@@ -32,6 +32,9 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+wordpress_sql/
+wordpress_files/
+wordpress_public_html/
 
 # Symbolication related
 app.*.symbols

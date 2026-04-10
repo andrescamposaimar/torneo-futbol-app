@@ -1,1 +1,0 @@
-[17-Dec-2020 12:02:16 America/Argentina/Buenos_Aires] PHP Fatal error:  Class 'getid3_handler' not found in /home/entrered/public_html/wp-includes/ID3/module.audio.ac3.php on line 18
