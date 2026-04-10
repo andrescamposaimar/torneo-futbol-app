@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <title>No Encontrado</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, minimum-scale=1, maximum-scale=1">
+  <link rel="stylesheet" href="https://assets.wnpservers.net/css/style.css" type="text/css">
+</head>
+<body>
+
+  <!-- Google Tag Manager -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-WLLGKCQ');</script>
+  <!-- End Google Tag Manager -->
+
+  <!-- Elimina la siguiente linea de comentario html si vas a personalizar esta página para evitar que se pise con futuras versiones oficiales -->
+  <!-- :: DEFAULT ERROR PAGE skel_sinlogo :: -->
+
+  <main>
+    <h2 class="main_error-code">404</h2>
+    <h1 class="main_error-title">No Encontrado</h1>
+    <p class="main_error-message">Oops, ¡el recurso al que intentas acceder no se encontró!</p>
+    <a class="main_error-link" href="/">Página Principal</a>
+  </main>
+  
+</body>
+</html>

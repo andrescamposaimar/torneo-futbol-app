@@ -1,0 +1,45 @@
+.pattern-01, .pattern-02, .pattern-03, .pattern-04, .pattern-05, .pattern-06, .pattern-07, .pattern-08, .pattern-09, .pattern-10, .pattern-11{
+	background-repeat: repeat;
+	background-size: auto;
+	background-attachment: inherit;
+}
+
+.pattern-01 {
+	background-image: url("../../assets/images/bg/pattern-01.jpg");
+}
+
+.pattern-02 {
+	background-image: url("../../assets/images/bg/pattern-02.jpg");
+}
+
+.pattern-03 {
+	background-image: url("../../assets/images/bg/pattern-03.jpg");
+}
+
+.pattern-04 {
+	background-image: url("../../assets/images/bg/pattern-04.jpg");
+}
+
+.pattern-05 {
+	background-image: url("../../assets/images/bg/pattern-05.jpg");
+}
+
+.background-01 {
+	background-image:url("../../assets/images/bg/background-01.jpg");
+}
+
+.background-02 {
+	background-image:url("../../assets/images/bg/background-02.jpg");
+}
+
+.background-03 {
+	background-image:url("../../assets/images/bg/background-03.jpg");
+}
+
+.background-04 {
+	background-image:url("../../assets/images/bg/background-04.jpg");
+}
+
+.background-05 {
+	background-image:url("../../assets/images/bg/background-05.jpg");
+}

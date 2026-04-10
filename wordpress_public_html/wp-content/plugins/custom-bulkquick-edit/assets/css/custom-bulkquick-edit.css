@@ -1,0 +1,16 @@
+fieldset.cbqe {
+    clear: both;
+}
+fieldset.cbqe label .title {
+    width: 10em;
+}
+fieldset.cbqe label .warning,
+label.inline-edit-tags .warning {
+    color: red;
+    display: block;
+    float: left;
+    margin: 0.2em 1em;
+}
+.inline-edit-group.cbqe label {
+    clear: both;
+}

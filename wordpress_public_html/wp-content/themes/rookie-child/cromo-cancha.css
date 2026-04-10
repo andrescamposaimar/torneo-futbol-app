@@ -1,0 +1,370 @@
+/* =============================================================================
+   Wrapper de página
+   ============================================================================= */
+.cromo-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+
+/* =============================================================================
+   Cromo
+   ============================================================================= */
+.cromo {
+  width: 100%;
+  background: #e8dcc8;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow:
+    0 2px 0 #a09070,
+    0 4px 0 #b8a888,
+    4px 6px 20px rgba(0,0,0,0.45),
+    inset 0 0 0 2px rgba(255,255,255,0.15);
+  position: relative;
+}
+
+.cromo::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.015) 2px,
+      rgba(0,0,0,0.015) 4px
+    );
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* =============================================================================
+   Cabecera
+   ============================================================================= */
+.cromo-header {
+  background: #b03040;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 3px solid #8a1f2c;
+  position: relative;
+}
+
+.cromo-header::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.3), rgba(255,255,255,0.1), rgba(255,255,255,0.3));
+}
+
+.header-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 52px;
+  color: #f0e8d8;
+  letter-spacing: 3px;
+  line-height: 1;
+  text-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+  flex-shrink: 0;
+}
+
+.header-divider {
+  width: 2px;
+  height: 36px;
+  background: rgba(255,255,255,0.25);
+  flex-shrink: 0;
+}
+
+.header-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.header-subtitle {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f0e8d8;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.header-address {
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 300;
+  color: rgba(240,232,216,0.7);
+  letter-spacing: 0.5px;
+  line-height: 1.3;
+}
+
+/* =============================================================================
+   Cuerpo — slots de imagen
+   ============================================================================= */
+.cromo-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 2px solid #c8b898;
+}
+
+.cromo-slot {
+  position: relative;
+  background: #d8ccb4;
+  border: 3px solid #c0b090;
+  margin: 12px;
+  border-radius: 2px;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.cromo-slot img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+}
+
+.cromo-slot iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
+.cromo-body .cromo-slot:first-child {
+  border-right: none;
+}
+
+.cromo-slot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%),
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 8px,
+      rgba(0,0,0,0.02) 8px,
+      rgba(0,0,0,0.02) 9px
+    );
+  pointer-events: none;
+}
+
+.slot-inner {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 16px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.slot-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #a09070;
+  opacity: 0.6;
+}
+
+/* =============================================================================
+   Pie — partidos
+   ============================================================================= */
+.cromo-footer {
+  padding: 10px 16px 14px;
+  background: #e8dcc8;
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+}
+
+.match-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dotted #c0b090;
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  color: #2a1f14;
+}
+
+.match-row:last-child {
+  border-bottom: none;
+}
+
+.match-date {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: #2a1f14;
+  min-width: 36px;
+  flex-shrink: 0;
+}
+
+.match-teams {
+  flex: 1;
+  font-weight: 400;
+  font-size: 13px;
+  color: #3a2f20;
+  letter-spacing: 0.3px;
+}
+
+.match-dots {
+  flex: 1;
+  border-bottom: 1px dotted #b0a080;
+  margin-bottom: 4px;
+  min-width: 20px;
+}
+
+.match-result {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  color: #806050;
+  min-width: 20px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.match-date small {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.75;
+    display: block;
+    line-height: 1;
+}
+
+/* =============================================================================
+   Responsive — Mobile
+   ============================================================================= */
+
+.cromo {
+    width: 100%;
+    max-width: 100%;
+}
+
+@media ( max-width: 640px ) {
+    
+    .match-dots {
+        display: none;
+    }
+    
+    .match-teams {
+        max-width: unset !important;
+        flex: 1 !important;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        word-break: break-word;
+    }
+
+    .cromo-wrap {
+        padding: 16px 12px;
+    }
+
+    /* Cabecera */
+    .header-title {
+        font-size: 32px;
+        letter-spacing: 2px;
+    }
+
+    .header-subtitle {
+        font-size: 12px;
+        letter-spacing: 1px;
+    }
+
+    /* Slots: apilados verticalmente */
+    .cromo-body {
+        grid-template-columns: 1fr;
+    }
+
+    .cromo-slot {
+        margin: 8px 12px;
+        min-height: 200px;
+    }
+
+    .cromo-body .cromo-slot:first-child {
+        border-right: 3px solid #c0b090;
+        margin-bottom: 0;
+    }
+
+    /* Partidos: una sola columna */
+    .footer-grid {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+
+    /* Fila de partido */
+    .match-row {
+        font-size: 12px;
+        gap: 6px;
+    }
+
+    .match-date {
+        font-size: 12px;
+        min-width: 44px;
+    }
+
+    .match-date small {
+        font-size: 10px;
+    }
+
+    .match-teams {
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+    }
+
+    .match-result {
+        font-size: 12px;
+        min-width: 32px;
+    }
+    
+    .cromo-body .cromo-slot:last-child {
+    display: none;
+    }
+}
+
+/* =============================================================================
+   AdPlugg
+   ============================================================================= */
+
+.adplugg-tag {
+    width: 100%;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background-color: #ffffff;
+}
+
+.adplugg-tag img {
+    height: 60px;
+    width: auto;
+    display: block;
+}

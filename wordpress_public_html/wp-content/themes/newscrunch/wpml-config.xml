@@ -1,0 +1,195 @@
+<wpml-config>
+  <taxonomies>
+    <taxonomy translate="0">translation_priority</taxonomy>
+  </taxonomies>
+  <custom-fields>
+    <custom-field action="ignore">_wp_page_template</custom-field>
+    <custom-field action="ignore">_wpml_word_count</custom-field>
+    <custom-field action="ignore">_wpml_media_featured</custom-field>
+    <custom-field action="ignore">_wpml_media_duplicate</custom-field>
+    <custom-field action="ignore">_edit_lock</custom-field>
+    <custom-field action="ignore">_wp_trash_meta_status</custom-field>
+    <custom-field action="ignore">_wp_trash_meta_time</custom-field>
+    <custom-field action="ignore">_wp_attached_file</custom-field>
+    <custom-field action="ignore">_wp_attachment_metadata</custom-field>
+    <custom-field action="ignore">wpml_media_processed</custom-field>
+    <custom-field action="ignore">_wpml_location_migration_done</custom-field>
+    <custom-field action="ignore">_edit_last</custom-field>
+    <custom-field action="ignore">newscrunch_site_layout</custom-field>
+    <custom-field action="ignore">newscrunch_page_sidebar</custom-field>
+    <custom-field action="ignore">newscrunch_page_left_sidebar</custom-field>
+    <custom-field action="ignore">newscrunch_post_video_embed</custom-field>
+    <custom-field action="ignore">newscrunch_views</custom-field>
+  </custom-fields>
+  <admin-texts>
+    <key name="current_theme"/>
+    <key name="theme_mods_newscrunch">
+      <key name="0"/>
+      <key name="nav_menu_locations"/>
+      <key name="custom_css_post_id"/>
+      <key name="social_icons"/>
+      <key name="spnc_spsp_shortcode"/>
+      <key name="banner_center_dropdown_category"/>
+      <key name="news_highlight_title"/>
+      <key name="newscrunch_highlight_search_option"/>
+      <key name="news_highlight_dropdown_category"/>
+      <key name="news_highlight_num_posts"/>
+      <key name="missed_section_title"/>
+      <key name="missed_section_dropdown_category"/>
+      <key name="newscrunch_related_post_title"/>
+      <key name="featured_video_title"/>
+      <key name="featured_video_dropdown_category"/>
+      <key name="footer_copyright"/>
+      <key name="breadcrumb_section_padding"/>
+      <key name="breadcrumb_top_padding"/>
+      <key name="breadcrumb_right_padding"/>
+      <key name="breadcrumb_bottom_padding"/>
+      <key name="breadcrumb_left_padding"/>
+    </key>
+    <key name="widget_newscrunch_adv">
+      <key name="2">
+        <key name="title"/>
+        <key name="name"/>
+        <key name="img"/>
+        <key name="txt"/>
+        <key name="url"/>
+        <key name="desc"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_featured_post">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="date"/>
+        <key name="show_cat"/>
+        <key name="show_auth"/>
+        <key name="show_comments"/>
+        <key name="show_read"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_grid_slider_two_column">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+        <key name="show_cat"/>
+        <key name="show_auth"/>
+        <key name="color1"/>
+        <key name="color2"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_post_grid_two_col">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_grid_slider_three_column">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+        <key name="show_cat"/>
+        <key name="show_auth"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_list_grid_view">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_list_view_slider">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+        <key name="show_cat"/>
+        <key name="show_auth"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_overlay_slider">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+        <key name="show_cat"/>
+        <key name="show_auth"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_single_column">
+      <key name="2">
+        <key name="title"/>
+        <key name="category"/>
+        <key name="number"/>
+        <key name="date"/>
+        <key name="show_comments"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_social_icons">
+      <key name="2">
+        <key name="title"/>
+        <key name="facebook_link"/>
+        <key name="facebook_target"/>
+        <key name="facebook_num"/>
+        <key name="facebook_follow"/>
+        <key name="twitter_link"/>
+        <key name="twitter_target"/>
+        <key name="twitter_num"/>
+        <key name="twitter_follow"/>
+        <key name="linkedin_link"/>
+        <key name="linkedin_target"/>
+        <key name="linkedin_num"/>
+        <key name="linkedin_follow"/>
+        <key name="instagram_link"/>
+        <key name="instagram_target"/>
+        <key name="instagram_num"/>
+        <key name="instagram_follow"/>
+        <key name="youtube_link"/>
+        <key name="youtube_target"/>
+        <key name="youtube_num"/>
+        <key name="youtube_follow"/>
+        <key name="skype_link"/>
+        <key name="skype_target"/>
+        <key name="skype_num"/>
+        <key name="skype_follow"/>
+        <key name="vimeo_link"/>
+        <key name="vimeo_target"/>
+        <key name="vimeo_num"/>
+        <key name="vimeo_follow"/>
+        <key name="dribble_link"/>
+        <key name="dribble_target"/>
+        <key name="dribble_num"/>
+        <key name="dribble_follow"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+    <key name="widget_newscrunch_post_tabs">
+      <key name="2">
+        <key name="title"/>
+        <key name="number"/>
+        <key name="show_date"/>
+        <key name="show_post_image"/>
+        <key name="show_no_preview_img"/>
+      </key>
+      <key name="_multiwidget"/>
+    </key>
+  </admin-texts>
+</wpml-config>

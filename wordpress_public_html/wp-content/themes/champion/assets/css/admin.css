@@ -1,0 +1,252 @@
+.match_params{
+	position: relative;
+}
+
+.match_params i.fa{
+	margin: 0 5px 0 0;
+	font-size: 16px;
+	width: 20px;
+	text-align: center;
+}
+
+.match_params label{
+	font-size: 14px;
+	font-weight: bold;
+	margin: 0 10px 0 0;
+}
+
+.match_params > tr > td{
+	padding: 5px;
+}
+
+.match_params > tr > td:first-child{
+	padding-left: 0;
+}
+
+.match_result table{
+	margin: 0;
+	padding: 0;
+	border-spacing: 0;
+	border-collapse: collapse;
+	float: left;
+}
+
+.match_result td, .match_result th{
+	border: 1px solid #d6d6d6;
+	padding: 5px;
+	font-size: 14px;
+}
+
+.match_result .remove_goal{
+	width: 20px;
+	text-align: center;
+}
+
+.match_result .remove_goal .fa{
+	width: auto;
+	margin: 0;
+}
+
+.match_result .result_time{
+	width: 50px;
+}
+
+/*Gutenberg*/
+@charset "UTF-8";
+#editor.block-editor__container .editor-styles-wrapper {
+	background-color: #f5f5f5;
+	font-family: Arial, sans-serif;
+	font-size: 14px;
+	color: #252c33;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-block:not([data-align=full]) {
+	width: 1200px;
+	margin: 0 auto;
+	max-width: 100%;
+}
+#editor.block-editor__container .editor-styles-wrapper h1, #editor.block-editor__container .editor-styles-wrapper .h1, #editor.block-editor__container .editor-styles-wrapper h2, #editor.block-editor__container .editor-styles-wrapper .h2, #editor.block-editor__container .editor-styles-wrapper h3, #editor.block-editor__container .editor-styles-wrapper .h3, #editor.block-editor__container .editor-styles-wrapper h4, #editor.block-editor__container .editor-styles-wrapper .h4, #editor.block-editor__container .editor-styles-wrapper h5, #editor.block-editor__container .editor-styles-wrapper .h5, #editor.block-editor__container .editor-styles-wrapper h6, #editor.block-editor__container .editor-styles-wrapper .h6, #editor.block-editor__container .editor-styles-wrapper .entry-title, #editor.block-editor__container .editor-styles-wrapper .page-title {
+	color: #252c33;
+	font-weight: 400;
+	font-family: Oswald, Arial, sans-serif;
+}
+#editor.block-editor__container .editor-styles-wrapper h1, #editor.block-editor__container .editor-styles-wrapper h2, #editor.block-editor__container .editor-styles-wrapper h3, #editor.block-editor__container .editor-styles-wrapper h4, #editor.block-editor__container .editor-styles-wrapper h5, #editor.block-editor__container .editor-styles-wrapper h6, #editor.block-editor__container .editor-styles-wrapper table {
+	margin: 0 0 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper dt {
+	font-weight: bold;
+}
+#editor.block-editor__container .editor-styles-wrapper dt, #editor.block-editor__container .editor-styles-wrapper dd {
+	line-height: 1.42857143;
+}
+#editor.block-editor__container .editor-styles-wrapper pre {
+	display: block;
+	padding: 9.5px;
+	margin: 0 0 10px;
+	font-size: 13px;
+	line-height: 1.42857143;
+	word-break: break-all;
+	word-wrap: break-word;
+	color: #333;
+	background-color: #f5f5f5;
+	border: 1px solid #ccc;
+	border-radius: 4px;
+}
+#editor.block-editor__container .editor-styles-wrapper code {
+	padding: 2px 4px;
+	font-size: 90%;
+	color: #c7254e;
+	background-color: #f9f2f4;
+	border-radius: 4px;
+}
+#editor.block-editor__container .editor-styles-wrapper table {
+	border-collapse: collapse;
+	border-spacing: 0;
+}
+#editor.block-editor__container .editor-styles-wrapper table th, #editor.block-editor__container .editor-styles-wrapper table td {
+	border: 1px solid #808289;
+	padding: 5px 10px;
+}
+#editor.block-editor__container .editor-styles-wrapper a {
+	color: #428bca;
+	text-decoration: none;
+}
+#editor.block-editor__container .editor-styles-wrapper a:hover {
+	color: #d61919;
+}
+#editor.block-editor__container .editor-styles-wrapper h1, #editor.block-editor__container .editor-styles-wrapper .h1 {
+	font-size: 60px;
+}
+#editor.block-editor__container .editor-styles-wrapper h2, #editor.block-editor__container .editor-styles-wrapper .h2 {
+	font-size: 30px;
+}
+#editor.block-editor__container .editor-styles-wrapper h3, #editor.block-editor__container .editor-styles-wrapper .h3 {
+	font-size: 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper h4, #editor.block-editor__container .editor-styles-wrapper .h4 {
+	font-size: 17px;
+}
+#editor.block-editor__container .editor-styles-wrapper h5, #editor.block-editor__container .editor-styles-wrapper .h5 {
+	font-size: 15px;
+}
+#editor.block-editor__container .editor-styles-wrapper h6, #editor.block-editor__container .editor-styles-wrapper .h6 {
+	font-size: 14px;
+}
+#editor.block-editor__container .editor-styles-wrapper .countdown span small,
+#editor.block-editor__container .editor-styles-wrapper .widget_sp_event_blocks .sp-event-blocks .event-time,
+#editor.block-editor__container .editor-styles-wrapper .upcoming_events .event_date .date span {
+	font-family: Arial, sans-serif;
+}
+#editor.block-editor__container .editor-styles-wrapper p {
+	line-height: 22px;
+	margin: 0 0 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper input[type=number]::-webkit-inner-spin-button, #editor.block-editor__container .editor-styles-wrapper input[type=number]::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+#editor.block-editor__container .editor-styles-wrapper blockquote {
+	border-left: 5px solid #ec1919;
+	padding: 0 0 0 20px;
+	font-size: 14px;
+	color: #868686;
+	font-style: italic;
+	line-height: 22px;
+	margin: 0 0 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper blockquote.quote, #editor.block-editor__container .editor-styles-wrapper .quote {
+	position: relative;
+	border: none;
+	padding: 40px 60px 30px 80px;
+	color: #252c33;
+	background: #fff;
+	box-shadow: 1px 1px 0px #cecece;
+}
+#editor.block-editor__container .editor-styles-wrapper blockquote.quote:before, #editor.block-editor__container .editor-styles-wrapper .quote:before {
+	content: "";
+	display: inline-block;
+	font-family: FontAwesome;
+	font-weight: normal;
+	font-style: normal;
+	font-size: 40px;
+	text-rendering: auto;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	position: absolute;
+	left: 22px;
+	top: 34px;
+	color: #e21919;
+}
+#editor.block-editor__container .editor-styles-wrapper blockquote.quote h4, #editor.block-editor__container .editor-styles-wrapper .quote h4 {
+	font-style: normal;
+}
+#editor.block-editor__container .editor-styles-wrapper .form-control {
+	border: none;
+	height: 47px;
+	padding: 0 20px;
+	border-radius: 0;
+	font-size: 13px;
+	color: #868686;
+}
+#editor.block-editor__container .editor-styles-wrapper .alignnone {
+	margin: 5px 20px 20px 0;
+}
+#editor.block-editor__container .editor-styles-wrapper .aligncenter,
+#editor.block-editor__container .editor-styles-wrapper div.aligncenter {
+	display: block;
+	margin: 5px auto 5px auto;
+}
+#editor.block-editor__container .editor-styles-wrapper .alignright {
+	float: right;
+	margin: 5px 0 20px 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper .alignleft {
+	float: left;
+	margin: 5px 20px 20px 0;
+}
+#editor.block-editor__container .editor-styles-wrapper a img.alignright {
+	float: right;
+	margin: 5px 0 20px 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper a img.alignnone {
+	margin: 5px 20px 20px 0;
+}
+#editor.block-editor__container .editor-styles-wrapper a img.alignleft {
+	float: left;
+	margin: 5px 20px 20px 0;
+}
+#editor.block-editor__container .editor-styles-wrapper a img.aligncenter {
+	display: block;
+	margin-left: auto;
+	margin-right: auto;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-caption {
+	background: #fff;
+	border: 1px solid #f0f0f0;
+	max-width: 96%;
+	/* Image does not overflow the content area */
+	padding: 5px 3px 10px;
+	text-align: center;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-caption.alignnone {
+	margin: 5px 20px 20px 0;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-caption.alignleft {
+	margin: 5px 20px 20px 0;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-caption.alignright {
+	margin: 5px 0 20px 20px;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-caption img {
+	border: 0 none;
+	height: auto;
+	margin: 0;
+	max-width: 98.5%;
+	padding: 0;
+	width: auto;
+}
+#editor.block-editor__container .editor-styles-wrapper .wp-caption p.wp-caption-text {
+	font-size: 11px;
+	line-height: 17px;
+	margin: 0;
+	padding: 0 4px 5px;
+}

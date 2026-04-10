@@ -1,0 +1,299 @@
+/*
+    Theme Name: Champion
+    Theme URI: https://champion.stylemixthemes.com/
+    Author: StylemixThemes
+    Author URI: https://stylemixthemes.com/
+    Description: Champion was created especially for sport clubs, football clubs, soccer news and sport organizations. The responsive layout is designed based on the Bootstrap 3.1 standards. Champion was built on Visual Composer Page Builder, which is included into the theme. Using Visual Composer you can easily create the pages in Front- or Back-end with 60+ modules.
+    Version: 3.2.1
+    License: GNU General Public License v2 or later
+    License URI: http://www.gnu.org/licenses/gpl-2.0.html
+    Tags: champion, responsive, sport, soccer, football, sport club, club, wordpress, wp, fixtures, events, match
+    Text Domain: champion
+
+    This theme, like WordPress, is licensed under the GPL.
+    Use it to make something cool, have fun, and share what you've learned with others.
+*/
+
+@import "assets/css/normalize.css";
+@import "assets/css/bootstrap.min.css";
+@import "assets/css/style.css";
+@import "assets/css/font-awesome.min.css";
+@import "assets/css/select2.css";
+@import "assets/css/jquery.fancybox.css";
+@import "assets/css/owl.carousel.css";
+@import "inc/customizer/customizer.css";
+@import "inc/vc/assets/css/vc_next_match.css";
+@import "inc/vc/assets/css/vc_upcoming_fixtures.css";
+@import "assets/css/mobile.css";
+
+
+/*UPDATE STYLES*/
+a {
+    transition: all 0.25s ease;
+}
+
+.addthis_button_compact.btn {
+    line-height: 45px !important;
+}
+
+.sp-event-list td{
+    padding: 20px 10px !important;
+}
+
+.paging_simple_numbers {
+
+}
+
+.paging_simple_numbers .next,
+.paging_simple_numbers .previous {
+    padding: 5px 10px;
+    background-color: #2a3138;
+    color: #fff;
+    text-decoration: none !important;
+}
+
+.paging_simple_numbers .paginate_button:hover,
+.paging_simple_numbers .next:hover,
+.paging_simple_numbers .previous:hover {
+    background-color: #d61919;
+}
+
+.paging_simple_numbers .paginate_button {
+    margin: 0;
+    padding: 5px 10px;
+    color: #fff !important;
+    text-decoration: none !important;
+    background: #2a3138;
+}
+
+.sp-event-list .data-article a .dashicons {
+    position: relative;
+    left: -4px;
+}
+
+article .entry-content td.data-away img,
+article .entry-content td.data-home img,
+article .entry-content td.data-event img {
+    margin: 0 5px;
+}
+
+article .entry-content td.data-event.data-teams img {
+    margin: 10px 5px;
+}
+
+.sp-event-blocks td {
+    padding-top: 20px !important;
+    padding-bottom: 20px !important;
+}
+
+.sp-event-blocks td .sp-event-date,
+.sp-event-blocks td .sp-event-results,
+.sp-event-blocks td .sp-event-title,
+.sp-event-blocks td .sp-event-venue,
+.sp-event-blocks td .sp-event-season,
+.sp-event-blocks td .sp-event-league {
+    margin-top: 15px;
+    margin-bottom: 15px;
+}
+
+.sp-template-event-calendar table {
+    width: 100%;
+}
+
+.sp-league-table .data-name .team-logo {
+    margin-right: 20px !important;
+}
+
+.sp-league-table .data-name .team-logo img {
+    vertical-align: top;
+    margin-right: 10px;
+}
+
+.sp-league-table td {
+    padding-top: 20px !important;
+    padding-bottom: 20px !important;
+}
+
+.player_gallery {
+    margin: 0 -10px 40px !important;
+}
+
+table.sp-player-list td {
+    padding-top: 20px !important;
+    padding-bottom: 20px !important;
+}
+
+article .entry-content .player_info img {
+    vertical-align: middle;
+    position: relative;
+    top: -2px;
+    margin-right: 5px;
+}
+
+.sp-fixtures-results .sp-widget-align-left,
+.sp-fixtures-results .sp-widget-align-right {
+    width: 100%;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+dl.sp-team-details dd {
+    margin-left: 0;
+    margin-bottom: 15px;
+}
+
+body .wpb_button, body .wpb_column > .vc_column-inner > .wpb_wrapper > :last-child {
+margin-bottom: 0;
+}
+body .vc_col-has-fill > .vc_column-inner, body .vc_row-has-fill + .vc_row-full-width + .vc_row > .vc_column_container > .vc_column-inner,
+body .vc_row-has-fill + .vc_row > .vc_column_container > .vc_column-inner, body .vc_row-has-fill + .vc_vc_row > .vc_row > .vc_vc_column > .vc_column_container > .vc_column-inner,
+body .vc_row-has-fill + .vc_vc_row_inner > .vc_row > .vc_vc_column_inner > .vc_column_container > .vc_column-inner, body .vc_row-has-fill > .vc_column_container > .vc_column-inner,
+body .vc_row-has-fill > .vc_row > .vc_vc_column > .vc_column_container > .vc_column-inner, body .vc_row-has-fill > .vc_vc_column_inner > .vc_column_container > .vc_column-inner {
+padding-top: 0;
+}
+
+body .vc_row[data-vc-full-width] {
+   overflow: visible;
+}
+body .vc_row[data-vc-full-width].vc_parallax {
+   overflow: hidden;
+}
+.woocommerce .shipping .woocommerce-info {
+    display: table-row !important;
+}
+.woocommerce input.button:disabled, .woocommerce input.button:disabled[disabled] {
+	color: inherit;
+	cursor: not-allowed;
+	opacity: .5;
+	padding: 0 27px;
+}
+.woocommerce-info .notice_content a, .woocommerce-info .notice_content a {
+	color: #ffffff;
+}
+.woocommerce-info .notice_content a:hover, .woocommerce-info .notice_content a:focus {
+	 color: #515151;
+}
+/* Changes */
+.woocommerce-account .woocommerce-MyAccount-navigation,
+.woocommerce-account .woocommerce-MyAccount-content {
+	width: 100%;
+	margin-bottom: 30px;
+	clear: both;
+}
+.woocommerce-MyAccount-navigation ul{
+	padding: 0;
+	border: none;
+}
+.woocommerce-MyAccount-navigation li.is-active
+{
+	background: #ce3434;
+}
+.woocommerce-MyAccount-navigation ul li{
+	box-shadow: none;
+	margin: 0 1px 0 0;
+	border-radius: 0;
+	padding: 0;
+	background: #3a4147;
+	border: none;
+	display: block;
+	float: left;
+}
+.woocommerce-MyAccount-navigation ul li a{
+	color: #fff;
+	padding: 0 40px;
+	height: 53px;
+	line-height: 53px;
+	text-shadow: none;
+	font-size: 15px;
+	font-weight: normal;
+	text-transform: uppercase;
+}
+.woocommerce-MyAccount-navigation li.is-active a{
+	color:#fff;
+}
+.woocommerce-MyAccount-navigation ul li a:hover{
+	color: #fff;
+}
+.woocommerce-MyAccount-navigation ul:before{
+	display: none;
+}
+
+.woocommerce input.button:disabled, .woocommerce input.button:disabled[disabled] {
+	color: #fff;
+}
+.sp-data-table .data-name {
+    text-align: left !important;
+}
+
+#stmgdpr_field label.checkbox {
+    padding-left: 20px;
+}
+
+#stmgdpr_field input#stmgdpr {
+    margin: 6px 0 0 -17px;
+}
+
+input#stm_gdpr_compliance {
+    margin-right: 10px;
+}
+
+input#stm_gpdr_data_email {
+    color: #868686;
+    font-size: 13px;
+    border: 1px solid #b2b2b2;
+    padding: 10px 12px;
+    box-shadow: none;
+    display: block;
+}
+
+.stm_gdpr_compliance-checkbox label {
+    color: #fff;
+}
+
+#stm-gpdr-form input[type=radio] {
+    margin-right: 5px;
+}
+
+#stm-gpdr-form input[type="submit"] {
+    background: -moz-linear-gradient(top, rgba(223,26,26,0.8) 0%, rgba(198,0,0,0.8) 100%);
+    background: -webkit-gradient(linear, left top, left bottom, color-stop(0%,rgba(223,26,26,0.8)), color-stop(100%,rgba(198,0,0,0.8)));
+    background: -webkit-linear-gradient(top, rgba(223,26,26,0.8) 0%,rgba(198,0,0,0.8) 100%);
+    background: -o-linear-gradient(top, rgba(223,26,26,0.8) 0%,rgba(198,0,0,0.8) 100%);
+    background: -ms-linear-gradient(top, rgba(223,26,26,0.8) 0%,rgba(198,0,0,0.8) 100%);
+    background: linear-gradient(to bottom, rgba(223,26,26,0.8) 0%,rgba(198,0,0,0.8) 100%);
+    filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#ccdf1a1a', endColorstr='#ccc60000',GradientType=0 );
+    border: none;
+    border-radius: 0;
+    text-shadow: none;
+    box-shadow: none;
+    height: 47px;
+    padding: 0 16px 0 25px;
+    line-height: 47px;
+    text-transform: uppercase;
+    font-size: 15px;
+    font-weight: normal;
+    color: #fff;
+}
+
+.woocommerce .cart-collaterals .shipping_calculator, .woocommerce-page .cart-collaterals .shipping_calculator {
+    width: 100%;
+}
+.woocommerce .cart-collaterals .shipping_calculator, .woocommerce-page .cart-collaterals .shipping_calculator h2 {
+    color: #fff;
+    padding-top: 10px;
+}
+.woocommerce-shipping-totals.shipping > th {
+    width: 110px;
+}
+.woocommerce-shipping-totals.shipping .select2.select2-container {
+    width: 100% !important;
+}
+.woocommerce-shipping-totals.shipping .select2-container .select2-selection--single {
+    height: 47px
+}
+.woocommerce-shipping-totals.shipping .select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 47px;
+}
+.woocommerce-shipping-totals.shipping .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 47px;
+}

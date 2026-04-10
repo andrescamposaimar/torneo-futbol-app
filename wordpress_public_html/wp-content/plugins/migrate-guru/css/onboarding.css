@@ -1,0 +1,1242 @@
+/* ============================================
+   MigrateGuru Onboarding Styles
+   Scoped to .mg-onboarding-wrap to avoid
+   conflicts with WordPress admin
+   ============================================ */
+
+/* Override WordPress admin defaults */
+#wpwrap #wpcontent #wpbody #wpbody-content .wrap.mg-onboarding-wrap {
+    margin: 0 !important;
+    padding: 0 !important;
+    background-color: #ffffff !important;
+}
+
+/* Base wrapper styles */
+.mg-onboarding-wrap {
+    font-family: 'Inter', sans-serif;
+    background-color: #ffffff;
+    color: #1f2937;
+    line-height: 1.5;
+    margin: 0 0 0 -20px !important;
+    padding: 0 !important;
+    min-height: 100vh;
+    position: relative;
+    left: 0;
+    right: 0;
+    width: calc(100% + 20px) !important;
+    max-width: none !important;
+}
+
+/* Scoped box-sizing reset */
+.mg-onboarding-wrap *,
+.mg-onboarding-wrap *::before,
+.mg-onboarding-wrap *::after {
+    box-sizing: border-box;
+}
+
+/* Reset margins/paddings only within our wrapper */
+.mg-onboarding-wrap h1,
+.mg-onboarding-wrap h2,
+.mg-onboarding-wrap h3,
+.mg-onboarding-wrap h4,
+.mg-onboarding-wrap h5,
+.mg-onboarding-wrap h6,
+.mg-onboarding-wrap p,
+.mg-onboarding-wrap ul,
+.mg-onboarding-wrap ol,
+.mg-onboarding-wrap li {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* Header */
+.mg-header {
+    border-bottom: 0.8px solid #e5e7eb;
+    padding: 16px 0;
+    background-color: #ffffff;
+    position: sticky;
+    top: 32px;
+    z-index: 20;
+}
+
+.mg-header-content {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+}
+
+@media (max-width: 768px) {
+    .mg-header-content {
+        padding: 0 16px;
+        height: 40px;
+    }
+}
+
+.mg-logo-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.mg-logo {
+    height: 40px;
+    width: auto;
+}
+
+@media (max-width: 768px) {
+    .mg-logo {
+        height: 32px;
+    }
+}
+
+.mg-powered-by {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mg-powered-text {
+    font-size: 14px;
+    color: #71717b;
+    font-weight: 400;
+}
+
+.mg-blogvault-logo {
+    height: 28px;
+    width: auto;
+}
+
+/* Main Container */
+.mg-container {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 48px 40px 64px;
+    display: grid;
+    grid-template-columns: minmax(600px, 2fr) minmax(300px, 1fr);
+    gap: 40px;
+    align-items: start;
+    font-family: 'Inter', sans-serif;
+}
+
+@media (max-width: 1200px) {
+    .mg-container {
+        grid-template-columns: 1fr;
+        padding: 32px 24px;
+    }
+    
+    .mg-sidebar {
+        order: -1;
+    }
+}
+
+@media (max-width: 768px) {
+    .mg-container {
+        padding: 24px 16px;
+        gap: 24px;
+    }
+}
+
+/* Main Content */
+.mg-main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* Page Title */
+.mg-page-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 36px;
+}
+
+.mg-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 24px;
+    line-height: 36px;
+}
+
+.mg-title-normal {
+    font-family: 'Montserrat', sans-serif;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.mg-title-highlight {
+    font-family: 'Happy Monkey', cursive;
+    font-weight: 400;
+    color: #0097a7;
+}
+
+.mg-btn-copy-key {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 12.8px;
+    background: #ffffff;
+    border: 0.8px solid #0097a7;
+    border-radius: 8px;
+    color: #0097a7;
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+    height: 36px;
+    transition: all 0.2s;
+}
+
+.mg-btn-copy-key:hover {
+    background: #e6f7f9;
+}
+
+.mg-btn-icon {
+    width: 16px;
+    height: 16px;
+}
+
+/* Steps Container */
+.mg-steps-container {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+/* Step Card */
+.mg-step-card {
+    border: 0.8px solid #e5e7eb;
+    border-radius: 10px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.mg-step-card.mg-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.mg-step-card.mg-active {
+    border-color: #0097a7;
+}
+
+/* Step Header */
+.mg-step-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 24px;
+    border-bottom: 0.8px solid #e5e7eb;
+    min-height: 93.8px;
+    width: 100%;
+}
+
+/* Make step headers clickable when step is collapsed */
+.mg-step-card.mg-collapsed .mg-step-header {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.mg-step-card.mg-collapsed .mg-step-header:hover {
+    background-color: #f9fafb;
+}
+
+.mg-step-number-badge {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #0097a7;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 400;
+    flex-shrink: 0;
+}
+
+.mg-step-card.mg-disabled .mg-step-number-badge {
+    background: #f3f4f6;
+    color: #99a1af;
+}
+
+.mg-step-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.mg-step-status {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    color: #0097a7;
+    font-size: 14px;
+    font-weight: 500;
+    margin-left: auto;
+}
+
+.mg-step-status svg {
+    width: 16px;
+    height: 16px;
+    stroke: #0097a7;
+}
+
+.mg-step-card.mg-completed .mg-step-status {
+    display: flex;
+}
+
+.mg-step-title {
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 24px;
+    color: #1f2937;
+}
+
+.mg-step-description {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 21px;
+    color: #6b7280;
+}
+
+/* Step Content */
+.mg-step-content {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.mg-step-content > .mg-step-video-container:first-child {
+    margin-top: 16px;
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+    border-radius: 10px;
+    border-top: none;
+}
+
+/* Step Video Container */
+.mg-step-video-container {
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    border: none;
+    margin-top: 0;
+    padding-top: 0;
+    position: relative;
+    padding-bottom: 43%; /* 16:9 Aspect Ratio */
+    height: 0;
+    isolation: isolate;
+}
+
+.mg-step-video {
+    width: 100%;
+    height: 366px;
+    display: block;
+    border: none;
+    outline: none;
+    border-radius: 10px;
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+/* Video Overlay to prevent YouTube controls from showing on hover */
+.mg-video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    pointer-events: all;
+    background: transparent;
+    border-radius: 10px;
+    cursor: default;
+}
+
+/* Modal Video Player */
+.mg-get-key-video-player {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 8px;
+    pointer-events: none;
+}
+
+/* Video overlay for modal video */
+.mg-modal-body > div[style*="position: relative"] .mg-video-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    pointer-events: all;
+    background: transparent;
+    border-radius: 8px;
+    cursor: default;
+}
+
+/* Sidebar Video Container */
+.mg-video-container {
+    position: relative;
+    width: 100%;
+    padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+    height: 0;
+    overflow: hidden;
+    border-radius: 10px;
+    background: #000;
+}
+
+.mg-migration-video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 10px;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+/* Overlay for sidebar video - allows clicks to pass through to video */
+.mg-video-overlay-clickable {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+    background: transparent;
+    border-radius: 10px;
+}
+
+/* Info Box */
+/* Migration Overview */
+.mg-migration-overview {
+    margin: 16px 0 24px;
+}
+
+.mg-overview-header {
+    margin-bottom: 12px;
+}
+
+.mg-overview-title {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 18px;
+    font-weight: 600;
+    color: #0f172a;
+    margin-bottom: 4px;
+}
+
+.mg-overview-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.mg-overview-cards {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 20px;
+    align-items: center;
+}
+
+.mg-site-card {
+    background: #ffffff;
+    border: 1px solid #d6e0ed;
+    border-radius: 12px;
+    padding: 20px;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+}
+
+.mg-site-card-body {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+}
+
+.mg-site-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #e6f7f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mg-site-card-icon img {
+    width: 24px;
+    height: 24px;
+}
+
+.mg-site-card-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mg-site-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+    letter-spacing: 0.08em;
+}
+
+.mg-site-card-title {
+    font-family: 'Montserrat', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.mg-site-url {
+    font-size: 14px;
+    color: #0891b2;
+    word-break: break-word;
+    text-decoration: none;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.mg-site-url:hover,
+.mg-site-url:focus {
+    text-decoration: underline;
+}
+
+.mg-site-url-disabled {
+    color: #94a3b8;
+    pointer-events: none;
+    cursor: default;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.mg-site-card-empty {
+    background: #f8fafc;
+    border-color: #dde4f0;
+}
+
+.mg-site-card-empty .mg-site-card-title,
+.mg-site-card-empty .mg-site-url {
+    color: #94a3b8;
+}
+
+.mg-site-arrow {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #dff3ff;
+    border: 1px solid #c4e3ff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mg-site-arrow svg {
+    display: block;
+}
+
+.mg-info-box {
+    background: #e6f7f9;
+    border-radius: 16px;
+    padding: 16px;
+}
+
+.mg-info-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: #0891b2;
+}
+
+.mg-info-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.mg-info-text {
+    font-size: 12px;
+    color: #0891b2;
+    line-height: 1.4;
+    margin-left: 32px;
+}
+
+/* Step Actions */
+.mg-step-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.mg-btn-primary {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: #0097a7;
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+    height: 40px;
+    transition: all 0.2s;
+}
+
+.mg-btn-primary:hover {
+    background: #007d8a;
+}
+
+.mg-step-card.mg-disabled .mg-btn-primary {
+    opacity: 0.5;
+}
+
+/* Form Elements */
+.mg-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mg-form-label-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+}
+
+.mg-form-label {
+    font-size: 14px;
+    color: #1f2937;
+    font-weight: 500;
+}
+
+.mg-btn-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    color: #0097a7;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.mg-btn-link:hover {
+    background: #e6f7f9;
+}
+
+.mg-form-row {
+    display: flex;
+    gap: 8px;
+}
+
+.mg-form-input {
+    flex: 1;
+    height: 36px;
+    background: #f3f3f5;
+    border: 0.8px solid transparent;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    color: #1f2937;
+}
+
+.mg-form-input::placeholder {
+    color: #6b7280;
+}
+
+.mg-form-input:focus {
+    outline: none;
+    border-color: #0097a7;
+    background: #ffffff;
+}
+
+.mg-step-card.mg-disabled .mg-form-input {
+    opacity: 0.5;
+}
+
+.mg-form-hint {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 16px;
+}
+
+/* Sidebar */
+.mg-sidebar {
+    background: #ffffff;
+    border: 0.8px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 24.8px;
+}
+
+.mg-sidebar-header {
+    margin-bottom: 24px;
+}
+
+.mg-sidebar-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1f2937;
+    line-height: 24px;
+    margin-bottom: 4px;
+}
+
+.mg-sidebar-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+    line-height: 21px;
+}
+
+/* Video Container */
+.mg-video-container {
+    width: 100%;
+    margin-bottom: 24px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000000;
+}
+
+.mg-migration-video {
+    width: 100%;
+    height: 219.375px;
+    display: block;
+    border: none;
+    border-radius: 10px;
+}
+
+/* Help Links */
+.mg-help-links {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.mg-help-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12.8px;
+    background: #ffffff;
+    border: 0.8px solid #e5e7eb;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.mg-help-link:hover {
+    border-color: #0097a7;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.mg-help-link-content {
+    flex: 1;
+}
+
+.mg-help-link-title {
+    font-size: 14px;
+    color: #1f2937;
+    line-height: 21px;
+    font-weight: 400;
+    margin-bottom: 2px;
+}
+
+.mg-help-link-desc {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 18px;
+}
+
+.mg-help-link-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 1400px) {
+    .mg-main-container {
+        padding: 80px 40px 40px;
+        grid-template-columns: 1fr;
+        max-width: 900px;
+    }
+
+    .mg-header-content {
+        padding: 0 40px;
+    }
+
+    .mg-sidebar {
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 768px) {
+    .mg-main-container {
+        padding: 40px 20px;
+    }
+
+    .mg-header-content {
+        padding: 0 20px;
+    }
+
+    .mg-page-title {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        height: auto;
+    }
+
+    .mg-step-video {
+        max-height: 300px;
+        pointer-events: none;
+    }
+
+    .mg-form-row {
+        flex-direction: column;
+    }
+
+    .mg-form-input {
+        width: 100%;
+    }
+}
+
+/* ====================================
+   MODAL SYSTEM
+   ==================================== */
+
+.mg-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', sans-serif;
+}
+
+.mg-modal.mg-active {
+    display: flex;
+}
+
+.mg-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    cursor: pointer;
+}
+
+.mg-modal-overlay.mg-no-close {
+    cursor: default;
+}
+
+.mg-modal-content {
+    position: relative;
+    background: #ffffff;
+    border-radius: 12px;
+    max-width: 650px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    animation: modalSlideIn 0.3s ease-out;
+    z-index: 10000;
+}
+
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.mg-modal-header {
+    padding: 24px 24px 0px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    justify-content: space-between;
+}
+
+.mg-modal-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0;
+}
+
+.mg-modal-close {
+    background: transparent;
+    border: none;
+    font-size: 24px;
+    line-height: 1;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s;
+    position: absolute;
+    right: 8px;
+    top: 8px;
+}
+
+.mg-modal-close:hover {
+    background: #f3f4f6;
+    color: #1f2937;
+}
+
+.mg-modal-body {
+    margin: 16px 24px 24px 24px;
+    padding: 16px 0px;
+}
+
+.mg-modal-description {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0px;
+}
+
+.mg-modal-footer {
+    padding-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+/* Key Input Wrapper */
+.mg-key-input-wrapper {
+    display: flex;
+    gap: 12px;
+    align-items: stretch;
+    margin-top: 8px;
+}
+
+/* Prevent any button from having absolute children except .mg-input-with-icon */
+.mg-key-input-wrapper > .mg-btn-primary {
+    position: relative;
+}
+
+.mg-input-with-icon {
+    position: relative;
+    flex: 1;
+    display: block;
+    min-width: 0;
+}
+
+.mg-key-input {
+    width: 100%;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 1px;
+    padding-right: 48px !important;
+    cursor: text;
+    user-select: text;
+}
+
+/* Eye icon button - MUST be child of .mg-input-with-icon */
+.mg-input-with-icon .mg-btn-icon-only {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #6b7280;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+    z-index: 10;
+    pointer-events: auto;
+}
+
+.mg-input-with-icon .mg-btn-icon-only:hover {
+    background: #f3f4f6;
+    color: #1f2937;
+}
+
+.mg-input-with-icon .mg-btn-icon-only svg {
+    width: 20px;
+    height: 20px;
+}
+
+.mg-key-input-hint {
+    font-size: 12px;
+    margin-top: -4px;
+}
+
+/* Form group - position relative removed to fix eye icon positioning */
+
+/* Warning Box */
+.mg-warning-box {
+    background: #fffbeb;
+    border-radius: 16px;
+    padding: 16px;
+    margin-top: 20px;
+}
+
+.mg-warning-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    color: #D97706;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.mg-warning-list {
+    list-style: disc;
+    padding-left: 42px;
+    color: #D97706;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.mg-warning-list li {
+    margin-bottom: 0px;
+}
+
+.mg-warning-text {
+    color: #D97706;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-left: 26px;
+}
+
+/* Instruction Steps */
+.mg-steps-list {
+    margin-bottom: 24px;
+}
+
+.mg-instruction-step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 16px;
+}
+
+.mg-step-num {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    flex-shrink: 0;
+}
+
+.mg-instruction-step p {
+    font-size: 14px;
+    color: #1f2937;
+    margin: 0;
+    line-height: 1.5;
+}
+
+
+/* ====================================
+   TOAST NOTIFICATIONS
+   ==================================== */
+
+.mg-toast-container {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+    font-family: 'Inter', sans-serif;
+}
+
+.mg-toast {
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 16px 20px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 300px;
+    pointer-events: auto;
+    animation: toastSlideIn 0.3s ease-out;
+}
+
+@keyframes toastSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.mg-toast.mg-removing {
+    animation: toastSlideOut 0.3s ease-out forwards;
+}
+
+@keyframes toastSlideOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+}
+
+.mg-toast.mg-success {
+    border-left: 4px solid #0097a7;
+}
+
+.mg-toast.mg-error {
+    border-left: 4px solid #dc2626;
+}
+
+.mg-toast-icon {
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+}
+
+.mg-toast-icon.mg-success {
+    color: #0097a7;
+}
+
+.mg-toast-icon.mg-error {
+    color: #dc2626;
+}
+
+.mg-toast-message {
+    flex: 1;
+    font-size: 14px;
+    color: #1f2937;
+    font-weight: 500;
+}
+
+/* ====================================
+   ERROR MESSAGES
+   ==================================== */
+
+.mg-error-message {
+    color: #dc2626;
+    font-size: 14px;
+    margin-top: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.mg-error-message::before {
+    content: "!";
+    flex-shrink: 0;
+    font-weight: 700;
+}
+
+.mg-form-input.mg-error {
+    border-color: #dc2626;
+}
+
+/* ====================================
+   STEP STATE ANIMATIONS
+   ==================================== */
+
+.mg-step-content {
+    max-height: 2000px;
+    overflow: hidden;
+    transition: max-height 0.4s ease-out, opacity 0.3s ease-out, padding 0.3s ease-out;
+}
+
+.mg-step-card.mg-collapsed .mg-step-content {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.mg-step-card.mg-disabled {
+    pointer-events: none;
+}
+
+.mg-step-number-badge {
+    transition: all 0.3s ease;
+}
+
+.mg-step-card.mg-completed .mg-step-number-badge {
+    background: #0097a7;
+}
+
+/* Checkmark in completed steps */
+.mg-step-number-badge.mg-completed {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.mg-btn-primary:disabled,
+.mg-btn-primary.mg-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .mg-modal-content {
+        width: 95%;
+        max-height: 95vh;
+    }
+    
+    .mg-key-input-wrapper {
+        flex-direction: column;
+    }
+    
+    .mg-key-input-wrapper .mg-btn-primary {
+        width: 100%;
+    }
+    
+    .mg-success-content {
+        flex-direction: column;
+        text-align: center;
+    }
+}
+

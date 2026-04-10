@@ -1,0 +1,125 @@
+.vc_upcoming_fixtures{
+    position: relative;
+    margin: 0 0 30px;
+}
+
+.vc_upcoming_fixtures .title{
+    padding: 17px 10px;
+    background: #b81e1f;
+    text-align: center;
+    margin: 0 0 10px;
+}
+
+.vc_upcoming_fixtures .title h4{
+    color:#fff;
+    margin: 0;
+    text-transform: uppercase;
+}
+
+.vc_upcoming_fixtures .commands{
+    background: #242a31;
+    border-bottom: 3px solid #ec1919;
+    padding: 15px 10px;
+    text-align: center;
+    display: table;
+    width: 100%;
+    border-spacing: 0;
+    border-collapse: collapse;
+    color:#fff;
+}
+
+.vc_upcoming_fixtures .commands .command{
+    display: table-cell;
+    vertical-align: middle;
+    text-align: right;
+    height: 59px;
+    width: 40%
+}
+
+.vc_upcoming_fixtures .commands .command:last-child{
+    text-align: left;
+}
+
+.vc_upcoming_fixtures .commands .command_vs{
+    display: table-cell;
+    vertical-align: middle;
+    font-family: Oswald;
+    font-size: 20px;
+    text-transform: uppercase;
+    color:#b2b2b2;
+    height: 59px;
+    width: 20%
+}
+
+.vc_upcoming_fixtures .command_vs span{
+    line-height: 23px;
+    display: inline-block;
+    vertical-align: top;
+}
+
+.vc_upcoming_fixtures .command h5{
+    margin: 0;
+    color:#fff;
+    text-transform: uppercase;
+    font-weight: normal;
+    line-height: 20px;
+}
+
+.vc_upcoming_fixtures .command h5 a{
+    color:#fff;
+}
+
+.vc_upcoming_fixtures .command h5 a:hover{
+    color:#c4302b;
+    text-decoration: none;
+}
+
+.vc_upcoming_fixtures .match_info{
+    background: #394149;
+    color:#fff;
+    text-align: center;
+    font-size: 13px;
+    line-height: 22px;
+    padding: 14px 10px;
+    margin: 0 0 12.5px;
+}
+
+@media (max-width: 992px) {
+    .vc_upcoming_fixtures .commands .command_vs{
+        font-size: 15px;
+    }
+
+    .vc_upcoming_fixtures .command h5{
+        font-size: 13px;
+    }
+
+    .vc_upcoming_fixtures .commands .command_vs span{
+        line-height: 20px;
+    }
+
+    .vc_upcoming_fixtures .commands .command,
+    .vc_upcoming_fixtures .commands .command_vs
+    {
+        height: 49px;
+    }
+}
+
+@media (max-width: 767px) {
+    .vc_upcoming_fixtures .commands .command_vs{
+        font-size: 20px;
+    }
+
+    .vc_upcoming_fixtures .command h5{
+        font-size: 15px;
+    }
+
+    .vc_upcoming_fixtures .commands .command_vs span{
+        line-height: 23px;
+    }
+
+    .vc_upcoming_fixtures .commands .command,
+    .vc_upcoming_fixtures .commands .command_vs
+    {
+        height: 59px;
+    }
+}

@@ -1,0 +1,16 @@
+[19-Sep-2025 09:16:15 America/Argentina/Buenos_Aires] PHP Fatal error:  Uncaught Error: Call to undefined function add_action() in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php:147
+Stack trace:
+#0 {main}
+  thrown in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php on line 147
+[19-Sep-2025 11:40:37 America/Argentina/Buenos_Aires] PHP Fatal error:  Uncaught Error: Call to undefined function add_action() in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php:147
+Stack trace:
+#0 {main}
+  thrown in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php on line 147
+[30-Sep-2025 02:47:10 America/Argentina/Buenos_Aires] PHP Fatal error:  Uncaught Error: Call to undefined function add_action() in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php:147
+Stack trace:
+#0 {main}
+  thrown in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php on line 147
+[21-Oct-2025 21:51:28 America/Argentina/Buenos_Aires] PHP Fatal error:  Uncaught Error: Call to undefined function add_action() in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php:147
+Stack trace:
+#0 {main}
+  thrown in /home/entrered/public_html/wp-content/themes/twentytwentyfour/functions.php on line 147

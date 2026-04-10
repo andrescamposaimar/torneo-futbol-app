@@ -1,0 +1,11 @@
+{
+  "players_cache_version": "10",
+  "standings_cache_version": "1",
+  "scorers_cache_version": "1",
+  "imbatibles_cache_version": "1",
+  "maintenance_message": null,
+  "season_announcement": null,
+  "min_app_version": "1.0.8",
+  "app_bar_logo_url": "https://entreredespadres.com.ar/wp-content/uploads/media/top_bar_logo_chami_mundial.png",
+  "cache_ttl_days": 7
+}

@@ -1,0 +1,76 @@
+<wpml-config>
+    <custom-fields>
+        <custom-field action="translate">title</custom-field>
+        <custom-field action="translate">description</custom-field>
+        <custom-field action="translate">keywords</custom-field>
+    </custom-fields>
+    <custom-types>
+        <custom-type translate="1">sp_result</custom-type>
+        <custom-type translate="1">sp_outcome</custom-type>
+        <custom-type translate="1">sp_column</custom-type>
+        <custom-type translate="1">sp_metric</custom-type>
+        <custom-type translate="1">sp_performance</custom-type>
+        <custom-type translate="1">sp_statistic</custom-type>
+        <custom-type translate="1">sp_event</custom-type>
+        <custom-type translate="1">sp_calendar</custom-type>
+        <custom-type translate="1">sp_team</custom-type>
+        <custom-type translate="1">sp_table</custom-type>
+        <custom-type translate="1">sp_player</custom-type>
+        <custom-type translate="1">sp_list</custom-type>
+        <custom-type translate="1">sp_staff</custom-type>
+        <custom-type translate="1">product</custom-type>
+        <custom-type translate="1">product_variation</custom-type>
+        <custom-type translate="1">product_variation</custom-type>
+        <custom-type translate="1">shop_order</custom-type>
+        <custom-type translate="1">shop_order_refund</custom-type>
+        <custom-type translate="1">shop_coupon</custom-type>
+        <custom-type translate="1">shop_webhook</custom-type>
+    </custom-types>
+    <taxonomies>
+        <taxonomy translate="1">sp_league</taxonomy>
+        <taxonomy translate="1">sp_season</taxonomy>
+        <taxonomy translate="1">sp_venue</taxonomy>
+        <taxonomy translate="1">sp_position</taxonomy>
+        <taxonomy translate="1">sp_role</taxonomy>
+        <taxonomy translate="1">product_type</taxonomy>
+        <taxonomy translate="1">product_cat</taxonomy>
+        <taxonomy translate="1">product_tag</taxonomy>
+        <taxonomy translate="1">product_shipping_class</taxonomy>
+        <taxonomy translate="1">pa_color</taxonomy>
+    </taxonomies>
+    <language-switcher-settings>
+        <key name="icl_lang_sel_config">
+            <key name="font-current-normal">#444444</key>
+            <key name="font-current-hover">#000000</key>
+            <key name="background-current-normal">#ffffff</key>
+            <key name="background-current-hover">#eeeeee</key>
+            <key name="font-other-normal">#444444</key>
+            <key name="font-other-hover">#000000</key>
+            <key name="background-other-normal">#ffffff</key>
+            <key name="background-other-hover">#eeeeee</key>
+            <key name="border">#cdcdcd</key>
+        </key>
+        <key name="icl_lang_sel_footer_config">
+            <key name="font-current-normal">#444444</key>
+            <key name="font-current-hover">#000000</key>
+            <key name="background-current-normal">#ffffff</key>
+            <key name="background-current-hover">#eeeeee</key>
+            <key name="font-other-normal">#444444</key>
+            <key name="font-other-hover">#000000</key>
+            <key name="background-other-normal">#ffffff</key>
+            <key name="background-other-hover">#eeeeee</key>
+            <key name="border">#cdcdcd</key>
+        </key>                
+        <key name="icl_language_switcher_sidebar">0</key>        
+        <key name="icl_widget_title_show">0</key>
+        <key name="icl_lang_sel_type">dropdown</key>
+        <key name="icl_lso_link_empty">0</key>
+        <key name="icl_lso_flags">0</key>
+        <key name="icl_lso_native_lang">1</key>
+        <key name="icl_lso_display_lang">1</key>
+        <key name="icl_lang_sel_footer">0</key>
+        <key name="icl_post_availability">0</key>
+        <key name="icl_post_availability_position">below</key>
+        <key name="icl_post_availability_text">This post is also available in: %s</key>                
+    </language-switcher-settings>
+</wpml-config>

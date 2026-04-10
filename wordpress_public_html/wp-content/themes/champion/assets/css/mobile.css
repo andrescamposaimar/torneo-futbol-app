@@ -1,0 +1,384 @@
+@media (max-width: 1200px) {
+    .player_detail .player_info{
+        padding: 20px 30px;
+    }
+
+    .player_detail .player_photo{
+        width: 290px;
+    }
+
+    body.boxed #wrapper{
+        max-width: 960px;
+    }
+
+    .vc_league_table .sp-data-table thead th, .vc_league_table .sp-data-table tbody td{
+        padding: 5px;
+    }
+
+}
+
+@media (max-width: 992px) {
+
+    .vc_league_table{
+        overflow: auto;
+    }
+
+    .secondary_menu.two{
+        float: none;
+    }
+
+    body.boxed #wrapper{
+        max-width: 740px;
+    }
+
+    #customer_login .login .form-row label{
+        display: block;
+    }
+
+    #customer_login .login .form-row .lost_password {
+        line-height: 40px;
+    }
+
+    .player_detail .player_photo{
+        float: none;
+        width: auto;
+    }
+
+    .fixture_detail .goals{
+        float: none !important;
+        clear: both;
+    }
+
+    .fixture_detail .command_info, .fixture_detail .command_right .command_info{
+        margin-bottom: 50px;
+    }
+
+    .fixture_detail .goals{
+        margin: 0 20px 0 0;
+    }
+
+    .fixture_detail .command_right .goals{
+        margin: 0 0 20px 20px;
+    }
+
+    .upcoming_events .commands h3 span{
+        display: block;
+        margin: 10px 0;
+    }
+
+    .wpb_tabs.full_width .wpb_tabs_nav > li a{
+        font-size: 90% !important;
+    }
+
+}
+
+@media (max-width: 768px) {
+	.pre_footer aside, .pre_footer .cols_4 aside{
+		width: 50%;
+	}
+	.top_socials{
+		float: none;
+		margin: 0 0 10px;
+	}
+
+	.top_socials li:first-child{
+		margin: 0;
+	}
+
+	.navbar-default .navbar-collapse, .navbar-default .navbar-form{
+		border: none;
+		box-shadow: none;
+	}
+
+	.navbar-default .navbar-nav > li > a:hover, .navbar-default .navbar-nav > li > a:focus{
+		background-color: rgba(255,255,255,0.8);
+	}
+
+	.navbar-default .navbar-nav > .open > a, .navbar-default .navbar-nav > .open > a:hover, .navbar-default .navbar-nav > .open > a:focus{
+		background-color: rgba(255,255,255,0.8);
+	}
+
+	.navbar-nav .open > .dropdown-menu{
+		background-color: rgba(255,255,255,0.8);
+	}
+
+	.dropdown-menu > li > .dropdown-menu{
+		position: relative;
+		right: auto;
+		top: auto;
+		display: block;
+		background: none;
+		margin: 0 0 0 10px;
+	}
+
+	#header{
+		position: relative;
+	}
+
+	.navbar-form .form-group{
+		display: block !important;
+		position: relative;
+		left: auto;
+		right: auto;
+		top: auto;
+		margin: 10px 0;
+		opacity: 1 !important;
+	}
+
+	.navbar-form button{
+		position: absolute;
+		right: 10px;
+		top: 10px;
+		z-index: 200;
+		color:#000;
+	}
+
+	.navbar-form{
+		float: none;
+	}
+
+	.navbar-form a{
+		display: none;
+	}
+
+	.navbar-collapse{
+		padding: 0 15px;
+	}
+
+	.footer_menu{
+		float: none;
+	}
+
+	.footer_menu li{
+		margin: 0 45px 20px 0;
+	}
+
+    .posts_list > article{
+		width: 25%;
+	}
+
+    .woocommerce ul.products li.product, .woocommerce-page ul.products li.product,
+    .woocommerce .related ul li.product, .woocommerce .related ul.products li.product, .woocommerce .upsells.products ul li.product, .woocommerce .upsells.products ul.products li.product, .woocommerce-page .related ul li.product, .woocommerce-page .related ul.products li.product, .woocommerce-page .upsells.products ul li.product, .woocommerce-page .upsells.products ul.products li.product
+	{
+		width: 50%;
+		float: left;
+    }
+	
+    .woocommerce .four-col ul.products li.product, .woocommerce-page .four-col ul.products li.product, .woocommerce .related .four-col ul li.product, .woocommerce .related .four-col ul.products li.product, .woocommerce .upsells.products .four-col ul li.product, .woocommerce .upsells.products .four-col ul.products li.product, .woocommerce-page .related .four-col ul li.product, .woocommerce-page .related .four-col ul.products li.product, .woocommerce-page .upsells.products .four-col ul li.product, .woocommerce-page .upsells.products .four-col ul.products li.product{
+        width: 50%;
+    }
+
+    .woocommerce #content table.cart td.actions .coupon .input-text, .woocommerce table.cart td.actions .coupon .input-text, .woocommerce-page #content table.cart td.actions .coupon .input-text, .woocommerce-page table.cart td.actions .coupon .input-text{
+        min-width: inherit;
+        margin: 0;
+    }
+
+    .woocommerce .cart .checkout-button, .woocommerce .cart input.checkout-button, .woocommerce-page .cart .checkout-button, .woocommerce-page .cart input.checkout-button{
+        margin: 0;
+    }
+
+    .woocommerce .col2-set .col-1, .woocommerce-page .col2-set .col-1,
+    .woocommerce .col2-set .col-2, .woocommerce-page .col2-set .col-2
+    {
+        width: 100%;
+        margin-bottom: 20px;
+    }
+
+    .message_404{
+        padding-top: 30px;
+        padding-bottom: 30px;
+    }
+
+    .fixture_detail .goals{
+        margin: 0 20px 0 0;
+    }
+
+    .fixture_detail .command_right .goals{
+        margin: 0 0 20px 20px;
+    }
+
+    .event_banner{
+        padding-top: 30px;
+        padding-bottom: 30px;
+    }
+
+    .latest_result{
+        padding: 40px 3000px;
+    }
+
+    .upcoming_events .commands .time, .upcoming_events .commands .stadium{
+        display: block;
+        margin: 0;
+    }
+
+    .upcoming_events .commands{
+        padding: 10px 20px 10px;
+    }
+
+    .upcoming_events .commands h3{
+        font-size: 17px;
+        line-height: 19px;
+    }
+
+    .upcoming_events .read_more{
+        padding-right: 10px;
+    }
+
+    .fixture_detail.future .fixture_info{
+        padding: 0;
+    }
+
+    .ts-video-container iframe{
+        max-width: 100% !important;
+    }
+
+    .wpb_tabs.right .wpb_tabs_nav{
+        float: none;
+    }
+
+
+    .navbar-form .form-control{
+        width: 100%;
+    }
+
+    .wpb_row.home_slider{
+        margin-top: -25px !important;
+    }
+
+    body .uvc-main-heading h2{
+        margin-bottom: 20px !important;
+    }
+
+    body .owl-controls{
+        right: auto;
+        left: 0;
+    }
+
+    .ivan-carousel.video_carousel .owl-carousel .owl-wrapper-outer{
+        padding-top: 40px;
+    }
+
+    body .vc_custom_heading{
+        margin-bottom: 30px !important;
+    }
+    
+    .posts_list > article .post_info{
+	    padding: 0 10px;
+    }
+
+}
+
+@media (max-width: 568px) {
+	.posts_list > article{
+		width: 50%;
+	}
+	.upcoming_events .commands{
+		display: block;
+	}
+	.upcoming_events ul li{
+		text-align: center;
+	}
+	.upcoming_events .read_more{
+		display: block;
+		text-align: center;
+		padding: 0 0 20px 0;
+	}
+}
+
+@media (max-width: 480px) {
+	.pre_footer aside, .pre_footer .cols_3 aside,
+	.pre_footer aside, .pre_footer .cols_4 aside{
+		float: none;
+		width: 100%;
+		margin: 0 0 30px;
+	}
+
+	.footer_widget .widget_title{
+		margin: 0 0 20px;
+	}
+
+	.pre_footer{
+		padding: 20px 0;
+	}
+
+    .posts_list > article{
+		width: 100%;
+	}
+
+	.post-thumbnail img{
+		width: 100%;
+		height: auto;
+	}
+
+    .message_404{
+        padding-top: 20px;
+        padding-bottom: 20px;
+    }
+
+    .player_gallery li{
+        width: 50%;
+    }
+
+    .footer{
+        padding: 20px 0 0;
+    }
+
+    .footer_menu li{
+        margin: 0 20px 20px 0;
+    }
+
+    .pre_footer aside:last-child, .pre_footer .cols_3 aside:last-child{
+        margin-bottom: 0;
+    }
+
+    .fixture_detail .command_info .score{
+        width: 110px;
+        padding: 0 20px 0 0;
+    }
+
+    .fixture_detail .command_info .logo{
+        top: -6px;
+        left: -42px;
+        width: 90px;
+        height: 90px;
+    }
+
+    .fixture_detail .command_right .command_info .logo{
+        right: -42px;
+    }
+
+    .pagination{
+        margin: 0 0 20px;
+    }
+
+    .entry-meta .comments-link{
+        float: none;
+        clear: both;
+        margin: 0 0 5px;
+    }
+
+    .comment-respond .btn{
+        width: 100%;
+    }
+
+    .comment-form-rating label{
+        margin-bottom: 20px;
+    }
+
+    .woocommerce p.stars a, .woocommerce-page p.stars a{
+        margin: 0;
+    }
+
+    .woocommerce .product_comments .star-rating, .woocommerce-page .product_comments .star-rating{
+        float: none;
+        clear: both;
+        margin: 10px 0;
+    }
+	
+	.woocommerce ul.products li.product, .woocommerce-page ul.products li.product, .woocommerce .related ul li.product,
+	.woocommerce .related ul.products li.product, .woocommerce .upsells.products ul li.product, .woocommerce .upsells.products ul.products li.product, .woocommerce-page .related ul li.product, .woocommerce-page .related ul.products li.product, .woocommerce-page .upsells.products ul li.product, .woocommerce-page .upsells.products ul.products li.product {
+		width: 100%;
+		float: left;
+	}
+
+}

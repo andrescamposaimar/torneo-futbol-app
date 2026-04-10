@@ -1,0 +1,39 @@
+name: entre_redes_flutter_app
+description: Aplicacion mobil del Torneo de Padres del Colegio Marianista.
+publish_to: 'none'
+version: 1.2.0+18
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.3.0
+  intl: ^0.18.0
+  shared_preferences: ^2.2.2
+  url_launcher: ^6.2.5
+  webview_flutter: ^4.2.2
+  flutter_riverpod: ^2.6.0
+  package_info_plus: ^8.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/roboto/static/Roboto-Regular.ttf
+        - asset: assets/fonts/roboto/static/Roboto-Bold.ttf
+          weight: 700
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/app_logo.png"
+  remove_alpha_ios: true

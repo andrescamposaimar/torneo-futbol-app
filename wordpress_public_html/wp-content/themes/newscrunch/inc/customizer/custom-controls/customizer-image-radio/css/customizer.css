@@ -1,0 +1,72 @@
+/* ==========================================================================
+   Image Radio Buttons
+   ========================================================================== */
+.image_radio_button_control .radio-button-label > input {
+	display: none;
+}
+
+.image_radio_button_control .radio-button-label > img {
+	cursor: pointer;
+	border: 3px solid #ddd;
+	width: 25%;
+	background-color: #2271b1;
+}
+#customize-control-highlight_layout .image_radio_button_control .radio-button-label > img{width: 45%;}
+#customize-control-spncp_skin_mode .image_radio_button_control .radio-button-label > img,
+#customize-control-heading_layout_setting_section .image_radio_button_control .radio-button-label > img{width: 45%;}
+#customize-control-heading_layout .image_radio_button_control .radio-button-label > img{width: 45%;}
+#sub-accordion-section-ribbon_section .image_radio_button_control .radio-button-label > img {width: 100%;}
+#customize-control-bredcrumb_alignment .image_radio_button_control .radio-button-label > img {
+	width: 47%;
+}
+#customize-control-video_layout .image_radio_button_control .radio-button-label > img {
+	width: 28%;
+	margin: 3px;
+}
+.image_radio_button_control .radio-button-label > input:checked + img {
+	border: 3px solid #2885bb;
+}
+#customize-control-blog_sidebar_layout .image_radio_button_control .radio-button-label > img,
+#customize-control-single_blog_sidebar_layout .image_radio_button_control .radio-button-label > img,
+#customize-control-page_sidebar_layout .image_radio_button_control .radio-button-label > img,
+#customize-control-page_widget1_sidebar_layout .image_radio_button_control .radio-button-label > img,
+#customize-control-page_widget2_sidebar_layout .image_radio_button_control .radio-button-label > img{
+width: 22%;
+}
+#customize-control-theme_layout .image_radio_button_control .radio-button-label > img{
+	width: 47%;
+}
+#customize-control-header_layout .image_radio_button_control .radio-button-label > img{
+	width: 22%;
+}
+#customize-control-newscrunch_single_post_layout .image_radio_button_control .radio-button-label > img{
+	width: 30%;
+}
+#customize-control-newscrunch_single_post_author_layout .image_radio_button_control .radio-button-label > img{
+	width: 30%;
+}
+#customize-control-archive_blog_variation .image_radio_button_control .radio-button-label > img{
+	width: 30%;
+}
+#customize-control-archive_blog_variation .image_radio_button_control .radio-button-label{
+	vertical-align: unset;
+}
+#customize-control-newscrunch_logo_view .image_radio_button_control .radio-button-label > img{
+	width: 10%;
+	border: none;
+   background: none;
+   margin-left: 10px;
+   margin-top: 5px;
+}
+#customize-control-newscrunch_logo_view .image_radio_button_control .radio-button-label > input:checked + img{
+	border: 2px solid #2271b1;
+}
+#customize-control-newscrunch_logo_view .customize-control-title{
+	display: inline-block;
+	margin-right: 70px;
+}
+.rtl #customize-control-newscrunch_logo_view .customize-control-title{
+	display: inline-block;
+	margin-left: 70px;
+	margin-right: 0;
+}

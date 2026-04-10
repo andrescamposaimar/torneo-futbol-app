@@ -1,0 +1,48 @@
+.stm_customizer_subtitle {
+	display: block;
+	margin: 0 -20px 10px;
+	padding: 5px 20px;
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+	color: #555;
+	background: #f5f5f5;
+}
+
+.customize-control-select, .customize-control-bg, .customize-control-text, .customize-control-color, .customize-control-checkbox, .customize-control-subtitle, .customize-control-image{
+	padding: 5px 0 10px;
+}
+
+.theme_bg li{
+	display: block;
+	float: left;
+	margin: 0 5px 5px 0;
+	background: #dedede repeat 50% 50%;
+	border: 2px solid #d6d6d6;
+	overflow: hidden;
+}
+
+.theme_bg li label{
+	display: block;
+	width: 30px;
+	height: 30px;
+}
+
+.theme_bg li.active{
+	border-color: #ec1919;
+}
+
+.theme_bg ul{
+	position: relative;
+	width: 110%;
+}
+
+.theme_bg ul:after{
+	content:'';
+	clear: both;
+	display: table;
+}
+
+.theme_bg input{
+	visibility: hidden;
+}
