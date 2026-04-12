@@ -79,4 +79,9 @@ abstract class IApiService {
     int page = 1,
     int perPage = 10,
   });
+
+  Future<Map<String, dynamic>> getNoticias({
+    int page = 1,
+    int perPage = 10,
+  });
 }

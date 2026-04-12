@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'firebase_options.dart';
 import 'screens/players_screen.dart';
 import 'screens/standings_screen.dart';
 import 'screens/teams_screen.dart';
@@ -11,11 +14,20 @@ import 'providers/service_providers.dart';
 import 'providers/temporadas_provider.dart';
 import 'providers/config_provider.dart';
 import 'screens/matches_screen.dart';
+import 'screens/noticias_screen.dart';
 import 'services/config_service.dart';
 
 
   void main() async {
     WidgetsFlutterBinding.ensureInitialized();
+
+    // Inicializar locale español para formateo de fechas
+    await initializeDateFormatting('es');
+
+    // Inicializar Firebase
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
 
     // Crear container temporal para operaciones de startup antes de runApp
     final container = ProviderContainer();
@@ -103,7 +115,7 @@ import 'services/config_service.dart';
   }
 
   class _MainNavigationState extends ConsumerState<MainNavigation> {
-    int _selectedIndex = 0;
+    int _selectedIndex = 2;
     List<Widget>? _screens;
     String? _maintenanceMessage;
 
@@ -111,6 +123,8 @@ import 'services/config_service.dart';
     void initState() {
       super.initState();
       _initScreens();
+      // Inicializar notificaciones después de que la app arrancó
+      ref.read(notificationServiceProvider).init();
     }
 
     Future<void> _initScreens() async {
@@ -126,6 +140,7 @@ import 'services/config_service.dart';
         _screens = [
           MatchesScreen(temporadaId: temporada.id),
           const StandingsScreen(),
+          const NoticiasScreen(),
           const TeamsScreen(),
           const PlayersScreen(),
           const MoreScreen(),
@@ -265,9 +280,10 @@ import 'services/config_service.dart';
           items: [
             _buildNavItem(0, Icons.sports_soccer, 'Partidos'),
             _buildNavItem(1, Icons.bar_chart, 'Posiciones'),
-            _buildNavItem(2, Icons.group, 'Equipos'),
-            _buildNavItem(3, Icons.person, 'Jugadores'),
-            _buildNavItem(4, Icons.menu, 'Más'),
+            _buildNavItem(2, Icons.newspaper, 'Noticias'),
+            _buildNavItem(3, Icons.group, 'Equipos'),
+            _buildNavItem(4, Icons.person, 'Jugadores'),
+            _buildNavItem(5, Icons.menu, 'Más'),
           ],
         ),
       );

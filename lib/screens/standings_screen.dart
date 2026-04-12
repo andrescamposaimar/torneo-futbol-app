@@ -309,9 +309,11 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
         perPage: 500,
       );
       final fetched = res['items'] ?? [];
+      final existingIds = pc.partidosJugados.map((p) => p['id']).toSet();
       for (final partido in fetched) {
-        if (!pc.partidosJugados.contains(partido)) {
+        if (!existingIds.contains(partido['id'])) {
           pc.partidosJugados.add(partido);
+          existingIds.add(partido['id']);
         }
       }
       await ref.read(cacheServiceProvider).cachePartidosJugadosPorTemporada(

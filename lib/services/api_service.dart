@@ -432,4 +432,37 @@ class ApiService implements IApiService {
       throw Exception('Error al obtener tabla de imbatibles');
     }
   }
+
+  @override
+  Future<Map<String, dynamic>> getNoticias({
+    int page = 1,
+    int perPage = 10,
+  }) async {
+    final uri = Uri.parse('https://entreredespadres.com.ar/wp-json/wp/v2/posts')
+        .replace(queryParameters: {
+      'page': page.toString(),
+      'per_page': perPage.toString(),
+      '_embed': '',
+    });
+
+    final res = await http.get(uri);
+    _logRequest(uri, res);
+
+    if (res.statusCode == 200) {
+      final data = json.decode(res.body);
+      final totalPages = int.tryParse(res.headers['x-wp-totalpages'] ?? '') ?? 1;
+      if (data is List) {
+        return {
+          'items': data,
+          'total_pages': totalPages,
+        };
+      }
+      return {
+        'items': [],
+        'total_pages': 1,
+      };
+    } else {
+      throw Exception('Error al obtener noticias');
+    }
+  }
 }

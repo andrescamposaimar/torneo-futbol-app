@@ -24,6 +24,8 @@ class CacheService implements ICacheService {
   static const String _playersHistoricosCacheKey = 'cached_players_historicos';
   // 🔹 Temporadas Cache
   static const String _temporadasCacheKey = 'cached_temporadas';
+  // 🔹 Noticias Cache
+  static const String _noticiasCacheKey = 'cached_noticias';
 
   // ─────────────────────────────────────────────────────────────
   // 🔹 Configuración remota: versiones de caché y TTL
@@ -309,6 +311,42 @@ class CacheService implements ICacheService {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // 🔹 Noticias Cache (TTL corto: 1 hora)
+  // ─────────────────────────────────────────────────────────────
+
+  @override
+  Future<void> cacheNoticias(List<dynamic> noticias) async {
+    final prefs = await _sharedPrefs;
+    final cacheData = {
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'noticias': noticias,
+    };
+    await prefs.setString(_noticiasCacheKey, jsonEncode(cacheData));
+  }
+
+  @override
+  Future<List<dynamic>?> getCachedNoticias() async {
+    final prefs = await _sharedPrefs;
+    final raw = prefs.getString(_noticiasCacheKey);
+    if (raw != null) {
+      final decoded = jsonDecode(raw);
+      final timestamp = decoded['timestamp'] as int;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      // TTL de 1 hora para noticias (se actualizan más frecuentemente)
+      if ((now - timestamp) < const Duration(hours: 1).inMilliseconds) {
+        return List<dynamic>.from(decoded['noticias']);
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<void> clearNoticiasCache() async {
+    final prefs = await _sharedPrefs;
+    await prefs.remove(_noticiasCacheKey);
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // 🔹 Clear all caches
   // ─────────────────────────────────────────────────────────────
 
@@ -322,6 +360,7 @@ class CacheService implements ICacheService {
     await prefs.remove(_playersHistoricosCacheKey);
     await prefs.remove(_scorersCacheKey);
     await prefs.remove(_temporadasCacheKey);
+    await prefs.remove(_noticiasCacheKey);
     await prefs.remove('cache_partidos_jugados');
     await prefs.remove('cache_partidos_futuros');
 
@@ -451,6 +490,7 @@ class CacheService implements ICacheService {
       await prefs.remove(_playersTemporadaCacheKey);
       await prefs.remove(_playersHistoricosCacheKey);
       await prefs.remove(_temporadasCacheKey);
+      await prefs.remove(_noticiasCacheKey);
 
       final keys = prefs.getKeys();
       for (final key in keys) {

@@ -1231,7 +1231,7 @@ Widget _buildListaPorFecha() {
 
   Future<void> _forzarActualizacionCacheJugados() async {
     try {
-      final res = await ref.read(apiServiceProvider).getPartidos(page: 1, perPage: 16);
+      final res = await ref.read(apiServiceProvider).getPartidos(page: 1, perPage: 16, temporada: widget.temporadaId);
       final nuevos = res['items'] ?? [];
 
       if (nuevos.isNotEmpty) {

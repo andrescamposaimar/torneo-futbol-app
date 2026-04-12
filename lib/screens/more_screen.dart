@@ -1,17 +1,54 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'listas_screen.dart';
 import 'scorers_screen.dart';
 import 'imbatibles_screen.dart';
 import 'package:flutter/foundation.dart';
 import '../providers/repository_providers.dart';
+import '../providers/service_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'solicitud_cambio_webview.dart';
 import '../widgets/entre_redes_app_bar.dart';
 
 
-class MoreScreen extends ConsumerWidget {
+class MoreScreen extends ConsumerStatefulWidget {
   const MoreScreen({super.key});
+
+  @override
+  ConsumerState<MoreScreen> createState() => _MoreScreenState();
+}
+
+class _MoreScreenState extends ConsumerState<MoreScreen> {
+  bool _notificacionesHabilitadas = true;
+  String? _fcmToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarEstadoNotificaciones();
+    if (kDebugMode) _cargarFcmToken();
+  }
+
+  Future<void> _cargarEstadoNotificaciones() async {
+    final habilitadas =
+        await ref.read(notificationServiceProvider).isEnabled();
+    if (mounted) setState(() => _notificacionesHabilitadas = habilitadas);
+  }
+
+  Future<void> _cargarFcmToken() async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (mounted) setState(() => _fcmToken = token ?? 'Esperando token...');
+    } catch (_) {
+      // Escuchar cuando el token esté disponible
+      FirebaseMessaging.instance.onTokenRefresh.listen((token) {
+        if (mounted) setState(() => _fcmToken = token);
+      });
+      if (mounted) setState(() => _fcmToken = 'Esperando token...');
+    }
+  }
 
   Widget _sectionTitle(String title) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16),
@@ -33,7 +70,7 @@ class MoreScreen extends ConsumerWidget {
       );
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     void abrirPdf(String url) async {
       final uri = Uri.parse(url);
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -45,6 +82,21 @@ class MoreScreen extends ConsumerWidget {
       appBar: EntreRedesAppBar(title: 'Otras Opciones'),
       body: ListView(
         children: [
+          _sectionTitle('Notificaciones'),
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications, color: Colors.black),
+            title: const Text('Avisos del torneo'),
+            subtitle: const Text(
+                'Recibir alertas sobre novedades y anuncios'),
+            value: _notificacionesHabilitadas,
+            activeTrackColor: const Color(0xFF005BBB),
+            onChanged: (value) async {
+              setState(() => _notificacionesHabilitadas = value);
+              await ref
+                  .read(notificationServiceProvider)
+                  .setEnabled(value);
+            },
+          ),
           _sectionTitle('Estadísticas'),
           _menuItem(
             'Goleadores',
@@ -125,6 +177,25 @@ class MoreScreen extends ConsumerWidget {
 
           if (kDebugMode) ...[
             const Divider(),
+            Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: _fcmToken == null
+                    ? const Text('Cargando FCM Token...',
+                        style: TextStyle(fontSize: 10, color: Colors.grey))
+                    : GestureDetector(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: _fcmToken!));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('FCM Token copiado')),
+                          );
+                        },
+                        child: Text(
+                          'FCM Token (tap para copiar):\n$_fcmToken',
+                          style: const TextStyle(fontSize: 10, color: Colors.grey),
+                        ),
+                      ),
+              ),
+            const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: ElevatedButton.icon(

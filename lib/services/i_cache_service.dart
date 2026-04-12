@@ -50,4 +50,8 @@ abstract class ICacheService {
   Future<void> clearScorersTemporadaCache(int temporadaId);
   Future<void> clearAllCaches();
   Future<void> clearCacheOncePerWeekWindow();
+
+  Future<void> cacheNoticias(List<dynamic> noticias);
+  Future<List<dynamic>?> getCachedNoticias();
+  Future<void> clearNoticiasCache();
 }
