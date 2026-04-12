@@ -47,3 +47,14 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 ios_backup/
+
+# Build symlinks y carpetas temporales
+build */
+build?*/
+
+# Certificados y credenciales
+*.pem
+
+# Duplicados de CocoaPods
+ios/Pods */
+ios/Podfile *.lock
