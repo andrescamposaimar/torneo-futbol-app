@@ -131,7 +131,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             },
           ),
           _menuItem(
-            'Lista de Espera y Reserva',
+            'Lista de Espera',
             Icons.people_alt,
             () {
               Navigator.push(

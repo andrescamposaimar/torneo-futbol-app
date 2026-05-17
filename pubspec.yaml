@@ -1,5 +1,5 @@
-name: entre_redes_flutter_app
-description: Aplicacion mobil del Torneo de Padres del Colegio Marianista.
+name: torneo_futbol_app
+description: App mobile white-label para torneos de fútbol amateur.
 publish_to: 'none'
 version: 1.3.1+21
 

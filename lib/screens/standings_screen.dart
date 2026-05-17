@@ -240,6 +240,38 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
     });
   }
 
+  Future<void> _refreshTablas({required bool isActual}) async {
+    final temporadaId = isActual ? temporadaActual?.id : _histTemporadaId;
+    if (temporadaId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('cache_tablas_$temporadaId');
+
+    final myGen = isActual ? ++_actGeneration : ++_histGeneration;
+    setState(() {
+      if (isActual) {
+        _actPosiciones.clear();
+        _actTodasLasPosiciones.clear();
+        _actTitulos.clear();
+        _actTituloSeleccionado = null;
+        _actPage = 1;
+        _actHasMore = true;
+        _actIsLoading = false;
+      } else {
+        _histPosiciones.clear();
+        _histTodasLasPosiciones.clear();
+        _histTitulos.clear();
+        _histTituloSeleccionado = null;
+        _histPage = 1;
+        _histHasMore = true;
+        _histIsLoading = false;
+      }
+    });
+
+    await _obtenerPartidosTemporada(temporadaId);
+    await _fetchTablas(isActual: isActual, generation: myGen);
+  }
+
   // ── Histórico: selección de temporada ──
 
   void _histSeleccionarTemporada(Temporada t) async {
@@ -471,23 +503,28 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
     required bool hasMore,
     required ScrollController scrollController,
     required int temporadaId,
+    required bool isActual,
   }) {
     if (posiciones.isEmpty && isLoading) {
       return const LoadingSeccionConAd(texto: 'Cargando tablas...');
     }
-    return ListView.builder(
-      controller: scrollController,
-      itemCount: posiciones.length + (hasMore ? 1 : 0),
-      padding: const EdgeInsets.only(top: 8),
-      itemBuilder: (context, index) {
-        if (index < posiciones.length) {
-          return _buildRow(posiciones[index], temporadaId);
-        }
-        return const Padding(
-          padding: EdgeInsets.symmetric(vertical: 16),
-          child: Center(child: CircularProgressIndicator()),
-        );
-      },
+    return RefreshIndicator(
+      onRefresh: () => _refreshTablas(isActual: isActual),
+      child: ListView.builder(
+        controller: scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: posiciones.length + (hasMore ? 1 : 0),
+        padding: const EdgeInsets.only(top: 8),
+        itemBuilder: (context, index) {
+          if (index < posiciones.length) {
+            return _buildRow(posiciones[index], temporadaId);
+          }
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        },
+      ),
     );
   }
 
@@ -515,6 +552,7 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
               hasMore: _actHasMore,
               scrollController: _actScrollController,
               temporadaId: temporadaActual?.id ?? 0,
+              isActual: true,
             ),
           ),
         ),
@@ -585,6 +623,7 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
                     hasMore: _histHasMore,
                     scrollController: _histScrollController,
                     temporadaId: _histTemporadaId!,
+                    isActual: false,
                   ),
           ),
         ),

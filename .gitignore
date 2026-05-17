@@ -52,6 +52,9 @@ ios_backup/
 build */
 build?*/
 
+# Agent tooling
+.atl/
+
 # Certificados y credenciales
 *.pem
 

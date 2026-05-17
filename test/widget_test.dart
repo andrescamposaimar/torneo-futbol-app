@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:entre_redes_flutter_app/main.dart';
+import 'package:torneo_futbol_app/main.dart';
 
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {

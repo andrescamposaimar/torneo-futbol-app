@@ -1,0 +1,92 @@
+═══════════════════════════════════════════════════════════════
+TABLA 1 — Funcionalidades incluidas (Sección 2)
+Pegar después de "Funcionalidades incluidas"
+═══════════════════════════════════════════════════════════════
+Módulo	Descripción
+Partidos	Jugados y por jugar, con filtros por fecha, zona y equipo
+Detalle de partido	Resultado, formaciones, goleadores, tarjetas
+Tabla de posiciones	Filtrable por zona y temporada
+Equipos	Listado, plantel completo, historial de partidos
+Jugadores	Listado con buscador, perfil individual, estadísticas
+Goleadores	Tabla acumulada por temporada
+Arqueros vallas invictas	Ranking de arqueros (imbatibles)
+Notificaciones push	Avisos a los jugadores sobre próximos partidos, resultados, novedades
+Banners / sponsors	Espacios publicitarios 100% controlados por vos
+Caché inteligente	La app funciona aún con conectividad intermitente
+
+
+═══════════════════════════════════════════════════════════════
+TABLA 2 — Comparativa de competidores (Sección 3.4)
+Pegar después de "Comparativa"
+═══════════════════════════════════════════════════════════════
+Eje	TIMBO Free	TIMBO Premium	Todo Torneos	Esta propuesta
+Costo Año 1	USD 0	A consultar	A consultar (estimado USD 2.000-5.000)	USD 4.360
+App branded propia (marca del torneo)	No	Solo tier top (Copa Potrero)	Sí	Sí
+Anuncios de terceros forzados	Sí	No	No	No
+Dueño de los sponsors al 100%	No (TIMBO toma comisión)	Parcial	Sí	Sí
+Dueño del backend / datos	No (TIMBO)	No (TIMBO)	No (iBaires)	Sí (servidor propio)
+Stack moderno (Flutter)	—	—	No	Sí
+Trato directo con el desarrollador	No	No	No	Sí
+Producto en producción referenciable	Sí (TIMBO)	Sí	Sí	Sí (Entre Redes)
+
+
+═══════════════════════════════════════════════════════════════
+TABLA 3 — Cronograma (Sección 5)
+Pegar después del párrafo "Asumiendo firma de propuesta..."
+═══════════════════════════════════════════════════════════════
+Semana	Fechas	Hitos
+Semana 1	1–7 jun	Discovery, entrega de assets (logo, colores), apertura cuentas Apple/Google
+Semana 2	8–14 jun	Setup backend WordPress + SportsPress + plugin custom
+Semana 3	15–21 jun	Customización app (branding, bundle ID, naming), build inicial
+Semana 4	22–28 jun	Screenshots, fichas de stores, builds de release
+Semana 5	29 jun – 5 jul	Submission iOS + Google Play, carga inicial de datos del torneo
+Semana 6	6–12 jul	Revisión Apple (3-7 días) + ajustes de feedback
+Semana 7	13–19 jul	App publicada, pruebas con cliente, capacitación de carga
+Semana 8	20–26 jul	Hyper-care, ajustes finales, comunicación de lanzamiento
+Lanzamiento	agosto 2026	Inicio del torneo con la app en producción
+
+
+═══════════════════════════════════════════════════════════════
+TABLA 4 — Setup desglose (Sección 6.1)
+Pegar después de "Setup (pago único)"
+═══════════════════════════════════════════════════════════════
+Concepto	USD
+Customización de app (branding, naming, bundle IDs, builds)	800
+Setup backend (WordPress + SportsPress + plugin custom + carga inicial)	700
+Publicación en stores (signing, screenshots, fichas, submission, manejo de revisiones)	500
+30 días de hyper-care post-lanzamiento	200
+TOTAL SETUP	USD 2.200
+
+
+═══════════════════════════════════════════════════════════════
+TABLA 5 — Servicio mensual desglose (Sección 6.2)
+Pegar después de "Servicio mensual"
+═══════════════════════════════════════════════════════════════
+Concepto	USD/mes
+Mantenimiento general	60
+Updates obligatorios de iOS y Android (mínimo 2 al año)	50
+Soporte por canal directo (WhatsApp / email)	40
+Evolución menor (ajustes, pequeños features)	30
+TOTAL MENSUAL	USD 180
+
+
+═══════════════════════════════════════════════════════════════
+TABLA 6 — Resumen Año 1 (Sección 6.3)
+Pegar después de "Resumen Año 1"
+═══════════════════════════════════════════════════════════════
+Concepto	USD
+Setup	2.200
+Mensualidad x 12 meses	2.160
+TOTAL AÑO 1	USD 4.360
+
+
+═══════════════════════════════════════════════════════════════
+TABLA 7 — Costos a cargo del cliente (Sección 7)
+Pegar después de "NO incluye (a cargo del cliente)"
+═══════════════════════════════════════════════════════════════
+Concepto	Costo aproximado	A cargo de
+Hosting WordPress (servidor)	USD 10-25/mes	Cliente, contratado a su nombre
+Apple Developer Program	USD 99/año	Cliente, cuenta a su nombre
+Google Play Console	USD 25 (única vez)	Cliente, cuenta a su nombre
+Dominio web (opcional)	USD 15/año	Cliente
+Diseño gráfico del logo final	A definir	Cliente (debe entregarlo en vectorial)
