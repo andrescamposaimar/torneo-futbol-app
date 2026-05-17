@@ -1,6 +1,4 @@
 import 'bootstrap.dart';
 import 'config/tenants/marianista.dart';
 
-/// Default entry point — uses the Marianista tenant.
-/// `flutter run` with no `-t` flag uses this file.
 void main() => bootstrap(marianistaTenant);
