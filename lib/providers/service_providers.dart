@@ -19,5 +19,5 @@ final notificationServiceProvider =
 
 final remoteDataServiceProvider = Provider<RemoteDataService>((ref) {
   final cfg = ref.watch(tenantConfigProvider);
-  return RemoteDataService(mediaBaseUrl: cfg.mediaBaseUrl);
+  return RemoteDataService(mediaBaseUrl: cfg.mediaBaseUrl, apiBaseUrl: cfg.apiBaseUrl);
 });

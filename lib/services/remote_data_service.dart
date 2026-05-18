@@ -8,8 +8,12 @@ import 'cache_service.dart';
 
 class RemoteDataService {
   final String mediaBaseUrl;
+  final String apiBaseUrl;
 
-  const RemoteDataService({required this.mediaBaseUrl});
+  const RemoteDataService({
+    required this.mediaBaseUrl,
+    required this.apiBaseUrl,
+  });
 
   String get _adsUrl => '$mediaBaseUrl/publicidades.json';
   String get _listasUrl => '$mediaBaseUrl/listas_jugadores.json';
@@ -64,7 +68,7 @@ class RemoteDataService {
     IApiService? api,
     ICacheService? cache,
   }) async {
-    final effectiveApi = api ?? ApiService(baseUrl: mediaBaseUrl);
+    final effectiveApi = api ?? ApiService(baseUrl: apiBaseUrl);
     final effectiveCache = cache ?? CacheService();
 
     final cached = await effectiveCache.getCachedTemporadas();
