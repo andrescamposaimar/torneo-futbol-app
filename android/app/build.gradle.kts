@@ -30,6 +30,24 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    flavorDimensions += "tenant"
+
+    productFlavors {
+        create("marianista") {
+            dimension = "tenant"
+            // Preserves the existing production application ID — tenant zero
+            // must remain an UPDATE to the existing store app (spec TZ-6).
+            applicationId = "com.entre_redes.app"
+            resValue("string", "app_name", "Entre Redes")
+        }
+        create("facundo") {
+            dimension = "tenant"
+            // Placeholder — confirm with client before publishing to store.
+            applicationId = "com.facundo.ligafutbol"
+            resValue("string", "app_name", "Liga Facundo")
+        }
+    }
+
     defaultConfig {
         applicationId = "com.entre_redes.app"
         minSdk = flutter.minSdkVersion

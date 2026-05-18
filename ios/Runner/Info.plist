@@ -1,5 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS FLAVOR SETUP — MUST BE DONE MANUALLY IN XCODE
+  ==================================================
+  Android flavors are configured via build.gradle.kts productFlavors (see android/app/build.gradle.kts).
+  iOS flavor equivalents require manual Xcode setup. Do NOT edit project.pbxproj by hand.
+
+  Steps to add a new flavor (e.g. "facundo"):
+  1. In Xcode, open Runner.xcworkspace.
+  2. Duplicate the "Runner" scheme (Product > Scheme > Manage Schemes > Duplicate).
+     Name the new scheme "facundo".
+  3. In the scheme's Build Settings, set the following per scheme:
+       PRODUCT_BUNDLE_IDENTIFIER  = com.facundo.ligafutbol   (placeholder — confirm with client)
+       DISPLAY_NAME               = Liga Facundo              (placeholder — confirm with client)
+  4. Create ios/Flutter/facundo.xcconfig with:
+       #include "Generated.xcconfig"
+       PRODUCT_BUNDLE_IDENTIFIER=com.facundo.ligafutbol
+       FLUTTER_TARGET=lib/main_facundo.dart
+  5. Assign the xcconfig to the facundo scheme's Debug and Release configurations.
+  6. If Firebase push notifications are per-tenant, place the tenant-specific
+     GoogleService-Info.plist under ios/Runner/<flavor>/GoogleService-Info.plist
+     and wire it via a Run Script build phase that copies the right file.
+
+  Existing Marianista values (tenant zero — DO NOT CHANGE):
+    PRODUCT_BUNDLE_IDENTIFIER = com.andrescampos.torneochaminade   (from pbxproj)
+    DISPLAY_NAME               = Torneo Chami                       (current CFBundleDisplayName)
+    Firebase project: shared with Facundo until separate Firebase projects are provisioned.
+
+  Run command for Facundo flavor:
+    flutter run --flavor facundo -t lib/main_facundo.dart
+    flutter build ipa --flavor facundo -t lib/main_facundo.dart
+-->
 <plist version="1.0">
 <dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
