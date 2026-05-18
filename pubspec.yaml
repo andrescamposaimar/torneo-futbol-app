@@ -30,6 +30,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
+  assets:
+    - assets/images/marianista/
+    - assets/images/facundo/
+
   fonts:
     - family: Roboto
       fonts:
@@ -37,8 +41,26 @@ flutter:
         - asset: assets/fonts/roboto/static/Roboto-Bold.ttf
           weight: 700
 
-flutter_icons:
+# Per-flavor launcher icons.
+# Generate with:
+#   flutter pub run flutter_launcher_icons:main --flavor marianista
+#   flutter pub run flutter_launcher_icons:main --flavor facundo
+flutter_launcher_icons:
+  # Default fallback (used when no --flavor is specified)
   android: true
   ios: true
-  image_path: "assets/images/app_logo.png"
+  image_path: "assets/images/marianista/app_logo.png"
+  remove_alpha_ios: true
+
+flutter_launcher_icons_marianista:
+  android: true
+  ios: true
+  image_path: "assets/images/marianista/app_logo.png"
+  remove_alpha_ios: true
+
+flutter_launcher_icons_facundo:
+  android: true
+  ios: true
+  # TODO: replace placeholder with real Facundo logo before release
+  image_path: "assets/images/facundo/app_logo.png"
   remove_alpha_ios: true

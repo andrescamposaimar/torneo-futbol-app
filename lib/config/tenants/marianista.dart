@@ -46,7 +46,7 @@ const marianistaTenant = TenantConfig(
       ),
     ],
   ),
-  logoAsset: 'assets/images/app_logo.png',
+  logoAsset: 'assets/images/marianista/app_logo.png',
   androidStoreUrl:
       'https://play.google.com/store/apps/details?id=com.entreredes.app',
   iosStoreUrl: 'https://apps.apple.com/app/entre-redes/id6743369159',
