@@ -6,7 +6,6 @@ import 'player_detail_screen.dart';
 import '../providers/service_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../services/player_filter_service.dart';
-import '../services/remote_data_service.dart';
 import '../utils/date_utils.dart';
 import '../utils/posicion_utils.dart';
 import '../utils/puntaje_utils.dart';
@@ -74,7 +73,7 @@ class _PlayersScreenState extends ConsumerState<PlayersScreen>
   // ───────────────────────────────────────────────
 
   Future<void> _loadAds() async {
-    RemoteDataService.fetchAdImages().then((ads) {
+    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
       if (!mounted) return;
       setState(() {
         //adImageUrl = ads['jugadores'];
@@ -413,7 +412,7 @@ class _PlayersScreenState extends ConsumerState<PlayersScreen>
                         duration: const Duration(milliseconds: 150),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF00A3FF) : Colors.grey[200],
+                          color: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey[200],
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(

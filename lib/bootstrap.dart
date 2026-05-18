@@ -28,7 +28,7 @@ Future<void> bootstrap(TenantConfig cfg) async {
   final container = ProviderContainer(overrides: overrides);
   await container.read(cacheServiceProvider).clearCacheOncePerWeekWindow();
 
-  final config = await ConfigService.fetchConfig();
+  final config = await ConfigService.fetchConfig(cfg.mediaBaseUrl);
   if (config != null) {
     await container.read(cacheServiceProvider).applyRemoteConfig(config);
   }

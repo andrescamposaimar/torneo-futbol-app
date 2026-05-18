@@ -7,10 +7,14 @@ import 'api_service.dart';
 import 'cache_service.dart';
 
 class RemoteDataService {
-  static const _adsUrl = 'https://entreredespadres.com.ar/wp-content/uploads/media/publicidades.json';
-  static const _listasUrl = 'https://entreredespadres.com.ar/wp-content/uploads/media/listas_jugadores.json';
+  final String mediaBaseUrl;
 
-  static Future<Map<String, String>> fetchAdImages() async {
+  const RemoteDataService({required this.mediaBaseUrl});
+
+  String get _adsUrl => '$mediaBaseUrl/publicidades.json';
+  String get _listasUrl => '$mediaBaseUrl/listas_jugadores.json';
+
+  Future<Map<String, String>> fetchAdImages() async {
     try {
       final res = await http.get(Uri.parse(_adsUrl));
       if (res.statusCode == 200) {
@@ -38,7 +42,7 @@ class RemoteDataService {
     };
   }
 
-  static Future<Map<String, List<int>>> fetchListasJugadores() async {
+  Future<Map<String, List<int>>> fetchListasJugadores() async {
     try {
       final res = await http.get(Uri.parse(_listasUrl));
       if (res.statusCode == 200) {
@@ -55,12 +59,12 @@ class RemoteDataService {
     return {'espera': [], 'reserva': [], 'no_inscriptos': []};
   }
 
-  static Future<int?> getTemporadaIdPorNombre(
+  Future<int?> getTemporadaIdPorNombre(
     String nombre, {
     IApiService? api,
     ICacheService? cache,
   }) async {
-    final effectiveApi = api ?? ApiService();
+    final effectiveApi = api ?? ApiService(baseUrl: mediaBaseUrl);
     final effectiveCache = cache ?? CacheService();
 
     final cached = await effectiveCache.getCachedTemporadas();
@@ -84,7 +88,7 @@ class RemoteDataService {
     return null;
   }
 
-  static Future<List<AdItem>> fetchZocaloAds() async {
+  Future<List<AdItem>> fetchZocaloAds() async {
     try {
       final res = await http.get(Uri.parse(_adsUrl));
       if (res.statusCode == 200) {

@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'team_detail_screen.dart';
 import '../providers/service_providers.dart';
 import '../providers/temporadas_provider.dart';
-import '../services/remote_data_service.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/zocalo_publicitario.dart';
 
@@ -36,7 +35,7 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
 
     _tabController = TabController(length: 2, vsync: this);
 
-    RemoteDataService.fetchAdImages().then((ads) {
+    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
       if (!mounted) return;
       setState(() {
         //equiposAdUrl = ads['equipos'];
@@ -275,7 +274,7 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
   }
 
   Future<List<int>> fetchEquiposExcluidos() async {
-    final listas = await RemoteDataService.fetchListasJugadores();
+    final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
     return [
       ...(listas['reserva'] ?? []),
       ...(listas['espera'] ?? []),

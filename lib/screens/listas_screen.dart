@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/remote_data_service.dart';
 import '../providers/service_providers.dart';
 import '../services/player_filter_service.dart';
 import '../utils/date_utils.dart';
@@ -61,7 +60,7 @@ class _ListasScreenState extends ConsumerState<ListasScreen> {
     _scrollControllerEspera.addListener(_onScrollEspera);
     _scrollControllerReserva.addListener(_onScrollReserva);
 
-    RemoteDataService.fetchAdImages().then((ads) {
+    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
       if (!mounted) return;
       setState(() {
         adImageUrl = ads['jugadores'];
@@ -70,7 +69,7 @@ class _ListasScreenState extends ConsumerState<ListasScreen> {
   }
 
   Future<void> _loadListasIDs() async {
-    final listas = await RemoteDataService.fetchListasJugadores();
+    final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
     esperaIds = List<int>.from(listas['espera'] ?? []);
     reservaIds = List<int>.from(listas['reserva'] ?? []);
 
@@ -224,9 +223,9 @@ class _ListasScreenState extends ConsumerState<ListasScreen> {
               color: Colors.white,
               child: TabBar(
                 onTap: _onTabChanged,
-                labelColor: const Color(0xFF005BBB),
+                labelColor: Theme.of(context).colorScheme.primary,
                 unselectedLabelColor: Colors.grey,
-                indicatorColor: const Color(0xFF005BBB),
+                indicatorColor: Theme.of(context).colorScheme.primary,
                 indicatorWeight: 3,
                 labelStyle: const TextStyle(
                   fontSize: 16,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/remote_data_service.dart';
+import '../providers/service_providers.dart';
 import '../providers/repository_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../models/temporada.dart';
@@ -31,7 +31,7 @@ class _ScorersScreenState extends ConsumerState<ScorersScreen> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadTemporadas();
-    RemoteDataService.fetchAdImages().then((ads) {
+    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
       if (!mounted) return;
       setState(() {
         //adImageUrl = ads['goleadores'];
@@ -117,7 +117,7 @@ class _ScorersScreenState extends ConsumerState<ScorersScreen> {
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: temporadaSeleccionadaId == null
-                    ? const Color(0xFF00A3FF)
+                    ? Theme.of(context).colorScheme.primary
                     : Colors.grey[200],
                 foregroundColor: temporadaSeleccionadaId == null ? Colors.white : Colors.black87,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -140,7 +140,7 @@ class _ScorersScreenState extends ConsumerState<ScorersScreen> {
                   _loadMasGoleadores();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isSelected ? const Color(0xFF00A3FF) : Colors.grey[200],
+                  backgroundColor: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey[200],
                   foregroundColor: isSelected ? Colors.white : Colors.black87,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),

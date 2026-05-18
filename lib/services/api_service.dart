@@ -4,7 +4,9 @@ import 'package:http/http.dart' as http;
 import 'i_api_service.dart';
 
 class ApiService implements IApiService {
-  static const String baseUrl = 'https://entreredespadres.com.ar/wp-json/entre-redes/v1';
+  final String baseUrl;
+
+  const ApiService({required this.baseUrl});
 
   void _logRequest(Uri uri, http.Response res) {
     if (!kDebugMode) return;
@@ -438,7 +440,10 @@ class ApiService implements IApiService {
     int page = 1,
     int perPage = 10,
   }) async {
-    final uri = Uri.parse('https://entreredespadres.com.ar/wp-json/wp/v2/posts')
+    // Derive WP core API root from baseUrl: strip the last two path segments
+    // e.g. https://host.com/wp-json/entre-redes/v1 → https://host.com/wp-json/wp/v2/posts
+    final siteRoot = baseUrl.replaceAll(RegExp(r'/wp-json/.*$'), '');
+    final uri = Uri.parse('$siteRoot/wp-json/wp/v2/posts')
         .replace(queryParameters: {
       'page': page.toString(),
       'per_page': perPage.toString(),

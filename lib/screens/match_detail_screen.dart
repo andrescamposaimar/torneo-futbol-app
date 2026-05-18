@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/remote_data_service.dart';
 import '../providers/service_providers.dart';
 import '../widgets/zocalo_publicitario.dart';
 import '../widgets/full_field_painter.dart';
@@ -36,7 +35,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     _tabController = TabController(length: 3, vsync: this);
 
     // Cargar publicidad
-    RemoteDataService.fetchAdImages().then((ads) {
+    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
       if (!mounted) return;
       setState(() {
        // estadisticasAdUrl = ads['estadisticas'];

@@ -1,17 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../providers/service_providers.dart';
 import '../services/remote_data_service.dart';
 
-class ZocaloPublicitario extends StatefulWidget {
+class ZocaloPublicitario extends ConsumerStatefulWidget {
   const ZocaloPublicitario({super.key});
 
   @override
-  State<ZocaloPublicitario> createState() => _ZocaloPublicitarioState();
+  ConsumerState<ZocaloPublicitario> createState() => _ZocaloPublicitarioState();
 }
 
-class _ZocaloPublicitarioState extends State<ZocaloPublicitario> {
+class _ZocaloPublicitarioState extends ConsumerState<ZocaloPublicitario> {
   List<AdItem> ads = [];
   int _currentIndex = 0;
   bool _visible = false;
@@ -27,17 +29,18 @@ class _ZocaloPublicitarioState extends State<ZocaloPublicitario> {
     final prefs = await SharedPreferences.getInstance();
     //final lastClosed = prefs.getInt('zocalo_ad_closed_at');
     final now = DateTime.now().millisecondsSinceEpoch;
-    await prefs.remove('zocalo_ad_closed_at'); // 🔥 Fuerza su visibilidad
+    await prefs.remove('zocalo_ad_closed_at'); // Fuerza su visibilidad
 
     /*if (lastClosed != null && now - lastClosed < 3600000) {
-      debugPrint('⏱️ Zócalo oculto por cierre reciente');
+      debugPrint('Zócalo oculto por cierre reciente');
       return;
     }*/
 
-    final loadedAds = await RemoteDataService.fetchZocaloAds();
+    final remoteData = ref.read(remoteDataServiceProvider);
+    final loadedAds = await remoteData.fetchZocaloAds();
 
     if (!mounted || loadedAds.isEmpty) {
-      debugPrint('⚠️ No se montó el widget o la lista está vacía');
+      debugPrint('No se montó el widget o la lista está vacía');
       return;
     }
 
@@ -45,7 +48,7 @@ class _ZocaloPublicitarioState extends State<ZocaloPublicitario> {
       ads = loadedAds;
       _visible = true;
     });
-    debugPrint('✅ Zócalo visible con ${ads.length} anuncios');
+    debugPrint('Zócalo visible con ${ads.length} anuncios');
     _startCarrusel();
   }
 

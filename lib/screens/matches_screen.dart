@@ -6,7 +6,6 @@ import 'match_detail_screen.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/zocalo_publicitario.dart';
 import 'dart:async';
-import '../services/remote_data_service.dart';
 import '../providers/service_providers.dart';
 import '../providers/partidos_cache_provider.dart';
 import '../utils/liga_utils.dart';
@@ -484,7 +483,7 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF00A3FF) : Colors.grey[200],
+          color: selected ? Theme.of(context).colorScheme.primary : Colors.grey[200],
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(
@@ -789,7 +788,7 @@ Widget _buildListaPorFecha() {
     try {
       final cached = await _cargarCacheEquipos();
       if (cached != null) {
-        final listas = await RemoteDataService.fetchListasJugadores();
+        final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
         final idsAExcluir = [
           ...?listas['espera'],
           ...?listas['reserva'],
@@ -808,7 +807,7 @@ Widget _buildListaPorFecha() {
         return;
       }
 
-      final listas = await RemoteDataService.fetchListasJugadores();
+      final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
       final idsAExcluir = [
         ...?listas['espera'],
         ...?listas['reserva'],
@@ -962,7 +961,7 @@ Widget _buildListaPorFecha() {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFF00A3FF) : Colors.grey[200],
+          color: selected ? Theme.of(context).colorScheme.primary : Colors.grey[200],
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(

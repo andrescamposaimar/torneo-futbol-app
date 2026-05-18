@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/remote_data_service.dart';
+import '../providers/service_providers.dart';
 import '../providers/repository_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../models/temporada.dart';
@@ -30,7 +30,7 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadTemporadas();
-    RemoteDataService.fetchAdImages().then((ads) {
+    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
       if (!mounted) return;
       setState(() {
         adImageUrl = ads['imbatibles'];
