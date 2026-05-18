@@ -72,7 +72,9 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final docs = ref.watch(tenantConfigProvider).documents;
+    final cfg = ref.watch(tenantConfigProvider);
+    final docs = cfg.documents;
+    final features = cfg.features;
 
     void abrirPdf(String url) async {
       final uri = Uri.parse(url);
@@ -136,16 +138,17 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
               );
               },
             ),
-          _menuItem(
-            'Lista de Espera',
-            Icons.people_alt,
-            () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ListasScreen()),
-              );
-            },
-          ),
+          if (features.waitingLists)
+            _menuItem(
+              'Lista de Espera',
+              Icons.people_alt,
+              () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ListasScreen()),
+                );
+              },
+            ),
 
           if (docs.reglamentoUrl != null || docs.modalidadUrl != null)
             _sectionTitle('Información'),

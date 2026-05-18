@@ -10,6 +10,17 @@ import 'services/config_service.dart';
 import 'app.dart';
 
 Future<void> bootstrap(TenantConfig cfg) async {
+  // Fail fast: waitingLists=true requires a valid appsScriptUrl.
+  if (cfg.features.waitingLists &&
+      (cfg.integrations.appsScriptUrl == null ||
+          cfg.integrations.appsScriptUrl!.isEmpty)) {
+    throw StateError(
+      'TenantConfig "${cfg.tenantId}": waitingLists=true but '
+      'appsScriptUrl is null or empty. '
+      'Provide a valid appsScriptUrl in TenantIntegrations.',
+    );
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
 
   await initializeDateFormatting('es');

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'team_detail_screen.dart';
+import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../widgets/entre_redes_app_bar.dart';
@@ -274,6 +275,7 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
   }
 
   Future<List<int>> fetchEquiposExcluidos() async {
+    if (!ref.read(tenantConfigProvider).features.waitingLists) return [];
     final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
     return [
       ...(listas['reserva'] ?? []),

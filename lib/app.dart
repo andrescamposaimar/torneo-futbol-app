@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'config/tenant_config.dart';
 import 'config/tenant_provider.dart';
 import 'screens/players_screen.dart';
 import 'screens/standings_screen.dart';
@@ -69,7 +70,8 @@ class MainNavigation extends ConsumerStatefulWidget {
 }
 
 class _MainNavigationState extends ConsumerState<MainNavigation> {
-  int _selectedIndex = 2;
+  // Default to 0 (Partidos); adjusted after feature flags are resolved in _initScreens.
+  int _selectedIndex = 0;
   List<Widget>? _screens;
   String? _maintenanceMessage;
 
@@ -88,11 +90,13 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
 
     if (!mounted) return;
 
+    final features = ref.read(tenantConfigProvider).features;
+
     setState(() {
       _screens = [
         MatchesScreen(temporadaId: temporada.id),
         const StandingsScreen(),
-        const NoticiasScreen(),
+        if (features.newsTab) const NoticiasScreen(),
         const TeamsScreen(),
         const PlayersScreen(),
         const MoreScreen(),
@@ -187,6 +191,7 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final features = ref.watch(tenantConfigProvider).features;
 
     if (_screens == null) {
       return Scaffold(
@@ -226,16 +231,21 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
         backgroundColor: primary,
         selectedItemColor: Colors.white,
         unselectedItemColor: Colors.white70,
-        items: [
-          _buildNavItem(0, Icons.sports_soccer, 'Partidos'),
-          _buildNavItem(1, Icons.bar_chart, 'Posiciones'),
-          _buildNavItem(2, Icons.newspaper, 'Noticias'),
-          _buildNavItem(3, Icons.group, 'Equipos'),
-          _buildNavItem(4, Icons.person, 'Jugadores'),
-          _buildNavItem(5, Icons.menu, 'Más'),
-        ],
+        items: _buildNavItems(features),
       ),
     );
+  }
+
+  List<BottomNavigationBarItem> _buildNavItems(TenantFeatures features) {
+    int i = 0;
+    return [
+      _buildNavItem(i++, Icons.sports_soccer, 'Partidos'),
+      _buildNavItem(i++, Icons.bar_chart, 'Posiciones'),
+      if (features.newsTab) _buildNavItem(i++, Icons.newspaper, 'Noticias'),
+      _buildNavItem(i++, Icons.group, 'Equipos'),
+      _buildNavItem(i++, Icons.person, 'Jugadores'),
+      _buildNavItem(i++, Icons.menu, 'Más'),
+    ];
   }
 
   BottomNavigationBarItem _buildNavItem(int index, IconData icon, String label) {

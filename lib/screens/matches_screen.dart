@@ -6,6 +6,7 @@ import 'match_detail_screen.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/zocalo_publicitario.dart';
 import 'dart:async';
+import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/partidos_cache_provider.dart';
 import '../utils/liga_utils.dart';
@@ -785,20 +786,28 @@ Widget _buildListaPorFecha() {
 
   Future<void> _cargarEquiposTemporadaActual() async {
     setState(() => isCargandoEquipos = true);
+    final hasWaitingLists =
+        ref.read(tenantConfigProvider).features.waitingLists;
     try {
       final cached = await _cargarCacheEquipos();
       if (cached != null) {
-        final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
-        final idsAExcluir = [
-          ...?listas['espera'],
-          ...?listas['reserva'],
-          ...?listas['no_inscriptos'],
-        ];
-
-        final filtrados = cached
-            .where((e) => !idsAExcluir.contains(e['id']))
-            .toList()
-          ..sort((a, b) => (a['nombre'] ?? '').toString().toLowerCase().compareTo((b['nombre'] ?? '').toString().toLowerCase()));
+        List<dynamic> filtrados;
+        if (hasWaitingLists) {
+          final listas =
+              await ref.read(remoteDataServiceProvider).fetchListasJugadores();
+          final idsAExcluir = [
+            ...?listas['espera'],
+            ...?listas['reserva'],
+            ...?listas['no_inscriptos'],
+          ];
+          filtrados = cached.where((e) => !idsAExcluir.contains(e['id'])).toList();
+        } else {
+          filtrados = List<dynamic>.from(cached);
+        }
+        filtrados.sort((a, b) => (a['nombre'] ?? '')
+            .toString()
+            .toLowerCase()
+            .compareTo((b['nombre'] ?? '').toString().toLowerCase()));
 
         setState(() {
           equiposTemporada = filtrados;
@@ -807,18 +816,25 @@ Widget _buildListaPorFecha() {
         return;
       }
 
-      final listas = await ref.read(remoteDataServiceProvider).fetchListasJugadores();
-      final idsAExcluir = [
-        ...?listas['espera'],
-        ...?listas['reserva'],
-        ...?listas['no_inscriptos'],
-      ];
-
-      final res = await ref.read(apiServiceProvider).getEquipos(temporada: widget.temporadaId);
-      final filtrados = res
-          .where((e) => !idsAExcluir.contains(e['id']))
-          .toList()
-        ..sort((a, b) => (a['nombre'] ?? '').toString().toLowerCase().compareTo((b['nombre'] ?? '').toString().toLowerCase()));
+      final res =
+          await ref.read(apiServiceProvider).getEquipos(temporada: widget.temporadaId);
+      List<dynamic> filtrados;
+      if (hasWaitingLists) {
+        final listas =
+            await ref.read(remoteDataServiceProvider).fetchListasJugadores();
+        final idsAExcluir = [
+          ...?listas['espera'],
+          ...?listas['reserva'],
+          ...?listas['no_inscriptos'],
+        ];
+        filtrados = res.where((e) => !idsAExcluir.contains(e['id'])).toList();
+      } else {
+        filtrados = List<dynamic>.from(res);
+      }
+      filtrados.sort((a, b) => (a['nombre'] ?? '')
+          .toString()
+          .toLowerCase()
+          .compareTo((b['nombre'] ?? '').toString().toLowerCase()));
 
       setState(() {
         equiposTemporada = filtrados;

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../services/remote_data_service.dart';
 
@@ -26,6 +27,7 @@ class _ZocaloPublicitarioState extends ConsumerState<ZocaloPublicitario> {
   }
 
   Future<void> _loadAds() async {
+    if (!ref.read(tenantConfigProvider).features.ads) return;
     final prefs = await SharedPreferences.getInstance();
     //final lastClosed = prefs.getInt('zocalo_ad_closed_at');
     final now = DateTime.now().millisecondsSinceEpoch;
