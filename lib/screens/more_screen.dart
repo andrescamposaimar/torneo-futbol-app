@@ -89,7 +89,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             subtitle: const Text(
                 'Recibir alertas sobre novedades y anuncios'),
             value: _notificacionesHabilitadas,
-            activeTrackColor: const Color(0xFF005BBB),
+            activeTrackColor: Theme.of(context).colorScheme.primary,
             onChanged: (value) async {
               setState(() => _notificacionesHabilitadas = value);
               await ref

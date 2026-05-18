@@ -13,6 +13,7 @@ import 'providers/temporadas_provider.dart';
 import 'providers/config_provider.dart';
 import 'screens/matches_screen.dart';
 import 'screens/noticias_screen.dart';
+import 'theme.dart';
 
 class EntreRedesApp extends ConsumerWidget {
   const EntreRedesApp({super.key});
@@ -23,22 +24,7 @@ class EntreRedesApp extends ConsumerWidget {
     return MaterialApp(
       title: cfg.appName,
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: cfg.colors.accent).copyWith(
-          primary: cfg.colors.primary,
-        ),
-        appBarTheme: AppBarTheme(
-          backgroundColor: cfg.colors.primary,
-          foregroundColor: Colors.white,
-          iconTheme: const IconThemeData(color: Colors.white),
-          titleTextStyle: const TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
+      theme: buildAppTheme(cfg.colors),
       home: const SplashToMain(),
     );
   }

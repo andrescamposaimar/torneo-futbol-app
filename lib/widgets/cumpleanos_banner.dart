@@ -143,14 +143,15 @@ class _CumpleanerosTicker extends StatelessWidget {
         final fits = textPainter.width <= constraints.maxWidth;
 
         if (fits) {
-          return _buildStatic();
+          return _buildStatic(context);
         }
         return _MarqueeRow(cumpleaneros: cumpleaneros, onTap: onTap);
       },
     );
   }
 
-  Widget _buildStatic() {
+  Widget _buildStatic(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
     final children = <Widget>[];
     for (int i = 0; i < cumpleaneros.length; i++) {
       if (i > 0) {
@@ -172,7 +173,7 @@ class _CumpleanerosTicker extends StatelessWidget {
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF005BBB),
+              color: primary,
               decoration: TextDecoration.underline,
               decorationColor: Colors.blue.shade300,
             ),
@@ -248,7 +249,8 @@ class _MarqueeRowState extends State<_MarqueeRow>
     }
   }
 
-  List<Widget> _buildChildren() {
+  List<Widget> _buildChildren(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
     final children = <Widget>[];
     for (int i = 0; i < widget.cumpleaneros.length; i++) {
       if (i > 0) {
@@ -270,7 +272,7 @@ class _MarqueeRowState extends State<_MarqueeRow>
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF005BBB),
+              color: primary,
               decoration: TextDecoration.underline,
               decorationColor: Colors.blue.shade300,
             ),
@@ -307,7 +309,7 @@ class _MarqueeRowState extends State<_MarqueeRow>
               physics: const NeverScrollableScrollPhysics(),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
-                children: _buildChildren(),
+                children: _buildChildren(context),
               ),
             ),
           );

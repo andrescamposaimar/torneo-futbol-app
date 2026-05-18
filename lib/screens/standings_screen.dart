@@ -383,7 +383,7 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
             child: ElevatedButton(
               onPressed: () => onSelect(titulo),
               style: ElevatedButton.styleFrom(
-                backgroundColor: isSelected ? const Color(0xFF00A3FF) : Colors.grey[200],
+                backgroundColor: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey[200],
                 foregroundColor: isSelected ? Colors.white : Colors.black87,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 elevation: isSelected ? 2 : 0,
@@ -584,7 +584,7 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
                       child: ElevatedButton(
                         onPressed: () => _histSeleccionarTemporada(t),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isSelected ? const Color(0xFF00A3FF) : Colors.grey[200],
+                          backgroundColor: isSelected ? Theme.of(context).colorScheme.primary : Colors.grey[200],
                           foregroundColor: isSelected ? Colors.white : Colors.black87,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                           elevation: isSelected ? 2 : 0,

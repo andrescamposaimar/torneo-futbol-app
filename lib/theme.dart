@@ -1,37 +1,38 @@
 import 'package:flutter/material.dart';
+import 'config/tenant_config.dart';
 
-class AppColors {
-  static const primary = Color(0xFF00B7CC); // celeste EntreRedes
-  static const background = Color(0xFFF9F9F9);
-  static const textPrimary = Colors.black;
-  static const textSecondary = Colors.grey;
-  static const card = Colors.white;
-}
-
-class AppTheme {
-  static ThemeData get lightTheme => ThemeData(
-    primaryColor: AppColors.primary,
-    scaffoldBackgroundColor: AppColors.background,
+/// Builds a MaterialApp [ThemeData] from the tenant's [BrandColors].
+/// This is the single source of truth for all theme-derived colors.
+/// Screens should use [Theme.of(context).colorScheme.primary] rather than
+/// hard-coding color literals.
+ThemeData buildAppTheme(BrandColors colors) {
+  return ThemeData(
+    useMaterial3: true,
+    colorScheme: ColorScheme.fromSeed(seedColor: colors.accent).copyWith(
+      primary: colors.primary,
+      surface: colors.background,
+    ),
+    scaffoldBackgroundColor: colors.background,
     appBarTheme: AppBarTheme(
-      color: AppColors.primary,
-      titleTextStyle: TextStyle(
+      backgroundColor: colors.primary,
+      foregroundColor: Colors.white,
+      iconTheme: const IconThemeData(color: Colors.white),
+      titleTextStyle: const TextStyle(
         fontFamily: 'Roboto',
         fontWeight: FontWeight.bold,
         fontSize: 20,
         color: Colors.white,
       ),
-      iconTheme: IconThemeData(color: Colors.white),
     ),
     bottomNavigationBarTheme: BottomNavigationBarThemeData(
-      selectedItemColor: AppColors.primary,
-      unselectedItemColor: AppColors.textSecondary,
+      selectedItemColor: colors.primary,
+      unselectedItemColor: Colors.grey,
     ),
     textTheme: const TextTheme(
       bodyLarge: TextStyle(fontSize: 16),
       bodyMedium: TextStyle(fontSize: 14),
       titleLarge: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
     ),
-    cardColor: AppColors.card,
-    useMaterial3: true,
+    cardColor: colors.card,
   );
 }
