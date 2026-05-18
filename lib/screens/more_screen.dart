@@ -6,6 +6,7 @@ import 'listas_screen.dart';
 import 'scorers_screen.dart';
 import 'imbatibles_screen.dart';
 import 'package:flutter/foundation.dart';
+import '../config/tenant_provider.dart';
 import '../providers/repository_providers.dart';
 import '../providers/service_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -71,6 +72,8 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final docs = ref.watch(tenantConfigProvider).documents;
+
     void abrirPdf(String url) async {
       final uri = Uri.parse(url);
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -120,16 +123,19 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
           ),
 
           _sectionTitle('Gestión Torneo'),
-          _menuItem(
-            'Solicitud de cambio de jugador',
-            Icons.swap_horiz,
-            () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const SolicitudCambioWebViewScreen()),
-            );
-            },
-          ),
+          if (docs.solicitudCambioUrl != null)
+            _menuItem(
+              'Solicitud de cambio de jugador',
+              Icons.swap_horiz,
+              () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SolicitudCambioWebViewScreen(url: docs.solicitudCambioUrl!),
+                ),
+              );
+              },
+            ),
           _menuItem(
             'Lista de Espera',
             Icons.people_alt,
@@ -141,39 +147,28 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             },
           ),
 
-          _sectionTitle('Información'),
-          _menuItem(
-            'Reglamento',
-            Icons.rule,
-            () => abrirPdf('https://entreredespadres.com.ar/wp-content/uploads/2026/REGLAMENTO-CHAMI-2026.pdf'),
-          ),
-          _menuItem(
-            'Modalidad Torneo',
-            Icons.description,
-            () => abrirPdf('https://entreredespadres.com.ar/wp-content/uploads/2026/modalidad_torneo_2026.pdf'),
-          ),
+          if (docs.reglamentoUrl != null || docs.modalidadUrl != null)
+            _sectionTitle('Información'),
+          if (docs.reglamentoUrl != null)
+            _menuItem(
+              'Reglamento',
+              Icons.rule,
+              () => abrirPdf(docs.reglamentoUrl!),
+            ),
+          if (docs.modalidadUrl != null)
+            _menuItem(
+              'Modalidad Torneo',
+              Icons.description,
+              () => abrirPdf(docs.modalidadUrl!),
+            ),
 
-          _sectionTitle('Anuarios'),
-          _menuItem(
-            'Anuario 2022',
+          if (docs.anuarios.isNotEmpty)
+            _sectionTitle('Anuarios'),
+          ...docs.anuarios.map((a) => _menuItem(
+            a.label,
             Icons.menu_book,
-            () => abrirPdf('https://entreredespadres.com.ar/wp-content/uploads/anuarios/Entreredes2022-Anuario.pdf'),
-          ),
-          _menuItem(
-            'Anuario 2023',
-            Icons.menu_book,
-            () => abrirPdf('https://entreredespadres.com.ar/wp-content/uploads/anuarios/Anuario-2023-OK.pdf'),
-          ),
-          _menuItem(
-            'Anuario 2024',
-            Icons.menu_book,
-            () => abrirPdf('https://entreredespadres.com.ar/wp-content/uploads/anuarios/Anuario-2024.pdf'),
-          ),
-          _menuItem(
-            'Anuario 2025',
-            Icons.menu_book,
-            () => abrirPdf('https://entreredespadres.com.ar/wp-content/uploads/anuarios/Anuario-2025.pdf'),
-          ),
+            () => abrirPdf(a.url),
+          )),
 
           if (kDebugMode) ...[
             const Divider(),

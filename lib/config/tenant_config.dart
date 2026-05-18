@@ -41,6 +41,31 @@ class TenantIntegrations {
   const TenantIntegrations({this.appsScriptUrl});
 }
 
+/// Per-tenant content document URLs (PDFs, webviews, etc.).
+/// All fields are optional — a tenant that doesn't have a particular document
+/// simply leaves it null and the UI hides or disables that entry.
+@immutable
+class TenantDocuments {
+  final String? reglamentoUrl;
+  final String? modalidadUrl;
+  final List<TenantAnuario> anuarios;
+  final String? solicitudCambioUrl;
+
+  const TenantDocuments({
+    this.reglamentoUrl,
+    this.modalidadUrl,
+    this.anuarios = const [],
+    this.solicitudCambioUrl,
+  });
+}
+
+@immutable
+class TenantAnuario {
+  final String label;
+  final String url;
+  const TenantAnuario({required this.label, required this.url});
+}
+
 @immutable
 class TenantConfig {
   final String tenantId;
@@ -50,6 +75,7 @@ class TenantConfig {
   final BrandColors colors;
   final TenantFeatures features;
   final TenantIntegrations integrations;
+  final TenantDocuments documents;
   final String logoAsset;
   final String? androidStoreUrl;
   final String? iosStoreUrl;
@@ -62,6 +88,7 @@ class TenantConfig {
     required this.colors,
     required this.features,
     this.integrations = const TenantIntegrations(),
+    this.documents = const TenantDocuments(),
     required this.logoAsset,
     this.androidStoreUrl,
     this.iosStoreUrl,

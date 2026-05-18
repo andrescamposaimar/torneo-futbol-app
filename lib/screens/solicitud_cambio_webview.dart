@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class SolicitudCambioWebViewScreen extends StatefulWidget {
-  const SolicitudCambioWebViewScreen({super.key});
+  final String url;
+
+  const SolicitudCambioWebViewScreen({super.key, required this.url});
 
   @override
   State<SolicitudCambioWebViewScreen> createState() => _SolicitudCambioWebViewScreenState();
@@ -39,7 +41,7 @@ class _SolicitudCambioWebViewScreenState extends State<SolicitudCambioWebViewScr
           },
         ),
       )
-      ..loadRequest(Uri.parse('https://entreredespadres.com.ar/jugadores/solicitud-de-cambios'));
+      ..loadRequest(Uri.parse(widget.url));
   }
 
   @override
