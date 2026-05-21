@@ -68,11 +68,29 @@ Summary:
 4. Create `ios/Flutter/<tenant_id>.xcconfig` pointing to `lib/main_<tenant_id>.dart`
 5. If push notifications are per-tenant, add the correct `GoogleService-Info.plist`
 
-### Step 5 — Add Tenant Logo
+### Step 5 — Add Tenant Logos (two variants)
 
-Place the logo at `assets/images/<tenant_id>/app_logo.png`. The directory is pre-registered in `pubspec.yaml` — no pubspec edit needed for a new tenant (as long as the directory follows the `assets/images/<tenant_id>/` pattern).
+The tenant needs **two logo variants** under `assets/images/<tenant_id>/`:
 
-If you add a new directory with a different name, register it in `pubspec.yaml` under `flutter.assets`.
+| File | Size | Purpose |
+|------|------|---------|
+| `app_logo.png` | 1024×1024, full-bleed (content fills the canvas) | Source for launcher icons via `flutter_launcher_icons`. Should match the published store icon. |
+| `app_logo_splash.png` | 1152×1152, content centered inside ~800×800 with transparent padding | Source for the Android 12+ adaptive splash icon. The circular mask of the new SplashScreen API would crop a full-bleed icon, hence the padded variant. |
+
+The directory `assets/images/<tenant_id>/` is pre-registered in `pubspec.yaml` — no pubspec edit needed (as long as the path follows that pattern).
+
+**Generate the padded splash variant from the full-bleed icon** (requires ImageMagick — `brew install imagemagick`):
+
+```bash
+magick assets/images/<tenant_id>/app_logo.png \
+  -resize 800x800 -background none -gravity center \
+  -extent 1152x1152 \
+  assets/images/<tenant_id>/app_logo_splash.png
+```
+
+This scales the original into a 800×800 region centered inside a 1152×1152 transparent canvas, leaving ~176px of safe-zone padding on each side.
+
+If you add a new asset directory with a different name, register it in `pubspec.yaml` under `flutter.assets`.
 
 ### Step 6 — Generate Launcher Icons
 
@@ -81,6 +99,73 @@ flutter pub run flutter_launcher_icons:main --flavor <tenant_id>
 ```
 
 Add a `flutter_launcher_icons_<tenant_id>` block to `pubspec.yaml` before running this command (see existing `facundo` block as a template).
+
+### Step 7 — Configure the Splash Screen
+
+The splash is generated at build time by `flutter_native_splash` per-flavor. There is one YAML config file per tenant at the project root.
+
+**Step 7.1 — Sample the icon's actual blue (avoid the brand-color mismatch class of bug)**
+
+The `colors.primary` value in `TenantConfig` is what the UI uses (AppBar, buttons, etc.) but it does NOT necessarily match the blue inside the published store icon. The splash places the icon on a solid colored background, so any mismatch becomes visible immediately. Always sample the icon's actual background color:
+
+```bash
+magick assets/images/<tenant_id>/app_logo.png -format "%[pixel:p{10,10}]" info:
+# Example output: srgb(0,87,169) → #0057A9
+```
+
+Use the sampled hex value as `colors.splashBackground` in the tenant config AND as `color` / `icon_background_color` in the YAML below. Leave `colors.primary` alone unless you are doing a deliberate brand-coherence refactor — changing it affects the whole UI and requires re-validation.
+
+**Step 7.2 — Create `flutter_native_splash-<tenant_id>.yaml`** at the project root:
+
+```yaml
+flutter_native_splash:
+  color: "#0057A9"                                         # sampled icon blue
+  image: assets/images/<tenant_id>/app_logo.png            # full-bleed for legacy splash
+  android: true
+  ios: true
+  web: false
+
+  android_12:
+    image: assets/images/<tenant_id>/app_logo_splash.png   # padded version
+    icon_background_color: "#0057A9"
+```
+
+**Step 7.3 — Generate the splash assets**:
+
+```bash
+dart run flutter_native_splash:create --flavors <tenant_id>
+```
+
+This creates a flavor source set under `android/app/src/<tenant_id>/res/` (drawables + Android 12+ `values-v31/styles.xml`) and a suffixed iOS storyboard `LaunchScreen<TenantId>.storyboard` plus `LaunchImage<TenantId>.imageset/` and `LaunchBackground<TenantId>.imageset/` under `ios/Runner/Assets.xcassets/`.
+
+**Step 7.4 — Wire the splash to iOS (one of two paths)**:
+
+- **Tenant zero (Marianista) — uses the default `Runner` scheme**: Overwrite `ios/Runner/Base.lproj/LaunchScreen.storyboard` with the generated `LaunchScreen<TenantId>.storyboard` contents, then delete the suffixed `.storyboard` (it is not registered in `project.pbxproj` so it would not be compiled anyway). Keep the suffixed imagesets — future regenerations will refresh them automatically and the (now hacked) `LaunchScreen.storyboard` keeps referencing them by name. Self-healing.
+
+  ```bash
+  cp ios/Runner/Base.lproj/LaunchScreen<TenantId>.storyboard \
+     ios/Runner/Base.lproj/LaunchScreen.storyboard
+  rm ios/Runner/Base.lproj/LaunchScreen<TenantId>.storyboard
+  rm -r ios/Runner/Assets.xcassets/LaunchImage.imageset   # remove the legacy default
+  ```
+
+- **New tenant with its own iOS scheme (e.g. Facundo)**: In Xcode, after Step 4 of section "How to Create a New Tenant", set the scheme's `Info.plist` (or use a per-scheme `Info-<TenantId>.plist`) so `UILaunchStoryboardName` points to `LaunchScreen<TenantId>`. No file copy needed — Xcode will compile the suffixed storyboard for that scheme directly.
+
+**Step 7.5 — Verify**:
+
+```bash
+# Android
+flutter run --flavor <tenant_id> -t lib/main_<tenant_id>.dart -d <android_device>
+adb shell am force-stop <android_application_id>
+adb shell am start -n <android_application_id>/.MainActivity   # forces cold start
+
+# iOS
+flutter run -d <ios_device> -t lib/main_<tenant_id>.dart
+xcrun simctl terminate booted <ios_bundle_id>
+xcrun simctl launch booted <ios_bundle_id>
+```
+
+Splash must show: tenant blue background + centered logo, no cropping on Android 12+, color matches the icon's blue.
 
 ---
 
@@ -184,6 +269,8 @@ The app fetches three JSON files from `{mediaBaseUrl}/`:
 | `flutter_launcher_icons` per-flavor config requires manual pubspec entries | Each new tenant needs a pubspec block added | Accepted cost; only 2 tenants for August |
 | Facundo logo is a 1×1 placeholder PNG | Will show a blank icon until real logo is provided | Client must supply a 1024×1024 PNG |
 | Facundo `apiBaseUrl` and `androidStoreUrl`/`iosStoreUrl` are placeholders | Facundo flavor cannot connect to a real backend until client provides URLs | Replace values in `lib/config/tenants/facundo.dart` once client provisions WordPress |
+| Marianista iOS splash uses the "option B" hack — `LaunchScreen.storyboard` was overwritten in place with the contents of the generated `LaunchScreenMarianista.storyboard`, which then was deleted | Re-running `dart run flutter_native_splash:create --flavors marianista` will recreate `LaunchScreenMarianista.storyboard`; the hacked `LaunchScreen.storyboard` is NOT regenerated by the plugin and must be re-overwritten manually if the storyboard structure changes (the imageset PNGs ARE auto-refreshed because the storyboard references them by name) | Only Marianista (tenant zero) needs this; new tenants get their own iOS scheme and use the suffixed storyboard directly via Xcode |
+| `colors.primary` in Marianista config is `#005BBB`, the App Store icon uses `#0057A9` | Splash uses `#0057A9` to match the icon; AppBar / Material primary still uses `#005BBB`. The two are 18 units apart on the B channel and don't sit next to each other in the running app, so users don't notice — but the brand is technically inconsistent | Pending brand-coherence review with the Colegio. If `#0057A9` is the canonical brand value, update `colors.primary` and `theme.dart` in a separate refactor and re-validate the whole UI |
 
 ---
 
@@ -208,13 +295,17 @@ All placeholder values are in `lib/config/tenants/facundo.dart`. Search for `TOD
 
 - [ ] `apiBaseUrl` points to a live WordPress REST endpoint returning valid JSON from `/temporadas`
 - [ ] `mediaBaseUrl/configuraciones.json` is reachable and returns valid JSON
-- [ ] Real logo placed at `assets/images/facundo/app_logo.png`
+- [ ] Real logo placed at `assets/images/facundo/app_logo.png` (1024×1024 full-bleed)
+- [ ] Padded splash logo generated at `assets/images/facundo/app_logo_splash.png` (1152×1152 with 800×800 content centered) — see Step 5
 - [ ] `flutter pub run flutter_launcher_icons:main --flavor facundo` run successfully
+- [ ] `flutter_native_splash-facundo.yaml` created with the sampled icon blue (see Step 7.1) and `dart run flutter_native_splash:create --flavors facundo` run successfully
 - [ ] Android `applicationId` registered on Google Play Console
 - [ ] iOS bundle ID registered in App Store Connect
-- [ ] iOS scheme created in Xcode with correct `PRODUCT_BUNDLE_IDENTIFIER`
+- [ ] iOS scheme created in Xcode with correct `PRODUCT_BUNDLE_IDENTIFIER` and `UILaunchStoryboardName=LaunchScreenFacundo`
 - [ ] `flutter build apk --flavor facundo -t lib/main_facundo.dart --release` exits 0
 - [ ] `flutter build ipa --flavor facundo -t lib/main_facundo.dart` exits 0
+- [ ] Splash on Android cold start shows tenant blue + uncropped logo on API 31+ (Android 12+ adaptive splash)
+- [ ] Splash on iOS cold start shows tenant blue + logo, color matches the App Store icon
 - [ ] No Marianista URLs appear in Facundo's network traffic (confirm in Charles/Proxyman)
 - [ ] No Listas tab visible when `waitingLists=false`
 - [ ] No zócalo ads visible when `ads=false`
