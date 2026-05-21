@@ -191,15 +191,23 @@ flutter build apk --flavor marianista -t lib/main_marianista.dart --release
 flutter build apk --flavor facundo -t lib/main_facundo.dart --release
 ```
 
-### Build release IPA (iOS — after Xcode scheme is set up)
+### Build release IPA (iOS)
+
+`--flavor` on iOS only applies when an Xcode scheme with that exact name exists. Marianista is tenant zero and keeps the default `Runner` scheme (no flavor renaming), so its IPA build must NOT pass `--flavor`. Facundo (and any future tenant) gets its own Xcode scheme during the manual setup, so `--flavor` works for those.
 
 ```bash
-# Marianista
-flutter build ipa --flavor marianista -t lib/main_marianista.dart
+# Marianista — tenant zero, uses the default Runner scheme (no --flavor)
+flutter build ipa -t lib/main_marianista.dart
 
-# Facundo
+# Facundo — requires the `facundo` Xcode scheme to exist (see "Add iOS Scheme")
 flutter build ipa --flavor facundo -t lib/main_facundo.dart
 ```
+
+Passing `--flavor marianista` to `flutter build ipa` fails with:
+
+> The Xcode project does not define custom schemes. You cannot use the --flavor option.
+
+That is by design — there is no `marianista` scheme to select.
 
 ### Without flavor (default, for development only)
 
