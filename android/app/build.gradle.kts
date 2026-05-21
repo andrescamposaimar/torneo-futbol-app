@@ -52,8 +52,8 @@ android {
         applicationId = "com.entre_redes.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 21
-        versionName = "1.3.1"
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     signingConfigs {
