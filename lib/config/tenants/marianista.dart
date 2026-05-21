@@ -9,7 +9,7 @@ const marianistaTenant = TenantConfig(
   colors: BrandColors(
     primary: Color(0xFF005BBB),
     accent: Colors.cyan,
-    splashBackground: Color(0xFF005BBB),
+    splashBackground: Color(0xFF0057A9),
   ),
   features: TenantFeatures(
     waitingLists: true,
