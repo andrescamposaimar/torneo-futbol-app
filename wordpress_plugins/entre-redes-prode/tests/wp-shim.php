@@ -106,6 +106,69 @@ if ( ! class_exists( 'wpdb' ) ) {
             return $rows[0] ?? null;
         }
 
+        /**
+         * Mimics wpdb::insert(). Returns false on failure, 1 on success.
+         * Sets $this->insert_id.
+         */
+        public int $insert_id = 0;
+
+        public function insert( string $table, array $data, mixed $format = null ): int|false {
+            if ( empty( $data ) ) {
+                return false;
+            }
+            $cols        = implode( ', ', array_keys( $data ) );
+            $placeholders = implode( ', ', array_fill( 0, count( $data ), '?' ) );
+            $sql         = "INSERT INTO {$table} ({$cols}) VALUES ({$placeholders})";
+            try {
+                $stmt = $this->pdo->prepare( $sql );
+                $stmt->execute( array_values( $data ) );
+                $this->insert_id = (int) $this->pdo->lastInsertId();
+                return 1;
+            } catch ( \PDOException $e ) {
+                $this->last_error = $e->getMessage();
+                return false;
+            }
+        }
+
+        /**
+         * Mimics wpdb::update().
+         *
+         * @param array<string, mixed> $data
+         * @param array<string, mixed> $where
+         */
+        public function update( string $table, array $data, array $where ): int|false {
+            $set_parts   = array_map( static fn( $k ) => "{$k} = ?", array_keys( $data ) );
+            $where_parts = array_map( static fn( $k ) => "{$k} = ?", array_keys( $where ) );
+            $sql         = "UPDATE {$table} SET " . implode( ', ', $set_parts )
+                         . ' WHERE ' . implode( ' AND ', $where_parts );
+            try {
+                $stmt = $this->pdo->prepare( $sql );
+                $stmt->execute( [ ...array_values( $data ), ...array_values( $where ) ] );
+                return $stmt->rowCount();
+            } catch ( \PDOException $e ) {
+                $this->last_error = $e->getMessage();
+                return false;
+            }
+        }
+
+        /**
+         * Mimics wpdb::delete().
+         *
+         * @param array<string, mixed> $where
+         */
+        public function delete( string $table, array $where ): int|false {
+            $where_parts = array_map( static fn( $k ) => "{$k} = ?", array_keys( $where ) );
+            $sql         = "DELETE FROM {$table} WHERE " . implode( ' AND ', $where_parts );
+            try {
+                $stmt = $this->pdo->prepare( $sql );
+                $stmt->execute( array_values( $where ) );
+                return $stmt->rowCount();
+            } catch ( \PDOException $e ) {
+                $this->last_error = $e->getMessage();
+                return false;
+            }
+        }
+
         public function getPdo(): \PDO {
             return $this->pdo;
         }
@@ -276,11 +339,99 @@ if ( ! function_exists( 'add_filter' ) ) {
     }
 }
 
-// ─── Misc WP functions ────────────────────────────────────────────────────────
+// ─── WP constants ────────────────────────────────────────────────────────────
 
 if ( ! defined( 'OBJECT' ) ) {
     define( 'OBJECT', 'OBJECT' );
 }
+
+if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
+    define( 'HOUR_IN_SECONDS', 3600 );
+}
+
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+    define( 'DAY_IN_SECONDS', 86400 );
+}
+
+if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
+    define( 'MINUTE_IN_SECONDS', 60 );
+}
+
+// ─── WP site URL shim ────────────────────────────────────────────────────────
+
+if ( ! function_exists( 'get_site_url' ) ) {
+    function get_site_url(): string {
+        return 'http://example.com';
+    }
+}
+
+// ─── WP HTTP shims (no-ops for unit tests) ───────────────────────────────────
+
+if ( ! function_exists( 'wp_remote_get' ) ) {
+    function wp_remote_get( string $url, array $args = [] ): array|false {
+        // In unit tests we do not make real HTTP calls.
+        // Tests that need HTTP responses should mock or stub this via override.
+        return [
+            'response' => [ 'code' => 200 ],
+            'body'     => '{"keys":[]}',
+            'headers'  => [],
+        ];
+    }
+}
+
+if ( ! function_exists( 'wp_remote_retrieve_response_code' ) ) {
+    function wp_remote_retrieve_response_code( array $response ): int {
+        return (int) ( $response['response']['code'] ?? 0 );
+    }
+}
+
+if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
+    function wp_remote_retrieve_body( array $response ): string {
+        return (string) ( $response['body'] ?? '' );
+    }
+}
+
+if ( ! function_exists( 'is_wp_error' ) ) {
+    function is_wp_error( mixed $thing ): bool {
+        return $thing instanceof WP_Error;
+    }
+}
+
+if ( ! class_exists( 'WP_Error' ) ) {
+    class WP_Error {
+        public string $code;
+        public string $message;
+        public mixed $data;
+
+        public function __construct( string $code = '', string $message = '', mixed $data = '' ) {
+            $this->code    = $code;
+            $this->message = $message;
+            $this->data    = $data;
+        }
+    }
+}
+
+// ─── WP transient shims ───────────────────────────────────────────────────────
+
+if ( ! function_exists( 'get_transient' ) ) {
+    $GLOBALS['_prode_test_transients'] = [];
+
+    function get_transient( string $key ): mixed {
+        return $GLOBALS['_prode_test_transients'][ $key ] ?? false;
+    }
+
+    function set_transient( string $key, mixed $value, int $expiration = 0 ): bool {
+        $GLOBALS['_prode_test_transients'][ $key ] = $value;
+        return true;
+    }
+
+    function delete_transient( string $key ): bool {
+        unset( $GLOBALS['_prode_test_transients'][ $key ] );
+        return true;
+    }
+}
+
+// ─── Misc WP functions ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'version_compare' ) ) {
     // PHP built-in; never needed. Here only for clarity.
