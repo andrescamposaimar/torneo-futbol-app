@@ -37,6 +37,8 @@ final class Plugin {
 
         // 4. Cron action handlers (registered here; scheduled at activation).
         add_action( 'prode_evaluate_matches_cron',      [ Cron\EvaluatorCron::class, 'run' ] );
+        // prode_recompute_rankings_cron is event-driven (fired on-demand by EvaluatorCron
+        // after match evaluations land), NOT on a fixed schedule — per design.
         add_action( 'prode_recompute_rankings_cron',    [ Cron\RankingCron::class, 'run' ] );
         add_action( 'prode_notify_lock_approaching_cron', [ Cron\NotificationCron::class, 'runLockApproaching' ] );
         add_action( 'prode_create_new_fecha_cron',      [ Cron\FechaCreationCron::class, 'run' ] );

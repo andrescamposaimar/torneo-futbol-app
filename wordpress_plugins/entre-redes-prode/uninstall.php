@@ -39,6 +39,7 @@ $options = [
     'prode_db_version',
     'prode_rsa_private_key',
     'prode_rsa_public_key',
+    'prode_rsa_key_id',
     'prode_audit_dni_pepper',
 ];
 foreach ( $options as $option ) {
