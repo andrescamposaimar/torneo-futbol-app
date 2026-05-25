@@ -7,13 +7,20 @@ namespace EntreRedes\Prode\Rest;
 /**
  * Registers all /entre-redes/v1/prode/* REST routes.
  *
- * PR-01 scope: healthcheck + JWKS endpoints only.
- * Auth, game, and account endpoints are added in PR-02 and later.
+ * PR-01 scope: healthcheck + JWKS endpoints.
+ * PR-02 scope: auth endpoints (google, apple, dni, refresh) wired here.
+ * Auth, game, and account endpoints from PR-03+ are added in later PRs.
  */
 class RestController {
 
     private const NAMESPACE = 'entre-redes/v1';
     private const BASE      = 'prode';
+
+    private ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints;
+
+    public function __construct( ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null ) {
+        $this->auth_endpoints = $auth_endpoints;
+    }
 
     public function register_routes(): void {
         // Health check — no auth required. Proves the plugin is alive and
@@ -38,6 +45,11 @@ class RestController {
                 'permission_callback' => '__return_true',
             ]
         );
+
+        // Auth endpoints (PR-02): google, apple, dni, refresh.
+        if ( null !== $this->auth_endpoints ) {
+            $this->auth_endpoints->register_routes();
+        }
     }
 
     // -------------------------------------------------------------------------

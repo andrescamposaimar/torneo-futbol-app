@@ -24,9 +24,25 @@ final class Plugin {
         //    plugin has had a chance to declare itself at priority 10.
         add_action( 'plugins_loaded', [ DependencyCheck::class, 'ensureActive' ], 11 );
 
-        // 2. REST API routes.
+        // 2. REST API routes — wire auth services and register all /prode/* routes.
         add_action( 'rest_api_init', function () {
-            $controller = new Rest\RestController();
+            $jwt           = new Auth\JwtService();
+            $google        = new Auth\GoogleVerifier();
+            $apple         = new Auth\AppleVerifier();
+            $dni_matcher   = new Auth\DniMatcher();
+            $session       = new Auth\SessionManager();
+            $audit         = new Audit\AuditLogger();
+
+            $auth_endpoints = new Rest\AuthEndpoints(
+                $jwt,
+                $google,
+                $apple,
+                $dni_matcher,
+                $session,
+                $audit
+            );
+
+            $controller = new Rest\RestController( $auth_endpoints );
             $controller->register_routes();
         } );
 
