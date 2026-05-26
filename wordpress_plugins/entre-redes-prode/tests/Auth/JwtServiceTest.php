@@ -40,7 +40,7 @@ class JwtServiceTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_issue_and_verify_access_token(): void {
-        $token = $this->service->issueAccessToken( 42, 7 );
+        $token = $this->service->issueAccessToken( 42, 7, 100 );
 
         $this->assertIsString( $token );
         $this->assertStringContainsString( '.', $token ); // Sanity: it's a JWT
@@ -50,11 +50,12 @@ class JwtServiceTest extends TestCase {
         $this->assertSame( '42', $decoded->sub );
         $this->assertSame( 7, (int) $decoded->sv );
         $this->assertSame( 'prode_access', $decoded->typ );
+        $this->assertSame( 100, (int) $decoded->player_id );
     }
 
     public function test_access_token_carries_session_version(): void {
-        $token1 = $this->service->issueAccessToken( 1, 1 );
-        $token2 = $this->service->issueAccessToken( 1, 2 );
+        $token1 = $this->service->issueAccessToken( 1, 1, 100 );
+        $token2 = $this->service->issueAccessToken( 1, 2, 100 );
 
         $dec1 = $this->service->verifyAccessToken( $token1 );
         $dec2 = $this->service->verifyAccessToken( $token2 );
@@ -107,7 +108,7 @@ class JwtServiceTest extends TestCase {
     }
 
     public function test_access_token_rejected_as_intent_token(): void {
-        $access = $this->service->issueAccessToken( 99, 3 );
+        $access = $this->service->issueAccessToken( 99, 3, 100 );
 
         $this->expectException( \InvalidArgumentException::class );
         $this->expectExceptionMessage( 'invalid_intent_token' );
@@ -123,7 +124,7 @@ class JwtServiceTest extends TestCase {
         // Issue a token with iat and exp in the past by manipulating the
         // token directly: we decode the payload, change exp, and re-sign.
         // This is a whitebox test to avoid sleeping 15 minutes.
-        $token = $this->service->issueAccessToken( 5, 1 );
+        $token = $this->service->issueAccessToken( 5, 1, 100 );
 
         // Tamper: change exp to a past timestamp.
         $parts = explode( '.', $token );
@@ -170,7 +171,7 @@ class JwtServiceTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_tampered_token_rejected(): void {
-        $token  = $this->service->issueAccessToken( 1, 1 );
+        $token  = $this->service->issueAccessToken( 1, 1, 100 );
         $parts  = explode( '.', $token );
         // Corrupt the signature.
         $parts[2] = strrev( $parts[2] );

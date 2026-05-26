@@ -262,7 +262,7 @@ class AuthEndpoints {
 
         // 6. Issue tokens.
         $device_label  = $this->extractDeviceLabel( $request );
-        $access_token  = $this->jwt->issueAccessToken( $user_id, $session_version );
+        $access_token  = $this->jwt->issueAccessToken( $user_id, $session_version, (int) $player['player_id'] );
         $refresh_token = $this->session->issueRefreshToken( $user_id, $device_label );
 
         return new \WP_REST_Response(
@@ -293,8 +293,7 @@ class AuthEndpoints {
             $rotation = $this->session->rotateRefreshToken( $plain_token );
         } catch ( \InvalidArgumentException $e ) {
             $code = $e->getMessage();
-            $status = 'session_revoked' === $code ? 401 : 401;
-            return $this->errorResponse( $code, 'Refresh token is invalid or expired.', $status );
+            return $this->errorResponse( $code, 'Refresh token is invalid or expired.', 401 );
         }
 
         $user_id = $rotation['user_id'];
@@ -316,12 +315,12 @@ class AuthEndpoints {
         // Update last_login_at.
         $this->session->touchLastLogin( $user_id );
 
-        $access_token  = $this->jwt->issueAccessToken( $user_id, $session_version );
-        $new_refresh   = $rotation['token'];
-
-        // Load the active association to get player_id.
+        // Load the active association to get player_id (needed for JWT claim per FR-Auth-05).
         $assoc     = $this->session->getActiveAssociation( $user_id );
         $player_id = $assoc ? (int) $assoc['player_id'] : 0;
+
+        $access_token = $this->jwt->issueAccessToken( $user_id, $session_version, $player_id );
+        $new_refresh  = $rotation['token'];
 
         return new \WP_REST_Response(
             [
@@ -373,7 +372,8 @@ class AuthEndpoints {
 
             $this->session->touchLastLogin( $user_id );
 
-            $access_token  = $this->jwt->issueAccessToken( $user_id, $session_version );
+            $player_id     = (int) ( $existing['player_id'] ?? 0 );
+            $access_token  = $this->jwt->issueAccessToken( $user_id, $session_version, $player_id );
             $refresh_token = $this->session->issueRefreshToken( $user_id );
 
             return new \WP_REST_Response(

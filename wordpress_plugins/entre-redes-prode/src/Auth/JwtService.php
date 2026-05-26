@@ -59,20 +59,22 @@ class JwtService {
      *
      * @param int $user_id         prode_users.id
      * @param int $session_version prode_users.session_version
+     * @param int $player_id       prode_associations.player_id (entre-redes roster ref, FR-Auth-05)
      * @return string Signed JWT
      * @throws \RuntimeException If the private key is not provisioned or signing fails.
      */
-    public function issueAccessToken( int $user_id, int $session_version ): string {
+    public function issueAccessToken( int $user_id, int $session_version, int $player_id ): string {
         $now = time();
 
         $payload = [
-            'iss' => $this->issuer(),
-            'aud' => $this->audience(),
-            'sub' => (string) $user_id,
-            'typ' => self::TYPE_ACCESS,
-            'sv'  => $session_version,
-            'iat' => $now,
-            'exp' => $now + self::ACCESS_TTL,
+            'iss'       => $this->issuer(),
+            'aud'       => $this->audience(),
+            'sub'       => (string) $user_id,
+            'typ'       => self::TYPE_ACCESS,
+            'sv'        => $session_version,
+            'player_id' => $player_id,
+            'iat'       => $now,
+            'exp'       => $now + self::ACCESS_TTL,
         ];
 
         return $this->sign( $payload );
