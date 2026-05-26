@@ -456,6 +456,44 @@ if ( ! function_exists( 'get_transient' ) ) {
     }
 }
 
+// ─── WP REST API stubs ────────────────────────────────────────────────────────
+
+if ( ! function_exists( 'register_rest_route' ) ) {
+    function register_rest_route( string $namespace, string $route, array $args ): bool {
+        return true;
+    }
+}
+
+if ( ! class_exists( 'WP_REST_Server' ) ) {
+    class WP_REST_Server {
+        public const READABLE  = 'GET';
+        public const CREATABLE = 'POST';
+        public const EDITABLE  = 'POST, PUT, PATCH';
+        public const DELETABLE = 'DELETE';
+        public const ALLMETHODS = 'GET, POST, PUT, PATCH, DELETE';
+    }
+}
+
+if ( ! class_exists( 'WP_REST_Response' ) ) {
+    class WP_REST_Response {
+        private mixed $data;
+        private int $status;
+
+        public function __construct( mixed $data = null, int $status = 200 ) {
+            $this->data   = $data;
+            $this->status = $status;
+        }
+
+        public function get_data(): mixed {
+            return $this->data;
+        }
+
+        public function get_status(): int {
+            return $this->status;
+        }
+    }
+}
+
 // ─── Misc WP functions ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'version_compare' ) ) {
