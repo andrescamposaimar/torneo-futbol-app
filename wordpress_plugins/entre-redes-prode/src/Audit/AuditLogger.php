@@ -176,6 +176,25 @@ class AuditLogger {
 
         $tenant_id = defined( 'PRODE_TENANT_ID' ) ? (string) PRODE_TENANT_ID : '';
 
+        // Merge caller-supplied metadata with any prode_user_id that needs to be
+        // preserved. The schema has no dedicated prode_user_id column (it predates
+        // the standalone prode_users table); we store it in metadata_json so audit
+        // queries can correlate events back to a prode_users row.
+        $meta = [];
+        if ( isset( $fields['metadata_json'] ) ) {
+            $decoded = json_decode( (string) $fields['metadata_json'], true );
+            if ( is_array( $decoded ) ) {
+                $meta = $decoded;
+            }
+        }
+        if ( isset( $fields['user_id'] ) ) {
+            $meta['prode_user_id'] = (int) $fields['user_id'];
+        }
+        if ( isset( $fields['actor'] ) ) {
+            $meta['actor'] = (string) $fields['actor'];
+        }
+        $metadata_json = ! empty( $meta ) ? json_encode( $meta ) : ( $fields['metadata_json'] ?? null );
+
         $row = array_filter( [
             'event_type'       => $event_type,
             'tenant_id'        => $tenant_id,
@@ -185,7 +204,7 @@ class AuditLogger {
             'provider'         => $fields['provider'] ?? null,
             'provider_id_hash' => $fields['provider_id_hash'] ?? null,
             'actor_wp_user_id' => $fields['actor_wp_user_id'] ?? null,
-            'metadata_json'    => $fields['metadata_json'] ?? null,
+            'metadata_json'    => $metadata_json,
             'created_at'       => current_time( 'mysql' ),
         ], static fn( $v ) => null !== $v );
 
