@@ -411,6 +411,31 @@ if ( ! class_exists( 'WP_Error' ) ) {
     }
 }
 
+if ( ! class_exists( 'WP_REST_Request' ) ) {
+    class WP_REST_Request {
+        /** @var array<string, string> */
+        private array $headers = [];
+        /** @var array<string, mixed> */
+        private array $params = [];
+
+        public function set_header( string $name, string $value ): void {
+            $this->headers[ strtolower( $name ) ] = $value;
+        }
+
+        public function get_header( string $name ): ?string {
+            return $this->headers[ strtolower( $name ) ] ?? null;
+        }
+
+        public function set_param( string $name, mixed $value ): void {
+            $this->params[ $name ] = $value;
+        }
+
+        public function get_param( string $name ): mixed {
+            return $this->params[ $name ] ?? null;
+        }
+    }
+}
+
 // ─── WP transient shims ───────────────────────────────────────────────────────
 
 if ( ! function_exists( 'get_transient' ) ) {
