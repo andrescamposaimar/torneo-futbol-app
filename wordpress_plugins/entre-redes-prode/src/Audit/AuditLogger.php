@@ -143,21 +143,32 @@ class AuditLogger {
     /**
      * Logs a user-initiated account deletion.
      *
+     * Always best-effort: even if dni_hash or provider are empty (no active
+     * association at deletion time), the entry is still written with user_id,
+     * actor, tenant_id and timestamp — required for Ley 25.326 traceability.
+     * Empty optional fields are omitted so the audit row is not polluted with
+     * empty strings.
+     *
      * @param int    $user_id  prode_users.id being deleted
-     * @param string $dni_hash Pre-computed hash from the association row
-     * @param string $provider Provider of the primary association
+     * @param string $dni_hash Pre-computed hash; pass '' if no association
+     * @param string $provider Provider of the primary association; pass '' if none
      */
     public function logAccountDeletion(
         int $user_id,
         string $dni_hash,
         string $provider
     ): void {
-        $this->insert( 'user_account_deletion', [
-            'user_id'  => $user_id,
-            'dni_hash' => $dni_hash,
-            'provider' => $provider,
-            'actor'    => 'self',
-        ] );
+        $fields = [
+            'user_id' => $user_id,
+            'actor'   => 'self',
+        ];
+        if ( '' !== $dni_hash ) {
+            $fields['dni_hash'] = $dni_hash;
+        }
+        if ( '' !== $provider ) {
+            $fields['provider'] = $provider;
+        }
+        $this->insert( 'user_account_deletion', $fields );
     }
 
     // -------------------------------------------------------------------------

@@ -277,6 +277,52 @@ class AccountDeletionTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // 9. Audit best-effort: entry written even without active association (W2)
+    // -------------------------------------------------------------------------
+
+    public function test_audit_entry_written_when_association_is_missing(): void {
+        global $wpdb;
+
+        // Edge case: an admin previously hard-deleted the association rows for
+        // this user. Per Ley 25.326, the deletion audit entry must still be
+        // written — with whatever fields are available — instead of being
+        // silently skipped.
+        $wpdb->query(
+            "DELETE FROM {$wpdb->prefix}prode_associations WHERE user_id = " . self::USER_ID
+        );
+
+        $request  = $this->buildAuthedRequest();
+        $response = $this->controller->handleDelete( $request );
+        $this->assertSame( 200, $response->get_status() );
+
+        $row = $wpdb->get_row(
+            "SELECT event_type, metadata_json, dni_hash, provider
+               FROM {$wpdb->prefix}prode_audit_log
+              WHERE event_type = 'user_account_deletion'
+              LIMIT 1",
+            ARRAY_A
+        );
+
+        $this->assertNotNull( $row, 'Audit entry must be written even without active association' );
+        $this->assertSame( 'user_account_deletion', $row['event_type'] );
+
+        $meta = json_decode( (string) $row['metadata_json'], true );
+        $this->assertSame( self::USER_ID, $meta['prode_user_id'] );
+        $this->assertSame( 'self', $meta['actor'] );
+
+        // dni_hash is still derivable from the JWT-attached _prode_user param,
+        // so it must be present.
+        $expected_hash = $this->hasher->hash( self::DNI );
+        $this->assertSame( $expected_hash, $row['dni_hash'] );
+
+        // provider has no source without an association → must be omitted from the row.
+        $this->assertTrue(
+            null === $row['provider'] || '' === $row['provider'],
+            'provider must be absent when no association exists'
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

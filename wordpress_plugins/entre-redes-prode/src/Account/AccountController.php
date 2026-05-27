@@ -181,10 +181,13 @@ class AccountController {
         // Bumps session_version (invalidates all active JWTs) and purges refresh tokens.
         $this->session->revokeAllSessions( $user_id );
 
-        // --- Audit log ---
-        if ( '' !== $dni_hash && '' !== $provider ) {
-            $this->audit->logAccountDeletion( $user_id, $dni_hash, $provider );
-        }
+        // --- Audit log (best-effort, Ley 25.326) ---
+        // Always write the deletion entry, even if the user had no active
+        // association at deletion time (edge case: an admin previously
+        // hard-deleted association rows). dni_hash and/or provider may be
+        // empty strings; AuditLogger::logAccountDeletion drops empty fields
+        // so the row keeps user_id + actor + tenant_id + timestamp at minimum.
+        $this->audit->logAccountDeletion( $user_id, $dni_hash, $provider );
 
         return new \WP_REST_Response(
             [
