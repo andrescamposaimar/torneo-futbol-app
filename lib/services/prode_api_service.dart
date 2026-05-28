@@ -150,12 +150,7 @@ class ProdeApiService {
 
     // --- 401 handling ---
     final body = _decodeBody(response);
-    // AuthMiddleware-protected endpoints serialize WP_Error as {"code":...},
-    // while /auth/refresh emits a custom envelope with {"error":...}.
-    // Accept both so the recovery branches fire on every authenticated path.
-    final errorCode = (body['code'] as String?) ??
-        (body['error'] as String?) ??
-        'unknown';
+    final errorCode = _extractErrorCode(body);
 
     if (errorCode == 'token_expired') {
       // Attempt a single refresh.
@@ -202,9 +197,7 @@ class ProdeApiService {
       // session_version may arrive as int (PHP int) or string (proxy/driver
       // serialization). Both are accepted; anything else is a hard failure
       // — storing 0 would force an immediate session_revoked on the retry.
-      final sessionVersion = rawSessionVersion is int
-          ? rawSessionVersion
-          : int.tryParse(rawSessionVersion?.toString() ?? '');
+      final sessionVersion = _parseSessionVersionFromWire(rawSessionVersion);
       if (sessionVersion == null) {
         await _authRepo.clear();
         invalidateTokenCache();
@@ -319,9 +312,7 @@ class ProdeApiService {
 
     if (response.statusCode == 401) {
       final body = _decodeBody(response);
-      final errorCode = (body['code'] as String?) ??
-          (body['error'] as String?) ??
-          'unknown';
+      final errorCode = _extractErrorCode(body);
 
       await _authRepo.clear();
       // clear() fires onTokensChanged → invalidateTokenCache automatically.
@@ -428,9 +419,7 @@ class ProdeApiService {
     final playerId = rawPlayerId is int ? rawPlayerId : null;
     final name = rawName is String ? rawName : null;
     // session_version may arrive as int (PHP) or String (some proxies).
-    final sessionVersion = rawSv is int
-        ? rawSv
-        : (rawSv is String ? int.tryParse(rawSv) : null);
+    final sessionVersion = _parseSessionVersionFromWire(rawSv);
 
     if (userId == null ||
         playerId == null ||
@@ -445,6 +434,29 @@ class ProdeApiService {
       name: name,
       sessionVersion: sessionVersion,
     );
+  }
+
+  /// Extracts the machine-readable error code from a decoded 401 response body.
+  ///
+  /// AuthMiddleware-protected endpoints use `{"code": ...}` (WP_Error shape),
+  /// while `/auth/refresh` uses `{"error": ...}`. Both are accepted so all
+  /// authenticated paths resolve consistently to a single code string.
+  static String _extractErrorCode(Map<String, dynamic> body) =>
+      (body['code'] as String?) ?? (body['error'] as String?) ?? 'unknown';
+
+  /// Parses a session_version value from a wire response into an [int].
+  ///
+  /// Accepts int (PHP JSON integer) or String (some proxy/driver
+  /// serializations). Any other type — including double, bool, or List —
+  /// is rejected and returns null, forcing the caller to handle the missing
+  /// value explicitly rather than silently defaulting to a wrong version.
+  ///
+  /// Used in both the 401-interceptor refresh path ([request]) and the
+  /// [parseProdeUser] static parser so both paths share identical semantics.
+  static int? _parseSessionVersionFromWire(Object? raw) {
+    if (raw is int) return raw;
+    if (raw is String) return int.tryParse(raw);
+    return null;
   }
 
   /// Notifies [onAuthRequired] and throws [ProdeAuthRequired].

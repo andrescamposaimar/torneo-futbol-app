@@ -376,5 +376,33 @@ void main() {
         isNull,
       );
     });
+
+    // _parseSessionVersionFromWire unification: exotic types (double, bool, List)
+    // must be rejected (return null) rather than coerced via toString().
+    // The old request() path would have accepted e.g. 3.0 as "3" via toString;
+    // the unified helper is stricter — only int and String are accepted.
+    test('session_version as double → returns null (exotic type rejected)', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 3.0,
+        }),
+        isNull,
+      );
+    });
+
+    test('session_version as bool → returns null (exotic type rejected)', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': true,
+        }),
+        isNull,
+      );
+    });
   });
 }
