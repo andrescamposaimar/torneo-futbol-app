@@ -74,5 +74,11 @@ final prodeAuthControllerProvider =
   // Bridge service-side 401s into the state machine.
   service.onAuthRequired = controller.onAuthRequired;
 
+  // Automatic cache coherence: any write to the repository (write, writeTokens,
+  // clear, and private _writeX helpers) fires onTokensChanged, which invalidates
+  // the service's in-memory access-token cache. This removes the need for every
+  // call site to manually pair storage writes with cache-invalidation calls.
+  repository.onTokensChanged = service.invalidateTokenCache;
+
   return controller;
 });

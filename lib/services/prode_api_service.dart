@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import 'prode_auth_repository.dart';
+import 'prode_auth_state.dart';
 
 // ---------------------------------------------------------------------------
 // Exceptions
@@ -57,9 +58,11 @@ class ProdeApiService {
   /// Invalidated on logout ([invalidateTokenCache]) and updated after
   /// every successful token refresh.
   ///
-  /// INVARIANT: whenever [ProdeAuthRepository] is written to or cleared,
-  /// the caller is responsible for also calling [invalidateTokenCache] so
-  /// the cache stays consistent. [ProdeAuthController] orchestrates both.
+  /// Cache coherence is maintained automatically: [ProdeAuthRepository]
+  /// fires [onTokensChanged] after every successful write or clear, and
+  /// [prodeAuthControllerProvider] wires that callback to
+  /// [invalidateTokenCache]. Any write to the repository — including from
+  /// future code paths — will automatically keep this cache in sync.
   String? _cachedAccessToken;
 
   /// Derived once from config — no trailing slash.
@@ -223,6 +226,95 @@ class ProdeApiService {
       code: errorCode,
       message: (body['message'] as String?) ?? 'Authentication required.',
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Silent-refresh (bootstrap path)
+  // ---------------------------------------------------------------------------
+
+  /// Attempts a token refresh using [refreshToken] during app bootstrap.
+  ///
+  /// This is distinct from the 401-interceptor refresh path in [request]:
+  /// it is called proactively on app start when stored tokens are found,
+  /// before any user-visible Prode screen is shown.
+  ///
+  /// Outcomes:
+  /// - **200 with valid user payload** — persists new tokens via
+  ///   [ProdeAuthRepository.writeTokens], updates [_cachedAccessToken],
+  ///   and returns the parsed [ProdeUser].
+  /// - **401 `session_revoked`** — clears storage, fires [onAuthRequired]
+  ///   so the controller transitions to [ProdeAuthRevoked], returns null.
+  /// - **401 with any other code** — clears storage, fires [onAuthRequired]
+  ///   so the controller transitions to [ProdeAuthUnauthenticated], returns
+  ///   null.
+  /// - **Network failure / non-401 server error** — returns null WITHOUT
+  ///   clearing storage. The tokens may still be valid; we just could not
+  ///   reach the server. The caller ([ProdeAuthController.bootstrap])
+  ///   handles this as the degraded-fallback case.
+  Future<ProdeUser?> attemptSilentRefresh({
+    required String refreshToken,
+  }) async {
+    http.Response response;
+    try {
+      response = await _httpClient.post(
+        Uri.parse(_refreshUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'refresh_token': refreshToken}),
+      );
+    } catch (_) {
+      // Network failure — do NOT clear storage.
+      return null;
+    }
+
+    if (response.statusCode == 200) {
+      final body = _decodeBody(response);
+      final newAccess = body['access_token'];
+      final newRefresh = body['refresh_token'];
+      final userMap = body['user'];
+
+      if (newAccess is String && newRefresh is String && userMap is Map<String, dynamic>) {
+        final user = ProdeUser.fromJson(userMap);
+        if (user != null) {
+          await _authRepo.writeTokens(
+            accessToken: newAccess,
+            refreshToken: newRefresh,
+            sessionVersion: user.sessionVersion.toString(),
+          );
+          // writeTokens fires onTokensChanged → invalidateTokenCache;
+          // update the cache with the fresh token.
+          _cachedAccessToken = newAccess;
+          return user;
+        }
+      }
+      // 200 but malformed body — treat as non-fatal, return null without
+      // clearing (same as network failure: tokens might still be usable).
+      return null;
+    }
+
+    if (response.statusCode == 401) {
+      final body = _decodeBody(response);
+      final errorCode = (body['code'] as String?) ??
+          (body['error'] as String?) ??
+          'unknown';
+
+      await _authRepo.clear();
+      // clear() fires onTokensChanged → invalidateTokenCache automatically.
+
+      if (errorCode == 'session_revoked') {
+        _emitAuthRequired(
+          code: 'session_revoked',
+          message: (body['message'] as String?) ?? 'Session was revoked.',
+        );
+      } else {
+        _emitAuthRequired(
+          code: errorCode,
+          message: (body['message'] as String?) ?? 'Silent refresh failed.',
+        );
+      }
+    }
+
+    // Non-401 server error — do NOT clear storage.
+    return null;
   }
 
   // ---------------------------------------------------------------------------
