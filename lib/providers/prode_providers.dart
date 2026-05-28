@@ -51,10 +51,28 @@ final prodeApiServiceProvider = Provider<ProdeApiService>((ref) {
 ///
 /// Screens and widgets that need auth state should `ref.watch` this provider.
 /// [ProdeAuthController] methods are accessed via `ref.read(...notifier)`.
+///
+/// Uses `ref.watch` on its dependencies so the controller is rebuilt
+/// together with the underlying service/repository when the tenant config
+/// changes. Without this, a tenant switch (or any provider invalidation
+/// upstream) would leave the controller holding a stale service whose
+/// `invalidateTokenCache()` calls target a dead instance.
+///
+/// Wires [ProdeApiService.onAuthRequired] to [ProdeAuthController.onAuthRequired]
+/// at construction time so that terminal 401 responses (session_revoked,
+/// refresh failures) automatically transition the state machine.
 final prodeAuthControllerProvider =
     StateNotifierProvider<ProdeAuthController, ProdeAuthState>((ref) {
-  return ProdeAuthController(
-    repository: ref.read(prodeAuthRepositoryProvider),
-    service: ref.read(prodeApiServiceProvider),
+  final repository = ref.watch(prodeAuthRepositoryProvider);
+  final service = ref.watch(prodeApiServiceProvider);
+
+  final controller = ProdeAuthController(
+    repository: repository,
+    service: service,
   );
+
+  // Bridge service-side 401s into the state machine.
+  service.onAuthRequired = controller.onAuthRequired;
+
+  return controller;
 });

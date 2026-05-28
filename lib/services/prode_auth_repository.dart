@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -72,17 +73,27 @@ class ProdeAuthRepository {
   /// [mutate] receives the current token map (never null), modifies it
   /// in place, and returns it. The modified map is then encoded and written
   /// back to storage atomically.
+  ///
+  /// Failure isolation: errors surface to the CALLER via the returned future
+  /// while [_writeLock] itself always resolves successfully. A transient
+  /// storage failure on one write does NOT poison the lock chain for every
+  /// subsequent write on this repository instance.
   Future<void> _lockedWrite(void Function(_TokenMap map) mutate) {
-    // Chain onto the tail of the current lock future.
+    final completer = Completer<void>();
     _writeLock = _writeLock.then((_) async {
-      final map = await _readBlob();
-      mutate(map);
-      await _storage.write(
-        key: _Keys.tokens,
-        value: json.encode(map),
-      );
+      try {
+        final map = await _readBlob();
+        mutate(map);
+        await _storage.write(
+          key: _Keys.tokens,
+          value: json.encode(map),
+        );
+        completer.complete();
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
     });
-    return _writeLock;
+    return completer.future;
   }
 
   // ---------------------------------------------------------------------------
@@ -169,10 +180,19 @@ class ProdeAuthRepository {
 
   /// Remove all Prode-related tokens from secure storage.
   /// Call on logout, account deletion, or session_revoked.
+  ///
+  /// Uses the same failure-isolation pattern as [_lockedWrite]: the error
+  /// surfaces to the caller but the lock chain stays healthy.
   Future<void> clear() {
+    final completer = Completer<void>();
     _writeLock = _writeLock.then((_) async {
-      await _storage.delete(key: _Keys.tokens);
+      try {
+        await _storage.delete(key: _Keys.tokens);
+        completer.complete();
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
     });
-    return _writeLock;
+    return completer.future;
   }
 }
