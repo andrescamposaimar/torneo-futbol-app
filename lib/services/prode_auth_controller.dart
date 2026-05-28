@@ -79,17 +79,19 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
 
       // Network failure / non-401 server error: user is null but state was
       // NOT changed by onAuthRequired. Use a degraded-placeholder so the app
-      // remains usable offline.
-      //
-      // ADR-P004 alignment: we optimistically trust the stored tokens.
-      // The placeholder fields (userId=0, playerId=0, name='') will be
-      // resolved the next time the user makes a successful authenticated
-      // API call (the 401-interceptor refresh path in ProdeApiService will
-      // then update storage and state via the controller). This is an
-      // intentional trade-off between UX (instant app-open) and data
-      // freshness (real user profile only after connectivity is restored).
+      // remains usable offline. The placeholder fields will be lifted by
+      // ProdeApiService.onTokensRefreshed → controller.onTokensRefreshed on
+      // the first successful 401-interceptor refresh.
       final sessionVersion =
           _parseSessionVersion(snapshot.sessionVersion);
+      if (sessionVersion == null) {
+        // session_version unparseable — can't reconstruct a coherent session.
+        // Clear and force re-authentication instead of emitting a guess that
+        // the server's strict equality check would reject as session_revoked.
+        await _repository.clear();
+        state = const ProdeAuthUnauthenticated();
+        return;
+      }
       state = ProdeAuthAuthenticated(
         user: ProdeUser(
           userId: 0, // degraded placeholder — resolved on next API call
@@ -150,6 +152,23 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
     }
   }
 
+  /// Called by [ProdeApiService] after a successful 401-interceptor token
+  /// refresh with the freshly-parsed [ProdeUser]. Lifts the controller out
+  /// of the degraded-placeholder shape that [bootstrap] emits when it
+  /// couldn't reach the server on cold start.
+  ///
+  /// Only transitions when the controller is already in
+  /// [ProdeAuthAuthenticated]. From any other state (Unauthenticated,
+  /// Revoked, Error), a refresh-driven user update would be inconsistent
+  /// — the refresh should not silently re-authenticate a session that
+  /// the state machine considers closed.
+  void onTokensRefreshed(ProdeUser user) {
+    final current = state;
+    if (current is ProdeAuthAuthenticated) {
+      state = ProdeAuthAuthenticated(user: user);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // PR-07 placeholders
   // ---------------------------------------------------------------------------
@@ -193,9 +212,14 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  /// Parses a stored session_version string to int, defaulting to 1.
-  int _parseSessionVersion(String? raw) {
-    if (raw == null) return 1;
-    return int.tryParse(raw) ?? 1;
+  /// Parses a stored session_version string to int.
+  ///
+  /// Returns null when the value is missing or unparseable. The caller must
+  /// treat null as "cannot reconstruct session" and force re-authentication —
+  /// silently defaulting to a guess (e.g., 1) would emit a JWT the server's
+  /// strict-equality check would reject as session_revoked.
+  int? _parseSessionVersion(String? raw) {
+    if (raw == null) return null;
+    return int.tryParse(raw);
   }
 }

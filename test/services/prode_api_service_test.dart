@@ -159,19 +159,17 @@ void main() {
       service.onAuthRequired = (e) => captured = e;
 
       // attemptSilentRefresh emits onAuthRequired then throws ProdeAuthRequired.
-      expect(
-        () async => service.attemptSilentRefresh(refreshToken: 'ref'),
+      // Use expectLater + await so the matcher actually observes the throw
+      // before subsequent assertions run.
+      await expectLater(
+        service.attemptSilentRefresh(refreshToken: 'ref'),
         throwsA(isA<ProdeAuthRequired>()),
       );
-
-      // Give the async operations a chance to run.
-      await Future<void>.delayed(Duration.zero);
 
       expect(captured, isNotNull);
       expect(captured!.code, equals('session_revoked'));
 
       // Storage must be cleared.
-      await Future<void>.delayed(Duration.zero);
       expect(await repo.readAccessToken(), isNull);
     });
 
@@ -192,12 +190,10 @@ void main() {
       ProdeAuthRequired? captured;
       service.onAuthRequired = (e) => captured = e;
 
-      expect(
-        () async => service.attemptSilentRefresh(refreshToken: 'ref'),
+      await expectLater(
+        service.attemptSilentRefresh(refreshToken: 'ref'),
         throwsA(isA<ProdeAuthRequired>()),
       );
-
-      await Future<void>.delayed(Duration.zero);
 
       expect(captured, isNotNull);
       expect(captured!.code, equals('refresh_token_invalid'));

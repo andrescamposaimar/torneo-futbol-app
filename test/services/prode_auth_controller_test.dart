@@ -363,6 +363,74 @@ void main() {
     });
   });
 
+  group('ProdeAuthController.onTokensRefreshed()', () {
+    late ProdeAuthController controller;
+
+    setUp(() {
+      final store = <String, String>{};
+      _setUpFakeStorage(store);
+      final repo = ProdeAuthRepository();
+      controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Unused')),
+      );
+    });
+
+    test('Authenticated(placeholder) → Authenticated(realUser) on refresh', () {
+      // Seed the controller in the degraded-placeholder shape that bootstrap
+      // emits on network failure.
+      controller.state = ProdeAuthAuthenticated(
+        user: const ProdeUser(
+          userId: 0,
+          playerId: 0,
+          name: '',
+          sessionVersion: 3,
+        ),
+      );
+
+      const real = ProdeUser(
+        userId: 42,
+        playerId: 7,
+        name: 'María García',
+        sessionVersion: 4,
+      );
+      controller.onTokensRefreshed(real);
+
+      expect(controller.state, isA<ProdeAuthAuthenticated>());
+      final auth = controller.state as ProdeAuthAuthenticated;
+      expect(auth.user.userId, equals(42));
+      expect(auth.user.name, equals('María García'));
+      expect(auth.user.sessionVersion, equals(4));
+    });
+
+    test('Unauthenticated → unchanged (refresh must not silently re-auth)',
+        () {
+      controller.state = const ProdeAuthUnauthenticated();
+
+      controller.onTokensRefreshed(const ProdeUser(
+        userId: 42,
+        playerId: 7,
+        name: 'María García',
+        sessionVersion: 4,
+      ));
+
+      expect(controller.state, isA<ProdeAuthUnauthenticated>());
+    });
+
+    test('Revoked → unchanged (refresh must not lift a revoked session)', () {
+      controller.state = const ProdeAuthRevoked(reason: 'session_revoked');
+
+      controller.onTokensRefreshed(const ProdeUser(
+        userId: 42,
+        playerId: 7,
+        name: 'María García',
+        sessionVersion: 4,
+      ));
+
+      expect(controller.state, isA<ProdeAuthRevoked>());
+    });
+  });
+
   group('PR-07 placeholder methods throw UnimplementedError', () {
     late ProdeAuthController controller;
 

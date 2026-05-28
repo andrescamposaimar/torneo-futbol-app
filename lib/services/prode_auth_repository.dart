@@ -109,7 +109,10 @@ class ProdeAuthRepository {
   /// storage failure on one write does NOT poison the lock chain for every
   /// subsequent write on this repository instance.
   ///
-  /// Fires [onTokensChanged] after a successful write.
+  /// Fires [onTokensChanged] AFTER the lock body releases and the caller's
+  /// future resolves successfully. Callback errors are swallowed so a
+  /// throwing subscriber cannot poison the chain or make the caller think
+  /// the storage write failed.
   Future<void> _lockedWrite(void Function(_TokenMap map) mutate) {
     final completer = Completer<void>();
     _writeLock = _writeLock.then((_) async {
@@ -120,13 +123,18 @@ class ProdeAuthRepository {
           key: _Keys.tokens,
           value: json.encode(map),
         );
-        onTokensChanged?.call();
         completer.complete();
       } catch (e, st) {
         completer.completeError(e, st);
       }
     });
-    return completer.future;
+    return completer.future.then((_) {
+      try {
+        onTokensChanged?.call();
+      } catch (_) {
+        // A buggy subscriber must not pretend the write failed.
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -236,18 +244,24 @@ class ProdeAuthRepository {
   ///
   /// Uses the same failure-isolation pattern as [_lockedWrite]: the error
   /// surfaces to the caller but the lock chain stays healthy.
-  /// Fires [onTokensChanged] after a successful delete.
+  /// Fires [onTokensChanged] AFTER the lock body releases (same semantics
+  /// as [_lockedWrite]). Callback errors are swallowed.
   Future<void> clear() {
     final completer = Completer<void>();
     _writeLock = _writeLock.then((_) async {
       try {
         await _storage.delete(key: _Keys.tokens);
-        onTokensChanged?.call();
         completer.complete();
       } catch (e, st) {
         completer.completeError(e, st);
       }
     });
-    return completer.future;
+    return completer.future.then((_) {
+      try {
+        onTokensChanged?.call();
+      } catch (_) {
+        // A buggy subscriber must not pretend the clear failed.
+      }
+    });
   }
 }
