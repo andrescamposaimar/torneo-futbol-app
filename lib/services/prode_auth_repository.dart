@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Storage key for the single JSON blob that persists all Prode tokens.
@@ -15,6 +16,25 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// overwritten on the next successful auth call.
 abstract class _Keys {
   static const tokens = 'prode_tokens';
+}
+
+/// Immutable snapshot of all four stored Prode token fields.
+///
+/// Returned by [ProdeAuthRepository.readAll] so callers can read every field
+/// in one storage round-trip. All fields are nullable — a missing or empty
+/// blob returns all nulls.
+class TokenSnapshot {
+  final String? accessToken;
+  final String? refreshToken;
+  final String? sessionVersion;
+  final String? tenantId;
+
+  const TokenSnapshot({
+    this.accessToken,
+    this.refreshToken,
+    this.sessionVersion,
+    this.tenantId,
+  });
 }
 
 /// JSON blob schema:
@@ -38,8 +58,18 @@ typedef _TokenMap = Map<String, dynamic>;
 ///
 /// Inject a custom [FlutterSecureStorage] instance via the constructor to
 /// enable testing without platform channel dependencies.
+///
+/// [onTokensChanged] is fired after any successful write or clear. Set by
+/// [prodeAuthControllerProvider] to point at [ProdeApiService.invalidateTokenCache]
+/// so the in-memory cache stays consistent without callers having to
+/// pair write calls with manual cache-invalidation calls.
 class ProdeAuthRepository {
   final FlutterSecureStorage _storage;
+
+  /// Callback fired after every successful storage mutation (write, writeTokens,
+  /// clear, and the private _writeX helpers). Wired in [prodeAuthControllerProvider]
+  /// to [ProdeApiService.invalidateTokenCache].
+  void Function()? onTokensChanged;
 
   /// Serialises concurrent writes so the read-modify-write cycle is safe.
   ///
@@ -78,6 +108,8 @@ class ProdeAuthRepository {
   /// while [_writeLock] itself always resolves successfully. A transient
   /// storage failure on one write does NOT poison the lock chain for every
   /// subsequent write on this repository instance.
+  ///
+  /// Fires [onTokensChanged] after a successful write.
   Future<void> _lockedWrite(void Function(_TokenMap map) mutate) {
     final completer = Completer<void>();
     _writeLock = _writeLock.then((_) async {
@@ -88,6 +120,7 @@ class ProdeAuthRepository {
           key: _Keys.tokens,
           value: json.encode(map),
         );
+        onTokensChanged?.call();
         completer.complete();
       } catch (e, st) {
         completer.completeError(e, st);
@@ -97,7 +130,7 @@ class ProdeAuthRepository {
   }
 
   // ---------------------------------------------------------------------------
-  // Access token
+  // Individual read methods (public — used by ProdeApiService cached path)
   // ---------------------------------------------------------------------------
 
   Future<String?> readAccessToken() async {
@@ -105,42 +138,62 @@ class ProdeAuthRepository {
     return map['access_token'] as String?;
   }
 
-  Future<void> writeAccessToken(String token) =>
-      _lockedWrite((m) => m['access_token'] = token);
-
-  // ---------------------------------------------------------------------------
-  // Refresh token
-  // ---------------------------------------------------------------------------
-
   Future<String?> readRefreshToken() async {
     final map = await _readBlob();
     return map['refresh_token'] as String?;
   }
-
-  Future<void> writeRefreshToken(String token) =>
-      _lockedWrite((m) => m['refresh_token'] = token);
-
-  // ---------------------------------------------------------------------------
-  // Session version
-  // ---------------------------------------------------------------------------
 
   Future<String?> readSessionVersion() async {
     final map = await _readBlob();
     return map['session_version'] as String?;
   }
 
-  Future<void> writeSessionVersion(String version) =>
-      _lockedWrite((m) => m['session_version'] = version);
-
-  // ---------------------------------------------------------------------------
-  // Tenant ID
-  // ---------------------------------------------------------------------------
-
   Future<String?> readTenantId() async {
     final map = await _readBlob();
     return map['tenant_id'] as String?;
   }
 
+  // ---------------------------------------------------------------------------
+  // Bulk read — eliminates sequential _readBlob() calls in bootstrap
+  // ---------------------------------------------------------------------------
+
+  /// Reads all four token fields in a single storage round-trip.
+  ///
+  /// Eliminates the TOCTOU window that arises from calling [readAccessToken],
+  /// [readRefreshToken], and [readSessionVersion] sequentially — each of which
+  /// decodes the blob independently. Bootstrap should prefer this method.
+  Future<TokenSnapshot> readAll() async {
+    final map = await _readBlob();
+    return TokenSnapshot(
+      accessToken: map['access_token'] as String?,
+      refreshToken: map['refresh_token'] as String?,
+      sessionVersion: map['session_version'] as String?,
+      tenantId: map['tenant_id'] as String?,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Individual write helpers — library-private, exposed only for testing
+  // ---------------------------------------------------------------------------
+
+  /// Writes only the access token field.
+  ///
+  /// No production code calls this directly — use [write] or [writeTokens]
+  /// instead. Annotated [@visibleForTesting] so tests can exercise the
+  /// individual-field write path without promoting these to a public API.
+  @visibleForTesting
+  Future<void> writeAccessToken(String token) =>
+      _lockedWrite((m) => m['access_token'] = token);
+
+  @visibleForTesting
+  Future<void> writeRefreshToken(String token) =>
+      _lockedWrite((m) => m['refresh_token'] = token);
+
+  @visibleForTesting
+  Future<void> writeSessionVersion(String version) =>
+      _lockedWrite((m) => m['session_version'] = version);
+
+  @visibleForTesting
   Future<void> writeTenantId(String id) =>
       _lockedWrite((m) => m['tenant_id'] = id);
 
@@ -183,11 +236,13 @@ class ProdeAuthRepository {
   ///
   /// Uses the same failure-isolation pattern as [_lockedWrite]: the error
   /// surfaces to the caller but the lock chain stays healthy.
+  /// Fires [onTokensChanged] after a successful delete.
   Future<void> clear() {
     final completer = Completer<void>();
     _writeLock = _writeLock.then((_) async {
       try {
         await _storage.delete(key: _Keys.tokens);
+        onTokensChanged?.call();
         completer.complete();
       } catch (e, st) {
         completer.completeError(e, st);

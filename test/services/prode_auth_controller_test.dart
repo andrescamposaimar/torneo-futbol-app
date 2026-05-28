@@ -1,6 +1,11 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:torneo_futbol_app/services/prode_auth_controller.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
@@ -27,56 +32,114 @@ const _testConfig = ProdeAuthConfig(
 );
 
 // ---------------------------------------------------------------------------
-// Builder helper
+// Refresh response helpers
 // ---------------------------------------------------------------------------
 
-/// Creates a controller backed by in-memory secure storage.
-ProdeAuthController _makeController(ProdeAuthRepository repo) {
+http.Response _refreshSuccess({
+  String accessToken = 'new-access',
+  String refreshToken = 'new-refresh',
+  int userId = 42,
+  int playerId = 7,
+  String name = 'Test User',
+  int sessionVersion = 5,
+}) {
+  return http.Response(
+    json.encode({
+      'access_token': accessToken,
+      'refresh_token': refreshToken,
+      'user': {
+        'user_id': userId,
+        'player_id': playerId,
+        'name': name,
+        'session_version': sessionVersion,
+      },
+    }),
+    200,
+    headers: {'content-type': 'application/json'},
+  );
+}
+
+http.Response _refresh401({String code = 'token_expired', String message = 'Token expired.'}) {
+  return http.Response(
+    json.encode({'code': code, 'message': message}),
+    401,
+    headers: {'content-type': 'application/json'},
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Builder helpers
+// ---------------------------------------------------------------------------
+
+/// Creates a controller backed by in-memory secure storage and a fake HTTP client.
+ProdeAuthController _makeController(
+  ProdeAuthRepository repo,
+  http.Client httpClient,
+) {
   final service = ProdeApiService(
     config: _testConfig,
     authRepo: repo,
+    httpClient: httpClient,
   );
-  return ProdeAuthController(repository: repo, service: service);
+  final controller = ProdeAuthController(repository: repo, service: service);
+  service.onAuthRequired = controller.onAuthRequired;
+  return controller;
+}
+
+/// Creates a controller with a network-failure HTTP client (always throws).
+ProdeAuthController _makeControllerWithNetworkFailure(ProdeAuthRepository repo) {
+  return _makeController(
+    repo,
+    MockClient((_) async => throw http.ClientException('Network unreachable')),
+  );
 }
 
 void main() {
   group('ProdeAuthController.bootstrap()', () {
     late Map<String, String> store;
     late ProdeAuthRepository repo;
-    late ProdeAuthController controller;
 
     setUp(() {
       store = {};
       _setUpFakeStorage(store);
       repo = ProdeAuthRepository();
-      controller = _makeController(repo);
     });
 
-    test('bootstrap with no tokens → Hydrating then Unauthenticated', () async {
-      // Collect stream emissions to verify Hydrating was passed through.
+    // (a) No tokens → Unauthenticated
+    test('no tokens → Hydrating then Unauthenticated', () async {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Should not be called')),
+      );
+
       final states = <ProdeAuthState>[];
       final sub = controller.stream.listen(states.add);
 
       await controller.bootstrap();
       await sub.cancel();
 
-      // Stream emits each state change (Hydrating, then Unauthenticated).
-      // controller.state reflects the final settled state.
       expect(states, contains(isA<ProdeAuthHydrating>()));
       expect(controller.state, isA<ProdeAuthUnauthenticated>());
     });
 
-    test('bootstrap with tokens present → Hydrating then Authenticated', () async {
-      // Pre-seed tokens (simulates a previously logged-in state).
+    // (b) Tokens + silent refresh success → Authenticated with real user
+    test('tokens + silent refresh success → Authenticated with real user', () async {
       await repo.write(
-        accessToken: 'access-xyz',
-        refreshToken: 'refresh-xyz',
-        sessionVersion: '5',
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        sessionVersion: '3',
         tenantId: 'marianista',
       );
 
-      // Re-create controller so it starts fresh.
-      controller = _makeController(repo);
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => _refreshSuccess(
+          userId: 42,
+          playerId: 7,
+          name: 'Juan Pérez',
+          sessionVersion: 5,
+        )),
+      );
 
       final states = <ProdeAuthState>[];
       final sub = controller.stream.listen(states.add);
@@ -88,11 +151,121 @@ void main() {
       expect(controller.state, isA<ProdeAuthAuthenticated>());
 
       final authenticated = controller.state as ProdeAuthAuthenticated;
-      // sessionVersion was stored as '5' → parsed to 5.
+      expect(authenticated.user.userId, equals(42));
+      expect(authenticated.user.playerId, equals(7));
+      expect(authenticated.user.name, equals('Juan Pérez'));
       expect(authenticated.user.sessionVersion, equals(5));
     });
 
+    // (c) Tokens + session_revoked → Revoked (via onAuthRequired)
+    test('tokens + session_revoked → state is Revoked', () async {
+      await repo.write(
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => _refresh401(code: 'session_revoked', message: 'Session revoked.')),
+      );
+
+      final states = <ProdeAuthState>[];
+      final sub = controller.stream.listen(states.add);
+
+      await controller.bootstrap();
+      await sub.cancel();
+
+      expect(states, contains(isA<ProdeAuthHydrating>()));
+      expect(controller.state, isA<ProdeAuthRevoked>());
+      final revoked = controller.state as ProdeAuthRevoked;
+      expect(revoked.reason, equals('session_revoked'));
+
+      // Storage must be cleared after session_revoked
+      expect(await repo.readAccessToken(), isNull);
+    });
+
+    // (d) Tokens + network failure → Authenticated with placeholder user (degraded fallback)
+    test('tokens + network failure → Authenticated with placeholder user', () async {
+      await repo.write(
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        sessionVersion: '4',
+        tenantId: 'marianista',
+      );
+
+      final controller = _makeControllerWithNetworkFailure(repo);
+
+      final states = <ProdeAuthState>[];
+      final sub = controller.stream.listen(states.add);
+
+      await controller.bootstrap();
+      await sub.cancel();
+
+      expect(states, contains(isA<ProdeAuthHydrating>()));
+      expect(controller.state, isA<ProdeAuthAuthenticated>());
+
+      // Degraded placeholder: real userId/playerId/name unknown, sessionVersion from storage
+      final authenticated = controller.state as ProdeAuthAuthenticated;
+      expect(authenticated.user.userId, equals(0));
+      expect(authenticated.user.playerId, equals(0));
+      expect(authenticated.user.name, equals(''));
+      expect(authenticated.user.sessionVersion, equals(4));
+
+      // Storage must NOT be cleared on network failure
+      expect(await repo.readAccessToken(), equals('acc'));
+    });
+
+    // (e) PlatformException preserved with its code
+    test('PlatformException in storage → ProdeAuthError with platform code', () async {
+      // Inject a repository that throws PlatformException on readAll.
+      // We simulate this by installing a storage platform that throws.
+      // Use a custom fake that throws PlatformException on read.
+      FlutterSecureStoragePlatform.instance =
+          _ThrowingStoragePlatform(PlatformException(code: 'KEYCHAIN_ERROR', message: 'Keychain unavailable.'));
+
+      final throwingRepo = ProdeAuthRepository();
+      final controller = _makeController(
+        throwingRepo,
+        MockClient((_) async => throw http.ClientException('Should not call')),
+      );
+
+      final states = <ProdeAuthState>[];
+      final sub = controller.stream.listen(states.add);
+
+      await controller.bootstrap();
+      await sub.cancel();
+
+      expect(controller.state, isA<ProdeAuthError>());
+      final error = controller.state as ProdeAuthError;
+      expect(error.code, equals('KEYCHAIN_ERROR'));
+    });
+
+    test('tokens + non-revoked 401 → Unauthenticated (tokens cleared)', () async {
+      await repo.write(
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => _refresh401(code: 'refresh_token_invalid', message: 'Token rotated.')),
+      );
+
+      await controller.bootstrap();
+
+      expect(controller.state, isA<ProdeAuthUnauthenticated>());
+      expect(await repo.readAccessToken(), isNull);
+    });
+
     test('initial state before bootstrap is Unauthenticated', () {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Should not be called')),
+      );
       expect(controller.state, isA<ProdeAuthUnauthenticated>());
     });
   });
@@ -116,33 +289,26 @@ void main() {
         tenantId: 'marianista',
       );
 
-      service = ProdeApiService(config: _testConfig, authRepo: repo);
+      service = ProdeApiService(
+        config: _testConfig,
+        authRepo: repo,
+        httpClient: MockClient((_) async => throw http.ClientException('Unused')),
+      );
       controller = ProdeAuthController(repository: repo, service: service);
     });
 
     test('logout clears repository and transitions to Unauthenticated', () async {
       await controller.logout();
 
-      // State is Unauthenticated.
       expect(controller.state, isA<ProdeAuthUnauthenticated>());
-
-      // Storage is cleared.
       expect(await repo.readAccessToken(), isNull);
       expect(await repo.readRefreshToken(), isNull);
       expect(await repo.readTenantId(), isNull);
     });
 
     test('logout invalidates service token cache', () async {
-      // Prime the service cache by reading the access token manually.
-      // (The cache is set the first time request() is called; here we
-      // approximate by verifying that after logout the service reports null.)
       await controller.logout();
 
-      // After logout, the service cache must be null.
-      // We verify indirectly: if cache were not invalidated, calling
-      // invalidateTokenCache() again would be a no-op (idempotent) — so
-      // we just assert that the repository was cleared and the state is
-      // Unauthenticated (coverage of the combined operation).
       expect(controller.state, isA<ProdeAuthUnauthenticated>());
       expect(await repo.readAccessToken(), isNull);
     });
@@ -155,7 +321,10 @@ void main() {
       final store = <String, String>{};
       _setUpFakeStorage(store);
       final repo = ProdeAuthRepository();
-      controller = _makeController(repo);
+      controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Unused')),
+      );
     });
 
     test('session_revoked code → state is Revoked', () {
@@ -194,14 +363,17 @@ void main() {
     });
   });
 
-  group('PR-06 placeholder methods throw UnimplementedError', () {
+  group('PR-07 placeholder methods throw UnimplementedError', () {
     late ProdeAuthController controller;
 
     setUp(() {
       final store = <String, String>{};
       _setUpFakeStorage(store);
       final repo = ProdeAuthRepository();
-      controller = _makeController(repo);
+      controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Unused')),
+      );
     });
 
     test('signInWithGoogle throws UnimplementedError', () {
@@ -225,4 +397,49 @@ void main() {
       );
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Test-only fake storage that throws PlatformException on every read
+// ---------------------------------------------------------------------------
+
+class _ThrowingStoragePlatform extends FlutterSecureStoragePlatform {
+  final PlatformException _exception;
+
+  _ThrowingStoragePlatform(this._exception);
+
+  @override
+  Future<String?> read({
+    required String key,
+    required Map<String, String> options,
+  }) async {
+    throw _exception;
+  }
+
+  @override
+  Future<bool> containsKey({
+    required String key,
+    required Map<String, String> options,
+  }) async => false;
+
+  @override
+  Future<void> delete({
+    required String key,
+    required Map<String, String> options,
+  }) async {}
+
+  @override
+  Future<void> deleteAll({required Map<String, String> options}) async {}
+
+  @override
+  Future<Map<String, String>> readAll({
+    required Map<String, String> options,
+  }) async => {};
+
+  @override
+  Future<void> write({
+    required String key,
+    required String value,
+    required Map<String, String> options,
+  }) async {}
 }
