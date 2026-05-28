@@ -99,6 +99,7 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
           name: '', // degraded placeholder — resolved on next API call
           sessionVersion: sessionVersion,
         ),
+        stale: true,
       );
     } on PlatformException catch (e) {
       state = ProdeAuthError(
@@ -165,7 +166,8 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   void onTokensRefreshed(ProdeUser user) {
     final current = state;
     if (current is ProdeAuthAuthenticated) {
-      state = ProdeAuthAuthenticated(user: user);
+      // stale: false explicitly documents that real server-confirmed data arrived.
+      state = ProdeAuthAuthenticated(user: user, stale: false);
     }
   }
 
