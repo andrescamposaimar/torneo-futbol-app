@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Storage key for the single JSON blob that persists all Prode tokens.
@@ -179,31 +178,6 @@ class ProdeAuthRepository {
       tenantId: map['tenant_id'] as String?,
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Individual write helpers — library-private, exposed only for testing
-  // ---------------------------------------------------------------------------
-
-  /// Writes only the access token field.
-  ///
-  /// No production code calls this directly — use [write] or [writeTokens]
-  /// instead. Annotated [@visibleForTesting] so tests can exercise the
-  /// individual-field write path without promoting these to a public API.
-  @visibleForTesting
-  Future<void> writeAccessToken(String token) =>
-      _lockedWrite((m) => m['access_token'] = token);
-
-  @visibleForTesting
-  Future<void> writeRefreshToken(String token) =>
-      _lockedWrite((m) => m['refresh_token'] = token);
-
-  @visibleForTesting
-  Future<void> writeSessionVersion(String version) =>
-      _lockedWrite((m) => m['session_version'] = version);
-
-  @visibleForTesting
-  Future<void> writeTenantId(String id) =>
-      _lockedWrite((m) => m['tenant_id'] = id);
 
   // ---------------------------------------------------------------------------
   // Bulk operations
