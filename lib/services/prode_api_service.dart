@@ -128,8 +128,13 @@ class ProdeApiService {
   /// Throws [ProdeAuthRequired] when the token cannot be refreshed or the
   /// session is revoked.
   Future<http.Response> request(http.Request request) async {
-    // Resolve access token: cache → storage fallback.
-    _cachedAccessToken ??= await _authRepo.readAccessToken();
+    // Resolve access token: cache → storage fallback (single readAll on miss).
+    String? refreshTokenSnapshot;
+    if (_cachedAccessToken == null) {
+      final snapshot = await _authRepo.readAll();
+      _cachedAccessToken = snapshot.accessToken;
+      refreshTokenSnapshot = snapshot.refreshToken;
+    }
 
     // Fail fast when no token is present — avoids a wasted unauthenticated
     // round-trip and a confusing 'unknown' error code in the 401 path.
@@ -158,8 +163,12 @@ class ProdeApiService {
         'unknown';
 
     if (errorCode == 'token_expired') {
-      // Attempt a single refresh.
-      final refreshToken = await _authRepo.readRefreshToken();
+      // Use the refresh token from the snapshot taken at the top of this call;
+      // fall back to a fresh storage read only when the cache was already warm
+      // (i.e., this is a second request in the same session where the snapshot
+      // was never populated).
+      final refreshToken =
+          refreshTokenSnapshot ?? await _authRepo.readRefreshToken();
       if (refreshToken == null) {
         await _authRepo.clear();
         invalidateTokenCache();
@@ -229,11 +238,10 @@ class ProdeApiService {
       // machine can lift any degraded-placeholder ProdeUser out of
       // Authenticated. Silently best-effort: a malformed user payload
       // doesn't fail the refresh — tokens already rotated successfully.
-      if (user is Map<String, dynamic>) {
-        final refreshedUser = ProdeUser.fromJson(user);
-        if (refreshedUser != null) {
-          onTokensRefreshed?.call(refreshedUser);
-        }
+      final refreshedUser =
+          _parseProdeUser(user is Map<String, dynamic> ? user : null);
+      if (refreshedUser != null) {
+        onTokensRefreshed?.call(refreshedUser);
       }
 
       // Retry the original request once with the new access token.
@@ -299,7 +307,7 @@ class ProdeApiService {
       if (newAccess is String &&
           newRefresh is String &&
           userMap is Map<String, dynamic>) {
-        final user = ProdeUser.fromJson(userMap);
+        final user = _parseProdeUser(userMap);
         if (user != null) {
           await _authRepo.writeTokens(
             accessToken: newAccess,
@@ -404,6 +412,51 @@ class ProdeApiService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Parses a `user` map from any auth/refresh response into a [ProdeUser].
+  ///
+  /// Expected JSON shape:
+  /// ```json
+  /// {
+  ///   "user_id":        <int>,
+  ///   "player_id":      <int>,
+  ///   "name":           <String>,
+  ///   "session_version":<int|String>
+  /// }
+  /// ```
+  /// Returns null when [raw] is null, any required field is absent, or any
+  /// field has the wrong type. Callers treat null as a parse failure and fall
+  /// back to the degraded-placeholder path.
+  static ProdeUser? _parseProdeUser(Map<String, dynamic>? raw) {
+    if (raw == null) return null;
+
+    final rawUserId = raw['user_id'];
+    final rawPlayerId = raw['player_id'];
+    final rawName = raw['name'];
+    final rawSv = raw['session_version'];
+
+    final userId = rawUserId is int ? rawUserId : null;
+    final playerId = rawPlayerId is int ? rawPlayerId : null;
+    final name = rawName is String ? rawName : null;
+    // session_version may arrive as int (PHP) or String (some proxies).
+    final sessionVersion = rawSv is int
+        ? rawSv
+        : (rawSv is String ? int.tryParse(rawSv) : null);
+
+    if (userId == null ||
+        playerId == null ||
+        name == null ||
+        sessionVersion == null) {
+      return null;
+    }
+
+    return ProdeUser(
+      userId: userId,
+      playerId: playerId,
+      name: name,
+      sessionVersion: sessionVersion,
+    );
   }
 
   /// Notifies [onAuthRequired] and throws [ProdeAuthRequired].

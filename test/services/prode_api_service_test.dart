@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
-import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 
 // ---------------------------------------------------------------------------
@@ -289,15 +288,48 @@ void main() {
     });
   });
 
-  group('ProdeUser.fromJson()', () {
-    test('parses valid payload', () {
-      final user = ProdeUser.fromJson({
-        'user_id': 10,
-        'player_id': 3,
-        'name': 'Ana López',
-        'session_version': 2,
-      });
+  // ---------------------------------------------------------------------------
+  // _parseProdeUser — tested indirectly via attemptSilentRefresh
+  //
+  // ProdeUser.fromJson was removed (PR-07 cleanup #1). JSON parsing now lives
+  // in ProdeApiService._parseProdeUser (private). These tests exercise the
+  // same parser semantics through the public attemptSilentRefresh surface.
+  // ---------------------------------------------------------------------------
 
+  group('_parseProdeUser (via attemptSilentRefresh)', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    http.Response _responseWithUserMap(Map<String, dynamic> userMap) {
+      return http.Response(
+        json.encode({
+          'access_token': 'new-access',
+          'refresh_token': 'new-refresh',
+          'user': userMap,
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+
+    test('parses valid payload — all fields present as int/String', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _responseWithUserMap({
+          'user_id': 10,
+          'player_id': 3,
+          'name': 'Ana López',
+          'session_version': 2,
+        })),
+      );
+
+      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
       expect(user, isNotNull);
       expect(user!.userId, equals(10));
       expect(user.playerId, equals(3));
@@ -305,48 +337,75 @@ void main() {
       expect(user.sessionVersion, equals(2));
     });
 
-    test('parses session_version as String', () {
-      final user = ProdeUser.fromJson({
-        'user_id': 1,
-        'player_id': 1,
-        'name': 'Test',
-        'session_version': '3',
-      });
+    test('parses session_version delivered as String', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _responseWithUserMap({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': '3',
+        })),
+      );
 
+      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
       expect(user, isNotNull);
       expect(user!.sessionVersion, equals(3));
     });
 
-    test('returns null when user_id missing', () {
-      final user = ProdeUser.fromJson({
-        'player_id': 1,
-        'name': 'Test',
-        'session_version': 1,
-      });
+    test('missing user_id → returns null (malformed body path)', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _responseWithUserMap({
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 1,
+        })),
+      );
+
+      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
+      // Parser returns null → attemptSilentRefresh falls through to the
+      // malformed-body path and returns null without persisting tokens.
       expect(user, isNull);
     });
 
-    test('returns null when name missing', () {
-      final user = ProdeUser.fromJson({
-        'user_id': 1,
-        'player_id': 1,
-        'session_version': 1,
-      });
+    test('missing name → returns null', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _responseWithUserMap({
+          'user_id': 1,
+          'player_id': 1,
+          'session_version': 1,
+        })),
+      );
+
+      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
       expect(user, isNull);
     });
 
-    test('returns null when session_version not parseable', () {
-      final user = ProdeUser.fromJson({
-        'user_id': 1,
-        'player_id': 1,
-        'name': 'Test',
-        'session_version': 'bad-value',
-      });
+    test('unparseable session_version → returns null', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _responseWithUserMap({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 'bad-value',
+        })),
+      );
+
+      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
       expect(user, isNull);
     });
 
-    test('returns null on empty map', () {
-      expect(ProdeUser.fromJson({}), isNull);
+    test('empty user map → returns null', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _responseWithUserMap({})),
+      );
+
+      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
+      expect(user, isNull);
     });
   });
 }
