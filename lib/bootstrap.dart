@@ -21,6 +21,14 @@ Future<void> bootstrap(TenantConfig cfg) async {
     );
   }
 
+  // Fail fast (debug): prode=true requires a non-null prodeAuth config.
+  assert(
+    !cfg.features.prode || cfg.integrations.prodeAuth != null,
+    'TenantConfig "${cfg.tenantId}": features.prode=true but '
+    'integrations.prodeAuth is null. '
+    'Provide a ProdeAuthConfig in TenantIntegrations.',
+  );
+
   WidgetsFlutterBinding.ensureInitialized();
 
   await initializeDateFormatting('es');

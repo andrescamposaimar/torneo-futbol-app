@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../tenant_config.dart';
+import '../prode_auth_config.dart';
 
 const marianistaTenant = TenantConfig(
   tenantId: 'marianista',
@@ -15,10 +16,21 @@ const marianistaTenant = TenantConfig(
     waitingLists: true,
     newsTab: true,
     ads: true,
+    prode: true,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
         'https://entreredespadres.com.ar/wp-content/uploads/media/listas_jugadores.json',
+    // TODO: replace placeholder client IDs once OAuth clients are provisioned
+    prodeAuth: ProdeAuthConfig(
+      googleWebClientId: 'TODO_GOOGLE_WEB_CLIENT_ID',
+      googleIosClientId: 'TODO_GOOGLE_IOS_CLIENT_ID',
+      googleAndroidClientId: 'TODO_GOOGLE_ANDROID_CLIENT_ID',
+      appleServiceId: 'com.entreredes.app.web',
+      appleTeamId: 'TODO_APPLE_TEAM_ID',
+      appleRedirectUri:
+          'https://entreredespadres.com.ar/wp-json/entre-redes/v1/prode/auth/apple/callback',
+    ),
   ),
   documents: TenantDocuments(
     reglamentoUrl:
