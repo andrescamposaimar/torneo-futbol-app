@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 // ---------------------------------------------------------------------------
 // User data model
 // ---------------------------------------------------------------------------
@@ -7,6 +9,7 @@
 /// Pure value class: const constructor, ==, hashCode, toString.
 /// JSON parsing lives in ProdeApiService._parseProdeUser — infrastructure
 /// concerns do not belong on a domain value type.
+@immutable
 class ProdeUser {
   final int userId;
   final int playerId;

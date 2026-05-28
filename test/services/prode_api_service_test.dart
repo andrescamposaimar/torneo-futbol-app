@@ -289,47 +289,22 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // _parseProdeUser — tested indirectly via attemptSilentRefresh
+  // ProdeApiService.parseProdeUser — direct synchronous parser unit tests.
   //
-  // ProdeUser.fromJson was removed (PR-07 cleanup #1). JSON parsing now lives
-  // in ProdeApiService._parseProdeUser (private). These tests exercise the
-  // same parser semantics through the public attemptSilentRefresh surface.
+  // The parser is annotated @visibleForTesting precisely so test failures
+  // pinpoint parser bugs without confounding HTTP/storage layers. The single
+  // happy-path integration test for the parser → onTokensRefreshed pipeline
+  // lives in prode_auth_controller_test (or the silent-refresh group above).
   // ---------------------------------------------------------------------------
 
-  group('_parseProdeUser (via attemptSilentRefresh)', () {
-    late Map<String, String> store;
-    late ProdeAuthRepository repo;
-
-    setUp(() {
-      store = {};
-      _setUpFakeStorage(store);
-      repo = ProdeAuthRepository();
-    });
-
-    http.Response _responseWithUserMap(Map<String, dynamic> userMap) {
-      return http.Response(
-        json.encode({
-          'access_token': 'new-access',
-          'refresh_token': 'new-refresh',
-          'user': userMap,
-        }),
-        200,
-        headers: {'content-type': 'application/json'},
-      );
-    }
-
-    test('parses valid payload — all fields present as int/String', () async {
-      final service = _makeService(
-        repo,
-        MockClient((_) async => _responseWithUserMap({
-          'user_id': 10,
-          'player_id': 3,
-          'name': 'Ana López',
-          'session_version': 2,
-        })),
-      );
-
-      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
+  group('ProdeApiService.parseProdeUser()', () {
+    test('parses valid payload — all fields present as int/String', () {
+      final user = ProdeApiService.parseProdeUser({
+        'user_id': 10,
+        'player_id': 3,
+        'name': 'Ana López',
+        'session_version': 2,
+      });
       expect(user, isNotNull);
       expect(user!.userId, equals(10));
       expect(user.playerId, equals(3));
@@ -337,75 +312,69 @@ void main() {
       expect(user.sessionVersion, equals(2));
     });
 
-    test('parses session_version delivered as String', () async {
-      final service = _makeService(
-        repo,
-        MockClient((_) async => _responseWithUserMap({
-          'user_id': 1,
-          'player_id': 1,
-          'name': 'Test',
-          'session_version': '3',
-        })),
-      );
-
-      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
+    test('parses session_version delivered as String', () {
+      final user = ProdeApiService.parseProdeUser({
+        'user_id': 1,
+        'player_id': 1,
+        'name': 'Test',
+        'session_version': '3',
+      });
       expect(user, isNotNull);
       expect(user!.sessionVersion, equals(3));
     });
 
-    test('missing user_id → returns null (malformed body path)', () async {
-      final service = _makeService(
-        repo,
-        MockClient((_) async => _responseWithUserMap({
+    test('null raw → returns null', () {
+      expect(ProdeApiService.parseProdeUser(null), isNull);
+    });
+
+    test('missing user_id → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
           'player_id': 1,
           'name': 'Test',
           'session_version': 1,
-        })),
+        }),
+        isNull,
       );
-
-      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
-      // Parser returns null → attemptSilentRefresh falls through to the
-      // malformed-body path and returns null without persisting tokens.
-      expect(user, isNull);
     });
 
-    test('missing name → returns null', () async {
-      final service = _makeService(
-        repo,
-        MockClient((_) async => _responseWithUserMap({
+    test('missing name → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
           'user_id': 1,
           'player_id': 1,
           'session_version': 1,
-        })),
+        }),
+        isNull,
       );
-
-      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
-      expect(user, isNull);
     });
 
-    test('unparseable session_version → returns null', () async {
-      final service = _makeService(
-        repo,
-        MockClient((_) async => _responseWithUserMap({
+    test('unparseable session_version → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
           'user_id': 1,
           'player_id': 1,
           'name': 'Test',
           'session_version': 'bad-value',
-        })),
+        }),
+        isNull,
       );
-
-      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
-      expect(user, isNull);
     });
 
-    test('empty user map → returns null', () async {
-      final service = _makeService(
-        repo,
-        MockClient((_) async => _responseWithUserMap({})),
-      );
+    test('empty user map → returns null', () {
+      expect(ProdeApiService.parseProdeUser({}), isNull);
+    });
 
-      final user = await service.attemptSilentRefresh(refreshToken: 'tok');
-      expect(user, isNull);
+    test('wrong-type user_id (String instead of int) → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': '10',
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 1,
+        }),
+        isNull,
+      );
     });
   });
 }
