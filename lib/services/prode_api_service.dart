@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import 'prode_auth_repository.dart';
@@ -94,7 +95,12 @@ class ProdeApiService {
 
     // --- 401 handling ---
     final body = _decodeBody(response);
-    final errorCode = (body['error'] as String?) ?? 'unknown';
+    // AuthMiddleware-protected endpoints serialize WP_Error as {"code":...},
+    // while /auth/refresh emits a custom envelope with {"error":...}.
+    // Accept both so the recovery branches fire on every authenticated path.
+    final errorCode = (body['code'] as String?) ??
+        (body['error'] as String?) ??
+        'unknown';
 
     if (errorCode == 'token_expired') {
       // Attempt a single refresh.
@@ -120,16 +126,46 @@ class ProdeApiService {
         );
       }
 
-      // Persist new tokens.
-      await _authRepo.write(
-        accessToken: newTokens['access_token'] as String,
-        refreshToken: newTokens['refresh_token'] as String,
-        sessionVersion: (newTokens['user']?['session_version'] as int? ?? 0).toString(),
-        tenantId: await _authRepo.readTenantId() ?? '',
+      // Safe extraction: a 200 with a malformed body still reaches here,
+      // and casting null/wrong-typed fields would throw uncaught TypeError.
+      final newAccess = newTokens['access_token'];
+      final newRefresh = newTokens['refresh_token'];
+      final user = newTokens['user'];
+      final rawSessionVersion =
+          user is Map ? user['session_version'] : null;
+
+      if (newAccess is! String || newRefresh is! String) {
+        await _authRepo.clear();
+        throw const ProdeAuthRequired(
+          code: 'token_expired',
+          message: 'Refresh response missing or malformed tokens.',
+        );
+      }
+
+      // session_version may arrive as int (PHP int) or string (proxy/driver
+      // serialization). Both are accepted; anything else is a hard failure
+      // — storing 0 would force an immediate session_revoked on the retry.
+      final sessionVersion = rawSessionVersion is int
+          ? rawSessionVersion
+          : int.tryParse(rawSessionVersion?.toString() ?? '');
+      if (sessionVersion == null) {
+        await _authRepo.clear();
+        throw const ProdeAuthRequired(
+          code: 'token_expired',
+          message: 'Refresh response missing session_version.',
+        );
+      }
+
+      // Persist only the rotating fields; tenantId is set at login and
+      // is NOT echoed in the refresh response.
+      await _authRepo.writeTokens(
+        accessToken: newAccess,
+        refreshToken: newRefresh,
+        sessionVersion: sessionVersion.toString(),
       );
 
       // Retry the original request once with the new access token.
-      final retryRequest = _cloneWithBearer(request, newTokens['access_token'] as String);
+      final retryRequest = _cloneWithBearer(request, newAccess);
       return _httpClient.send(retryRequest).then(http.Response.fromStream);
     }
 
@@ -191,7 +227,11 @@ class ProdeApiService {
       final decoded = json.decode(response.body);
       if (decoded is Map<String, dynamic>) return decoded;
       return {};
-    } catch (_) {
+    } on FormatException catch (e) {
+      debugPrint(
+        'ProdeApiService: failed to decode response body '
+        '(status=${response.statusCode}): $e',
+      );
       return {};
     }
   }

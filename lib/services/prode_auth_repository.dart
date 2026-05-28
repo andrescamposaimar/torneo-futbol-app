@@ -61,6 +61,7 @@ class ProdeAuthRepository {
   // ---------------------------------------------------------------------------
 
   /// Persist all token fields in one logical write.
+  /// Used at initial login when tenantId is known.
   Future<void> write({
     required String accessToken,
     required String refreshToken,
@@ -72,6 +73,21 @@ class ProdeAuthRepository {
       writeRefreshToken(refreshToken),
       writeSessionVersion(sessionVersion),
       writeTenantId(tenantId),
+    ]);
+  }
+
+  /// Persist only the rotating token fields. Used by the refresh path,
+  /// where the server does not echo tenantId back. Avoids overwriting
+  /// tenantId with stale or empty values.
+  Future<void> writeTokens({
+    required String accessToken,
+    required String refreshToken,
+    required String sessionVersion,
+  }) async {
+    await Future.wait([
+      writeAccessToken(accessToken),
+      writeRefreshToken(refreshToken),
+      writeSessionVersion(sessionVersion),
     ]);
   }
 

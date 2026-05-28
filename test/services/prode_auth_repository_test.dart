@@ -79,5 +79,32 @@ void main() {
 
       expect(await repo.readAccessToken(), equals('new-token'));
     });
+
+    test('writeTokens persists rotating fields and preserves tenantId',
+        () async {
+      // Seed initial state via the bulk write (login path).
+      await repo.write(
+        accessToken: 'old-acc',
+        refreshToken: 'old-ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      // Refresh path: rotate access/refresh/session_version only.
+      await repo.writeTokens(
+        accessToken: 'new-acc',
+        refreshToken: 'new-ref',
+        sessionVersion: '2',
+      );
+
+      expect(await repo.readAccessToken(), equals('new-acc'));
+      expect(await repo.readRefreshToken(), equals('new-ref'));
+      expect(await repo.readSessionVersion(), equals('2'));
+      expect(
+        await repo.readTenantId(),
+        equals('marianista'),
+        reason: 'writeTokens must not touch tenantId',
+      );
+    });
   });
 }
