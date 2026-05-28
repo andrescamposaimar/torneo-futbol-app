@@ -34,8 +34,11 @@ class ProdeAuthRequired implements Exception {
 ///
 /// Responsibilities:
 ///   1. Attach `Authorization: Bearer <access_token>` to every request.
+///      Reads from the in-memory cache first; falls back to storage only
+///      when the cache is empty (e.g., after a cold start or logout).
 ///   2. On 401 with `token_expired` — attempt a single token refresh via
 ///      `POST /prode/auth/refresh`, then retry the original request.
+///      Updates the in-memory cache after a successful refresh.
 ///   3. On 401 with `session_revoked` — clear tokens and throw
 ///      [ProdeAuthRequired] so the auth gate can transition to Revoked.
 ///   4. Bubble any other 401 as [ProdeAuthRequired].
@@ -44,10 +47,24 @@ class ProdeAuthRequired implements Exception {
 /// Endpoint methods (getActiveFecha, submitPredictions, etc.) will be
 /// added in later PRs once the UI screens land.
 class ProdeApiService {
-  // ignore: unused_field — will be used by endpoint methods added in PR-05+
   final ProdeAuthConfig _config;
   final ProdeAuthRepository _authRepo;
   final http.Client _httpClient;
+
+  /// In-memory cache for the current access token.
+  ///
+  /// Avoids a secure-storage read on every authenticated request.
+  /// Invalidated on logout ([invalidateTokenCache]) and updated after
+  /// every successful token refresh.
+  ///
+  /// INVARIANT: whenever [ProdeAuthRepository] is written to or cleared,
+  /// the caller is responsible for also calling [invalidateTokenCache] so
+  /// the cache stays consistent. [ProdeAuthController] orchestrates both.
+  String? _cachedAccessToken;
+
+  /// Derived once from config — no trailing slash.
+  late final String _refreshUrl =
+      '${_config.prodeApiBaseUrl}/auth/refresh';
 
   ProdeApiService({
     required ProdeAuthConfig config,
@@ -58,36 +75,32 @@ class ProdeApiService {
         _httpClient = httpClient ?? http.Client();
 
   // ---------------------------------------------------------------------------
-  // Internal transport helpers
+  // Public API
   // ---------------------------------------------------------------------------
 
-  /// Base URL for Prode endpoints (no trailing slash).
-  /// Derived from [ProdeAuthConfig] — in a future refactor the API base URL
-  /// may be moved to [TenantConfig.apiBaseUrl] + '/prode'; for now it is
-  /// provided via [ProdeAuthConfig] to keep PR-04 self-contained.
+  /// Clears the in-memory access-token cache.
   ///
-  /// NOTE: The design places the Prode routes under the WP REST API base
-  /// already stored in [TenantConfig.apiBaseUrl]. The actual base URL for
-  /// token refresh is hardcoded here as a relative concern; the full URL
-  /// is built at call sites using the tenant's apiBaseUrl. This method
-  /// exists as a hook for future centralisation.
-  String _refreshUrl(String apiBaseUrl) => '$apiBaseUrl/prode/auth/refresh';
+  /// Call this whenever the underlying token storage is modified externally
+  /// (e.g., logout clears the repository) so the cache stays in sync.
+  void invalidateTokenCache() {
+    _cachedAccessToken = null;
+  }
 
   /// Executes [request] with a Bearer token attached.
   ///
-  /// [apiBaseUrl] is the tenant's WP REST base URL — needed for the
-  /// refresh endpoint if a 401 is encountered.
+  /// Reads the access token from the in-memory cache first; falls back to
+  /// [ProdeAuthRepository.readAccessToken] only when the cache is null.
   ///
   /// Returns the final [http.Response] (possibly from a retry after refresh).
   /// Throws [ProdeAuthRequired] when the token cannot be refreshed or the
   /// session is revoked.
-  Future<http.Response> request(
-    http.Request request, {
-    required String apiBaseUrl,
-  }) async {
-    final accessToken = await _authRepo.readAccessToken();
-    final authedRequest = _cloneWithBearer(request, accessToken);
-    final response = await _httpClient.send(authedRequest).then(http.Response.fromStream);
+  Future<http.Response> request(http.Request request) async {
+    // Resolve access token: cache → storage fallback.
+    _cachedAccessToken ??= await _authRepo.readAccessToken();
+
+    final authedRequest = _cloneWithBearer(request, _cachedAccessToken);
+    final response =
+        await _httpClient.send(authedRequest).then(http.Response.fromStream);
 
     if (response.statusCode != 401) {
       return response;
@@ -107,19 +120,18 @@ class ProdeApiService {
       final refreshToken = await _authRepo.readRefreshToken();
       if (refreshToken == null) {
         await _authRepo.clear();
+        invalidateTokenCache();
         throw const ProdeAuthRequired(
           code: 'token_expired',
           message: 'No refresh token available.',
         );
       }
 
-      final newTokens = await _attemptRefresh(
-        refreshToken: refreshToken,
-        refreshUrl: _refreshUrl(apiBaseUrl),
-      );
+      final newTokens = await _attemptRefresh(refreshToken: refreshToken);
 
       if (newTokens == null) {
         await _authRepo.clear();
+        invalidateTokenCache();
         throw const ProdeAuthRequired(
           code: 'token_expired',
           message: 'Token refresh failed.',
@@ -136,6 +148,7 @@ class ProdeApiService {
 
       if (newAccess is! String || newRefresh is! String) {
         await _authRepo.clear();
+        invalidateTokenCache();
         throw const ProdeAuthRequired(
           code: 'token_expired',
           message: 'Refresh response missing or malformed tokens.',
@@ -150,6 +163,7 @@ class ProdeApiService {
           : int.tryParse(rawSessionVersion?.toString() ?? '');
       if (sessionVersion == null) {
         await _authRepo.clear();
+        invalidateTokenCache();
         throw const ProdeAuthRequired(
           code: 'token_expired',
           message: 'Refresh response missing session_version.',
@@ -164,6 +178,9 @@ class ProdeApiService {
         sessionVersion: sessionVersion.toString(),
       );
 
+      // Update the in-memory cache with the fresh access token.
+      _cachedAccessToken = newAccess;
+
       // Retry the original request once with the new access token.
       final retryRequest = _cloneWithBearer(request, newAccess);
       return _httpClient.send(retryRequest).then(http.Response.fromStream);
@@ -171,6 +188,7 @@ class ProdeApiService {
 
     if (errorCode == 'session_revoked') {
       await _authRepo.clear();
+      invalidateTokenCache();
       throw ProdeAuthRequired(
         code: 'session_revoked',
         message: (body['message'] as String?) ?? 'Session was revoked.',
@@ -205,11 +223,10 @@ class ProdeApiService {
   /// or null if the refresh request itself fails or returns non-200.
   Future<Map<String, dynamic>?> _attemptRefresh({
     required String refreshToken,
-    required String refreshUrl,
   }) async {
     try {
       final response = await _httpClient.post(
-        Uri.parse(refreshUrl),
+        Uri.parse(_refreshUrl),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'refresh_token': refreshToken}),
       );

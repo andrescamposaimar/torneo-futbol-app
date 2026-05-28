@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
@@ -105,6 +107,37 @@ void main() {
         equals('marianista'),
         reason: 'writeTokens must not touch tenantId',
       );
+    });
+
+    test('single-key persistence: only one storage key exists after write()',
+        () async {
+      await repo.write(
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      // The underlying storage map must contain exactly one key: 'prode_tokens'.
+      expect(store.keys, hasLength(1));
+      expect(store.keys.single, equals('prode_tokens'));
+
+      // And the value must be a valid JSON object containing all four fields.
+      final decoded = json.decode(store['prode_tokens']!) as Map<String, dynamic>;
+      expect(decoded['access_token'], equals('acc'));
+      expect(decoded['refresh_token'], equals('ref'));
+      expect(decoded['session_version'], equals('1'));
+      expect(decoded['tenant_id'], equals('marianista'));
+    });
+
+    test('individual writes coalesce into the same single key', () async {
+      await repo.writeAccessToken('a');
+      await repo.writeRefreshToken('r');
+      await repo.writeTenantId('marianista');
+
+      // Still only one key regardless of how many individual writes occurred.
+      expect(store.keys, hasLength(1));
+      expect(store.keys.single, equals('prode_tokens'));
     });
   });
 }

@@ -33,6 +33,7 @@ void main() {
 
     test('prodeAuth can be set', () {
       const config = ProdeAuthConfig(
+        prodeApiBaseUrl: 'https://example.com/wp-json/entre-redes/v1/prode',
         googleWebClientId: 'web-client',
         appleTeamId: 'TEAM123',
       );
@@ -45,15 +46,28 @@ void main() {
   group('ProdeAuthConfig', () {
     test('required fields are set', () {
       const config = ProdeAuthConfig(
+        prodeApiBaseUrl: 'https://example.com/wp-json/entre-redes/v1/prode',
         googleWebClientId: 'web-client',
         appleTeamId: 'TEAM123',
       );
+      expect(config.prodeApiBaseUrl,
+          equals('https://example.com/wp-json/entre-redes/v1/prode'));
       expect(config.googleWebClientId, equals('web-client'));
       expect(config.appleTeamId, equals('TEAM123'));
     });
 
+    test('prodeApiBaseUrl has no trailing slash (convention)', () {
+      const config = ProdeAuthConfig(
+        prodeApiBaseUrl: 'https://example.com/wp-json/entre-redes/v1/prode',
+        googleWebClientId: 'web-client',
+        appleTeamId: 'TEAM123',
+      );
+      expect(config.prodeApiBaseUrl, isNot(endsWith('/')));
+    });
+
     test('optional fields default to null', () {
       const config = ProdeAuthConfig(
+        prodeApiBaseUrl: 'https://example.com/wp-json/entre-redes/v1/prode',
         googleWebClientId: 'web-client',
         appleTeamId: 'TEAM123',
       );
