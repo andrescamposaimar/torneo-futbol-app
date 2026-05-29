@@ -88,8 +88,16 @@ class SessionManager {
             throw new \InvalidArgumentException( 'refresh_token_invalid' );
         }
 
-        // Already revoked?
+        // Already revoked? Presenting a token that was already rotated away is a
+        // strong refresh-token-theft signal (OAuth 2.0 Security BCP,
+        // draft-ietf-oauth-security-topics §4.13.2): the legitimate client and a
+        // thief now both hold tokens from the same chain. Treat it as a breach —
+        // revoke the entire session family (bumps session_version, invalidating
+        // every active JWT, and deletes all refresh tokens) so neither side keeps
+        // access. The wire contract is unchanged: the caller still sees
+        // `refresh_token_invalid` and must re-authenticate.
         if ( ! empty( $row['revoked_at'] ) ) {
+            $this->revokeAllSessions( (int) $row['user_id'] );
             throw new \InvalidArgumentException( 'refresh_token_invalid' );
         }
 
@@ -332,6 +340,14 @@ class SessionManager {
             );
 
             if ( false === $ok ) {
+                // A duplicate-key failure here means the uq_tenant_active_dni
+                // index caught a concurrent /auth/dni race for the same DNI that
+                // slipped past findConflictingAssociation() (TOCTOU). Surface it
+                // as the same friendly conflict the pre-check would have returned,
+                // not a 500.
+                if ( self::isDuplicateKeyError( (string) $wpdb->last_error ) ) {
+                    throw new \InvalidArgumentException( 'dni_already_associated' );
+                }
                 throw new \RuntimeException( 'db_user_insert_failed' );
             }
 
@@ -356,7 +372,10 @@ class SessionManager {
 
             $wpdb->query( 'COMMIT' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 
-        } catch ( \RuntimeException $e ) {
+        } catch ( \Throwable $e ) {
+            // Catch \Throwable (not just \RuntimeException) so the duplicate-key
+            // \InvalidArgumentException also rolls the transaction back instead
+            // of leaking an open transaction.
             $wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
             throw $e;
         }
@@ -368,6 +387,21 @@ class SessionManager {
             'user_id'         => $user_id,
             'session_version' => 1,
         ];
+    }
+
+    /**
+     * Tells whether a DB error string is a unique/duplicate-key violation.
+     *
+     * Portable across the production driver (MySQL: "Duplicate entry '...' for
+     * key 'uq_tenant_active_dni'") and the SQLite test shim ("UNIQUE constraint
+     * failed: ...").
+     *
+     * @param string $error The driver error message ($wpdb->last_error).
+     */
+    private static function isDuplicateKeyError( string $error ): bool {
+        return false !== stripos( $error, 'duplicate' )
+            || false !== stripos( $error, 'unique constraint' )
+            || false !== stripos( $error, 'uq_tenant_active_dni' );
     }
 
     /**
