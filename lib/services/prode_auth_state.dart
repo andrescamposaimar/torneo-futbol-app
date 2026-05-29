@@ -153,8 +153,9 @@ final class ProdeAuthNeedsDniConfirmation extends ProdeAuthState {
 /// [stale] is true when the session was reconstructed from a degraded
 /// placeholder during bootstrap (network failure path) and the real
 /// [ProdeUser] fields have not yet been confirmed by the server.
-/// It transitions to false on the first successful 401-interceptor refresh
-/// via [ProdeAuthController.onTokensRefreshed].
+/// It transitions to false on any successful refresh (bootstrap silent
+/// refresh or the 401-interceptor recovery path) via
+/// [ProdeAuthController.onTokensRefreshed].
 final class ProdeAuthAuthenticated extends ProdeAuthState {
   final ProdeUser user;
 

@@ -155,6 +155,8 @@ void main() {
       expect(authenticated.user.playerId, equals(7));
       expect(authenticated.user.name, equals('Juan Pérez'));
       expect(authenticated.user.sessionVersion, equals(5));
+      // Happy path emits server-confirmed data → stale must be false.
+      expect(authenticated.stale, isFalse);
     });
 
     // (c) Tokens + session_revoked → Revoked (via onAuthRequired)

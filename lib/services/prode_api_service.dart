@@ -150,7 +150,7 @@ class ProdeApiService {
 
     // --- 401 handling ---
     final body = _decodeBody(response);
-    final errorCode = _extractErrorCode(body);
+    final errorCode = extractErrorCode(body);
 
     if (errorCode == 'token_expired') {
       // Attempt a single refresh.
@@ -197,7 +197,7 @@ class ProdeApiService {
       // session_version may arrive as int (PHP int) or string (proxy/driver
       // serialization). Both are accepted; anything else is a hard failure
       // — storing 0 would force an immediate session_revoked on the retry.
-      final sessionVersion = _parseSessionVersionFromWire(rawSessionVersion);
+      final sessionVersion = parseSessionVersionFromWire(rawSessionVersion);
       if (sessionVersion == null) {
         await _authRepo.clear();
         invalidateTokenCache();
@@ -312,7 +312,7 @@ class ProdeApiService {
 
     if (response.statusCode == 401) {
       final body = _decodeBody(response);
-      final errorCode = _extractErrorCode(body);
+      final errorCode = extractErrorCode(body);
 
       await _authRepo.clear();
       // clear() fires onTokensChanged → invalidateTokenCache automatically.
@@ -419,7 +419,7 @@ class ProdeApiService {
     final playerId = rawPlayerId is int ? rawPlayerId : null;
     final name = rawName is String ? rawName : null;
     // session_version may arrive as int (PHP) or String (some proxies).
-    final sessionVersion = _parseSessionVersionFromWire(rawSv);
+    final sessionVersion = parseSessionVersionFromWire(rawSv);
 
     if (userId == null ||
         playerId == null ||
@@ -436,24 +436,25 @@ class ProdeApiService {
     );
   }
 
-  /// Extracts the machine-readable error code from a decoded 401 response body.
+  /// Extracts the machine-readable error code from a decoded 401 response.
   ///
-  /// AuthMiddleware-protected endpoints use `{"code": ...}` (WP_Error shape),
-  /// while `/auth/refresh` uses `{"error": ...}`. Both are accepted so all
-  /// authenticated paths resolve consistently to a single code string.
-  static String _extractErrorCode(Map<String, dynamic> body) =>
-      (body['code'] as String?) ?? (body['error'] as String?) ?? 'unknown';
+  /// AuthMiddleware-protected endpoints use `{"code": ...}` (WP_Error shape);
+  /// `/auth/refresh` uses `{"error": ...}`. Both keys are accepted. Values
+  /// that are not Strings (e.g., a server bug returning an int code) are
+  /// treated as missing and fall through to the next key or to 'unknown'.
+  @visibleForTesting
+  static String extractErrorCode(Map<String, dynamic> body) {
+    final code = body['code'];
+    if (code is String) return code;
+    final error = body['error'];
+    if (error is String) return error;
+    return 'unknown';
+  }
 
-  /// Parses a session_version value from a wire response into an [int].
-  ///
-  /// Accepts int (PHP JSON integer) or String (some proxy/driver
-  /// serializations). Any other type — including double, bool, or List —
-  /// is rejected and returns null, forcing the caller to handle the missing
-  /// value explicitly rather than silently defaulting to a wrong version.
-  ///
-  /// Used in both the 401-interceptor refresh path ([request]) and the
-  /// [parseProdeUser] static parser so both paths share identical semantics.
-  static int? _parseSessionVersionFromWire(Object? raw) {
+  /// Parses a wire JSON session_version value into an [int].
+  /// Accepts int or String; returns null otherwise.
+  @visibleForTesting
+  static int? parseSessionVersionFromWire(Object? raw) {
     if (raw is int) return raw;
     if (raw is String) return int.tryParse(raw);
     return null;

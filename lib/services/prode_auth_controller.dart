@@ -73,7 +73,9 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
 
       if (user != null) {
         // Happy path: server confirmed the session and returned real user data.
-        state = ProdeAuthAuthenticated(user: user);
+        // stale: false explicit (matches the style of the degraded-fallback
+        // and onTokensRefreshed call sites).
+        state = ProdeAuthAuthenticated(user: user, stale: false);
         return;
       }
 
