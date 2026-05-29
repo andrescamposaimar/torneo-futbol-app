@@ -21,13 +21,17 @@ const marianistaTenant = TenantConfig(
   integrations: TenantIntegrations(
     appsScriptUrl:
         'https://entreredespadres.com.ar/wp-content/uploads/media/listas_jugadores.json',
-    // TODO: replace placeholder OAuth client IDs once OAuth clients are provisioned
+    // Google OAuth clients provisioned (Cloud project 162105389930).
+    // Apple Team ID still pending — Sign in with Apple stays disabled until set.
     prodeAuth: ProdeAuthConfig(
       prodeApiBaseUrl:
           'https://entreredespadres.com.ar/wp-json/entre-redes/v1/prode',
-      googleWebClientId: 'TODO_GOOGLE_WEB_CLIENT_ID',
-      googleIosClientId: 'TODO_GOOGLE_IOS_CLIENT_ID',
-      googleAndroidClientId: 'TODO_GOOGLE_ANDROID_CLIENT_ID',
+      googleWebClientId:
+          '162105389930-0hsham0na79sutur9c15eo97j9f7n6rr.apps.googleusercontent.com',
+      googleIosClientId:
+          '162105389930-voh4mkso1fp05grfi5scms4u1bh2jdvj.apps.googleusercontent.com',
+      googleAndroidClientId:
+          '162105389930-c4cmrp0hmf9drerb348sg1rul8u33ias.apps.googleusercontent.com',
       appleServiceId: 'com.entreredes.app.web',
       appleTeamId: 'TODO_APPLE_TEAM_ID',
       appleRedirectUri:

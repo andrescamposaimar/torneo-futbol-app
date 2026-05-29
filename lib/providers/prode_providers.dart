@@ -1,9 +1,30 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+import '../config/prode_auth_config.dart';
 import '../config/tenant_provider.dart';
 import '../services/prode_auth_controller.dart';
 import '../services/prode_auth_repository.dart';
 import '../services/prode_api_service.dart';
 import '../services/prode_auth_state.dart';
+
+/// Drives the native Google Sign-In sheet and returns a Google id_token whose
+/// `aud` is the web client id (via [serverClientId]) — the audience the
+/// backend's GoogleVerifier validates. Returns null if the user cancels.
+Future<String?> _signInWithGoogleNative(ProdeAuthConfig cfg) async {
+  final googleSignIn = GoogleSignIn(
+    serverClientId: cfg.googleWebClientId,
+    // On iOS the native SDK needs the iOS client id; on Android the client is
+    // resolved from the package name + SHA-1 registered in Google Cloud.
+    clientId: Platform.isIOS ? cfg.googleIosClientId : null,
+  );
+  final account = await googleSignIn.signIn();
+  if (account == null) return null; // cancelled
+  final auth = await account.authentication;
+  return auth.idToken;
+}
 
 /// Provides a single [ProdeAuthRepository] instance for the lifetime of the
 /// enclosing [ProviderScope].
@@ -65,10 +86,13 @@ final prodeAuthControllerProvider =
     StateNotifierProvider<ProdeAuthController, ProdeAuthState>((ref) {
   final repository = ref.watch(prodeAuthRepositoryProvider);
   final service = ref.watch(prodeApiServiceProvider);
+  final cfg = ref.watch(tenantConfigProvider);
 
   final controller = ProdeAuthController(
     repository: repository,
     service: service,
+    tenantId: cfg.tenantId,
+    googleIdToken: () => _signInWithGoogleNative(cfg.integrations.prodeAuth!),
   );
 
   // Bridge service-side 401s into the state machine.

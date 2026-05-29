@@ -13,18 +13,31 @@ import 'prode_auth_state.dart';
 ///   - [onAuthRequired] — called by [ProdeApiService] when a 401 cannot be
 ///     recovered; transitions to Revoked or Unauthenticated based on the error.
 ///
-/// SSO and DNI-confirmation methods ([signInWithGoogle], [signInWithApple],
-/// [confirmDni]) are placeholders — they throw [UnimplementedError] until
-/// PR-07 wires the real SDKs.
+/// [signInWithGoogle] is wired to the Google SSO flow. [signInWithApple] and
+/// [confirmDni] remain placeholders (later slices).
 class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   final ProdeAuthRepository _repository;
   final ProdeApiService _service;
 
+  /// Tenant id stamped on tokens at initial login (see
+  /// [ProdeAuthRepository.write]). Provided by the provider from the active
+  /// tenant config.
+  final String _tenantId;
+
+  /// Returns a Google id_token (aud = web client id) or null if the user
+  /// cancelled. Injected so the controller stays unit-testable without the
+  /// google_sign_in SDK; the provider wires the real implementation.
+  final Future<String?> Function()? _googleIdToken;
+
   ProdeAuthController({
     required ProdeAuthRepository repository,
     required ProdeApiService service,
+    required String tenantId,
+    Future<String?> Function()? googleIdToken,
   })  : _repository = repository,
         _service = service,
+        _tenantId = tenantId,
+        _googleIdToken = googleIdToken,
         super(const ProdeAuthUnauthenticated());
 
   // ---------------------------------------------------------------------------
@@ -177,16 +190,63 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   // PR-07 placeholders
   // ---------------------------------------------------------------------------
 
-  /// Initiates Google Sign-In flow.
+  /// Runs the Google Sign-In flow:
+  ///   1. Obtain a Google id_token via the injected provider (the SDK call).
+  ///   2. Exchange it at `POST /prode/auth/google`.
+  ///   3. On `authenticated` → persist tokens (stamped with the tenant id) and
+  ///      transition to [ProdeAuthAuthenticated].
+  ///   4. On `dni_confirmation` → transition to [ProdeAuthNeedsDniConfirmation]
+  ///      so the DNI screen (later slice) can complete the link.
   ///
-  /// TODO(PR-07): wire google_sign_in SDK, call POST /prode/auth/google,
-  /// handle step=authenticated → Authenticated and step=dni_confirmation
-  /// → NeedsDniConfirmation transitions.
-  Future<void> signInWithGoogle() {
-    throw UnimplementedError(
-      'signInWithGoogle is not implemented. '
-      'Implement in PR-07 with google_sign_in SDK.',
-    );
+  /// Cancellation (provider returns null) returns to [ProdeAuthUnauthenticated]
+  /// silently. Any failure surfaces as [ProdeAuthError].
+  Future<void> signInWithGoogle() async {
+    final getIdToken = _googleIdToken;
+    if (getIdToken == null) {
+      state = const ProdeAuthError(
+        code: 'google_unavailable',
+        message: 'Google Sign-In no está configurado.',
+      );
+      return;
+    }
+
+    state = const ProdeAuthAuthenticating(provider: 'google');
+    try {
+      final idToken = await getIdToken();
+      if (idToken == null) {
+        // User cancelled the Google sheet.
+        state = const ProdeAuthUnauthenticated();
+        return;
+      }
+
+      final result = await _service.exchangeGoogleToken(idToken);
+
+      switch (result) {
+        case ProdeSsoAuthenticated(
+            :final user,
+            :final accessToken,
+            :final refreshToken,
+          ):
+          await _repository.write(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            sessionVersion: user.sessionVersion.toString(),
+            tenantId: _tenantId,
+          );
+          state = ProdeAuthAuthenticated(user: user, stale: false);
+        case ProdeSsoNeedsDni(:final intentToken, :final nameHint):
+          state = ProdeAuthNeedsDniConfirmation(
+            intentToken: intentToken,
+            nameHint: nameHint,
+          );
+      }
+    } on ProdeSsoException catch (e) {
+      state = ProdeAuthError(code: e.code, message: e.message);
+    } on PlatformException catch (e) {
+      state = ProdeAuthError(code: e.code, message: e.message ?? e.toString());
+    } catch (e) {
+      state = ProdeAuthError(code: 'google_signin_error', message: e.toString());
+    }
   }
 
   /// Initiates Apple Sign-In flow.

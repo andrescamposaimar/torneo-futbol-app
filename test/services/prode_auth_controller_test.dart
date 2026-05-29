@@ -74,14 +74,20 @@ http.Response _refresh401({String code = 'token_expired', String message = 'Toke
 /// Creates a controller backed by in-memory secure storage and a fake HTTP client.
 ProdeAuthController _makeController(
   ProdeAuthRepository repo,
-  http.Client httpClient,
-) {
+  http.Client httpClient, {
+  Future<String?> Function()? googleIdToken,
+}) {
   final service = ProdeApiService(
     config: _testConfig,
     authRepo: repo,
     httpClient: httpClient,
   );
-  final controller = ProdeAuthController(repository: repo, service: service);
+  final controller = ProdeAuthController(
+    repository: repo,
+    service: service,
+    tenantId: 'marianista',
+    googleIdToken: googleIdToken,
+  );
   service.onAuthRequired = controller.onAuthRequired;
   return controller;
 }
@@ -298,7 +304,11 @@ void main() {
         authRepo: repo,
         httpClient: MockClient((_) async => throw http.ClientException('Unused')),
       );
-      controller = ProdeAuthController(repository: repo, service: service);
+      controller = ProdeAuthController(
+        repository: repo,
+        service: service,
+        tenantId: 'marianista',
+      );
     });
 
     test('logout clears repository and transitions to Unauthenticated', () async {
@@ -438,7 +448,120 @@ void main() {
     });
   });
 
-  group('PR-07 placeholder methods throw UnimplementedError', () {
+  group('signInWithGoogle()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    http.Client googleClient(http.Response response) =>
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/google')) return response;
+          throw http.ClientException('Unexpected call to ${req.url}');
+        });
+
+    test('step=authenticated → Authenticated + tokens persisted', () async {
+      final controller = _makeController(
+        repo,
+        googleClient(http.Response(
+          json.encode({
+            'step': 'authenticated',
+            'access_token': 'acc-1',
+            'refresh_token': 'ref-1',
+            'user': {
+              'user_id': 10,
+              'player_id': 3,
+              'name': 'Juan',
+              'session_version': 2,
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        )),
+        googleIdToken: () async => 'fake-id-token',
+      );
+
+      await controller.signInWithGoogle();
+
+      final state = controller.state;
+      expect(state, isA<ProdeAuthAuthenticated>());
+      final auth = state as ProdeAuthAuthenticated;
+      expect(auth.user.userId, equals(10));
+      expect(auth.user.name, equals('Juan'));
+      expect(auth.stale, isFalse);
+      expect(await repo.readAccessToken(), equals('acc-1'));
+      expect(await repo.readRefreshToken(), equals('ref-1'));
+      expect(await repo.readTenantId(), equals('marianista'));
+    });
+
+    test('step=dni_confirmation → NeedsDniConfirmation with intent + nameHint',
+        () async {
+      final controller = _makeController(
+        repo,
+        googleClient(http.Response(
+          json.encode({
+            'step': 'dni_confirmation',
+            'intent_token': 'intent-xyz',
+            'profile': {
+              'name_first': 'Juan',
+              'name_last': 'Pérez',
+              'email': 'j@example.com',
+            },
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        )),
+        googleIdToken: () async => 'fake-id-token',
+      );
+
+      await controller.signInWithGoogle();
+
+      final state = controller.state;
+      expect(state, isA<ProdeAuthNeedsDniConfirmation>());
+      final needs = state as ProdeAuthNeedsDniConfirmation;
+      expect(needs.intentToken, equals('intent-xyz'));
+      expect(needs.nameHint, equals('Juan Pérez'));
+      // No tokens persisted yet.
+      expect(await repo.readAccessToken(), isNull);
+    });
+
+    test('user cancels (null id_token) → Unauthenticated', () async {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Should not be called')),
+        googleIdToken: () async => null,
+      );
+
+      await controller.signInWithGoogle();
+
+      expect(controller.state, isA<ProdeAuthUnauthenticated>());
+    });
+
+    test('backend rejects the provider token → ProdeAuthError', () async {
+      final controller = _makeController(
+        repo,
+        googleClient(http.Response(
+          json.encode(
+              {'code': 'invalid_provider_token', 'message': 'bad token'}),
+          401,
+          headers: {'content-type': 'application/json'},
+        )),
+        googleIdToken: () async => 'fake-id-token',
+      );
+
+      await controller.signInWithGoogle();
+
+      final state = controller.state;
+      expect(state, isA<ProdeAuthError>());
+      expect((state as ProdeAuthError).code, equals('invalid_provider_token'));
+    });
+  });
+
+  group('PR placeholder methods still throw UnimplementedError', () {
     late ProdeAuthController controller;
 
     setUp(() {
@@ -448,13 +571,6 @@ void main() {
       controller = _makeController(
         repo,
         MockClient((_) async => throw http.ClientException('Unused')),
-      );
-    });
-
-    test('signInWithGoogle throws UnimplementedError', () {
-      expect(
-        () async => controller.signInWithGoogle(),
-        throwsUnimplementedError,
       );
     });
 

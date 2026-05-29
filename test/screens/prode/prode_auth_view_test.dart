@@ -20,6 +20,7 @@ void main() {
             state: state,
             onLogout: () => logout++,
             onRetry: () => retry++,
+            onGoogleSignIn: () {},
           ),
         ),
       ),
@@ -85,6 +86,7 @@ void main() {
               ),
               onLogout: () => logout++,
               onRetry: () {},
+              onGoogleSignIn: () {},
             ),
           ),
         ),
@@ -93,10 +95,29 @@ void main() {
       expect(logout, equals(1));
     });
 
-    testWidgets('Unauthenticated shows the coming-soon sign-in message',
+    testWidgets('Unauthenticated shows the sign-in view with a Google button',
         (tester) async {
       await pumpView(tester, const ProdeAuthUnauthenticated());
       expect(find.text('Sumate al Prode'), findsOneWidget);
+      expect(find.text('Continuar con Google'), findsOneWidget);
+    });
+
+    testWidgets('Continuar con Google triggers onGoogleSignIn', (tester) async {
+      var google = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProdeAuthView(
+              state: const ProdeAuthUnauthenticated(),
+              onLogout: () {},
+              onRetry: () {},
+              onGoogleSignIn: () => google++,
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Continuar con Google'));
+      expect(google, equals(1));
     });
 
     testWidgets('NeedsDniConfirmation shows the coming-soon DNI message',
@@ -118,6 +139,7 @@ void main() {
               state: const ProdeAuthRevoked(reason: 'session_revoked'),
               onLogout: () => logout++,
               onRetry: () {},
+              onGoogleSignIn: () {},
             ),
           ),
         ),
@@ -141,6 +163,7 @@ void main() {
               ),
               onLogout: () {},
               onRetry: () => retry++,
+              onGoogleSignIn: () {},
             ),
           ),
         ),

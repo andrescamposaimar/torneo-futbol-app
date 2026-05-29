@@ -23,11 +23,15 @@ class ProdeAuthView extends StatelessWidget {
   /// Re-runs bootstrap (used by the Error and Revoked retry actions).
   final VoidCallback onRetry;
 
+  /// Starts the Google Sign-In flow (used by the Unauthenticated sign-in view).
+  final VoidCallback onGoogleSignIn;
+
   const ProdeAuthView({
     super.key,
     required this.state,
     required this.onLogout,
     required this.onRetry,
+    required this.onGoogleSignIn,
   });
 
   @override
@@ -38,13 +42,7 @@ class ProdeAuthView extends StatelessWidget {
         const _Centered(child: CircularProgressIndicator()),
       ProdeAuthAuthenticated(:final user, :final stale) =>
         _ProdeHome(user: user, stale: stale, onLogout: onLogout),
-      ProdeAuthUnauthenticated() => const _ComingSoon(
-          icon: Icons.sports_soccer,
-          title: 'Sumate al Prode',
-          message:
-              'Pronto vas a poder iniciar sesión con Google o Apple para '
-              'pronosticar los partidos del torneo.',
-        ),
+      ProdeAuthUnauthenticated() => _SignInView(onGoogleSignIn: onGoogleSignIn),
       ProdeAuthNeedsDniConfirmation() => const _ComingSoon(
           icon: Icons.badge_outlined,
           title: 'Confirmá tu identidad',
@@ -154,6 +152,69 @@ class _ProdeHome extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Sign-in view for the Unauthenticated state. Google is wired; Apple is shown
+/// disabled with a "próximamente" hint until its Team ID is provisioned.
+class _SignInView extends StatelessWidget {
+  final VoidCallback onGoogleSignIn;
+
+  const _SignInView({required this.onGoogleSignIn});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.sports_soccer, size: 64, color: theme.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text('Sumate al Prode', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            const Text(
+              'Iniciá sesión para pronosticar los partidos del torneo.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onGoogleSignIn,
+                icon: const Icon(Icons.account_circle),
+                label: const Text('Continuar con Google'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                // Disabled until the Apple Team ID is provisioned (next slice).
+                onPressed: null,
+                icon: const Icon(Icons.apple),
+                label: const Text('Continuar con Apple (próximamente)'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Al continuar aceptás los Términos del Servicio y la Política de '
+              'Privacidad.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.black54),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

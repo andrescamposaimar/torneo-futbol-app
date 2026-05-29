@@ -27,6 +27,56 @@ class ProdeAuthRequired implements Exception {
   String toString() => 'ProdeAuthRequired($code): $message';
 }
 
+/// Thrown when an SSO sign-in exchange (`POST /auth/google` or `/auth/apple`)
+/// fails — bad provider token, malformed response, or network error. The
+/// controller maps this to a [ProdeAuthError]. Distinct from
+/// [ProdeAuthRequired], which is for an already-established session going stale.
+class ProdeSsoException implements Exception {
+  final String code;
+  final String message;
+
+  const ProdeSsoException({required this.code, required this.message});
+
+  @override
+  String toString() => 'ProdeSsoException($code): $message';
+}
+
+// ---------------------------------------------------------------------------
+// SSO exchange result
+// ---------------------------------------------------------------------------
+
+/// Outcome of exchanging a provider id_token with the backend.
+///
+/// The backend returns one of two shapes: a returning user with final tokens
+/// (`step=authenticated`), or a new user that must confirm their DNI first
+/// (`step=dni_confirmation`). The service parses the wire response into this
+/// type; the controller persists tokens and drives the state machine.
+sealed class ProdeSsoResult {
+  const ProdeSsoResult();
+}
+
+/// Returning user: the backend issued final tokens.
+final class ProdeSsoAuthenticated extends ProdeSsoResult {
+  final ProdeUser user;
+  final String accessToken;
+  final String refreshToken;
+
+  const ProdeSsoAuthenticated({
+    required this.user,
+    required this.accessToken,
+    required this.refreshToken,
+  });
+}
+
+/// New user: SSO succeeded but no association exists yet, so the backend
+/// issued a short-lived intent token to complete DNI confirmation.
+final class ProdeSsoNeedsDni extends ProdeSsoResult {
+  final String intentToken;
+  final String? nameHint;
+
+  const ProdeSsoNeedsDni({required this.intentToken, this.nameHint});
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -262,6 +312,93 @@ class ProdeApiService {
     _emitAuthRequired(
       code: errorCode,
       message: (body['message'] as String?) ?? 'Authentication required.',
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // SSO sign-in
+  // ---------------------------------------------------------------------------
+
+  /// Exchanges a Google id_token for a Prode session.
+  ///
+  /// Calls `POST /prode/auth/google` and parses the two backend outcomes into
+  /// a [ProdeSsoResult]. Does NOT persist tokens — the controller owns that,
+  /// because it also knows the tenant id required by
+  /// [ProdeAuthRepository.write].
+  ///
+  /// Throws [ProdeSsoException] on a non-200 response, a malformed body, or a
+  /// network error.
+  Future<ProdeSsoResult> exchangeGoogleToken(String idToken) async {
+    final http.Response response;
+    try {
+      response = await _httpClient.post(
+        Uri.parse('${_config.prodeApiBaseUrl}/auth/google'),
+        headers: const {'Content-Type': 'application/json'},
+        body: json.encode({'id_token': idToken}),
+      );
+    } catch (e) {
+      throw const ProdeSsoException(
+        code: 'network_error',
+        message: 'No se pudo contactar el servidor.',
+      );
+    }
+
+    final body = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw ProdeSsoException(
+        code: extractErrorCode(body),
+        message: (body['message'] is String)
+            ? body['message'] as String
+            : 'No se pudo iniciar sesión.',
+      );
+    }
+
+    final step = body['step'];
+
+    if (step == 'authenticated') {
+      final access = body['access_token'];
+      final refresh = body['refresh_token'];
+      final user = parseProdeUser(
+        body['user'] is Map<String, dynamic>
+            ? body['user'] as Map<String, dynamic>
+            : null,
+      );
+      if (access is! String || refresh is! String || user == null) {
+        throw const ProdeSsoException(
+          code: 'malformed_response',
+          message: 'Respuesta de autenticación inválida.',
+        );
+      }
+      return ProdeSsoAuthenticated(
+        user: user,
+        accessToken: access,
+        refreshToken: refresh,
+      );
+    }
+
+    if (step == 'dni_confirmation') {
+      final intent = body['intent_token'];
+      if (intent is! String) {
+        throw const ProdeSsoException(
+          code: 'malformed_response',
+          message: 'Respuesta de confirmación inválida.',
+        );
+      }
+      final profile =
+          body['profile'] is Map<String, dynamic> ? body['profile'] as Map<String, dynamic> : const {};
+      final first = profile['name_first'] is String ? profile['name_first'] as String : '';
+      final last = profile['name_last'] is String ? profile['name_last'] as String : '';
+      final hint = '$first $last'.trim();
+      return ProdeSsoNeedsDni(
+        intentToken: intent,
+        nameHint: hint.isEmpty ? null : hint,
+      );
+    }
+
+    throw const ProdeSsoException(
+      code: 'unexpected_step',
+      message: 'Respuesta inesperada del servidor.',
     );
   }
 
