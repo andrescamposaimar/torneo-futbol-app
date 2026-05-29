@@ -1,7 +1,7 @@
 === Entre Redes — Prode Interno ===
 Contributors: entreredes
 Tags: football, predictions, prode, tournament
-Requires at least: 6.0
+Requires at least: 6.2
 Tested up to: 6.7
 Stable tag: 0.1.0
 Requires PHP: 8.0
