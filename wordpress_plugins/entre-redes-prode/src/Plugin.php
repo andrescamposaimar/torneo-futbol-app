@@ -32,6 +32,8 @@ final class Plugin {
             $dni_matcher   = new Auth\DniMatcher();
             $session       = new Auth\SessionManager();
             $audit         = new Audit\AuditLogger();
+            $hasher        = new Audit\DniHasher();
+            $middleware    = new Auth\AuthMiddleware( $jwt, $session );
 
             $auth_endpoints = new Rest\AuthEndpoints(
                 $jwt,
@@ -42,7 +44,14 @@ final class Plugin {
                 $audit
             );
 
-            $controller = new Rest\RestController( $auth_endpoints );
+            $account_controller = new Account\AccountController(
+                $middleware,
+                $session,
+                $audit,
+                $hasher
+            );
+
+            $controller = new Rest\RestController( $auth_endpoints, $account_controller );
             $controller->register_routes();
         } );
 

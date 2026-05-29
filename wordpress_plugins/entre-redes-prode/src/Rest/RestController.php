@@ -9,17 +9,23 @@ namespace EntreRedes\Prode\Rest;
  *
  * PR-01 scope: healthcheck + JWKS endpoints.
  * PR-02 scope: auth endpoints (google, apple, dni, refresh) wired here.
- * Auth, game, and account endpoints from PR-03+ are added in later PRs.
+ * PR-03 scope: account deletion endpoint wired here.
+ * Game, admin, and push endpoints from PR-04+ are added in later PRs.
  */
 class RestController {
 
     private const NAMESPACE = 'entre-redes/v1';
     private const BASE      = 'prode';
 
-    private ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints;
+    private ?\EntreRedes\Prode\Rest\AuthEndpoints       $auth_endpoints;
+    private ?\EntreRedes\Prode\Account\AccountController $account_controller;
 
-    public function __construct( ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null ) {
-        $this->auth_endpoints = $auth_endpoints;
+    public function __construct(
+        ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null,
+        ?\EntreRedes\Prode\Account\AccountController $account_controller = null
+    ) {
+        $this->auth_endpoints       = $auth_endpoints;
+        $this->account_controller   = $account_controller;
     }
 
     public function register_routes(): void {
@@ -49,6 +55,11 @@ class RestController {
         // Auth endpoints (PR-02): google, apple, dni, refresh.
         if ( null !== $this->auth_endpoints ) {
             $this->auth_endpoints->register_routes();
+        }
+
+        // Account endpoints (PR-03): DELETE /prode/account.
+        if ( null !== $this->account_controller ) {
+            $this->account_controller->register_routes();
         }
     }
 
