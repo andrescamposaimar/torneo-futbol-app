@@ -29,11 +29,17 @@ class _ProdeAuthGateState extends ConsumerState<ProdeAuthGate> {
     // Unauthenticated state: re-entering the gate while already Authenticated,
     // Revoked, or Error must NOT clobber that state with a fresh Hydrating +
     // redundant network refresh. (Error/Revoked expose their own retry CTA.)
-    // bootstrap()'s first synchronous statement sets Hydrating, so on a true
-    // cold entry the gate renders the loading state immediately — no flash of
-    // the Unauthenticated view.
     if (ref.read(prodeAuthControllerProvider) is ProdeAuthUnauthenticated) {
-      ref.read(prodeAuthControllerProvider.notifier).bootstrap();
+      // Defer with a microtask: bootstrap() mutates the provider synchronously
+      // (sets Hydrating), and Riverpod forbids modifying a provider while the
+      // widget tree is building (which is what initState/first-build is). The
+      // microtask runs right after this frame's build completes — before paint
+      // in practice — so there's no visible flash of the Unauthenticated view.
+      Future.microtask(() {
+        if (mounted) {
+          ref.read(prodeAuthControllerProvider.notifier).bootstrap();
+        }
+      });
     }
   }
 
