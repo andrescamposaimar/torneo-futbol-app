@@ -331,11 +331,15 @@ class ProdeApiService {
   Future<ProdeSsoResult> exchangeGoogleToken(String idToken) async {
     final http.Response response;
     try {
-      response = await _httpClient.post(
-        Uri.parse('${_config.prodeApiBaseUrl}/auth/google'),
-        headers: const {'Content-Type': 'application/json'},
-        body: json.encode({'id_token': idToken}),
-      );
+      response = await _httpClient
+          .post(
+            Uri.parse('${_config.prodeApiBaseUrl}/auth/google'),
+            headers: const {'Content-Type': 'application/json'},
+            body: json.encode({'id_token': idToken}),
+          )
+          // Bound the wait so a stalled connection can't leave the UI spinning
+          // forever — surfaces as a recoverable network error instead.
+          .timeout(const Duration(seconds: 30));
     } catch (e) {
       throw const ProdeSsoException(
         code: 'network_error',
