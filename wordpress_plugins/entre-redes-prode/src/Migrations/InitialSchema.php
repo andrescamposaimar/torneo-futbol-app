@@ -31,7 +31,9 @@ class InitialSchema {
     public static function up(): array {
         global $wpdb;
 
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        if ( ! function_exists( 'dbDelta' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
 
         self::assertInnoDB();
 
