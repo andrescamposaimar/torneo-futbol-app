@@ -7,6 +7,15 @@ import 'package:flutter/foundation.dart';
 /// [TenantIntegrations.prodeAuth] null.
 @immutable
 class ProdeAuthConfig {
+  /// Full base URL for Prode REST endpoints (no trailing slash).
+  ///
+  /// Example: `'https://entreredespadres.com.ar/wp-json/entre-redes/v1/prode'`
+  ///
+  /// [ProdeApiService] derives its refresh URL and all future endpoint URLs
+  /// from this field so callers never have to thread the base URL through
+  /// individual method parameters.
+  final String prodeApiBaseUrl;
+
   /// Google OAuth Web client ID.
   /// Required — used as the server-side token verification audience.
   final String googleWebClientId;
@@ -31,6 +40,7 @@ class ProdeAuthConfig {
   final String? appleRedirectUri;
 
   const ProdeAuthConfig({
+    required this.prodeApiBaseUrl,
     required this.googleWebClientId,
     this.googleIosClientId,
     this.googleAndroidClientId,
