@@ -377,6 +377,102 @@ void main() {
         isNull,
       );
     });
+
+    // parseSessionVersionFromWire unification: exotic types (double, bool, List)
+    // must return null. This is the same behavior the pre-PR-08 inline
+    // parsers had (both via `is String` and via `int.tryParse(toString())`,
+    // which produced null for double "3.0", bool "true", etc.). The PR-08
+    // refactor extracts the shared helper without changing semantics.
+    test('session_version as double → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 3.0,
+        }),
+        isNull,
+      );
+    });
+
+    test('session_version as bool → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': true,
+        }),
+        isNull,
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Direct unit tests for the static @visibleForTesting helpers.
+  // ---------------------------------------------------------------------------
+
+  group('ProdeApiService.extractErrorCode()', () {
+    test('returns body[code] when present', () {
+      expect(
+        ProdeApiService.extractErrorCode({'code': 'token_expired'}),
+        equals('token_expired'),
+      );
+    });
+
+    test('falls back to body[error] when code is absent', () {
+      expect(
+        ProdeApiService.extractErrorCode({'error': 'refresh_token_invalid'}),
+        equals('refresh_token_invalid'),
+      );
+    });
+
+    test('prefers code over error when both present', () {
+      expect(
+        ProdeApiService.extractErrorCode({
+          'code': 'session_revoked',
+          'error': 'other',
+        }),
+        equals('session_revoked'),
+      );
+    });
+
+    test("returns 'unknown' when neither key is present", () {
+      expect(ProdeApiService.extractErrorCode({}), equals('unknown'));
+    });
+
+    test('non-String code value falls through to error or unknown', () {
+      expect(
+        ProdeApiService.extractErrorCode({'code': 42, 'error': 'fallback'}),
+        equals('fallback'),
+      );
+    });
+  });
+
+  group('ProdeApiService.parseSessionVersionFromWire()', () {
+    test('int → int', () {
+      expect(ProdeApiService.parseSessionVersionFromWire(7), equals(7));
+    });
+
+    test('numeric String → int', () {
+      expect(ProdeApiService.parseSessionVersionFromWire('7'), equals(7));
+    });
+
+    test('non-numeric String → null', () {
+      expect(ProdeApiService.parseSessionVersionFromWire('abc'), isNull);
+    });
+
+    test('double → null', () {
+      expect(ProdeApiService.parseSessionVersionFromWire(3.0), isNull);
+    });
+
+    test('bool → null', () {
+      expect(ProdeApiService.parseSessionVersionFromWire(true), isNull);
+    });
+
+    test('null → null', () {
+      expect(ProdeApiService.parseSessionVersionFromWire(null), isNull);
+    });
   });
 
   group('ProdeApiService.request() — 401 interceptor', () {

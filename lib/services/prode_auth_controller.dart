@@ -73,7 +73,9 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
 
       if (user != null) {
         // Happy path: server confirmed the session and returned real user data.
-        state = ProdeAuthAuthenticated(user: user);
+        // stale: false explicit (matches the style of the degraded-fallback
+        // and onTokensRefreshed call sites).
+        state = ProdeAuthAuthenticated(user: user, stale: false);
         return;
       }
 
@@ -99,6 +101,7 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
           name: '', // degraded placeholder — resolved on next API call
           sessionVersion: sessionVersion,
         ),
+        stale: true,
       );
     } on PlatformException catch (e) {
       state = ProdeAuthError(
@@ -165,7 +168,8 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   void onTokensRefreshed(ProdeUser user) {
     final current = state;
     if (current is ProdeAuthAuthenticated) {
-      state = ProdeAuthAuthenticated(user: user);
+      // stale: false explicitly documents that real server-confirmed data arrived.
+      state = ProdeAuthAuthenticated(user: user, stale: false);
     }
   }
 

@@ -132,7 +132,7 @@ void main() {
       expect(a, isNot(equals(c)));
     });
 
-    test('Authenticated equality depends on user', () {
+    test('Authenticated equality depends on user and stale', () {
       const user = ProdeUser(
         userId: 1,
         playerId: 1,
@@ -141,7 +141,9 @@ void main() {
       );
       const a = ProdeAuthAuthenticated(user: user);
       const b = ProdeAuthAuthenticated(user: user);
+      const c = ProdeAuthAuthenticated(user: user, stale: true);
       expect(a, equals(b));
+      expect(a, isNot(equals(c)));
     });
 
     test('Revoked equality depends on reason', () {
@@ -174,6 +176,38 @@ void main() {
       const state = ProdeAuthNeedsDniConfirmation(intentToken: 'secret_tok');
       expect(state.toString(), isNot(contains('secret_tok')));
       expect(state.toString(), contains('[redacted]'));
+    });
+  });
+
+  group('ProdeAuthAuthenticated — stale flag', () {
+    const user = ProdeUser(
+      userId: 1,
+      playerId: 10,
+      name: 'Test',
+      sessionVersion: 2,
+    );
+
+    test('stale defaults to false', () {
+      const state = ProdeAuthAuthenticated(user: user);
+      expect(state.stale, isFalse);
+    });
+
+    test('stale: true construction is distinguishable from stale: false', () {
+      const fresh = ProdeAuthAuthenticated(user: user);
+      const degraded = ProdeAuthAuthenticated(user: user, stale: true);
+      expect(fresh.stale, isFalse);
+      expect(degraded.stale, isTrue);
+      expect(fresh, isNot(equals(degraded)));
+    });
+
+    test('toString includes stale field', () {
+      const state = ProdeAuthAuthenticated(user: user, stale: true);
+      expect(state.toString(), contains('stale: true'));
+    });
+
+    test('toString with stale: false includes stale field', () {
+      const state = ProdeAuthAuthenticated(user: user);
+      expect(state.toString(), contains('stale: false'));
     });
   });
 }

@@ -149,23 +149,37 @@ final class ProdeAuthNeedsDniConfirmation extends ProdeAuthState {
 }
 
 /// The user has a valid session (tokens present and not revoked).
+///
+/// [stale] is true when the session was reconstructed from a degraded
+/// placeholder during bootstrap (network failure path) and the real
+/// [ProdeUser] fields have not yet been confirmed by the server.
+/// It transitions to false on any successful refresh (bootstrap silent
+/// refresh or the 401-interceptor recovery path) via
+/// [ProdeAuthController.onTokensRefreshed].
 final class ProdeAuthAuthenticated extends ProdeAuthState {
   final ProdeUser user;
 
-  const ProdeAuthAuthenticated({required this.user});
+  /// Whether this state carries a degraded placeholder [ProdeUser] from
+  /// bootstrap rather than a server-confirmed user. UI consumers should
+  /// treat stale=true as "identity pending" and show reduced functionality
+  /// or a loading indicator until the next successful refresh clears it.
+  final bool stale;
+
+  const ProdeAuthAuthenticated({required this.user, this.stale = false});
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is ProdeAuthAuthenticated &&
           runtimeType == other.runtimeType &&
-          user == other.user;
+          user == other.user &&
+          stale == other.stale;
 
   @override
-  int get hashCode => Object.hash(runtimeType, user);
+  int get hashCode => Object.hash(runtimeType, user, stale);
 
   @override
-  String toString() => 'ProdeAuthAuthenticated(user: $user)';
+  String toString() => 'ProdeAuthAuthenticated(user: $user, stale: $stale)';
 }
 
 /// The session was invalidated server-side (admin unlink or account

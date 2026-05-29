@@ -155,6 +155,8 @@ void main() {
       expect(authenticated.user.playerId, equals(7));
       expect(authenticated.user.name, equals('Juan Pérez'));
       expect(authenticated.user.sessionVersion, equals(5));
+      // Happy path emits server-confirmed data → stale must be false.
+      expect(authenticated.stale, isFalse);
     });
 
     // (c) Tokens + session_revoked → Revoked (via onAuthRequired)
@@ -212,6 +214,8 @@ void main() {
       expect(authenticated.user.playerId, equals(0));
       expect(authenticated.user.name, equals(''));
       expect(authenticated.user.sessionVersion, equals(4));
+      // stale: true signals the UI that identity has not been server-confirmed yet
+      expect(authenticated.stale, isTrue);
 
       // Storage must NOT be cleared on network failure
       expect(await repo.readAccessToken(), equals('acc'));
@@ -378,7 +382,7 @@ void main() {
 
     test('Authenticated(placeholder) → Authenticated(realUser) on refresh', () {
       // Seed the controller in the degraded-placeholder shape that bootstrap
-      // emits on network failure.
+      // emits on network failure (stale: true).
       controller.state = ProdeAuthAuthenticated(
         user: const ProdeUser(
           userId: 0,
@@ -386,6 +390,7 @@ void main() {
           name: '',
           sessionVersion: 3,
         ),
+        stale: true,
       );
 
       const real = ProdeUser(
@@ -401,6 +406,8 @@ void main() {
       expect(auth.user.userId, equals(42));
       expect(auth.user.name, equals('María García'));
       expect(auth.user.sessionVersion, equals(4));
+      // stale: false confirms real server-confirmed data arrived
+      expect(auth.stale, isFalse);
     });
 
     test('Unauthenticated → unchanged (refresh must not silently re-auth)',
