@@ -7,7 +7,7 @@ import 'package:meta/meta.dart';
 /// Authenticated Prode user — carried by [ProdeAuthAuthenticated].
 ///
 /// Pure value class: const constructor, ==, hashCode, toString.
-/// JSON parsing lives in ProdeApiService._parseProdeUser — infrastructure
+/// JSON parsing lives in ProdeApiService.parseProdeUser — infrastructure
 /// concerns do not belong on a domain value type.
 @immutable
 class ProdeUser {
