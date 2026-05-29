@@ -43,12 +43,25 @@ if ( ! class_exists( 'wpdb' ) ) {
          * Executes a raw SQL string. Returns number of affected rows or false.
          */
         public function query( string $sql ): int|false {
+            $sql = $this->translateForSqlite( $sql );
             try {
                 return $this->pdo->exec( $sql );
             } catch ( \PDOException $e ) {
                 $this->last_error = $e->getMessage();
                 return false;
             }
+        }
+
+        /**
+         * Rewrites the few MySQL-isms the plugin emits at runtime into their
+         * SQLite equivalents (DDL is handled separately in _prode_mysql_to_sqlite).
+         */
+        private function translateForSqlite( string $sql ): string {
+            // MySQL `INSERT IGNORE INTO` → SQLite `INSERT OR IGNORE INTO`.
+            $sql = preg_replace( '/\bINSERT\s+IGNORE\b/i', 'INSERT OR IGNORE', $sql );
+            // MySQL `START TRANSACTION` → SQLite `BEGIN`.
+            $sql = preg_replace( '/^\s*START\s+TRANSACTION\b/i', 'BEGIN', $sql );
+            return $sql;
         }
 
         /**
@@ -238,22 +251,45 @@ if ( ! function_exists( 'dbDelta' ) ) {
         $sql = preg_replace( '/\)\s*(ENGINE|DEFAULT CHARSET|COLLATE|AUTO_INCREMENT)\s*[=\w]*[^;]*/i', ')', $sql );
         $sql = preg_replace( '/\s*(ENGINE|DEFAULT CHARSET|COLLATE|CHARACTER SET)\s*=\s*\w+/i', '', $sql );
 
+        // Identify the AUTO_INCREMENT column BEFORE stripping qualifiers, so we
+        // can promote it to a real SQLite rowid alias (INTEGER PRIMARY KEY) — that
+        // is what makes inserts which omit the id auto-increment.
+        $pk_col = null;
+        if ( preg_match( '/(\w+)\s+(?:BIG)?INT\s+(?:UNSIGNED\s+)?NOT NULL\s+AUTO_INCREMENT/i', $sql, $m ) ) {
+            $pk_col = $m[1];
+        }
+
         // Remove UNSIGNED (SQLite doesn't support it).
         $sql = str_ireplace( ' UNSIGNED', '', $sql );
 
-        // Translate AUTO_INCREMENT primary key to SQLite INTEGER PRIMARY KEY.
-        $sql = preg_replace( '/BIGINT\s+NOT NULL\s+AUTO_INCREMENT/i', 'INTEGER NOT NULL', $sql );
-        $sql = preg_replace( '/BIGINT\s+AUTO_INCREMENT/i', 'INTEGER', $sql );
-        $sql = preg_replace( '/INT\s+NOT NULL\s+AUTO_INCREMENT/i', 'INTEGER NOT NULL', $sql );
+        // ENUM('a','b') has no SQLite equivalent — store it as TEXT.
+        $sql = preg_replace( '/\bENUM\s*\([^)]*\)/i', 'TEXT', $sql );
 
-        // Remove remaining AUTO_INCREMENT occurrences.
+        // Promote the AUTO_INCREMENT column to INTEGER PRIMARY KEY inline.
+        if ( null !== $pk_col ) {
+            $sql = preg_replace(
+                '/\b' . preg_quote( $pk_col, '/' ) . '\s+(?:BIG)?INT\s+NOT NULL\s+AUTO_INCREMENT/i',
+                $pk_col . ' INTEGER PRIMARY KEY',
+                $sql
+            );
+        }
+
+        // Remove any remaining AUTO_INCREMENT occurrences.
         $sql = str_ireplace( ' AUTO_INCREMENT', '', $sql );
 
-        // Remove KEY / INDEX / UNIQUE KEY lines (they are separate DDL in SQLite).
+        // Drop separate index lines (UNIQUE KEY / KEY / INDEX are separate DDL in
+        // SQLite) and the standalone PRIMARY KEY line — its column is now an inline
+        // INTEGER PRIMARY KEY.
         $lines = explode( "\n", $sql );
-        $lines = array_filter( $lines, static function ( string $line ) {
+        $lines = array_filter( $lines, static function ( string $line ) use ( $pk_col ) {
             $trimmed = ltrim( $line );
-            return ! preg_match( '/^(UNIQUE\s+KEY|KEY|INDEX)\s+/i', $trimmed );
+            if ( preg_match( '/^(UNIQUE\s+KEY|KEY|INDEX)\s+/i', $trimmed ) ) {
+                return false;
+            }
+            if ( null !== $pk_col && preg_match( '/^PRIMARY KEY\s*\(/i', $trimmed ) ) {
+                return false;
+            }
+            return true;
         } );
         $sql = implode( "\n", $lines );
 
@@ -343,6 +379,14 @@ if ( ! function_exists( 'add_filter' ) ) {
 
 if ( ! defined( 'OBJECT' ) ) {
     define( 'OBJECT', 'OBJECT' );
+}
+
+if ( ! defined( 'ARRAY_A' ) ) {
+    define( 'ARRAY_A', 'ARRAY_A' );
+}
+
+if ( ! defined( 'ARRAY_N' ) ) {
+    define( 'ARRAY_N', 'ARRAY_N' );
 }
 
 if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
