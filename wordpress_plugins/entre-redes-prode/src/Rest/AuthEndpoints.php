@@ -243,6 +243,20 @@ class AuthEndpoints {
                 $display_name,
                 $player['player_id']
             );
+        } catch ( \InvalidArgumentException $e ) {
+            // The uq_tenant_active_dni index caught a concurrent same-DNI race
+            // that slipped past the step-2 pre-check. Return the same 409 the
+            // pre-check would have returned. (No audit row here: the conflicting
+            // provider isn't known on this path, and we won't log a misleading
+            // value — the friendly pre-check covers the common case.)
+            if ( 'dni_already_associated' === $e->getMessage() ) {
+                return $this->errorResponse(
+                    'dni_already_associated',
+                    'This DNI is already linked to a different account.',
+                    409
+                );
+            }
+            return $this->errorResponse( 'server_error', 'Account creation failed.', 500 );
         } catch ( \RuntimeException $e ) {
             return $this->errorResponse( 'server_error', 'Account creation failed.', 500 );
         }
