@@ -541,6 +541,18 @@ void main() {
       expect(controller.state, isA<ProdeAuthUnauthenticated>());
     });
 
+    test('Google SDK throwing → ProdeAuthError', () async {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Should not be called')),
+        googleIdToken: () async => throw Exception('sdk boom'),
+      );
+
+      await controller.signInWithGoogle();
+
+      expect(controller.state, isA<ProdeAuthError>());
+    });
+
     test('backend rejects the provider token → ProdeAuthError', () async {
       final controller = _makeController(
         repo,

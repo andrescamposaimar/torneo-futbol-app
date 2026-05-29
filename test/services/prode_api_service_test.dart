@@ -732,5 +732,18 @@ void main() {
         throwsA(isA<ProdeSsoException>()),
       );
     });
+
+    test('transport failure → ProdeSsoException(network_error)', () async {
+      final svc = _makeService(
+        repo,
+        MockClient((_) async => throw http.ClientException('offline')),
+      );
+      try {
+        await svc.exchangeGoogleToken('id-token');
+        fail('should have thrown');
+      } on ProdeSsoException catch (e) {
+        expect(e.code, equals('network_error'));
+      }
+    });
   });
 }
