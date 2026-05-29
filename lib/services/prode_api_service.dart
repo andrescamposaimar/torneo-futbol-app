@@ -52,6 +52,11 @@ class ProdeApiService {
   final ProdeAuthRepository _authRepo;
   final http.Client _httpClient;
 
+  /// Whether this service created [_httpClient] itself (and therefore owns its
+  /// lifecycle). An injected client is owned by the caller and must NOT be
+  /// closed here.
+  final bool _ownsClient;
+
   /// In-memory cache for the current access token.
   ///
   /// Avoids a secure-storage read on every authenticated request.
@@ -105,7 +110,17 @@ class ProdeApiService {
     http.Client? httpClient,
   })  : _config = config,
         _authRepo = authRepo,
+        _ownsClient = httpClient == null,
         _httpClient = httpClient ?? http.Client();
+
+  /// Releases the underlying [http.Client] when this service created it.
+  /// Wire this to the owning provider's dispose hook so the connection pool is
+  /// not leaked when the service is recreated (e.g. tenant switch or re-login).
+  void dispose() {
+    if (_ownsClient) {
+      _httpClient.close();
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -421,10 +436,14 @@ class ProdeApiService {
       final decoded = json.decode(response.body);
       if (decoded is Map<String, dynamic>) return decoded;
       return {};
-    } on FormatException catch (e) {
+    } on FormatException {
+      // Do NOT interpolate the exception: FormatException.toString() includes a
+      // snippet of the source around the parse offset, which for an auth/refresh
+      // body can contain token material — and debugPrint is NOT stripped in
+      // release builds. Log only non-sensitive metadata.
       debugPrint(
         'ProdeApiService: failed to decode response body '
-        '(status=${response.statusCode}): $e',
+        '(status=${response.statusCode}, length=${response.body.length})',
       );
       return {};
     }

@@ -4,7 +4,7 @@
  * Plugin URI:        https://entreredespadres.com.ar
  * Description:       Authenticated predictions game for the Entre Redes football league. Requires the Entre Redes main plugin.
  * Version:           0.1.0
- * Requires at least: 6.0
+ * Requires at least: 6.2
  * Requires PHP:      8.0
  * Author:            Entre Redes
  * Author URI:        https://entreredespadres.com.ar

@@ -47,6 +47,10 @@ class AccountDeletionTest extends TestCase {
 
     protected function setUp(): void {
         InitialSchema::up();
+        // The DNI pepper is provisioned by MigrationRunner on activation, not by
+        // InitialSchema::up(). Provision it here so DniHasher (used by the audit
+        // log on deletion) does not throw dni_pepper_not_provisioned.
+        update_option( 'prode_audit_dni_pepper', 'test_pepper_value' );
         $this->seedTestUserAndAssociation();
 
         $this->session    = new SessionManager();
