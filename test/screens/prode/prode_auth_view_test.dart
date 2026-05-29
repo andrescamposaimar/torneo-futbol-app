@@ -127,16 +127,17 @@ void main() {
       expect(logout, equals(1));
     });
 
-    testWidgets('Error shows the message and Reintentar triggers onRetry',
+    testWidgets('Error shows friendly copy (not the raw message) and Reintentar triggers onRetry',
         (tester) async {
       var retry = 0;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
             body: ProdeAuthView(
+              // message is a raw exception string — must NOT reach the UI.
               state: const ProdeAuthError(
-                code: 'network_error',
-                message: 'No hay conexión',
+                code: 'bootstrap_error',
+                message: 'Bad state: PlatformException(...)',
               ),
               onLogout: () {},
               onRetry: () => retry++,
@@ -144,7 +145,8 @@ void main() {
           ),
         ),
       );
-      expect(find.text('No hay conexión'), findsOneWidget);
+      expect(find.text('Algo salió mal'), findsOneWidget);
+      expect(find.textContaining('PlatformException'), findsNothing);
       await tester.tap(find.text('Reintentar'));
       expect(retry, equals(1));
     });

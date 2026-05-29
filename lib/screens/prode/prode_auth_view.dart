@@ -61,10 +61,15 @@ class ProdeAuthView extends StatelessWidget {
           actionLabel: 'Volver a ingresar',
           onAction: onLogout,
         ),
-      ProdeAuthError(:final message) => _MessageAction(
+      // The controller fills ProdeAuthError.message with e.toString() for
+      // diagnostics; don't surface that developer-y text to league users —
+      // show friendly generic copy and keep the technical detail for logging.
+      ProdeAuthError() => _MessageAction(
           icon: Icons.error_outline,
           title: 'Algo salió mal',
-          message: message,
+          message:
+              'No pudimos cargar el Prode. Revisá tu conexión y reintentá en '
+              'unos minutos.',
           actionLabel: 'Reintentar',
           onAction: onRetry,
         ),

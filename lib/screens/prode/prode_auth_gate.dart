@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/prode_providers.dart';
+import '../../services/prode_auth_state.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import 'prode_auth_view.dart';
 
@@ -23,10 +24,17 @@ class _ProdeAuthGateState extends ConsumerState<ProdeAuthGate> {
   @override
   void initState() {
     super.initState();
-    // bootstrap()'s first synchronous statement sets state to Hydrating, so
-    // calling it here (before the first build) means the gate renders the
-    // loading state immediately — no flash of the Unauthenticated view.
-    ref.read(prodeAuthControllerProvider.notifier).bootstrap();
+    // The controller is app-scoped (non-autoDispose), so its state survives
+    // navigating away and back. Only bootstrap from the resting/initial
+    // Unauthenticated state: re-entering the gate while already Authenticated,
+    // Revoked, or Error must NOT clobber that state with a fresh Hydrating +
+    // redundant network refresh. (Error/Revoked expose their own retry CTA.)
+    // bootstrap()'s first synchronous statement sets Hydrating, so on a true
+    // cold entry the gate renders the loading state immediately — no flash of
+    // the Unauthenticated view.
+    if (ref.read(prodeAuthControllerProvider) is ProdeAuthUnauthenticated) {
+      ref.read(prodeAuthControllerProvider.notifier).bootstrap();
+    }
   }
 
   @override
@@ -35,7 +43,7 @@ class _ProdeAuthGateState extends ConsumerState<ProdeAuthGate> {
     final controller = ref.read(prodeAuthControllerProvider.notifier);
 
     return Scaffold(
-      appBar: EntreRedesAppBar(title: 'Prode'),
+      appBar: const EntreRedesAppBar(title: 'Prode'),
       body: ProdeAuthView(
         state: state,
         onLogout: controller.logout,
