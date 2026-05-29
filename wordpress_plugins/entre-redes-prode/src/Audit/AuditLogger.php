@@ -219,7 +219,18 @@ class AuditLogger {
             'created_at'       => current_time( 'mysql' ),
         ], static fn( $v ) => null !== $v );
 
-        $wpdb->insert( $table, $row ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+        $ok = $wpdb->insert( $table, $row ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+
+        if ( false === $ok ) {
+            // The audit trail is a Ley 25.326 compliance requirement; a failed
+            // write must not be silent. Log the event type + driver error only
+            // (never PII, DNI, or tokens) so the failure is observable in ops.
+            error_log( sprintf(
+                '[entre-redes-prode] audit_log insert failed for event_type=%s: %s',
+                $event_type,
+                (string) $wpdb->last_error
+            ) );
+        }
     }
 
     /**
