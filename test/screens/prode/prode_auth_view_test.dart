@@ -21,6 +21,7 @@ void main() {
             onLogout: () => logout++,
             onRetry: () => retry++,
             onGoogleSignIn: () {},
+            onConfirmDni: (_) async => null,
           ),
         ),
       ),
@@ -87,6 +88,7 @@ void main() {
               onLogout: () => logout++,
               onRetry: () {},
               onGoogleSignIn: () {},
+              onConfirmDni: (_) async => null,
             ),
           ),
         ),
@@ -112,6 +114,7 @@ void main() {
               onLogout: () {},
               onRetry: () {},
               onGoogleSignIn: () => google++,
+              onConfirmDni: (_) async => null,
             ),
           ),
         ),
@@ -120,13 +123,73 @@ void main() {
       expect(google, equals(1));
     });
 
-    testWidgets('NeedsDniConfirmation shows the coming-soon DNI message',
+    testWidgets('NeedsDniConfirmation shows the DNI form (greeting + field + button)',
         (tester) async {
       await pumpView(
         tester,
-        const ProdeAuthNeedsDniConfirmation(intentToken: 'tok'),
+        const ProdeAuthNeedsDniConfirmation(
+          intentToken: 'tok',
+          nameHint: 'Ana',
+        ),
       );
-      expect(find.text('Confirmá tu identidad'), findsOneWidget);
+      expect(find.text('¡Hola, Ana!'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'DNI'), findsOneWidget);
+      expect(find.widgetWithText(ElevatedButton, 'Confirmar'), findsOneWidget);
+    });
+
+    testWidgets('submitting a DNI calls onConfirmDni and shows the returned error inline',
+        (tester) async {
+      String? submitted;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProdeAuthView(
+              state: const ProdeAuthNeedsDniConfirmation(intentToken: 'tok'),
+              onLogout: () {},
+              onRetry: () {},
+              onGoogleSignIn: () {},
+              onConfirmDni: (dni) async {
+                submitted = dni;
+                return 'Ese DNI no figura en el padrón.';
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField), '12345678');
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      expect(submitted, equals('12345678'));
+      expect(find.text('Ese DNI no figura en el padrón.'), findsOneWidget);
+    });
+
+    testWidgets('empty DNI shows a validation message and does not call onConfirmDni',
+        (tester) async {
+      var called = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProdeAuthView(
+              state: const ProdeAuthNeedsDniConfirmation(intentToken: 'tok'),
+              onLogout: () {},
+              onRetry: () {},
+              onGoogleSignIn: () {},
+              onConfirmDni: (dni) async {
+                called = true;
+                return null;
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.widgetWithText(ElevatedButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      expect(called, isFalse);
+      expect(find.text('Ingresá tu DNI.'), findsOneWidget);
     });
 
     testWidgets('Revoked shows the session-closed message and re-login CTA',
@@ -140,6 +203,7 @@ void main() {
               onLogout: () => logout++,
               onRetry: () {},
               onGoogleSignIn: () {},
+              onConfirmDni: (_) async => null,
             ),
           ),
         ),
@@ -164,6 +228,7 @@ void main() {
               onLogout: () {},
               onRetry: () => retry++,
               onGoogleSignIn: () {},
+              onConfirmDni: (_) async => null,
             ),
           ),
         ),

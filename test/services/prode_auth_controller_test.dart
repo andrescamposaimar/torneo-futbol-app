@@ -573,29 +573,122 @@ void main() {
     });
   });
 
-  group('PR placeholder methods still throw UnimplementedError', () {
-    late ProdeAuthController controller;
+  group('confirmDni()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
 
     setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    // Drives a controller into NeedsDniConfirmation (via a google
+    // dni_confirmation response), then routes POST /auth/dni to [dniResponse].
+    Future<ProdeAuthController> inNeedsDni(http.Response dniResponse) async {
+      final controller = _makeController(
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/google')) {
+            return http.Response(
+              json.encode({
+                'step': 'dni_confirmation',
+                'intent_token': 'intent-1',
+                'profile': {'name_first': 'Ana', 'name_last': 'Gómez'},
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (req.url.path.endsWith('/auth/dni')) return dniResponse;
+          throw http.ClientException('Unexpected ${req.url}');
+        }),
+        googleIdToken: () async => 'fake-id-token',
+      );
+      await controller.signInWithGoogle();
+      expect(controller.state, isA<ProdeAuthNeedsDniConfirmation>());
+      return controller;
+    }
+
+    test('success → Authenticated + tokens persisted, returns null', () async {
+      final controller = await inNeedsDni(http.Response(
+        json.encode({
+          'step': 'authenticated',
+          'access_token': 'acc-dni',
+          'refresh_token': 'ref-dni',
+          'user': {
+            'user_id': 5,
+            'player_id': 9,
+            'name': 'Ana Gómez',
+            'session_version': 1,
+          },
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      ));
+
+      final err = await controller.confirmDni('12345678');
+
+      expect(err, isNull);
+      expect(controller.state, isA<ProdeAuthAuthenticated>());
+      expect((controller.state as ProdeAuthAuthenticated).user.userId, equals(5));
+      expect(await repo.readAccessToken(), equals('acc-dni'));
+      expect(await repo.readTenantId(), equals('marianista'));
+    });
+
+    test('dni_not_in_roster (422) → stays on DNI step, returns roster message',
+        () async {
+      final controller = await inNeedsDni(http.Response(
+        json.encode({'code': 'dni_not_in_roster', 'message': 'x'}),
+        422,
+        headers: {'content-type': 'application/json'},
+      ));
+
+      final err = await controller.confirmDni('00000000');
+
+      expect(err, contains('padrón'));
+      expect(controller.state, isA<ProdeAuthNeedsDniConfirmation>());
+      expect(await repo.readAccessToken(), isNull);
+    });
+
+    test('dni_already_associated (409) → returns already-linked message',
+        () async {
+      final controller = await inNeedsDni(http.Response(
+        json.encode({'code': 'dni_already_associated', 'message': 'x'}),
+        409,
+        headers: {'content-type': 'application/json'},
+      ));
+
+      final err = await controller.confirmDni('12345678');
+
+      expect(err, contains('vinculado'));
+      expect(controller.state, isA<ProdeAuthNeedsDniConfirmation>());
+    });
+
+    test('called outside NeedsDniConfirmation → returns a message, no state change',
+        () async {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('unused')),
+      );
+      // Initial state is Unauthenticated.
+      final err = await controller.confirmDni('12345678');
+
+      expect(err, isNotNull);
+      expect(controller.state, isA<ProdeAuthUnauthenticated>());
+    });
+  });
+
+  group('signInWithApple() is still a placeholder', () {
+    test('throws UnimplementedError', () {
       final store = <String, String>{};
       _setUpFakeStorage(store);
-      final repo = ProdeAuthRepository();
-      controller = _makeController(
-        repo,
+      final controller = _makeController(
+        ProdeAuthRepository(),
         MockClient((_) async => throw http.ClientException('Unused')),
       );
-    });
-
-    test('signInWithApple throws UnimplementedError', () {
       expect(
         () async => controller.signInWithApple(),
-        throwsUnimplementedError,
-      );
-    });
-
-    test('confirmDni throws UnimplementedError', () {
-      expect(
-        () async => controller.confirmDni('12345678'),
         throwsUnimplementedError,
       );
     });

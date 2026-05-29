@@ -26,12 +26,17 @@ class ProdeAuthView extends StatelessWidget {
   /// Starts the Google Sign-In flow (used by the Unauthenticated sign-in view).
   final VoidCallback onGoogleSignIn;
 
+  /// Submits the entered DNI (used by the NeedsDniConfirmation view).
+  /// Returns null on success, or a user-facing error message to show inline.
+  final Future<String?> Function(String dni) onConfirmDni;
+
   const ProdeAuthView({
     super.key,
     required this.state,
     required this.onLogout,
     required this.onRetry,
     required this.onGoogleSignIn,
+    required this.onConfirmDni,
   });
 
   @override
@@ -43,12 +48,9 @@ class ProdeAuthView extends StatelessWidget {
       ProdeAuthAuthenticated(:final user, :final stale) =>
         _ProdeHome(user: user, stale: stale, onLogout: onLogout),
       ProdeAuthUnauthenticated() => _SignInView(onGoogleSignIn: onGoogleSignIn),
-      ProdeAuthNeedsDniConfirmation() => const _ComingSoon(
-          icon: Icons.badge_outlined,
-          title: 'Confirmá tu identidad',
-          message:
-              'La confirmación de DNI estará disponible en la próxima '
-              'actualización.',
+      ProdeAuthNeedsDniConfirmation(:final nameHint) => _DniConfirmView(
+          nameHint: nameHint,
+          onConfirmDni: onConfirmDni,
         ),
       ProdeAuthRevoked() => _MessageAction(
           icon: Icons.lock_outline,
@@ -219,32 +221,106 @@ class _SignInView extends StatelessWidget {
   }
 }
 
-/// A centered icon + title + message, used for the not-yet-wired states.
-class _ComingSoon extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String message;
+/// DNI confirmation form, shown for the NeedsDniConfirmation state (new user
+/// after SSO). Owns its own submission UX (text field, submitting spinner,
+/// inline error) and delegates the network call to [onConfirmDni], which
+/// returns null on success or a user-facing error message.
+class _DniConfirmView extends StatefulWidget {
+  final String? nameHint;
+  final Future<String?> Function(String dni) onConfirmDni;
 
-  const _ComingSoon({
-    required this.icon,
-    required this.title,
-    required this.message,
-  });
+  const _DniConfirmView({required this.nameHint, required this.onConfirmDni});
+
+  @override
+  State<_DniConfirmView> createState() => _DniConfirmViewState();
+}
+
+class _DniConfirmViewState extends State<_DniConfirmView> {
+  final _controller = TextEditingController();
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final dni = _controller.text.trim();
+    if (dni.isEmpty) {
+      setState(() => _error = 'Ingresá tu DNI.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final error = await widget.onConfirmDni(dni);
+    if (!mounted) return;
+    // On success the controller transitions to Authenticated and this view is
+    // replaced, so we only need to handle the error case here.
+    if (error != null) {
+      setState(() {
+        _submitting = false;
+        _error = error;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final greeting = (widget.nameHint == null || widget.nameHint!.isEmpty)
+        ? 'Confirmá tu identidad'
+        : '¡Hola, ${widget.nameHint}!';
+
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 64, color: theme.colorScheme.primary),
+            Icon(Icons.badge_outlined,
+                size: 64, color: theme.colorScheme.primary),
             const SizedBox(height: 16),
-            Text(title, style: theme.textTheme.headlineSmall),
+            Text(greeting, style: theme.textTheme.headlineSmall),
             const SizedBox(height: 8),
-            Text(message, textAlign: TextAlign.center),
+            const Text(
+              'Ingresá tu DNI para vincular tu cuenta con tu jugador del '
+              'torneo.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _controller,
+              keyboardType: TextInputType.number,
+              enabled: !_submitting,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'DNI',
+                border: const OutlineInputBorder(),
+                errorText: _error,
+              ),
+              onSubmitted: (_) => _submitting ? null : _submit(),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _submitting ? null : _submit,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: _submitting
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Confirmar'),
+              ),
+            ),
           ],
         ),
       ),
