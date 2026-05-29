@@ -289,15 +289,23 @@ void main() {
     });
   });
 
-  group('ProdeUser.fromJson()', () {
-    test('parses valid payload', () {
-      final user = ProdeUser.fromJson({
+  // ---------------------------------------------------------------------------
+  // ProdeApiService.parseProdeUser — direct synchronous parser unit tests.
+  //
+  // The parser is annotated @visibleForTesting precisely so test failures
+  // pinpoint parser bugs without confounding HTTP/storage layers. The single
+  // happy-path integration test for the parser → onTokensRefreshed pipeline
+  // lives in prode_auth_controller_test (or the silent-refresh group above).
+  // ---------------------------------------------------------------------------
+
+  group('ProdeApiService.parseProdeUser()', () {
+    test('parses valid payload — all fields present as int/String', () {
+      final user = ProdeApiService.parseProdeUser({
         'user_id': 10,
         'player_id': 3,
         'name': 'Ana López',
         'session_version': 2,
       });
-
       expect(user, isNotNull);
       expect(user!.userId, equals(10));
       expect(user.playerId, equals(3));
@@ -305,48 +313,69 @@ void main() {
       expect(user.sessionVersion, equals(2));
     });
 
-    test('parses session_version as String', () {
-      final user = ProdeUser.fromJson({
+    test('parses session_version delivered as String', () {
+      final user = ProdeApiService.parseProdeUser({
         'user_id': 1,
         'player_id': 1,
         'name': 'Test',
         'session_version': '3',
       });
-
       expect(user, isNotNull);
       expect(user!.sessionVersion, equals(3));
     });
 
-    test('returns null when user_id missing', () {
-      final user = ProdeUser.fromJson({
-        'player_id': 1,
-        'name': 'Test',
-        'session_version': 1,
-      });
-      expect(user, isNull);
+    test('null raw → returns null', () {
+      expect(ProdeApiService.parseProdeUser(null), isNull);
     });
 
-    test('returns null when name missing', () {
-      final user = ProdeUser.fromJson({
-        'user_id': 1,
-        'player_id': 1,
-        'session_version': 1,
-      });
-      expect(user, isNull);
+    test('missing user_id → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 1,
+        }),
+        isNull,
+      );
     });
 
-    test('returns null when session_version not parseable', () {
-      final user = ProdeUser.fromJson({
-        'user_id': 1,
-        'player_id': 1,
-        'name': 'Test',
-        'session_version': 'bad-value',
-      });
-      expect(user, isNull);
+    test('missing name → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': 1,
+          'player_id': 1,
+          'session_version': 1,
+        }),
+        isNull,
+      );
     });
 
-    test('returns null on empty map', () {
-      expect(ProdeUser.fromJson({}), isNull);
+    test('unparseable session_version → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': 1,
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 'bad-value',
+        }),
+        isNull,
+      );
+    });
+
+    test('empty user map → returns null', () {
+      expect(ProdeApiService.parseProdeUser({}), isNull);
+    });
+
+    test('wrong-type user_id (String instead of int) → returns null', () {
+      expect(
+        ProdeApiService.parseProdeUser({
+          'user_id': '10',
+          'player_id': 1,
+          'name': 'Test',
+          'session_version': 1,
+        }),
+        isNull,
+      );
     });
   });
 

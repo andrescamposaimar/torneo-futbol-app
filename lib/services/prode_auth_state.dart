@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 
 // ---------------------------------------------------------------------------
 // User data model
@@ -6,8 +6,9 @@ import 'package:flutter/foundation.dart';
 
 /// Authenticated Prode user — carried by [ProdeAuthAuthenticated].
 ///
-/// Fields mirror the `user` object returned by the backend on successful
-/// auth (POST /prode/auth/google|apple) and token refresh.
+/// Pure value class: const constructor, ==, hashCode, toString.
+/// JSON parsing lives in ProdeApiService.parseProdeUser — infrastructure
+/// concerns do not belong on a domain value type.
 @immutable
 class ProdeUser {
   final int userId;
@@ -35,50 +36,6 @@ class ProdeUser {
   @override
   int get hashCode =>
       Object.hash(userId, playerId, name, sessionVersion);
-
-  /// Parses the `user` object returned in the refresh and auth responses.
-  ///
-  /// Expected JSON shape (from `POST /prode/auth/refresh` and
-  /// `POST /prode/auth/google|apple`):
-  /// ```json
-  /// {
-  ///   "user_id":        <int>,
-  ///   "player_id":      <int>,
-  ///   "name":           <String>,
-  ///   "session_version":<int|String>
-  /// }
-  /// ```
-  /// All fields are required. Returns null when any required field is absent
-  /// or has the wrong type — the caller should treat null as a parse failure
-  /// and fall back to the degraded-placeholder path.
-  static ProdeUser? fromJson(Map<String, dynamic> json) {
-    final rawUserId = json['user_id'];
-    final rawPlayerId = json['player_id'];
-    final rawName = json['name'];
-    final rawSv = json['session_version'];
-
-    final userId = rawUserId is int ? rawUserId : null;
-    final playerId = rawPlayerId is int ? rawPlayerId : null;
-    final name = rawName is String ? rawName : null;
-    // session_version may arrive as int (PHP) or String (some proxies).
-    final sessionVersion = rawSv is int
-        ? rawSv
-        : (rawSv is String ? int.tryParse(rawSv) : null);
-
-    if (userId == null ||
-        playerId == null ||
-        name == null ||
-        sessionVersion == null) {
-      return null;
-    }
-
-    return ProdeUser(
-      userId: userId,
-      playerId: playerId,
-      name: name,
-      sessionVersion: sessionVersion,
-    );
-  }
 
   @override
   String toString() =>

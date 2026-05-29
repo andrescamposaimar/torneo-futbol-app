@@ -245,7 +245,7 @@ class ProdeApiService {
       // Authenticated. Silently best-effort: a malformed user payload
       // doesn't fail the refresh — tokens already rotated successfully.
       if (user is Map<String, dynamic>) {
-        final refreshedUser = ProdeUser.fromJson(user);
+        final refreshedUser = parseProdeUser(user);
         if (refreshedUser != null) {
           onTokensRefreshed?.call(refreshedUser);
         }
@@ -314,7 +314,7 @@ class ProdeApiService {
       if (newAccess is String &&
           newRefresh is String &&
           userMap is Map<String, dynamic>) {
-        final user = ProdeUser.fromJson(userMap);
+        final user = parseProdeUser(userMap);
         if (user != null) {
           await _authRepo.writeTokens(
             accessToken: newAccess,
@@ -419,6 +419,47 @@ class ProdeApiService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Parses a `user` map from an auth/refresh response into a [ProdeUser].
+  ///
+  /// Returns null when [raw] is null, any required field is absent, or any
+  /// field has the wrong type. Callers treat null as a parse failure and
+  /// fall back to the degraded-placeholder path.
+  ///
+  /// Annotated [@visibleForTesting] so parser semantics can be unit-tested
+  /// directly without spinning up an HTTP mock + storage fake to exercise
+  /// them through [attemptSilentRefresh].
+  @visibleForTesting
+  static ProdeUser? parseProdeUser(Map<String, dynamic>? raw) {
+    if (raw == null) return null;
+
+    final rawUserId = raw['user_id'];
+    final rawPlayerId = raw['player_id'];
+    final rawName = raw['name'];
+    final rawSv = raw['session_version'];
+
+    final userId = rawUserId is int ? rawUserId : null;
+    final playerId = rawPlayerId is int ? rawPlayerId : null;
+    final name = rawName is String ? rawName : null;
+    // session_version may arrive as int (PHP) or String (some proxies).
+    final sessionVersion = rawSv is int
+        ? rawSv
+        : (rawSv is String ? int.tryParse(rawSv) : null);
+
+    if (userId == null ||
+        playerId == null ||
+        name == null ||
+        sessionVersion == null) {
+      return null;
+    }
+
+    return ProdeUser(
+      userId: userId,
+      playerId: playerId,
+      name: name,
+      sessionVersion: sessionVersion,
+    );
   }
 
   /// Notifies [onAuthRequired] and throws [ProdeAuthRequired].

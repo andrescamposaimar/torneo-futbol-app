@@ -29,12 +29,13 @@ void main() {
       expect(await repo.readTenantId(), isNull);
     });
 
-    test('write and read round-trip for individual keys', () async {
-      // Individual writes use @visibleForTesting methods — valid from tests.
-      await repo.writeAccessToken('access-abc');
-      await repo.writeRefreshToken('refresh-xyz');
-      await repo.writeSessionVersion('7');
-      await repo.writeTenantId('marianista');
+    test('write and read round-trip for all fields via write()', () async {
+      await repo.write(
+        accessToken: 'access-abc',
+        refreshToken: 'refresh-xyz',
+        sessionVersion: '7',
+        tenantId: 'marianista',
+      );
 
       expect(await repo.readAccessToken(), equals('access-abc'));
       expect(await repo.readRefreshToken(), equals('refresh-xyz'));
@@ -77,8 +78,18 @@ void main() {
     });
 
     test('write overwrites existing value', () async {
-      await repo.writeAccessToken('old-token');
-      await repo.writeAccessToken('new-token');
+      await repo.write(
+        accessToken: 'old-token',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+      await repo.write(
+        accessToken: 'new-token',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
 
       expect(await repo.readAccessToken(), equals('new-token'));
     });
@@ -131,12 +142,20 @@ void main() {
       expect(decoded['tenant_id'], equals('marianista'));
     });
 
-    test('individual writes coalesce into the same single key', () async {
-      await repo.writeAccessToken('a');
-      await repo.writeRefreshToken('r');
-      await repo.writeTenantId('marianista');
+    test('sequential writes coalesce into the same single key', () async {
+      await repo.write(
+        accessToken: 'a',
+        refreshToken: 'r',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+      await repo.writeTokens(
+        accessToken: 'a2',
+        refreshToken: 'r2',
+        sessionVersion: '2',
+      );
 
-      // Still only one key regardless of how many individual writes occurred.
+      // Still only one key regardless of how many write calls occurred.
       expect(store.keys, hasLength(1));
       expect(store.keys.single, equals('prode_tokens'));
     });
@@ -273,15 +292,6 @@ void main() {
         repo.onTokensChanged = () => callCount++;
 
         await repo.clear();
-
-        expect(callCount, equals(1));
-      });
-
-      test('fires after individual writeAccessToken()', () async {
-        var callCount = 0;
-        repo.onTokensChanged = () => callCount++;
-
-        await repo.writeAccessToken('new-token');
 
         expect(callCount, equals(1));
       });
