@@ -631,4 +631,119 @@ void main() {
       expect(refreshCalls, equals(1));
     });
   });
+
+  group('ProdeApiService.exchangeGoogleToken()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    ProdeApiService service(http.Response response) => _makeService(
+          repo,
+          MockClient((req) async {
+            if (req.url.path.endsWith('/auth/google')) return response;
+            throw http.ClientException('Unexpected call to ${req.url}');
+          }),
+        );
+
+    test('step=authenticated → ProdeSsoAuthenticated with parsed user + tokens',
+        () async {
+      final result = await service(http.Response(
+        json.encode({
+          'step': 'authenticated',
+          'access_token': 'acc',
+          'refresh_token': 'ref',
+          'user': {
+            'user_id': 8,
+            'player_id': 4,
+            'name': 'Ana',
+            'session_version': 1,
+          },
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      )).exchangeGoogleToken('id-token');
+
+      expect(result, isA<ProdeSsoAuthenticated>());
+      final auth = result as ProdeSsoAuthenticated;
+      expect(auth.user.userId, equals(8));
+      expect(auth.accessToken, equals('acc'));
+      expect(auth.refreshToken, equals('ref'));
+    });
+
+    test('step=dni_confirmation → ProdeSsoNeedsDni with intent + nameHint',
+        () async {
+      final result = await service(http.Response(
+        json.encode({
+          'step': 'dni_confirmation',
+          'intent_token': 'intent-1',
+          'profile': {'name_first': 'Ana', 'name_last': 'Gómez'},
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      )).exchangeGoogleToken('id-token');
+
+      expect(result, isA<ProdeSsoNeedsDni>());
+      final needs = result as ProdeSsoNeedsDni;
+      expect(needs.intentToken, equals('intent-1'));
+      expect(needs.nameHint, equals('Ana Gómez'));
+    });
+
+    test('authenticated with malformed user → ProdeSsoException', () async {
+      expect(
+        service(http.Response(
+          json.encode({
+            'step': 'authenticated',
+            'access_token': 'acc',
+            'refresh_token': 'ref',
+            'user': {'player_id': 4}, // missing user_id/name/session_version
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        )).exchangeGoogleToken('id-token'),
+        throwsA(isA<ProdeSsoException>()),
+      );
+    });
+
+    test('non-200 → ProdeSsoException carrying the server code', () async {
+      try {
+        await service(http.Response(
+          json.encode({'code': 'invalid_provider_token', 'message': 'bad'}),
+          401,
+          headers: {'content-type': 'application/json'},
+        )).exchangeGoogleToken('id-token');
+        fail('should have thrown');
+      } on ProdeSsoException catch (e) {
+        expect(e.code, equals('invalid_provider_token'));
+      }
+    });
+
+    test('unexpected step → ProdeSsoException', () async {
+      expect(
+        service(http.Response(
+          json.encode({'step': 'something_else'}),
+          200,
+          headers: {'content-type': 'application/json'},
+        )).exchangeGoogleToken('id-token'),
+        throwsA(isA<ProdeSsoException>()),
+      );
+    });
+
+    test('transport failure → ProdeSsoException(network_error)', () async {
+      final svc = _makeService(
+        repo,
+        MockClient((_) async => throw http.ClientException('offline')),
+      );
+      try {
+        await svc.exchangeGoogleToken('id-token');
+        fail('should have thrown');
+      } on ProdeSsoException catch (e) {
+        expect(e.code, equals('network_error'));
+      }
+    });
+  });
 }
