@@ -746,4 +746,83 @@ void main() {
       }
     });
   });
+
+  group('ProdeApiService.confirmDni()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    ProdeApiService service(http.Response response) => _makeService(
+          repo,
+          MockClient((req) async {
+            if (req.url.path.endsWith('/auth/dni')) return response;
+            throw http.ClientException('Unexpected call to ${req.url}');
+          }),
+        );
+
+    test('200 authenticated → ProdeSsoAuthenticated with user + tokens', () async {
+      final result = await service(http.Response(
+        json.encode({
+          'step': 'authenticated',
+          'access_token': 'acc',
+          'refresh_token': 'ref',
+          'user': {
+            'user_id': 5,
+            'player_id': 9,
+            'name': 'Ana',
+            'session_version': 1,
+          },
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      )).confirmDni(intentToken: 'intent-1', dni: '12345678');
+
+      expect(result.user.userId, equals(5));
+      expect(result.accessToken, equals('acc'));
+      expect(result.refreshToken, equals('ref'));
+    });
+
+    test('422 dni_not_in_roster → ProdeSsoException with that code', () async {
+      try {
+        await service(http.Response(
+          json.encode({'code': 'dni_not_in_roster', 'message': 'x'}),
+          422,
+          headers: {'content-type': 'application/json'},
+        )).confirmDni(intentToken: 'intent-1', dni: '00000000');
+        fail('should have thrown');
+      } on ProdeSsoException catch (e) {
+        expect(e.code, equals('dni_not_in_roster'));
+      }
+    });
+
+    test('409 dni_already_associated → ProdeSsoException with that code',
+        () async {
+      try {
+        await service(http.Response(
+          json.encode({'code': 'dni_already_associated', 'message': 'x'}),
+          409,
+          headers: {'content-type': 'application/json'},
+        )).confirmDni(intentToken: 'intent-1', dni: '12345678');
+        fail('should have thrown');
+      } on ProdeSsoException catch (e) {
+        expect(e.code, equals('dni_already_associated'));
+      }
+    });
+
+    test('200 with malformed body → ProdeSsoException', () async {
+      expect(
+        service(http.Response(
+          json.encode({'step': 'authenticated', 'access_token': 'acc'}),
+          200,
+          headers: {'content-type': 'application/json'},
+        )).confirmDni(intentToken: 'intent-1', dni: '12345678'),
+        throwsA(isA<ProdeSsoException>()),
+      );
+    });
+  });
 }

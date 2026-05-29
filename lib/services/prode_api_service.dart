@@ -406,6 +406,68 @@ class ProdeApiService {
     );
   }
 
+  /// Confirms the DNI for a new user, completing the association.
+  ///
+  /// Calls `POST /prode/auth/dni` with the [intentToken] from the SSO step and
+  /// the user-entered [dni]. On success the backend creates the user+association
+  /// and returns final tokens (always `step=authenticated` — there is no
+  /// dni_confirmation branch here). Does NOT persist tokens; the controller
+  /// owns that (it knows the tenant id).
+  ///
+  /// Throws [ProdeSsoException] on a non-200 response (e.g. `dni_not_in_roster`
+  /// 422, `dni_already_associated` 409, `invalid_intent_token` 401), a malformed
+  /// body, or a network error.
+  Future<ProdeSsoAuthenticated> confirmDni({
+    required String intentToken,
+    required String dni,
+  }) async {
+    final http.Response response;
+    try {
+      response = await _httpClient
+          .post(
+            Uri.parse('${_config.prodeApiBaseUrl}/auth/dni'),
+            headers: const {'Content-Type': 'application/json'},
+            body: json.encode({'intent_token': intentToken, 'dni': dni}),
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (e) {
+      throw const ProdeSsoException(
+        code: 'network_error',
+        message: 'No se pudo contactar el servidor.',
+      );
+    }
+
+    final body = _decodeBody(response);
+
+    if (response.statusCode != 200) {
+      throw ProdeSsoException(
+        code: extractErrorCode(body),
+        message: (body['message'] is String)
+            ? body['message'] as String
+            : 'No se pudo confirmar el DNI.',
+      );
+    }
+
+    final access = body['access_token'];
+    final refresh = body['refresh_token'];
+    final user = parseProdeUser(
+      body['user'] is Map<String, dynamic>
+          ? body['user'] as Map<String, dynamic>
+          : null,
+    );
+    if (access is! String || refresh is! String || user == null) {
+      throw const ProdeSsoException(
+        code: 'malformed_response',
+        message: 'Respuesta de confirmación inválida.',
+      );
+    }
+    return ProdeSsoAuthenticated(
+      user: user,
+      accessToken: access,
+      refreshToken: refresh,
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Silent-refresh (bootstrap path)
   // ---------------------------------------------------------------------------

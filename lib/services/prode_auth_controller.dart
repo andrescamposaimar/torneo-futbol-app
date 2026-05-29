@@ -13,8 +13,8 @@ import 'prode_auth_state.dart';
 ///   - [onAuthRequired] — called by [ProdeApiService] when a 401 cannot be
 ///     recovered; transitions to Revoked or Unauthenticated based on the error.
 ///
-/// [signInWithGoogle] is wired to the Google SSO flow. [signInWithApple] and
-/// [confirmDni] remain placeholders (later slices).
+/// [signInWithGoogle] and [confirmDni] are wired to the SSO + DNI flow.
+/// [signInWithApple] remains a placeholder until its Team ID/keys are set up.
 class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   final ProdeAuthRepository _repository;
   final ProdeApiService _service;
@@ -262,14 +262,56 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
 
   /// Confirms the user's DNI after a successful SSO step.
   ///
-  /// TODO(PR-07): call POST /prode/auth/dni with [dni] and the intentToken
-  /// from [ProdeAuthNeedsDniConfirmation]; on success transition to
-  /// Authenticated; on failure surface the 422/409 error as ProdeAuthError.
-  Future<void> confirmDni(String dni) {
-    throw UnimplementedError(
-      'confirmDni is not implemented. '
-      'Implement in PR-07 once ProdeDniConfirmScreen lands.',
-    );
+  /// Uses the intent token from the current [ProdeAuthNeedsDniConfirmation]
+  /// state. On success, persists the final tokens (stamped with the tenant id)
+  /// and transitions to [ProdeAuthAuthenticated]. On failure, the state is left
+  /// unchanged (the DNI screen stays open) and a user-facing message is
+  /// RETURNED for inline display — this keeps the form's submission UX local to
+  /// the screen rather than spread through the state machine.
+  ///
+  /// Returns null on success, or a friendly error message on failure.
+  Future<String?> confirmDni(String dni) async {
+    final current = state;
+    if (current is! ProdeAuthNeedsDniConfirmation) {
+      return 'No hay una confirmación de DNI en curso.';
+    }
+
+    try {
+      final result = await _service.confirmDni(
+        intentToken: current.intentToken,
+        dni: dni,
+      );
+      await _repository.write(
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        sessionVersion: result.user.sessionVersion.toString(),
+        tenantId: _tenantId,
+      );
+      state = ProdeAuthAuthenticated(user: result.user, stale: false);
+      return null;
+    } on ProdeSsoException catch (e) {
+      return _dniErrorMessage(e.code);
+    } catch (e) {
+      return 'Algo salió mal. Reintentá en unos minutos.';
+    }
+  }
+
+  /// Maps a backend error code from the DNI step to user-facing Spanish copy.
+  String _dniErrorMessage(String code) {
+    switch (code) {
+      case 'dni_not_in_roster':
+        return 'Ese DNI no figura en el padrón de jugadores del torneo. '
+            'Revisá el número e intentá de nuevo.';
+      case 'dni_already_associated':
+        return 'Ese DNI ya está vinculado a otra cuenta.';
+      case 'invalid_intent_token':
+        return 'Tu ingreso expiró. Volvé atrás e iniciá sesión con Google de '
+            'nuevo.';
+      case 'network_error':
+        return 'No se pudo contactar el servidor. Revisá tu conexión.';
+      default:
+        return 'No se pudo confirmar el DNI. Reintentá en unos minutos.';
+    }
   }
 
   // ---------------------------------------------------------------------------

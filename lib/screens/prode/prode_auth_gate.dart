@@ -55,6 +55,7 @@ class _ProdeAuthGateState extends ConsumerState<ProdeAuthGate> {
         onLogout: controller.logout,
         onRetry: controller.bootstrap,
         onGoogleSignIn: controller.signInWithGoogle,
+        onConfirmDni: controller.confirmDni,
       ),
     );
   }
