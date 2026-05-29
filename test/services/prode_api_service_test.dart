@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
+import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 
 // ---------------------------------------------------------------------------
