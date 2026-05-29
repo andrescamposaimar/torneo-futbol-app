@@ -25,9 +25,24 @@ class SessionManagerTest extends TestCase {
     private SessionManager $manager;
 
     protected function setUp(): void {
+        global $wpdb;
+
         // Ensure tables exist in the shim's in-memory SQLite DB.
         \EntreRedes\Prode\Migrations\InitialSchema::up();
         $this->seedTestUser();
+
+        // The SQLite shim shares one in-memory DB across the whole run and has no
+        // per-test rollback (unlike the WP test framework). Reset the mutable
+        // state of the shared user row + clear leftover tokens/errors so tests are
+        // order-independent.
+        $wpdb->update(
+            $wpdb->prefix . 'prode_users',
+            [ 'session_version' => 1, 'deleted_at' => null ],
+            [ 'id' => 1 ]
+        );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_refresh_tokens" );
+        $wpdb->last_error = null;
+
         $this->manager = new SessionManager();
     }
 
@@ -171,6 +186,82 @@ class SessionManagerTest extends TestCase {
             [ 'deleted_at' => null ],
             [ 'id' => 1 ]
         );
+    }
+
+    /**
+     * W2: reusing an already-rotated (revoked) refresh token is a theft signal —
+     * it must revoke the entire session family, not just reject the one token.
+     */
+    public function test_reusing_revoked_refresh_token_triggers_family_revocation(): void {
+        global $wpdb;
+
+        $token = $this->manager->issueRefreshToken( 1 );
+        // First rotation revokes $token and issues a fresh one.
+        $this->manager->rotateRefreshToken( $token );
+
+        $sv_before = $this->manager->getUserSessionVersion( 1 );
+
+        // Reusing the now-revoked token still surfaces refresh_token_invalid...
+        $caught = null;
+        try {
+            $this->manager->rotateRefreshToken( $token );
+        } catch ( \InvalidArgumentException $e ) {
+            $caught = $e->getMessage();
+        }
+        $this->assertSame( 'refresh_token_invalid', $caught );
+
+        // ...but as a side effect the session_version is bumped (invalidating
+        // every outstanding JWT)...
+        $this->assertSame( $sv_before + 1, $this->manager->getUserSessionVersion( 1 ) );
+
+        // ...and all refresh tokens for the user are purged.
+        $count = (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}prode_refresh_tokens WHERE user_id = 1"
+        );
+        $this->assertSame( 0, $count );
+    }
+
+    /**
+     * W1: when two concurrent registrations race past the application-level
+     * conflict check, the DB unique index must surface as a friendly conflict
+     * (dni_already_associated), not a 500. The production guarantee is the
+     * MySQL-only uq_tenant_active_dni index; here we simulate it with a plain
+     * unique index since ensureActiveDniIndex() is a no-op on the SQLite shim.
+     */
+    public function test_create_user_with_duplicate_active_dni_returns_conflict(): void {
+        global $wpdb;
+
+        $wpdb->query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS test_uq_tenant_dni
+                ON {$wpdb->prefix}prode_users (tenant_id, dni)"
+        );
+
+        try {
+            // First registration for this DNI succeeds.
+            $first = $this->manager->createUserWithAssociation(
+                'google', 'sub-A', '99999999', 'a@example.com', 'User A', 100
+            );
+            $this->assertGreaterThan( 0, $first['user_id'] );
+
+            // A concurrent second registration for the SAME DNI hits the unique
+            // index and must be reported as a conflict, not a server error.
+            $caught = null;
+            try {
+                $this->manager->createUserWithAssociation(
+                    'apple', 'sub-B', '99999999', 'b@example.com', 'User B', 101
+                );
+            } catch ( \InvalidArgumentException $e ) {
+                $caught = $e->getMessage();
+            }
+            $this->assertSame( 'dni_already_associated', $caught );
+        } finally {
+            $wpdb->query( "DROP INDEX IF EXISTS test_uq_tenant_dni" );
+            $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_users WHERE dni = '99999999'" );
+            $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_associations WHERE dni = '99999999'" );
+            // The intentional duplicate insert set last_error; clear it so it does
+            // not leak into later tests that assert on $wpdb->last_error.
+            $wpdb->last_error = null;
+        }
     }
 
     // -------------------------------------------------------------------------

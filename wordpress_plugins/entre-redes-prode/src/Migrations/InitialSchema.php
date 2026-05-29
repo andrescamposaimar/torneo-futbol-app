@@ -31,7 +31,9 @@ class InitialSchema {
     public static function up(): array {
         global $wpdb;
 
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        if ( ! function_exists( 'dbDelta' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
 
         self::assertInnoDB();
 
@@ -56,9 +58,58 @@ class InitialSchema {
             $results = array_merge( $results, dbDelta( $sql ) );
         }
 
+        self::ensureActiveDniIndex( $p );
         self::seedSettings( $p );
 
         return $results;
+    }
+
+    /**
+     * Enforces "one active account per DNI per tenant" at the DB level.
+     *
+     * Adds a generated `active_dni` column to prode_users (equal to `dni` for
+     * live rows, NULL for soft-deleted rows) plus a UNIQUE index on
+     * (tenant_id, active_dni). Because MySQL treats NULLs as distinct in a
+     * UNIQUE index, this closes the TOCTOU race in the application-level
+     * conflict check (two concurrent /auth/dni calls for the same DNI) while
+     * still letting a user who deletes their account re-register later —
+     * deletion sets deleted_at, which flips active_dni to NULL and frees the
+     * DNI. This is consistent with ADR-P007 (deleted rows keep `dni` as an
+     * audit tombstone).
+     *
+     * Done outside dbDelta on purpose: dbDelta does not understand generated
+     * columns (and splits column definitions on commas, which an expression
+     * would break). Idempotent — skips when the column already exists, and is
+     * a no-op on non-MySQL test shims (no information_schema → null).
+     */
+    private static function ensureActiveDniIndex( string $p ): void {
+        global $wpdb;
+
+        $table = $p . 'prode_users';
+
+        $exists = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME   = %s
+                    AND COLUMN_NAME  = 'active_dni'",
+                $table
+            )
+        );
+
+        // null  → no information_schema (non-MySQL shim): skip silently.
+        // > 0   → already provisioned: skip.
+        if ( null === $exists || (int) $exists > 0 ) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $wpdb->query(
+            "ALTER TABLE {$table}
+                ADD COLUMN active_dni VARCHAR(20)
+                    GENERATED ALWAYS AS (CASE WHEN deleted_at IS NULL THEN dni END) STORED,
+                ADD UNIQUE KEY uq_tenant_active_dni (tenant_id, active_dni)"
+        );
     }
 
     // -------------------------------------------------------------------------

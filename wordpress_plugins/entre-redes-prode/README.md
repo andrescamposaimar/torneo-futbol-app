@@ -5,7 +5,7 @@ WordPress plugin that adds an authenticated predictions game to the Entre Redes 
 ## Requirements
 
 - PHP 8.0+
-- WordPress 6.0+
+- WordPress 6.2+
 - MySQL with InnoDB engine
 - Entre Redes base plugin (active)
 - `PRODE_TENANT_ID` constant in `wp-config.php`
