@@ -27,9 +27,11 @@ const facundoTenant = TenantConfig(
     waitingLists: false,
     newsTab: true,
     ads: false,
+    prode: false,
   ),
   // appsScriptUrl is null because waitingLists=false for Facundo
-  integrations: TenantIntegrations(),
+  // prodeAuth is null because prode=false for Facundo
+  integrations: TenantIntegrations(prodeAuth: null),
   // TODO: provide actual logo asset at this path
   logoAsset: 'assets/images/facundo/app_logo.png',
   documents: TenantDocuments(),

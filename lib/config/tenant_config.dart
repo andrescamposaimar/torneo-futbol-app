@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'prode_auth_config.dart';
 
 @immutable
 class BrandColors {
@@ -27,10 +28,15 @@ class TenantFeatures {
   final bool newsTab;
   final bool ads;
 
+  /// Whether the Prode (prediction game) feature is enabled for this tenant.
+  /// Defaults to false — tenants must explicitly opt in.
+  final bool prode;
+
   const TenantFeatures({
     this.waitingLists = false,
     this.newsTab = true,
     this.ads = true,
+    this.prode = false,
   });
 }
 
@@ -38,7 +44,12 @@ class TenantFeatures {
 class TenantIntegrations {
   final String? appsScriptUrl;
 
-  const TenantIntegrations({this.appsScriptUrl});
+  /// Prode OAuth/SSO configuration.
+  /// Must be non-null when [TenantFeatures.prode] is true.
+  /// Validated at startup in bootstrap.dart.
+  final ProdeAuthConfig? prodeAuth;
+
+  const TenantIntegrations({this.appsScriptUrl, this.prodeAuth});
 }
 
 /// Per-tenant content document URLs (PDFs, webviews, etc.).
