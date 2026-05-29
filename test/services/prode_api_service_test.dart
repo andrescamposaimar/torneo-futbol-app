@@ -349,4 +349,161 @@ void main() {
       expect(ProdeUser.fromJson({}), isNull);
     });
   });
+
+  group('ProdeApiService.request() — 401 interceptor', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    // Headline feature of PR-06: a 401 token_expired triggers a refresh, the
+    // freshly-parsed user is propagated via onTokensRefreshed (so the controller
+    // can lift a degraded placeholder), and the original request is retried with
+    // the new bearer.
+    test('401 token_expired → refreshes, lifts user via onTokensRefreshed, retries with new bearer', () async {
+      await repo.write(
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final bearers = <String>[];
+      var refreshCalls = 0;
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/refresh')) {
+            refreshCalls++;
+            return _refreshSuccessResponse(
+              accessToken: 'new-access',
+              refreshToken: 'new-refresh',
+              userId: 42,
+              playerId: 7,
+              name: 'Real User',
+              sessionVersion: 3,
+            );
+          }
+          bearers.add(req.headers['Authorization'] ?? '');
+          if (req.headers['Authorization'] == 'Bearer old-access') {
+            return http.Response(
+              json.encode({'code': 'token_expired', 'message': 'expired'}),
+              401,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(
+            json.encode({'ok': true}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      ProdeUser? refreshed;
+      service.onTokensRefreshed = (u) => refreshed = u;
+
+      final resp = await service.request(
+        http.Request('GET', Uri.parse('${_testConfig.prodeApiBaseUrl}/fechas')),
+      );
+
+      expect(resp.statusCode, equals(200));
+      expect(refreshCalls, equals(1));
+      // First attempt used the stale token; the retry used the refreshed one.
+      expect(bearers, equals(['Bearer old-access', 'Bearer new-access']));
+      // The full user object reached the controller (no userId:0 placeholder).
+      expect(refreshed, isNotNull);
+      expect(refreshed!.userId, equals(42));
+      expect(refreshed!.playerId, equals(7));
+      expect(refreshed!.name, equals('Real User'));
+      expect(refreshed!.sessionVersion, equals(3));
+      // Rotated tokens persisted.
+      expect(await repo.readAccessToken(), equals('new-access'));
+      expect(await repo.readRefreshToken(), equals('new-refresh'));
+    });
+
+    test('401 session_revoked → clears storage and throws ProdeAuthRequired', () async {
+      await repo.write(
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({'code': 'session_revoked', 'message': 'revoked'}),
+              401,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      ProdeAuthRequired? captured;
+      service.onAuthRequired = (e) => captured = e;
+
+      await expectLater(
+        service.request(
+          http.Request('GET', Uri.parse('${_testConfig.prodeApiBaseUrl}/fechas')),
+        ),
+        throwsA(isA<ProdeAuthRequired>()),
+      );
+
+      expect(captured?.code, equals('session_revoked'));
+      expect(await repo.readAccessToken(), isNull);
+    });
+
+    // Single-flight guard: two concurrent requests that both hit a 401 must
+    // share ONE POST /auth/refresh (otherwise the server rotates the refresh
+    // token on the first call and the second refresh fails spuriously).
+    test('concurrent 401s share a single refresh', () async {
+      await repo.write(
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      var refreshCalls = 0;
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/refresh')) {
+            refreshCalls++;
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            return _refreshSuccessResponse(
+              accessToken: 'new-access',
+              refreshToken: 'new-refresh',
+            );
+          }
+          if (req.headers['Authorization'] == 'Bearer old-access') {
+            return http.Response(
+              json.encode({'code': 'token_expired'}),
+              401,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(
+            json.encode({'ok': true}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final responses = await Future.wait([
+        service.request(http.Request('GET', Uri.parse('${_testConfig.prodeApiBaseUrl}/a'))),
+        service.request(http.Request('GET', Uri.parse('${_testConfig.prodeApiBaseUrl}/b'))),
+      ]);
+
+      expect(responses.every((r) => r.statusCode == 200), isTrue);
+      expect(refreshCalls, equals(1));
+    });
+  });
 }
