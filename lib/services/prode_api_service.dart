@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import 'prode_auth_repository.dart';
+import 'prode_auth_state.dart';
 
 // ---------------------------------------------------------------------------
 // Exceptions
@@ -62,21 +63,29 @@ class ProdeApiService {
   /// Invalidated on logout ([invalidateTokenCache]) and updated after
   /// every successful token refresh.
   ///
-  /// INVARIANT: whenever [ProdeAuthRepository] is written to or cleared,
-  /// the caller is responsible for also calling [invalidateTokenCache] so
-  /// the cache stays consistent. [ProdeAuthController] orchestrates both.
+  /// Cache coherence is maintained automatically: [ProdeAuthRepository]
+  /// fires [onTokensChanged] after every successful write or clear, and
+  /// [prodeAuthControllerProvider] wires that callback to
+  /// [invalidateTokenCache]. Any write to the repository — including from
+  /// future code paths — will automatically keep this cache in sync.
   String? _cachedAccessToken;
 
   /// Derived once from config — no trailing slash.
   late final String _refreshUrl =
       '${_config.prodeApiBaseUrl}/auth/refresh';
 
-  /// Single-flight guard for token refresh. When two concurrent [request]
-  /// calls both hit a 401, the second one awaits the first's refresh future
-  /// instead of triggering a duplicate POST /prode/auth/refresh — which
-  /// would cause the second refresh to fail with `refresh_token_invalid`
-  /// because the server rotated the token on the first call.
-  Future<Map<String, dynamic>?>? _inflightRefresh;
+  /// Single-flight guard for token refresh. When two concurrent callers
+  /// (bootstrap + a request hitting 401) both need to refresh, the second
+  /// one awaits the first's `http.Response?` instead of triggering a
+  /// duplicate `POST /prode/auth/refresh` — which would cause the second
+  /// to fail with `refresh_token_invalid` because the server rotated the
+  /// token on the first call.
+  ///
+  /// Returns the raw response so both call sites can branch on status:
+  /// the 401-interceptor in [request] treats any non-200 as failure,
+  /// while [attemptSilentRefresh] distinguishes 401 (clear + revoke) from
+  /// network failure (keep tokens).
+  Future<http.Response?>? _inflightRefresh;
 
   /// Notified when a 401 cannot be recovered (refresh failed, session
   /// revoked, or no token present). [ProdeAuthController] sets this in
@@ -84,6 +93,16 @@ class ProdeApiService {
   /// to Revoked / Unauthenticated. The service ALSO throws
   /// [ProdeAuthRequired] so callers can act on either signal.
   void Function(ProdeAuthRequired)? onAuthRequired;
+
+  /// Notified after a successful 401-interceptor refresh in [request] with
+  /// the freshly-parsed [ProdeUser] from the server's response.
+  ///
+  /// [ProdeAuthController] sets this in [prodeAuthControllerProvider] so
+  /// the controller's state can be lifted out of the degraded-placeholder
+  /// (userId=0, name='') that bootstrap emits when it could not reach the
+  /// server on cold start. Without this wiring the placeholder would
+  /// persist for the rest of the session.
+  void Function(ProdeUser)? onTokensRefreshed;
 
   ProdeApiService({
     required ProdeAuthConfig config,
@@ -165,9 +184,10 @@ class ProdeApiService {
         );
       }
 
-      final newTokens = await _attemptRefresh(refreshToken: refreshToken);
+      final refreshResponse =
+          await _attemptRefresh(refreshToken: refreshToken);
 
-      if (newTokens == null) {
+      if (refreshResponse == null || refreshResponse.statusCode != 200) {
         await _authRepo.clear();
         invalidateTokenCache();
         _emitAuthRequired(
@@ -178,6 +198,7 @@ class ProdeApiService {
 
       // Safe extraction: a 200 with a malformed body still reaches here,
       // and casting null/wrong-typed fields would throw uncaught TypeError.
+      final newTokens = _decodeBody(refreshResponse);
       final newAccess = newTokens['access_token'];
       final newRefresh = newTokens['refresh_token'];
       final user = newTokens['user'];
@@ -219,6 +240,17 @@ class ProdeApiService {
       // Update the in-memory cache with the fresh access token.
       _cachedAccessToken = newAccess;
 
+      // Notify the controller with the freshly-parsed user so the state
+      // machine can lift any degraded-placeholder ProdeUser out of
+      // Authenticated. Silently best-effort: a malformed user payload
+      // doesn't fail the refresh — tokens already rotated successfully.
+      if (user is Map<String, dynamic>) {
+        final refreshedUser = ProdeUser.fromJson(user);
+        if (refreshedUser != null) {
+          onTokensRefreshed?.call(refreshedUser);
+        }
+      }
+
       // Retry the original request once with the new access token.
       final retryRequest = _cloneWithBearer(request, newAccess);
       return _httpClient.send(retryRequest).then(http.Response.fromStream);
@@ -241,6 +273,92 @@ class ProdeApiService {
   }
 
   // ---------------------------------------------------------------------------
+  // Silent-refresh (bootstrap path)
+  // ---------------------------------------------------------------------------
+
+  /// Attempts a token refresh using [refreshToken] during app bootstrap.
+  ///
+  /// Routes through the same single-flight [_attemptRefresh] slot as the
+  /// 401-interceptor in [request], so concurrent bootstrap + 401-recovery
+  /// flows share one underlying `POST /prode/auth/refresh` instead of
+  /// racing to invalidate the same refresh token.
+  ///
+  /// Outcomes:
+  /// - **200 with valid user payload** — persists new tokens via
+  ///   [ProdeAuthRepository.writeTokens], updates [_cachedAccessToken],
+  ///   and returns the parsed [ProdeUser].
+  /// - **401 (any code)** — clears storage, fires [onAuthRequired] with the
+  ///   error code (so the controller transitions to Revoked or
+  ///   Unauthenticated), and THROWS [ProdeAuthRequired]. Callers should
+  ///   wrap the call in `try/on ProdeAuthRequired` to respect the state
+  ///   transition that already happened.
+  /// - **Network failure / non-401 server error / malformed 200 body** —
+  ///   returns null WITHOUT clearing storage. Tokens may still be valid;
+  ///   we just could not confirm. The caller ([ProdeAuthController.bootstrap])
+  ///   handles this as the degraded-fallback case.
+  Future<ProdeUser?> attemptSilentRefresh({
+    required String refreshToken,
+  }) async {
+    final response = await _attemptRefresh(refreshToken: refreshToken);
+    if (response == null) {
+      // Network failure — do NOT clear storage.
+      return null;
+    }
+
+    if (response.statusCode == 200) {
+      final body = _decodeBody(response);
+      final newAccess = body['access_token'];
+      final newRefresh = body['refresh_token'];
+      final userMap = body['user'];
+
+      if (newAccess is String &&
+          newRefresh is String &&
+          userMap is Map<String, dynamic>) {
+        final user = ProdeUser.fromJson(userMap);
+        if (user != null) {
+          await _authRepo.writeTokens(
+            accessToken: newAccess,
+            refreshToken: newRefresh,
+            sessionVersion: user.sessionVersion.toString(),
+          );
+          // writeTokens fires onTokensChanged → invalidateTokenCache;
+          // update the cache with the fresh token.
+          _cachedAccessToken = newAccess;
+          return user;
+        }
+      }
+      // 200 but malformed body — treat as non-fatal, return null without
+      // clearing (same as network failure: tokens might still be usable).
+      return null;
+    }
+
+    if (response.statusCode == 401) {
+      final body = _decodeBody(response);
+      final errorCode = (body['code'] as String?) ??
+          (body['error'] as String?) ??
+          'unknown';
+
+      await _authRepo.clear();
+      // clear() fires onTokensChanged → invalidateTokenCache automatically.
+
+      if (errorCode == 'session_revoked') {
+        _emitAuthRequired(
+          code: 'session_revoked',
+          message: (body['message'] as String?) ?? 'Session was revoked.',
+        );
+      } else {
+        _emitAuthRequired(
+          code: errorCode,
+          message: (body['message'] as String?) ?? 'Silent refresh failed.',
+        );
+      }
+    }
+
+    // Non-401 server error — do NOT clear storage.
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
@@ -260,9 +378,12 @@ class ProdeApiService {
   /// in flight, this method returns the same Future as the in-flight call —
   /// the second caller does not trigger a duplicate HTTP request.
   ///
-  /// Returns the parsed response body map on success (200), or null if the
-  /// refresh request fails or returns non-200.
-  Future<Map<String, dynamic>?> _attemptRefresh({
+  /// Returns the raw [http.Response] so callers can branch on status code:
+  /// [request]'s 401-interceptor treats any non-200 as failure, while
+  /// [attemptSilentRefresh] distinguishes 401 (clear + revoke) from
+  /// network failure (keep tokens). Returns null only on transport error
+  /// (no response received).
+  Future<http.Response?> _attemptRefresh({
     required String refreshToken,
   }) {
     final inflight = _inflightRefresh;
@@ -271,9 +392,9 @@ class ProdeApiService {
     }
     final future = _doRefresh(refreshToken: refreshToken);
     _inflightRefresh = future;
-    // Clear the slot regardless of success/failure so the next 401 path can
-    // retry on a fresh future. whenComplete fires after the awaiting callers
-    // have already received the result.
+    // Clear the slot regardless of success/failure so the next refresh can
+    // start fresh. whenComplete fires after awaiting callers receive the
+    // result.
     future.whenComplete(() {
       if (identical(_inflightRefresh, future)) {
         _inflightRefresh = null;
@@ -284,19 +405,17 @@ class ProdeApiService {
 
   /// The actual refresh HTTP call. Separated from [_attemptRefresh] so the
   /// single-flight wrapper above can manage the in-flight slot cleanly.
-  Future<Map<String, dynamic>?> _doRefresh({
+  ///
+  /// Returns the raw response (any status code) or null on transport error.
+  Future<http.Response?> _doRefresh({
     required String refreshToken,
   }) async {
     try {
-      final response = await _httpClient.post(
+      return await _httpClient.post(
         Uri.parse(_refreshUrl),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'refresh_token': refreshToken}),
       );
-      if (response.statusCode == 200) {
-        return _decodeBody(response);
-      }
-      return null;
     } catch (_) {
       return null;
     }

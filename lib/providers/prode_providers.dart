@@ -74,5 +74,16 @@ final prodeAuthControllerProvider =
   // Bridge service-side 401s into the state machine.
   service.onAuthRequired = controller.onAuthRequired;
 
+  // Bridge refreshed-user-from-401-interceptor into the state machine so the
+  // controller can lift a degraded-placeholder ProdeUser (from a network-failed
+  // bootstrap) on the first successful API call.
+  service.onTokensRefreshed = controller.onTokensRefreshed;
+
+  // Automatic cache coherence: any write to the repository (write, writeTokens,
+  // clear, and private _writeX helpers) fires onTokensChanged, which invalidates
+  // the service's in-memory access-token cache. This removes the need for every
+  // call site to manually pair storage writes with cache-invalidation calls.
+  repository.onTokensChanged = service.invalidateTokenCache;
+
   return controller;
 });

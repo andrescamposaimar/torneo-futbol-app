@@ -30,6 +30,7 @@ void main() {
     });
 
     test('write and read round-trip for individual keys', () async {
+      // Individual writes use @visibleForTesting methods — valid from tests.
       await repo.writeAccessToken('access-abc');
       await repo.writeRefreshToken('refresh-xyz');
       await repo.writeSessionVersion('7');
@@ -138,6 +139,183 @@ void main() {
       // Still only one key regardless of how many individual writes occurred.
       expect(store.keys, hasLength(1));
       expect(store.keys.single, equals('prode_tokens'));
+    });
+
+    // -------------------------------------------------------------------------
+    // readAll() tests
+    // -------------------------------------------------------------------------
+
+    group('readAll()', () {
+      test('returns all-null snapshot when storage is empty', () async {
+        final snapshot = await repo.readAll();
+        expect(snapshot.accessToken, isNull);
+        expect(snapshot.refreshToken, isNull);
+        expect(snapshot.sessionVersion, isNull);
+        expect(snapshot.tenantId, isNull);
+      });
+
+      test('returns all fields after a bulk write', () async {
+        await repo.write(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '9',
+          tenantId: 'marianista',
+        );
+
+        final snapshot = await repo.readAll();
+        expect(snapshot.accessToken, equals('acc'));
+        expect(snapshot.refreshToken, equals('ref'));
+        expect(snapshot.sessionVersion, equals('9'));
+        expect(snapshot.tenantId, equals('marianista'));
+      });
+
+      test('returns updated tokens after writeTokens', () async {
+        await repo.write(
+          accessToken: 'old-acc',
+          refreshToken: 'old-ref',
+          sessionVersion: '1',
+          tenantId: 'marianista',
+        );
+        await repo.writeTokens(
+          accessToken: 'new-acc',
+          refreshToken: 'new-ref',
+          sessionVersion: '2',
+        );
+
+        final snapshot = await repo.readAll();
+        expect(snapshot.accessToken, equals('new-acc'));
+        expect(snapshot.refreshToken, equals('new-ref'));
+        expect(snapshot.sessionVersion, equals('2'));
+        expect(snapshot.tenantId, equals('marianista'));
+      });
+
+      test('returns all-null snapshot after clear', () async {
+        await repo.write(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '1',
+          tenantId: 'marianista',
+        );
+        await repo.clear();
+
+        final snapshot = await repo.readAll();
+        expect(snapshot.accessToken, isNull);
+        expect(snapshot.refreshToken, isNull);
+        expect(snapshot.sessionVersion, isNull);
+        expect(snapshot.tenantId, isNull);
+      });
+
+      test('single storage read: readAll reads the blob once', () async {
+        // Verify readAll uses the same single key as individual reads.
+        await repo.write(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '3',
+          tenantId: 'marianista',
+        );
+
+        final snapshot = await repo.readAll();
+        final individual = [
+          await repo.readAccessToken(),
+          await repo.readRefreshToken(),
+          await repo.readSessionVersion(),
+          await repo.readTenantId(),
+        ];
+
+        expect(snapshot.accessToken, equals(individual[0]));
+        expect(snapshot.refreshToken, equals(individual[1]));
+        expect(snapshot.sessionVersion, equals(individual[2]));
+        expect(snapshot.tenantId, equals(individual[3]));
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // onTokensChanged callback tests
+    // -------------------------------------------------------------------------
+
+    group('onTokensChanged callback', () {
+      test('fires after write()', () async {
+        var callCount = 0;
+        repo.onTokensChanged = () => callCount++;
+
+        await repo.write(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '1',
+          tenantId: 'marianista',
+        );
+
+        expect(callCount, equals(1));
+      });
+
+      test('fires after writeTokens()', () async {
+        var callCount = 0;
+        repo.onTokensChanged = () => callCount++;
+
+        await repo.writeTokens(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '1',
+        );
+
+        expect(callCount, equals(1));
+      });
+
+      test('fires after clear()', () async {
+        await repo.write(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '1',
+          tenantId: 'marianista',
+        );
+
+        var callCount = 0;
+        repo.onTokensChanged = () => callCount++;
+
+        await repo.clear();
+
+        expect(callCount, equals(1));
+      });
+
+      test('fires after individual writeAccessToken()', () async {
+        var callCount = 0;
+        repo.onTokensChanged = () => callCount++;
+
+        await repo.writeAccessToken('new-token');
+
+        expect(callCount, equals(1));
+      });
+
+      test('fires once per write operation (not twice)', () async {
+        var callCount = 0;
+        repo.onTokensChanged = () => callCount++;
+
+        await repo.write(
+          accessToken: 'a1',
+          refreshToken: 'r1',
+          sessionVersion: '1',
+          tenantId: 'marianista',
+        );
+        await repo.writeTokens(
+          accessToken: 'a2',
+          refreshToken: 'r2',
+          sessionVersion: '2',
+        );
+
+        expect(callCount, equals(2));
+      });
+
+      test('does not fire when onTokensChanged is null', () async {
+        repo.onTokensChanged = null;
+        // Should not throw
+        await repo.write(
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          sessionVersion: '1',
+          tenantId: 'marianista',
+        );
+        await repo.clear();
+      });
     });
   });
 }
