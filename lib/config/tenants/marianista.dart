@@ -33,7 +33,7 @@ const marianistaTenant = TenantConfig(
       googleAndroidClientId:
           '162105389930-c4cmrp0hmf9drerb348sg1rul8u33ias.apps.googleusercontent.com',
       appleServiceId: 'com.entreredes.app.web',
-      appleTeamId: 'TODO_APPLE_TEAM_ID',
+      appleTeamId: '4Z7MM36M65',
       appleRedirectUri:
           'https://entreredespadres.com.ar/wp-json/entre-redes/v1/prode/auth/apple/callback',
     ),

@@ -26,6 +26,10 @@ class ProdeAuthView extends StatelessWidget {
   /// Starts the Google Sign-In flow (used by the Unauthenticated sign-in view).
   final VoidCallback onGoogleSignIn;
 
+  /// Starts the Apple Sign-In flow, or null when unavailable (non-iOS) — the
+  /// sign-in view hides the Apple button in that case.
+  final VoidCallback? onAppleSignIn;
+
   /// Submits the entered DNI (used by the NeedsDniConfirmation view).
   /// Returns null on success, or a user-facing error message to show inline.
   final Future<String?> Function(String dni) onConfirmDni;
@@ -36,6 +40,7 @@ class ProdeAuthView extends StatelessWidget {
     required this.onLogout,
     required this.onRetry,
     required this.onGoogleSignIn,
+    required this.onAppleSignIn,
     required this.onConfirmDni,
   });
 
@@ -47,7 +52,10 @@ class ProdeAuthView extends StatelessWidget {
         const _Centered(child: CircularProgressIndicator()),
       ProdeAuthAuthenticated(:final user, :final stale) =>
         _ProdeHome(user: user, stale: stale, onLogout: onLogout),
-      ProdeAuthUnauthenticated() => _SignInView(onGoogleSignIn: onGoogleSignIn),
+      ProdeAuthUnauthenticated() => _SignInView(
+          onGoogleSignIn: onGoogleSignIn,
+          onAppleSignIn: onAppleSignIn,
+        ),
       ProdeAuthNeedsDniConfirmation(:final nameHint) => _DniConfirmView(
           nameHint: nameHint,
           onConfirmDni: onConfirmDni,
@@ -158,12 +166,13 @@ class _ProdeHome extends StatelessWidget {
   }
 }
 
-/// Sign-in view for the Unauthenticated state. Google is wired; Apple is shown
-/// disabled with a "próximamente" hint until its Team ID is provisioned.
+/// Sign-in view for the Unauthenticated state. Google is always shown; the
+/// Apple button appears only when [onAppleSignIn] is non-null (iOS).
 class _SignInView extends StatelessWidget {
   final VoidCallback onGoogleSignIn;
+  final VoidCallback? onAppleSignIn;
 
-  const _SignInView({required this.onGoogleSignIn});
+  const _SignInView({required this.onGoogleSignIn, this.onAppleSignIn});
 
   @override
   Widget build(BuildContext context) {
@@ -194,19 +203,20 @@ class _SignInView extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                // Disabled until the Apple Team ID is provisioned (next slice).
-                onPressed: null,
-                icon: const Icon(Icons.apple),
-                label: const Text('Continuar con Apple (próximamente)'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            if (onAppleSignIn != null) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onAppleSignIn,
+                  icon: const Icon(Icons.apple),
+                  label: const Text('Continuar con Apple'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
                 ),
               ),
-            ),
+            ],
             const SizedBox(height: 20),
             Text(
               'Al continuar aceptás los Términos del Servicio y la Política de '

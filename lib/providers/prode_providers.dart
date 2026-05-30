@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../config/prode_auth_config.dart';
 import '../config/tenant_provider.dart';
@@ -24,6 +25,26 @@ Future<String?> _signInWithGoogleNative(ProdeAuthConfig cfg) async {
   if (account == null) return null; // cancelled
   final auth = await account.authentication;
   return auth.idToken;
+}
+
+/// Drives the native Sign in with Apple sheet (iOS) and returns the Apple
+/// identity_token, or null if the user cancelled. The backend's AppleVerifier
+/// validates the token against Apple's JWKS, with `aud` = the app bundle id.
+Future<String?> _signInWithAppleNative() async {
+  try {
+    final credential = await SignInWithApple.getAppleIDCredential(
+      scopes: const [
+        AppleIDAuthorizationScopes.email,
+        AppleIDAuthorizationScopes.fullName,
+      ],
+    );
+    return credential.identityToken;
+  } on SignInWithAppleAuthorizationException catch (e) {
+    // Apple surfaces cancellation as an exception; map it to "cancelled" (null)
+    // so the controller returns to Unauthenticated instead of showing an error.
+    if (e.code == AuthorizationErrorCode.canceled) return null;
+    rethrow;
+  }
 }
 
 /// Provides a single [ProdeAuthRepository] instance for the lifetime of the
@@ -93,6 +114,9 @@ final prodeAuthControllerProvider =
     service: service,
     tenantId: cfg.tenantId,
     googleIdToken: () => _signInWithGoogleNative(cfg.integrations.prodeAuth!),
+    // Apple sign-in is iOS-only (the backend supports only the native flow);
+    // leaving this null on other platforms makes the UI hide the Apple button.
+    appleIdentityToken: Platform.isIOS ? _signInWithAppleNative : null,
   );
 
   // Bridge service-side 401s into the state machine.

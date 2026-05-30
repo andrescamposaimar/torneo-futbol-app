@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -55,6 +57,9 @@ class _ProdeAuthGateState extends ConsumerState<ProdeAuthGate> {
         onLogout: controller.logout,
         onRetry: controller.bootstrap,
         onGoogleSignIn: controller.signInWithGoogle,
+        // Apple sign-in is iOS-only (backend supports only the native flow);
+        // null elsewhere so the sign-in view hides the Apple button.
+        onAppleSignIn: Platform.isIOS ? controller.signInWithApple : null,
         onConfirmDni: controller.confirmDni,
       ),
     );

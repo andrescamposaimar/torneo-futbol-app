@@ -319,23 +319,34 @@ class ProdeApiService {
   // SSO sign-in
   // ---------------------------------------------------------------------------
 
-  /// Exchanges a Google id_token for a Prode session.
-  ///
-  /// Calls `POST /prode/auth/google` and parses the two backend outcomes into
-  /// a [ProdeSsoResult]. Does NOT persist tokens — the controller owns that,
-  /// because it also knows the tenant id required by
-  /// [ProdeAuthRepository.write].
+  /// Exchanges a Google id_token for a Prode session via `POST /auth/google`.
+  /// See [_exchangeSso] for the parsed outcomes and error behaviour.
+  Future<ProdeSsoResult> exchangeGoogleToken(String idToken) =>
+      _exchangeSso(path: '/auth/google', body: {'id_token': idToken});
+
+  /// Exchanges an Apple identity_token for a Prode session via
+  /// `POST /auth/apple` (iOS-native flow). Same outcomes as [exchangeGoogleToken].
+  Future<ProdeSsoResult> exchangeAppleToken(String identityToken) =>
+      _exchangeSso(path: '/auth/apple', body: {'identity_token': identityToken});
+
+  /// Shared SSO exchange: POSTs [body] to [path] and parses the two backend
+  /// outcomes (`step=authenticated` → [ProdeSsoAuthenticated]; `dni_confirmation`
+  /// → [ProdeSsoNeedsDni]) into a [ProdeSsoResult]. Does NOT persist tokens —
+  /// the controller owns that (it knows the tenant id).
   ///
   /// Throws [ProdeSsoException] on a non-200 response, a malformed body, or a
-  /// network error.
-  Future<ProdeSsoResult> exchangeGoogleToken(String idToken) async {
+  /// network error/timeout.
+  Future<ProdeSsoResult> _exchangeSso({
+    required String path,
+    required Map<String, dynamic> body,
+  }) async {
     final http.Response response;
     try {
       response = await _httpClient
           .post(
-            Uri.parse('${_config.prodeApiBaseUrl}/auth/google'),
+            Uri.parse('${_config.prodeApiBaseUrl}$path'),
             headers: const {'Content-Type': 'application/json'},
-            body: json.encode({'id_token': idToken}),
+            body: json.encode(body),
           )
           // Bound the wait so a stalled connection can't leave the UI spinning
           // forever — surfaces as a recoverable network error instead.
@@ -347,25 +358,25 @@ class ProdeApiService {
       );
     }
 
-    final body = _decodeBody(response);
+    final decoded = _decodeBody(response);
 
     if (response.statusCode != 200) {
       throw ProdeSsoException(
-        code: extractErrorCode(body),
-        message: (body['message'] is String)
-            ? body['message'] as String
+        code: extractErrorCode(decoded),
+        message: (decoded['message'] is String)
+            ? decoded['message'] as String
             : 'No se pudo iniciar sesión.',
       );
     }
 
-    final step = body['step'];
+    final step = decoded['step'];
 
     if (step == 'authenticated') {
-      final access = body['access_token'];
-      final refresh = body['refresh_token'];
+      final access = decoded['access_token'];
+      final refresh = decoded['refresh_token'];
       final user = parseProdeUser(
-        body['user'] is Map<String, dynamic>
-            ? body['user'] as Map<String, dynamic>
+        decoded['user'] is Map<String, dynamic>
+            ? decoded['user'] as Map<String, dynamic>
             : null,
       );
       if (access is! String || refresh is! String || user == null) {
@@ -382,15 +393,16 @@ class ProdeApiService {
     }
 
     if (step == 'dni_confirmation') {
-      final intent = body['intent_token'];
+      final intent = decoded['intent_token'];
       if (intent is! String) {
         throw const ProdeSsoException(
           code: 'malformed_response',
           message: 'Respuesta de confirmación inválida.',
         );
       }
-      final profile =
-          body['profile'] is Map<String, dynamic> ? body['profile'] as Map<String, dynamic> : const {};
+      final profile = decoded['profile'] is Map<String, dynamic>
+          ? decoded['profile'] as Map<String, dynamic>
+          : const {};
       final first = profile['name_first'] is String ? profile['name_first'] as String : '';
       final last = profile['name_last'] is String ? profile['name_last'] as String : '';
       final hint = '$first $last'.trim();

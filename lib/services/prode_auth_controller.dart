@@ -13,8 +13,9 @@ import 'prode_auth_state.dart';
 ///   - [onAuthRequired] — called by [ProdeApiService] when a 401 cannot be
 ///     recovered; transitions to Revoked or Unauthenticated based on the error.
 ///
-/// [signInWithGoogle] and [confirmDni] are wired to the SSO + DNI flow.
-/// [signInWithApple] remains a placeholder until its Team ID/keys are set up.
+/// [signInWithGoogle], [signInWithApple] and [confirmDni] are wired to the
+/// SSO + DNI flow. Apple is iOS-only (the provider injects its token getter
+/// only on iOS).
 class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   final ProdeAuthRepository _repository;
   final ProdeApiService _service;
@@ -29,15 +30,22 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   /// google_sign_in SDK; the provider wires the real implementation.
   final Future<String?> Function()? _googleIdToken;
 
+  /// Returns an Apple identity_token or null if the user cancelled. Injected
+  /// for the same reason as [_googleIdToken]. iOS-only (the provider leaves it
+  /// null on other platforms, since the backend only supports the native flow).
+  final Future<String?> Function()? _appleIdentityToken;
+
   ProdeAuthController({
     required ProdeAuthRepository repository,
     required ProdeApiService service,
     required String tenantId,
     Future<String?> Function()? googleIdToken,
+    Future<String?> Function()? appleIdentityToken,
   })  : _repository = repository,
         _service = service,
         _tenantId = tenantId,
         _googleIdToken = googleIdToken,
+        _appleIdentityToken = appleIdentityToken,
         super(const ProdeAuthUnauthenticated());
 
   // ---------------------------------------------------------------------------
@@ -187,39 +195,57 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   }
 
   // ---------------------------------------------------------------------------
-  // PR-07 placeholders
+  // SSO sign-in
   // ---------------------------------------------------------------------------
 
-  /// Runs the Google Sign-In flow:
-  ///   1. Obtain a Google id_token via the injected provider (the SDK call).
-  ///   2. Exchange it at `POST /prode/auth/google`.
+  /// Runs the Google Sign-In flow (id_token → `POST /auth/google`).
+  Future<void> signInWithGoogle() => _signInWithProvider(
+        provider: 'google',
+        getToken: _googleIdToken,
+        exchange: _service.exchangeGoogleToken,
+      );
+
+  /// Runs the Apple Sign-In flow (identity_token → `POST /auth/apple`). iOS
+  /// only — on other platforms the provider leaves the token getter null and
+  /// this surfaces a "not configured" error (the UI hides the button there).
+  Future<void> signInWithApple() => _signInWithProvider(
+        provider: 'apple',
+        getToken: _appleIdentityToken,
+        exchange: _service.exchangeAppleToken,
+      );
+
+  /// Shared SSO flow for both providers:
+  ///   1. Obtain the provider token via the injected [getToken] (the SDK call).
+  ///   2. [exchange] it with the backend.
   ///   3. On `authenticated` → persist tokens (stamped with the tenant id) and
   ///      transition to [ProdeAuthAuthenticated].
-  ///   4. On `dni_confirmation` → transition to [ProdeAuthNeedsDniConfirmation]
-  ///      so the DNI screen (later slice) can complete the link.
+  ///   4. On `dni_confirmation` → transition to [ProdeAuthNeedsDniConfirmation].
   ///
-  /// Cancellation (provider returns null) returns to [ProdeAuthUnauthenticated]
+  /// Cancellation (getToken returns null) returns to [ProdeAuthUnauthenticated]
   /// silently. Any failure surfaces as [ProdeAuthError].
-  Future<void> signInWithGoogle() async {
-    final getIdToken = _googleIdToken;
-    if (getIdToken == null) {
-      state = const ProdeAuthError(
-        code: 'google_unavailable',
-        message: 'Google Sign-In no está configurado.',
+  Future<void> _signInWithProvider({
+    required String provider,
+    required Future<String?> Function()? getToken,
+    required Future<ProdeSsoResult> Function(String token) exchange,
+  }) async {
+    if (getToken == null) {
+      state = ProdeAuthError(
+        code: '${provider}_unavailable',
+        message: 'El inicio de sesión no está disponible en este dispositivo.',
       );
       return;
     }
 
-    state = const ProdeAuthAuthenticating(provider: 'google');
+    state = ProdeAuthAuthenticating(provider: provider);
     try {
-      final idToken = await getIdToken();
-      if (idToken == null) {
-        // User cancelled the Google sheet.
+      final token = await getToken();
+      if (token == null) {
+        // User cancelled the provider sheet.
         state = const ProdeAuthUnauthenticated();
         return;
       }
 
-      final result = await _service.exchangeGoogleToken(idToken);
+      final result = await exchange(token);
 
       switch (result) {
         case ProdeSsoAuthenticated(
@@ -245,19 +271,8 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
     } on PlatformException catch (e) {
       state = ProdeAuthError(code: e.code, message: e.message ?? e.toString());
     } catch (e) {
-      state = ProdeAuthError(code: 'google_signin_error', message: e.toString());
+      state = ProdeAuthError(code: '${provider}_signin_error', message: e.toString());
     }
-  }
-
-  /// Initiates Apple Sign-In flow.
-  ///
-  /// TODO(PR-07): wire sign_in_with_apple SDK, call POST /prode/auth/apple,
-  /// handle the same step transitions as [signInWithGoogle].
-  Future<void> signInWithApple() {
-    throw UnimplementedError(
-      'signInWithApple is not implemented. '
-      'Implement in PR-07 with sign_in_with_apple SDK.',
-    );
   }
 
   /// Confirms the user's DNI after a successful SSO step.

@@ -76,6 +76,7 @@ ProdeAuthController _makeController(
   ProdeAuthRepository repo,
   http.Client httpClient, {
   Future<String?> Function()? googleIdToken,
+  Future<String?> Function()? appleIdentityToken,
 }) {
   final service = ProdeApiService(
     config: _testConfig,
@@ -87,6 +88,7 @@ ProdeAuthController _makeController(
     service: service,
     tenantId: 'marianista',
     googleIdToken: googleIdToken,
+    appleIdentityToken: appleIdentityToken,
   );
   service.onAuthRequired = controller.onAuthRequired;
   return controller;
@@ -679,18 +681,98 @@ void main() {
     });
   });
 
-  group('signInWithApple() is still a placeholder', () {
-    test('throws UnimplementedError', () {
-      final store = <String, String>{};
+  group('signInWithApple()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
       _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    test('authenticated → Authenticated + tokens persisted', () async {
       final controller = _makeController(
-        ProdeAuthRepository(),
-        MockClient((_) async => throw http.ClientException('Unused')),
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/apple')) {
+            return http.Response(
+              json.encode({
+                'step': 'authenticated',
+                'access_token': 'acc-apple',
+                'refresh_token': 'ref-apple',
+                'user': {
+                  'user_id': 7,
+                  'player_id': 2,
+                  'name': 'Caro',
+                  'session_version': 1,
+                },
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          throw http.ClientException('Unexpected ${req.url}');
+        }),
+        appleIdentityToken: () async => 'fake-identity-token',
       );
-      expect(
-        () async => controller.signInWithApple(),
-        throwsUnimplementedError,
+
+      await controller.signInWithApple();
+
+      expect(controller.state, isA<ProdeAuthAuthenticated>());
+      expect((controller.state as ProdeAuthAuthenticated).user.userId, equals(7));
+      expect(await repo.readAccessToken(), equals('acc-apple'));
+    });
+
+    test('dni_confirmation → NeedsDniConfirmation', () async {
+      final controller = _makeController(
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/apple')) {
+            return http.Response(
+              json.encode({
+                'step': 'dni_confirmation',
+                'intent_token': 'intent-apple',
+                'profile': {'name_first': 'Caro', 'name_last': 'Díaz'},
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          throw http.ClientException('Unexpected ${req.url}');
+        }),
+        appleIdentityToken: () async => 'fake-identity-token',
       );
+
+      await controller.signInWithApple();
+
+      expect(controller.state, isA<ProdeAuthNeedsDniConfirmation>());
+      expect((controller.state as ProdeAuthNeedsDniConfirmation).intentToken,
+          equals('intent-apple'));
+    });
+
+    test('cancel (null token) → Unauthenticated', () async {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Should not be called')),
+        appleIdentityToken: () async => null,
+      );
+
+      await controller.signInWithApple();
+
+      expect(controller.state, isA<ProdeAuthUnauthenticated>());
+    });
+
+    test('no token getter (non-iOS) → ProdeAuthError', () async {
+      final controller = _makeController(
+        repo,
+        MockClient((_) async => throw http.ClientException('Should not be called')),
+        // appleIdentityToken omitted → null (simulates non-iOS).
+      );
+
+      await controller.signInWithApple();
+
+      expect(controller.state, isA<ProdeAuthError>());
     });
   });
 }
