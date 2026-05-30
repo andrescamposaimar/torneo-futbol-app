@@ -21,6 +21,7 @@ void main() {
             onLogout: () => logout++,
             onRetry: () => retry++,
             onGoogleSignIn: () {},
+            onAppleSignIn: null,
             onConfirmDni: (_) async => null,
           ),
         ),
@@ -88,6 +89,7 @@ void main() {
               onLogout: () => logout++,
               onRetry: () {},
               onGoogleSignIn: () {},
+              onAppleSignIn: null,
               onConfirmDni: (_) async => null,
             ),
           ),
@@ -97,11 +99,35 @@ void main() {
       expect(logout, equals(1));
     });
 
-    testWidgets('Unauthenticated shows the sign-in view with a Google button',
+    testWidgets('Unauthenticated shows Google; Apple hidden when unavailable',
         (tester) async {
+      // pumpView passes onAppleSignIn: null → Apple button hidden.
       await pumpView(tester, const ProdeAuthUnauthenticated());
       expect(find.text('Sumate al Prode'), findsOneWidget);
       expect(find.text('Continuar con Google'), findsOneWidget);
+      expect(find.text('Continuar con Apple'), findsNothing);
+    });
+
+    testWidgets('Apple button shows and triggers onAppleSignIn when available',
+        (tester) async {
+      var apple = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProdeAuthView(
+              state: const ProdeAuthUnauthenticated(),
+              onLogout: () {},
+              onRetry: () {},
+              onGoogleSignIn: () {},
+              onAppleSignIn: () => apple++,
+              onConfirmDni: (_) async => null,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Continuar con Apple'), findsOneWidget);
+      await tester.tap(find.text('Continuar con Apple'));
+      expect(apple, equals(1));
     });
 
     testWidgets('Continuar con Google triggers onGoogleSignIn', (tester) async {
@@ -114,6 +140,7 @@ void main() {
               onLogout: () {},
               onRetry: () {},
               onGoogleSignIn: () => google++,
+              onAppleSignIn: null,
               onConfirmDni: (_) async => null,
             ),
           ),
@@ -148,6 +175,7 @@ void main() {
               onLogout: () {},
               onRetry: () {},
               onGoogleSignIn: () {},
+              onAppleSignIn: null,
               onConfirmDni: (dni) async {
                 submitted = dni;
                 return 'Ese DNI no figura en el padrón.';
@@ -176,6 +204,7 @@ void main() {
               onLogout: () {},
               onRetry: () {},
               onGoogleSignIn: () {},
+              onAppleSignIn: null,
               onConfirmDni: (dni) async {
                 called = true;
                 return null;
@@ -203,6 +232,7 @@ void main() {
               onLogout: () => logout++,
               onRetry: () {},
               onGoogleSignIn: () {},
+              onAppleSignIn: null,
               onConfirmDni: (_) async => null,
             ),
           ),
@@ -228,6 +258,7 @@ void main() {
               onLogout: () {},
               onRetry: () => retry++,
               onGoogleSignIn: () {},
+              onAppleSignIn: null,
               onConfirmDni: (_) async => null,
             ),
           ),

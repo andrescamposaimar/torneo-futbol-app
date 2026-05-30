@@ -825,4 +825,68 @@ void main() {
       );
     });
   });
+
+  group('ProdeApiService.exchangeAppleToken()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    test('POSTs identity_token to /auth/apple and parses authenticated',
+        () async {
+      String? calledPath;
+      String? sentBody;
+      final svc = _makeService(
+        repo,
+        MockClient((req) async {
+          calledPath = req.url.path;
+          sentBody = req.body;
+          return http.Response(
+            json.encode({
+              'step': 'authenticated',
+              'access_token': 'acc',
+              'refresh_token': 'ref',
+              'user': {
+                'user_id': 3,
+                'player_id': 1,
+                'name': 'Caro',
+                'session_version': 1,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final result = await svc.exchangeAppleToken('apple-identity-token');
+
+      expect(calledPath, endsWith('/auth/apple'));
+      expect(sentBody, contains('identity_token'));
+      expect(result, isA<ProdeSsoAuthenticated>());
+      expect((result as ProdeSsoAuthenticated).user.userId, equals(3));
+    });
+
+    test('dni_confirmation → ProdeSsoNeedsDni', () async {
+      final result = await _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({
+                'step': 'dni_confirmation',
+                'intent_token': 'intent-apple',
+                'profile': {'name_first': 'Caro', 'name_last': 'Díaz'},
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            )),
+      ).exchangeAppleToken('apple-identity-token');
+
+      expect(result, isA<ProdeSsoNeedsDni>());
+      expect((result as ProdeSsoNeedsDni).intentToken, equals('intent-apple'));
+    });
+  });
 }
