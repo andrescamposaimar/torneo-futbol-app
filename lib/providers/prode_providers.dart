@@ -10,6 +10,7 @@ import '../services/prode_auth_controller.dart';
 import '../services/prode_auth_repository.dart';
 import '../services/prode_api_service.dart';
 import '../services/prode_auth_state.dart';
+import '../services/prode_fixtures_controller.dart';
 
 /// Drives the native Google Sign-In sheet and returns a Google id_token whose
 /// `aud` is the web client id (via [serverClientId]) — the audience the
@@ -134,4 +135,16 @@ final prodeAuthControllerProvider =
   repository.onTokensChanged = service.invalidateTokenCache;
 
   return controller;
+});
+
+/// Provides the [ProdeFixturesController] and exposes the [ProdeFixturesState]
+/// state machine to the fixtures screen.
+///
+/// NOT autoDispose: state persists for the session so navigating away and back
+/// does NOT auto-refetch (consistent with [prodeAuthControllerProvider]).
+/// [ProdeFixturesScreen.initState] guards on [ProdeFixturesLoading] to prevent
+/// a redundant network round-trip on re-entry while already Loaded/Empty/Error.
+final prodeFixturesControllerProvider =
+    StateNotifierProvider<ProdeFixturesController, ProdeFixturesState>((ref) {
+  return ProdeFixturesController(ref.watch(prodeApiServiceProvider));
 });

@@ -41,63 +41,15 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
-    testWidgets('Authenticated (fresh) greets the user by name, no stale banner',
-        (tester) async {
-      await pumpView(
-        tester,
-        const ProdeAuthAuthenticated(
-          user: ProdeUser(
-            userId: 1,
-            playerId: 2,
-            name: 'Ana',
-            sessionVersion: 1,
-          ),
-        ),
-      );
-      expect(find.text('¡Hola, Ana!'), findsOneWidget);
-      expect(find.text('Sincronizando tus datos…'), findsNothing);
-      expect(find.text('Cerrar sesión'), findsOneWidget);
-    });
-
-    testWidgets('Authenticated (stale) greets generically and shows the sync banner',
-        (tester) async {
-      await pumpView(
-        tester,
-        const ProdeAuthAuthenticated(
-          user: ProdeUser(userId: 0, playerId: 0, name: '', sessionVersion: 3),
-          stale: true,
-        ),
-      );
-      expect(find.text('¡Hola!'), findsOneWidget);
-      expect(find.text('Sincronizando tus datos…'), findsOneWidget);
-    });
-
-    testWidgets('Cerrar sesión triggers onLogout', (tester) async {
-      var logout = 0;
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: ProdeAuthView(
-              state: const ProdeAuthAuthenticated(
-                user: ProdeUser(
-                  userId: 1,
-                  playerId: 2,
-                  name: 'Ana',
-                  sessionVersion: 1,
-                ),
-              ),
-              onLogout: () => logout++,
-              onRetry: () {},
-              onGoogleSignIn: () {},
-              onAppleSignIn: null,
-              onConfirmDni: (_) async => null,
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('Cerrar sesión'));
-      expect(logout, equals(1));
-    });
+    // NOTE: The three Authenticated-arm tests that previously asserted on
+    // _ProdeHome copy ('¡Hola, Ana!', 'Sincronizando tus datos…', 'Cerrar sesión')
+    // have been removed here (B-6). Those scenarios are now fully covered by
+    // the ProdeFixturesScreen widget tests in prode_fixtures_screen_test.dart
+    // (B-4), which pump ProdeFixturesScreen directly with a scoped provider
+    // and assert on the stale banner, logout button, and match list.
+    // The Authenticated arm in ProdeAuthView now renders a ConsumerStatefulWidget
+    // (ProdeFixturesScreen) that requires a ProviderScope — pumping it inside
+    // a bare MaterialApp without one would cause a ProviderScope not found error.
 
     testWidgets('Unauthenticated shows Google; Apple hidden when unavailable',
         (tester) async {
