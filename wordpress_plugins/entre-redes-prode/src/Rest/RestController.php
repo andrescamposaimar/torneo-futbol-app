@@ -19,13 +19,16 @@ class RestController {
 
     private ?\EntreRedes\Prode\Rest\AuthEndpoints       $auth_endpoints;
     private ?\EntreRedes\Prode\Account\AccountController $account_controller;
+    private ?\EntreRedes\Prode\Rest\FechaController      $fecha_controller;
 
     public function __construct(
         ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null,
-        ?\EntreRedes\Prode\Account\AccountController $account_controller = null
+        ?\EntreRedes\Prode\Account\AccountController $account_controller = null,
+        ?\EntreRedes\Prode\Rest\FechaController $fecha_controller = null
     ) {
         $this->auth_endpoints       = $auth_endpoints;
         $this->account_controller   = $account_controller;
+        $this->fecha_controller     = $fecha_controller;
     }
 
     public function register_routes(): void {
@@ -60,6 +63,11 @@ class RestController {
         // Account endpoints (PR-03): DELETE /prode/account.
         if ( null !== $this->account_controller ) {
             $this->account_controller->register_routes();
+        }
+
+        // Fecha endpoints (PR-G0-C): GET /prode/fecha-activa.
+        if ( null !== $this->fecha_controller ) {
+            $this->fecha_controller->register_routes();
         }
     }
 
