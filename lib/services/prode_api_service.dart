@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
+import '../models/fecha_activa.dart';
 import 'prode_auth_repository.dart';
 import 'prode_auth_state.dart';
 
@@ -25,6 +26,19 @@ class ProdeAuthRequired implements Exception {
 
   @override
   String toString() => 'ProdeAuthRequired($code): $message';
+}
+
+/// Thrown by [ProdeApiService.fetchFechaActiva] when the backend returns HTTP
+/// 404, indicating there is no currently active fecha for the tenant.
+///
+/// Distinct from [ProdeSsoException] (which signals a server/transport error).
+/// [ProdeFixturesController] catches this specifically to transition to the
+/// `Empty` state rather than an error state.
+class ProdeNoActiveFecha implements Exception {
+  const ProdeNoActiveFecha();
+
+  @override
+  String toString() => 'ProdeNoActiveFecha: no active fecha for this tenant.';
 }
 
 /// Thrown when an SSO sign-in exchange (`POST /auth/google` or `/auth/apple`)
@@ -182,6 +196,44 @@ class ProdeApiService {
   /// (e.g., logout clears the repository) so the cache stays in sync.
   void invalidateTokenCache() {
     _cachedAccessToken = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fecha endpoints
+  // ---------------------------------------------------------------------------
+
+  /// Fetches the currently active Prode fecha (round) for the tenant.
+  ///
+  /// Uses the authenticated [request] transport, which attaches the Bearer
+  /// token and handles 401/refresh automatically.
+  ///
+  /// Outcomes:
+  /// - **200** — returns a parsed [FechaActiva].
+  /// - **404** — throws [ProdeNoActiveFecha] (no round is currently active).
+  /// - **any other status / network error** — throws [ProdeSsoException]
+  ///   with code `'fetch_fecha_error'`.
+  ///
+  /// Timeout: 15 s (fast read; lighter than the 30 s SSO POSTs).
+  Future<FechaActiva> fetchFechaActiva() async {
+    final req = http.Request(
+      'GET',
+      Uri.parse('${_config.prodeApiBaseUrl}/fecha-activa'),
+    )..headers['Accept'] = 'application/json';
+
+    final response = await request(req).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 404) {
+      throw const ProdeNoActiveFecha();
+    }
+
+    if (response.statusCode != 200) {
+      throw ProdeSsoException(
+        code: 'fetch_fecha_error',
+        message: 'status ${response.statusCode}',
+      );
+    }
+
+    return FechaActiva.fromJson(_decodeBody(response));
   }
 
   /// Executes [request] with a Bearer token attached.

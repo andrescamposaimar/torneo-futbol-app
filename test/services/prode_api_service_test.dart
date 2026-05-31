@@ -9,6 +9,7 @@ import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
+import 'package:torneo_futbol_app/models/fecha_activa.dart';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -887,6 +888,120 @@ void main() {
 
       expect(result, isA<ProdeSsoNeedsDni>());
       expect((result as ProdeSsoNeedsDni).intentToken, equals('intent-apple'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ProdeApiService.fetchFechaActiva()
+  // ---------------------------------------------------------------------------
+
+  group('ProdeApiService.fetchFechaActiva()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    // A minimal but valid fecha payload for 200 responses.
+    Map<String, dynamic> _validFechaBody({int fechaId = 42, int matchCount = 2}) {
+      return {
+        'fecha_id': fechaId,
+        'season_id': 3,
+        'state': 'open',
+        'locked_at': null,
+        'matches': List.generate(
+          matchCount,
+          (i) => {
+            'match_id': i + 1,
+            'home_team': 'Home ${i + 1}',
+            'away_team': 'Away ${i + 1}',
+            'kickoff': '2026-06-06 1${i}:00:00',
+          },
+        ),
+      };
+    }
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    Future<void> _seedToken() async {
+      await repo.write(
+        accessToken: 'test-access-token',
+        refreshToken: 'test-refresh-token',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+    }
+
+    test('200 valid body → returns FechaActiva with expected fechaId and matches.length', () async {
+      await _seedToken();
+
+      String? capturedPath;
+      String? capturedAuth;
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          capturedPath = req.url.path;
+          capturedAuth = req.headers['Authorization'];
+          return http.Response(
+            json.encode(_validFechaBody(fechaId: 42, matchCount: 3)),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final fecha = await service.fetchFechaActiva();
+
+      expect(fecha, isA<FechaActiva>());
+      expect(fecha.fechaId, equals(42));
+      expect(fecha.matches.length, equals(3));
+
+      // Must hit /fecha-activa endpoint.
+      expect(capturedPath, endsWith('/fecha-activa'));
+
+      // Must attach Bearer token.
+      expect(capturedAuth, equals('Bearer test-access-token'));
+    });
+
+    test('404 → throws ProdeNoActiveFecha', () async {
+      await _seedToken();
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({'error': 'no_active_fecha'}),
+              404,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.fetchFechaActiva(),
+        throwsA(isA<ProdeNoActiveFecha>()),
+      );
+    });
+
+    test('500 → throws ProdeSsoException(fetch_fecha_error), NOT ProdeNoActiveFecha', () async {
+      await _seedToken();
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response('Internal Server Error', 500)),
+      );
+
+      Object? caught;
+      try {
+        await service.fetchFechaActiva();
+        fail('should have thrown');
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught, isA<ProdeSsoException>());
+      expect(caught, isNot(isA<ProdeNoActiveFecha>()));
+      expect((caught as ProdeSsoException).code, equals('fetch_fecha_error'));
     });
   });
 }
