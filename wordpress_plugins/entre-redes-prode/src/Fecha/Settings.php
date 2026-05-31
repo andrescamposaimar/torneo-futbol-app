@@ -55,12 +55,12 @@ class Settings {
             "SELECT setting_value FROM {$p}prode_settings WHERE setting_key = %s",
             $key
         );
-        $row = $this->wpdb->get_row( $sql );
+        $value = $this->wpdb->get_var( $sql );
 
-        if ( null === $row ) {
+        if ( null === $value ) {
             return $default;
         }
 
-        return (int) $row['setting_value'];
+        return (int) $value;
     }
 }

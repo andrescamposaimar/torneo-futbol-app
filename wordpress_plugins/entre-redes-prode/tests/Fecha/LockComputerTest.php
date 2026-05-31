@@ -24,8 +24,11 @@ class LockComputerTest extends TestCase {
     // computeLockedAt — earliest kickoff minus lock_hours_before
     // -------------------------------------------------------------------------
 
-    public function test_locked_at_computed_from_earliest_of_multiple_kickoffs(): void {
-        // Spec scenario: kickoffs 13:45 and 15:10 same day, lock_hours=24
+    public function test_locked_at_computed_from_caller_provided_earliest_kickoff(): void {
+        // computeLockedAt receives the ALREADY-REDUCED earliest kickoff; the
+        // MIN(match_kickoff) reduction is the caller's responsibility (cron/repo),
+        // NOT LockComputer's. Spec scenario: kickoffs 13:45 and 15:10 same day,
+        // caller passes the earliest (13:45), lock_hours=24.
         // Expected: 2026-05-29 13:45:00 (24h before 2026-05-30 13:45:00)
         $result = $this->computer->computeLockedAt( '2026-05-30 13:45:00', 24 );
         $this->assertSame( '2026-05-29 13:45:00', $result );
