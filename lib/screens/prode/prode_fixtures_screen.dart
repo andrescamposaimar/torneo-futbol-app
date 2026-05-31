@@ -271,9 +271,9 @@ class _StaleBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: const Icon(Icons.sync, color: Colors.orange),
       backgroundColor: Colors.amber.shade100,
-      content: const Text(
+      content: Text(
         'Sincronizando tus datos…',
-        style: TextStyle(color: Colors.black87),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurface),
       ),
       actions: const [SizedBox.shrink()],
     );
