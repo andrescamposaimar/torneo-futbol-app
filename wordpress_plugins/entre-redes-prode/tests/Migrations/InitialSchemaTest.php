@@ -98,6 +98,21 @@ class InitialSchemaTest extends TestCase {
         $this->assertSame( '5', $row2['setting_value'] );
     }
 
+    public function test_new_g0_settings_keys_are_seeded(): void {
+        InitialSchema::up();
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $row = $wpdb->get_row( "SELECT setting_value FROM {$p}prode_settings WHERE setting_key = 'prode_season_id'" );
+        $this->assertNotNull( $row, "'prode_season_id' should be seeded in prode_settings." );
+        $this->assertSame( '359', $row['setting_value'] );
+
+        $row2 = $wpdb->get_row( "SELECT setting_value FROM {$p}prode_settings WHERE setting_key = 'fecha_window_days'" );
+        $this->assertNotNull( $row2, "'fecha_window_days' should be seeded in prode_settings." );
+        $this->assertSame( '1', $row2['setting_value'] );
+    }
+
     public function test_tenant_id_seeded_from_constant(): void {
         // PRODE_TENANT_ID is defined in bootstrap.php as 'test_tenant'.
         InitialSchema::up();

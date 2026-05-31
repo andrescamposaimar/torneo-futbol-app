@@ -336,6 +336,8 @@ class InitialSchema {
             'lock_hours_before'                => '24',
             'lock_warning_hours_before'        => '2',
             'evaluator_cron_interval_minutes'  => '5',
+            'prode_season_id'                  => '359',
+            'fecha_window_days'                => '1',
         ];
 
         if ( defined( 'PRODE_TENANT_ID' ) ) {
