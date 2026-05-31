@@ -43,6 +43,17 @@ class FechaResolverTest extends TestCase {
         };
     }
 
+    /**
+     * Returns a dispatcher stub mirroring the REAL /partidos-programados
+     * response envelope: { total, items: [...] }. The production dispatcher
+     * returns this shape (not a bare list), so resolveNext must unwrap it.
+     */
+    private function stubEnvelopeDispatcher( array $items ): callable {
+        return static function () use ( $items ): array {
+            return [ 'total' => count( $items ), 'items' => $items ];
+        };
+    }
+
     // -------------------------------------------------------------------------
     // resolveNext — empty / null-returning cases
     // -------------------------------------------------------------------------
@@ -50,6 +61,24 @@ class FechaResolverTest extends TestCase {
     public function test_empty_items_returns_null(): void {
         $resolver = new FechaResolver( $this->stubDispatcher( [] ) );
         $this->assertNull( $resolver->resolveNext() );
+    }
+
+    public function test_resolves_from_real_envelope_shape(): void {
+        // Regression: the live endpoint returns { total, items:[...] }, not a
+        // bare list. Iterating the envelope passed `total` (an int) where a
+        // match array was expected → TypeError in production. resolveNext must
+        // unwrap `items` before filtering.
+        $items = [
+            $this->makeItem( 30, '2026-05-30', '13:45', null, null ),
+            $this->makeItem( 31, '2026-05-30', '15:10', null, null ),
+        ];
+        $resolver = new FechaResolver( $this->stubEnvelopeDispatcher( $items ) );
+        $result   = $resolver->resolveNext();
+
+        $this->assertNotNull( $result );
+        $this->assertSame( '2026-05-30', $result['play_date'] );
+        $this->assertCount( 2, $result['matches'] );
+        $this->assertSame( '2026-05-30 13:45', $result['earliest_kickoff'] );
     }
 
     public function test_all_items_have_scores_returns_null(): void {

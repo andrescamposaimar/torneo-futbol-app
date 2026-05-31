@@ -156,7 +156,7 @@ class FechaResolver {
      */
     private function dispatch(): array {
         if ( null !== $this->dispatcher ) {
-            return (array) ( $this->dispatcher )();
+            return $this->unwrapItems( (array) ( $this->dispatcher )() );
         }
 
         // Production default: internal WP REST dispatch.
@@ -168,6 +168,24 @@ class FechaResolver {
         }
 
         $body = $response->get_data();
-        return is_array( $body ) ? $body : [];
+        return is_array( $body ) ? $this->unwrapItems( $body ) : [];
+    }
+
+    /**
+     * Normalize the /partidos-programados payload to a plain list of match items.
+     *
+     * The endpoint wraps fixtures in an envelope: { total, items: [...] }.
+     * Unwrap to the items list. A bare list (no 'items' key) is returned as-is
+     * for forward-compatibility and for stubbed dispatchers in tests.
+     *
+     * @param array<mixed> $payload
+     * @return array<int, array<string, mixed>>
+     */
+    private function unwrapItems( array $payload ): array {
+        if ( isset( $payload['items'] ) && is_array( $payload['items'] ) ) {
+            return array_values( $payload['items'] );
+        }
+
+        return $payload;
     }
 }
