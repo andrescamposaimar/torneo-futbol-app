@@ -63,6 +63,13 @@ class SeedFechaCommand {
             return;
         }
 
+        if ( $result['reused'] ) {
+            \WP_CLI::success(
+                "Already exists: fecha_id={$result['fecha_id']} with {$result['match_count']} matches (no new fecha created)."
+            );
+            return;
+        }
+
         \WP_CLI::success(
             "Created fecha_id={$result['fecha_id']} with {$result['match_count']} matches."
         );
@@ -75,7 +82,7 @@ class SeedFechaCommand {
      * the cron and the seed command share the same resolve→lock→upsert
      * logic without duplicating implementation.
      *
-     * @return array{fecha_id: int, match_count: int, skipped: bool}
+     * @return array{fecha_id: int, match_count: int, skipped: bool, reused: bool}
      */
     public function execute(): array {
         $result = ( $this->resolverFn )();
@@ -85,6 +92,7 @@ class SeedFechaCommand {
                 'fecha_id'    => 0,
                 'match_count' => 0,
                 'skipped'     => true,
+                'reused'      => false,
             ];
         }
 
@@ -94,10 +102,28 @@ class SeedFechaCommand {
         );
 
         $tenantId = defined( 'PRODE_TENANT_ID' ) ? (string) PRODE_TENANT_ID : '';
+        $seasonId = $this->settings->seasonId();
+
+        // Detect pre-existence BEFORE upsert so the operator gets accurate
+        // "created" vs "already exists" feedback. upsertFecha reuses the row
+        // either way (idempotent), but the return value alone can't tell the
+        // two apart, so we compare the resolved play-date against any active
+        // fecha already persisted for this tenant+season.
+        $reused   = false;
+        $playDate = substr( min( array_column( $result['matches'], 'kickoff' ) ), 0, 10 );
+        $existing = $this->repository->findActiveFecha( $tenantId, $seasonId );
+        if ( null !== $existing && ! empty( $existing['matches'] ) ) {
+            $existingPlayDate = substr(
+                min( array_column( $existing['matches'], 'match_kickoff' ) ),
+                0,
+                10
+            );
+            $reused = ( $existingPlayDate === $playDate );
+        }
 
         $fechaId = $this->repository->upsertFecha(
             $tenantId,
-            $this->settings->seasonId(),
+            $seasonId,
             $lockedAt,
             $result['matches']
         );
@@ -106,6 +132,7 @@ class SeedFechaCommand {
             'fecha_id'    => $fechaId,
             'match_count' => count( $result['matches'] ),
             'skipped'     => false,
+            'reused'      => $reused,
         ];
     }
 }

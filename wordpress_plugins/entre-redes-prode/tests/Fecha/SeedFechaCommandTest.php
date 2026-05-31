@@ -86,6 +86,7 @@ class SeedFechaCommandTest extends TestCase {
         $this->assertGreaterThan( 0, $result['fecha_id'] );
         $this->assertSame( 2, $result['match_count'] );
         $this->assertFalse( $result['skipped'] );
+        $this->assertFalse( $result['reused'], 'First seed creates the fecha, so it is not reused.' );
     }
 
     public function test_execute_creates_rows_in_db(): void {
@@ -121,6 +122,11 @@ class SeedFechaCommandTest extends TestCase {
 
         // Same fecha_id (existing row reused, not duplicated).
         $this->assertSame( $first['fecha_id'], $second['fecha_id'] );
+
+        // First run creates; second run detects the pre-existing fecha so the
+        // operator gets an "already exists" message instead of "created".
+        $this->assertFalse( $first['reused'] );
+        $this->assertTrue( $second['reused'] );
     }
 
     public function test_execute_is_idempotent_no_duplicate_rows(): void {
