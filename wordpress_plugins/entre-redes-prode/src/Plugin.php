@@ -26,6 +26,8 @@ final class Plugin {
 
         // 2. REST API routes — wire auth services and register all /prode/* routes.
         add_action( 'rest_api_init', function () {
+            global $wpdb;
+
             $jwt           = new Auth\JwtService();
             $google        = new Auth\GoogleVerifier();
             $apple         = new Auth\AppleVerifier();
@@ -51,7 +53,19 @@ final class Plugin {
                 $hasher
             );
 
-            $controller = new Rest\RestController( $auth_endpoints, $account_controller );
+            $fecha_controller = new Rest\FechaController(
+                new Fecha\FechaRepository( $wpdb ),
+                new Fecha\FechaResolver(),
+                new Fecha\LockComputer(),
+                new Fecha\Settings( $wpdb ),
+                $middleware
+            );
+
+            // Swap permission_callback to optionalAuth so the route is
+            // forward-compatible with G2 user_predictions (ADR-G0-5).
+            // The FechaController register_routes() is called by RestController.
+
+            $controller = new Rest\RestController( $auth_endpoints, $account_controller, $fecha_controller );
             $controller->register_routes();
         } );
 

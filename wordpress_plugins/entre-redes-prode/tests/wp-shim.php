@@ -366,7 +366,17 @@ if ( ! function_exists( 'add_action' ) ) {
 }
 
 if ( ! function_exists( 'do_action' ) ) {
-    function do_action( string $tag, mixed ...$args ): void {}
+    $GLOBALS['_prode_test_actions'] = [];
+
+    function do_action( string $tag, mixed ...$args ): void {
+        $GLOBALS['_prode_test_actions'][ $tag ] = ( $GLOBALS['_prode_test_actions'][ $tag ] ?? 0 ) + 1;
+    }
+}
+
+if ( ! function_exists( 'did_action' ) ) {
+    function did_action( string $tag ): int {
+        return $GLOBALS['_prode_test_actions'][ $tag ] ?? 0;
+    }
 }
 
 if ( ! function_exists( 'add_filter' ) ) {
