@@ -110,5 +110,18 @@
 		</array>
 		<key>UIStatusBarHidden</key>
 		<false/>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<!-- Reversed Google iOS client id (Prode Sign-In OAuth redirect).
+					     iOS client: 162105389930-voh4mkso1fp05grfi5scms4u1bh2jdvj -->
+					<string>com.googleusercontent.apps.162105389930-voh4mkso1fp05grfi5scms4u1bh2jdvj</string>
+				</array>
+			</dict>
+		</array>
 	</dict>
 </plist>

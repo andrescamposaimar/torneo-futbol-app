@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../tenant_config.dart';
+import '../prode_auth_config.dart';
 
 const marianistaTenant = TenantConfig(
   tenantId: 'marianista',
@@ -15,10 +16,32 @@ const marianistaTenant = TenantConfig(
     waitingLists: true,
     newsTab: true,
     ads: true,
+    // Shipped dark: the Prode UI (incl. the G5 leaderboard) is complete in the
+    // app, but the WordPress plugin in production is still pre-G3/G4 — the
+    // /prode/ranking endpoint 404s. Keep Prode hidden until the updated plugin
+    // is deployed, then flip this back to true. prodeAuth below stays set so
+    // re-enabling is a one-line change.
+    prode: false,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
         'https://entreredespadres.com.ar/wp-content/uploads/media/listas_jugadores.json',
+    // Google OAuth clients provisioned (Cloud project 162105389930).
+    // Apple Team ID still pending — Sign in with Apple stays disabled until set.
+    prodeAuth: ProdeAuthConfig(
+      prodeApiBaseUrl:
+          'https://entreredespadres.com.ar/wp-json/entre-redes/v1/prode',
+      googleWebClientId:
+          '162105389930-0hsham0na79sutur9c15eo97j9f7n6rr.apps.googleusercontent.com',
+      googleIosClientId:
+          '162105389930-voh4mkso1fp05grfi5scms4u1bh2jdvj.apps.googleusercontent.com',
+      googleAndroidClientId:
+          '162105389930-c4cmrp0hmf9drerb348sg1rul8u33ias.apps.googleusercontent.com',
+      appleServiceId: 'com.entreredes.app.web',
+      appleTeamId: '4Z7MM36M65',
+      appleRedirectUri:
+          'https://entreredespadres.com.ar/wp-json/entre-redes/v1/prode/auth/apple/callback',
+    ),
   ),
   documents: TenantDocuments(
     reglamentoUrl:
