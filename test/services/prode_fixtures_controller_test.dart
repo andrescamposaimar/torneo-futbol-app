@@ -430,6 +430,21 @@ void main() {
         expect(state.drafts[1]!.scoreHome, equals(3));
         expect(state.drafts[1]!.scoreAway, equals(0));
       });
+
+      test('clearing a field (null) clears the draft value, not keeps the stale one',
+          () async {
+        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+        // User deletes the home field; the tile re-sends both current values.
+        controller.updateDraft(1, scoreHome: null, scoreAway: 1);
+
+        final state = controller.state as ProdeFixturesLoaded;
+        expect(state.drafts[1]!.scoreHome, isNull);
+        expect(state.drafts[1]!.scoreAway, equals(1));
+      });
     });
 
     // -----------------------------------------------------------------------

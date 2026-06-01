@@ -245,9 +245,14 @@ class ProdeFixturesController
     if (current is! ProdeFixturesLoaded) return;
 
     final existing = current.drafts[matchId] ?? const PredictionDraft();
+    // The tile always passes the current parsed value of BOTH fields, so this is
+    // an absolute set: a null means the user cleared that field and the draft must
+    // clear too (otherwise a stale score would persist and be submitted).
     final updated = existing.copyWith(
       scoreHome: scoreHome,
       scoreAway: scoreAway,
+      clearScoreHome: scoreHome == null,
+      clearScoreAway: scoreAway == null,
     );
     final newDrafts = Map<int, PredictionDraft>.from(current.drafts)
       ..[matchId] = updated;

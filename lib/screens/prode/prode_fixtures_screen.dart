@@ -229,7 +229,7 @@ class _LoadedView extends ConsumerWidget {
     final controller = ref.read(prodeFixturesControllerProvider.notifier);
     // UX-only client-side lock check. Server lock (423) is the security boundary.
     final isLocked =
-        fecha.lockedAt != null && DateTime.now().isAfter(fecha.lockedAt!);
+        fecha.lockedAt != null && !DateTime.now().isBefore(fecha.lockedAt!);
 
     return Column(
       children: [
