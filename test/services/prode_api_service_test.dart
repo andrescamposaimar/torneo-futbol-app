@@ -1004,4 +1004,93 @@ void main() {
       expect((caught as ProdeSsoException).code, equals('fetch_fecha_error'));
     });
   });
+
+  // -------------------------------------------------------------------------
+  // ProdeApiService.submitPrediction  (B1-4)
+  // -------------------------------------------------------------------------
+  group('ProdeApiService.submitPrediction()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    setUp(() async {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+      await repo.write(
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        sessionVersion: '1',
+        tenantId: 'test',
+      );
+    });
+
+    test('200 -> completes normally without throwing', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              '{"status":"ok"}',
+              200,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.submitPrediction(
+          fechaId: 1,
+          matchId: 5,
+          scoreHome: 2,
+          scoreAway: 1,
+        ),
+        completes,
+      );
+    });
+
+    test('423 -> throws PredeLockedException', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              '{"code":"fecha_locked","message":"Locked."}',
+              423,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.submitPrediction(
+          fechaId: 1,
+          matchId: 5,
+          scoreHome: 2,
+          scoreAway: 1,
+        ),
+        throwsA(isA<PredeLockedException>()),
+      );
+    });
+
+    test('400 -> throws ProdeApiException with statusCode 400', () async {
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              '{"code":"invalid_score","message":"Bad score."}',
+              400,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.submitPrediction(
+          fechaId: 1,
+          matchId: 5,
+          scoreHome: -1,
+          scoreAway: 0,
+        ),
+        throwsA(
+          isA<ProdeApiException>().having(
+            (e) => e.statusCode,
+            'statusCode',
+            equals(400),
+          ),
+        ),
+      );
+    });
+  });
 }

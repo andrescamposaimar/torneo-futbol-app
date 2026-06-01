@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
@@ -71,6 +72,35 @@ class _StubControllerWithCallback extends ProdeFixturesController {
   }
 }
 
+/// Stub controller that records draft updates and submit calls for assertion.
+class _StubControllerWithDraftTracking extends ProdeFixturesController {
+  final List<(int, int?, int?)> draftUpdates = [];
+  final List<int> submitCalls = [];
+
+  _StubControllerWithDraftTracking(ProdeFixturesState initialState)
+      : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  void updateDraft(int matchId, {int? scoreHome, int? scoreAway}) {
+    draftUpdates.add((matchId, scoreHome, scoreAway));
+    // Also update state so the widget sees the change
+    super.updateDraft(matchId, scoreHome: scoreHome, scoreAway: scoreAway);
+  }
+
+  @override
+  Future<void> submitPrediction(int matchId) async {
+    submitCalls.add(matchId);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Test data helpers
 // ---------------------------------------------------------------------------
@@ -78,6 +108,8 @@ class _StubControllerWithCallback extends ProdeFixturesController {
 FechaActiva _makeFecha({
   ProdeFechaState state = ProdeFechaState.open,
   bool emptyMatches = false,
+  DateTime? lockedAt,
+  List<PredictionEntry>? userPredictions,
 }) {
   final matches = emptyMatches
       ? <FechaMatch>[]
@@ -100,9 +132,22 @@ FechaActiva _makeFecha({
     fechaId: 1,
     seasonId: 10,
     state: state,
-    lockedAt: null,
+    lockedAt: lockedAt,
     matches: matches,
+    userPredictions: userPredictions ?? [],
   );
+}
+
+/// Builds the initial drafts for [fecha], mirroring the controller's seed logic.
+Map<int, PredictionDraft> _seedDrafts(FechaActiva fecha) {
+  final predMap = {
+    for (final p in fecha.userPredictions)
+      p.matchId: PredictionDraft(scoreHome: p.scoreHome, scoreAway: p.scoreAway),
+  };
+  return {
+    for (final m in fecha.matches)
+      m.matchId: predMap[m.matchId] ?? const PredictionDraft(),
+  };
 }
 
 /// Pumps [ProdeFixturesScreen] with a stub controller inside a [ProviderScope].
@@ -325,5 +370,141 @@ void main() {
 
       expect(logoutCalled, isTrue);
     });
+
+    // -------------------------------------------------------------------------
+    // _PredictionMatchTile tests  (B3-1)
+    // -------------------------------------------------------------------------
+
+    group('_PredictionMatchTile', () {
+      /// Helper: pump with a [_StubControllerWithDraftTracking] that has
+      /// an initial [ProdeFixturesLoaded] with [fecha] + seeds drafts.
+      Future<_StubControllerWithDraftTracking> _pumpWithTracking(
+        WidgetTester tester,
+        FechaActiva fecha,
+      ) async {
+        final drafts = _seedDrafts(fecha);
+        final stub = _StubControllerWithDraftTracking(
+          ProdeFixturesLoaded(fecha, drafts: drafts),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        return stub;
+      }
+
+      testWidgets('entering scores calls updateDraft with matchId', (tester) async {
+        final fecha = _makeFecha();
+        final stub = await _pumpWithTracking(tester, fecha);
+
+        // Find the first score-home field and enter a value
+        final homeFields = find.byKey(const Key('score_home_1'));
+        expect(homeFields, findsOneWidget);
+
+        await tester.enterText(homeFields, '3');
+        await tester.pump();
+
+        expect(stub.draftUpdates, isNotEmpty);
+        final update = stub.draftUpdates.first;
+        expect(update.$1, equals(1)); // matchId
+        expect(update.$2, equals(3)); // scoreHome
+      });
+
+      testWidgets('tapping submit calls submitPrediction with matchId', (tester) async {
+        final fecha = _makeFecha();
+        final drafts = _seedDrafts(fecha);
+        // Seed draft with scores so submit is not a no-op
+        final seededDrafts = Map<int, PredictionDraft>.from(drafts)
+          ..[1] = const PredictionDraft(scoreHome: 2, scoreAway: 1);
+        final stub = _StubControllerWithDraftTracking(
+          ProdeFixturesLoaded(fecha, drafts: seededDrafts),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('submit_1')));
+        await tester.pump();
+
+        expect(stub.submitCalls, contains(1));
+      });
+
+      testWidgets('locked fecha: inputs disabled, submit button disabled', (tester) async {
+        // lockedAt in the past → locked
+        final fecha = _makeFecha(
+          lockedAt: DateTime(2020, 1, 1),
+        );
+        await _pumpWithTracking(tester, fecha);
+
+        // Score inputs should be disabled
+        final homeField = tester.widget<TextField>(
+          find.byKey(const Key('score_home_1')),
+        );
+        expect(homeField.enabled, isFalse);
+
+        // Submit button: the Key is directly on the ElevatedButton
+        final submitBtn = tester.widget<ElevatedButton>(
+          find.byKey(const Key('submit_1')),
+        );
+        expect(submitBtn.onPressed, isNull);
+      });
+
+      testWidgets('existing prediction pre-populates inputs', (tester) async {
+        final fecha = _makeFecha(
+          userPredictions: [
+            PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1),
+          ],
+        );
+        await _pumpWithTracking(tester, fecha);
+
+        final homeField = tester.widget<TextField>(
+          find.byKey(const Key('score_home_1')),
+        );
+        expect(homeField.controller?.text, equals('2'));
+
+        final awayField = tester.widget<TextField>(
+          find.byKey(const Key('score_away_1')),
+        );
+        expect(awayField.controller?.text, equals('1'));
+      });
+
+      testWidgets('score input only accepts numeric characters', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpWithTracking(tester, fecha);
+
+        final homeField = find.byKey(const Key('score_home_1'));
+        final widget = tester.widget<TextField>(homeField);
+        expect(widget.keyboardType, equals(TextInputType.number));
+        // FilteringTextInputFormatter should be present
+        final formatters = widget.inputFormatters ?? [];
+        expect(
+          formatters.any((f) => f is FilteringTextInputFormatter),
+          isTrue,
+        );
+      });
+    });
   });
 }
+
+void _noOp() {}
