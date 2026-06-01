@@ -9,18 +9,19 @@ use EntreRedes\Prode\Fecha\FechaRepository;
 use EntreRedes\Prode\Fecha\FechaResolver;
 use EntreRedes\Prode\Fecha\LockComputer;
 use EntreRedes\Prode\Fecha\Settings;
+use EntreRedes\Prode\Predictions\PredictionRepository;
 
 /**
  * REST controller for the GET /prode/fecha-activa endpoint.
  *
  * Response contract:
  * {
- *   fecha_id:       int,
- *   season_id:      int,
- *   state:          "open"|"locked",
- *   locked_at:      "Y-m-d H:i:s",
- *   matches:        [{match_id, home_team, away_team, kickoff}],
- *   user_predictions: []   // populated in G2
+ *   fecha_id:         int,
+ *   season_id:        int,
+ *   state:            "open"|"locked",
+ *   locked_at:        "Y-m-d H:i:s",
+ *   matches:          [{match_id, home_team, away_team, kickoff}],
+ *   user_predictions: [{match_id, score_home, score_away}]  // [] for anonymous
  * }
  *
  * Team names are enriched at read time via FechaResolver::enrichMatches()
@@ -35,24 +36,27 @@ class FechaController {
 
     private const NAMESPACE = 'entre-redes/v1';
 
-    private FechaRepository  $repository;
-    private FechaResolver    $resolver;
-    private LockComputer     $lockComputer;
-    private Settings         $settings;
-    private ?AuthMiddleware  $middleware;
+    private FechaRepository       $repository;
+    private FechaResolver         $resolver;
+    private LockComputer          $lockComputer;
+    private Settings              $settings;
+    private ?AuthMiddleware       $middleware;
+    private ?PredictionRepository $predRepo;
 
     public function __construct(
         FechaRepository $repository,
         FechaResolver $resolver,
         LockComputer $lockComputer,
         Settings $settings,
-        ?AuthMiddleware $middleware = null
+        ?AuthMiddleware $middleware = null,
+        ?PredictionRepository $predRepo = null
     ) {
         $this->repository   = $repository;
         $this->resolver     = $resolver;
         $this->lockComputer = $lockComputer;
         $this->settings     = $settings;
         $this->middleware   = $middleware;
+        $this->predRepo     = $predRepo;
     }
 
     /**
@@ -117,6 +121,23 @@ class FechaController {
             ];
         }, $enrichedMatches );
 
+        // Populate user_predictions when the request carries an authenticated user
+        // and a PredictionRepository is available (ADR-G2-3).
+        $userPredictions = [];
+        $prodeUser       = $request->get_param( '_prode_user' );
+
+        if ( null !== $prodeUser && null !== $this->predRepo ) {
+            $userId          = (int) ( $prodeUser['id'] ?? 0 );
+            $rawPredictions  = $this->predRepo->findByUserAndFecha( (int) $fecha['id'], $userId );
+            $userPredictions = array_map( static function ( array $row ): array {
+                return [
+                    'match_id'   => (int) $row['match_id'],
+                    'score_home' => (int) $row['score_home'],
+                    'score_away' => (int) $row['score_away'],
+                ];
+            }, $rawPredictions );
+        }
+
         return new \WP_REST_Response(
             [
                 'fecha_id'         => (int) $fecha['id'],
@@ -124,7 +145,7 @@ class FechaController {
                 'state'            => $state,
                 'locked_at'        => (string) $fecha['locked_at'],
                 'matches'          => $matchesResponse,
-                'user_predictions' => [], // G2 fills this
+                'user_predictions' => $userPredictions,
             ],
             200
         );
