@@ -21,17 +21,20 @@ class RestController {
     private ?\EntreRedes\Prode\Account\AccountController  $account_controller;
     private ?\EntreRedes\Prode\Rest\FechaController       $fecha_controller;
     private ?\EntreRedes\Prode\Rest\PredictionController  $prediction_controller;
+    private ?\EntreRedes\Prode\Rest\EvaluationController  $evaluation_controller;
 
     public function __construct(
         ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null,
         ?\EntreRedes\Prode\Account\AccountController $account_controller = null,
         ?\EntreRedes\Prode\Rest\FechaController $fecha_controller = null,
-        ?\EntreRedes\Prode\Rest\PredictionController $prediction_controller = null
+        ?\EntreRedes\Prode\Rest\PredictionController $prediction_controller = null,
+        ?\EntreRedes\Prode\Rest\EvaluationController $evaluation_controller = null
     ) {
         $this->auth_endpoints        = $auth_endpoints;
         $this->account_controller    = $account_controller;
         $this->fecha_controller      = $fecha_controller;
         $this->prediction_controller = $prediction_controller;
+        $this->evaluation_controller = $evaluation_controller;
     }
 
     public function register_routes(): void {
@@ -76,6 +79,11 @@ class RestController {
         // Prediction endpoints (PR-G2-A2): POST /prode/prediccion.
         if ( null !== $this->prediction_controller ) {
             $this->prediction_controller->register_routes();
+        }
+
+        // Evaluation endpoints (PR-G3-C): POST /prode/evaluar-fecha.
+        if ( null !== $this->evaluation_controller ) {
+            $this->evaluation_controller->register_routes();
         }
     }
 

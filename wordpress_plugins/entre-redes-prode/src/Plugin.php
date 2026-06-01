@@ -56,6 +56,11 @@ final class Plugin {
             $fecha_repo  = new Fecha\FechaRepository( $wpdb );
             $pred_repo   = new Predictions\PredictionRepository( $wpdb );
 
+            // G3: score repository and fecha evaluator (ADR-G3-1).
+            $score_repo         = new Scoring\ScoreRepository( $wpdb );
+            $results_dispatcher = static fn( \WP_REST_Request $req ) => rest_do_request( $req );
+            $fecha_evaluator    = new Scoring\FechaEvaluator( $score_repo, $pred_repo, $fecha_repo, $results_dispatcher );
+
             $fecha_controller = new Rest\FechaController(
                 $fecha_repo,
                 new Fecha\FechaResolver(),
@@ -71,11 +76,16 @@ final class Plugin {
                 $middleware
             );
 
+            // G3: admin endpoint for manual fecha evaluation (ADR-G3-4).
+            $cap_check = static fn() => current_user_can( 'manage_options' );
+            $evaluation_controller = new Rest\EvaluationController( $fecha_evaluator, $cap_check );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
                 $fecha_controller,
-                $prediction_controller
+                $prediction_controller,
+                $evaluation_controller
             );
             $controller->register_routes();
         } );
