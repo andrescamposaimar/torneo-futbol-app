@@ -6,6 +6,7 @@ import 'listas_screen.dart';
 import 'scorers_screen.dart';
 import 'imbatibles_screen.dart';
 import 'prode/prode_auth_gate.dart';
+import 'prode/prode_ranking_screen.dart';
 import 'package:flutter/foundation.dart';
 import '../config/tenant_provider.dart';
 import '../providers/repository_providers.dart';
@@ -112,6 +113,17 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const ProdeAuthGate()),
+                );
+              },
+            ),
+            _menuItem(
+              'Tabla de posiciones',
+              Icons.leaderboard,
+              () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ProdeRankingScreen()),
                 );
               },
             ),

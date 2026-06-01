@@ -11,6 +11,7 @@ import '../services/prode_auth_repository.dart';
 import '../services/prode_api_service.dart';
 import '../services/prode_auth_state.dart';
 import '../services/prode_fixtures_controller.dart';
+import '../services/prode_ranking_controller.dart';
 
 /// Drives the native Google Sign-In sheet and returns a Google id_token whose
 /// `aud` is the web client id (via [serverClientId]) — the audience the
@@ -147,4 +148,15 @@ final prodeAuthControllerProvider =
 final prodeFixturesControllerProvider =
     StateNotifierProvider<ProdeFixturesController, ProdeFixturesState>((ref) {
   return ProdeFixturesController(ref.watch(prodeApiServiceProvider));
+});
+
+/// Provides the [ProdeRankingController] and exposes the [ProdeRankingState]
+/// state machine to the ranking screen.
+///
+/// NOT autoDispose: state persists for the session so navigating away and back
+/// does NOT auto-refetch. [ProdeRankingScreen.initState] guards on
+/// [ProdeRankingLoading] to prevent a redundant round-trip on re-entry.
+final prodeRankingControllerProvider =
+    StateNotifierProvider<ProdeRankingController, ProdeRankingState>((ref) {
+  return ProdeRankingController(ref.watch(prodeApiServiceProvider));
 });

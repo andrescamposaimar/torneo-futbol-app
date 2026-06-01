@@ -10,6 +10,7 @@ import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/models/fecha_activa.dart';
+import 'package:torneo_futbol_app/models/prode_ranking.dart';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1191,6 +1192,224 @@ void main() {
         ),
         throwsA(isA<ProdeAuthRequired>()),
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ProdeApiService.fetchRanking()
+  // ---------------------------------------------------------------------------
+
+  group('ProdeApiService.fetchRanking()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    String _rankingBody({
+      List<Map<String, dynamic>> items = const [],
+      int total = 0,
+      int page = 1,
+      int perPage = 50,
+    }) {
+      return json.encode({
+        'items': items,
+        'total': total,
+        'page': page,
+        'per_page': perPage,
+      });
+    }
+
+    Map<String, dynamic> _entryMap({
+      int userId = 1,
+      String displayName = 'User',
+      int totalPoints = 5,
+      int rank = 1,
+      int exactCount = 1,
+      bool isMe = false,
+    }) => {
+      'user_id': userId,
+      'display_name': displayName,
+      'total_points': totalPoints,
+      'rank': rank,
+      'exact_count': exactCount,
+      'is_me': isMe,
+    };
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    test('anonymous (no token) — 200 — no Authorization header', () async {
+      // empty storage → no token
+      String? capturedAuthHeader;
+      final client = MockClient((request) async {
+        capturedAuthHeader = request.headers['Authorization'];
+        return http.Response(
+          _rankingBody(items: [_entryMap()], total: 1),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final service = _makeService(repo, client);
+      final result = await service.fetchRanking();
+      expect(capturedAuthHeader, isNull);
+      expect(result, isA<RankingPage>());
+      expect(result.items.length, 1);
+    });
+
+    test('token present — 200 — Authorization: Bearer tok', () async {
+      await repo.write(
+        accessToken: 'tok-abc',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+      String? capturedAuthHeader;
+      final client = MockClient((request) async {
+        capturedAuthHeader = request.headers['Authorization'];
+        return http.Response(
+          _rankingBody(items: [_entryMap()], total: 1),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final service = _makeService(repo, client);
+      final result = await service.fetchRanking();
+      expect(capturedAuthHeader, equals('Bearer tok-abc'));
+      expect(result, isA<RankingPage>());
+    });
+
+    test('401-degrade: token present → 1st call 401 → 2nd call 200 without auth', () async {
+      await repo.write(
+        accessToken: 'stale-tok',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+      var callCount = 0;
+      String? secondCallAuth;
+      final client = MockClient((request) async {
+        callCount++;
+        if (callCount == 1) {
+          return http.Response(
+            json.encode({'code': 'token_expired'}),
+            401,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        secondCallAuth = request.headers['Authorization'];
+        return http.Response(
+          _rankingBody(items: [_entryMap()], total: 1),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final service = _makeService(repo, client);
+      final result = await service.fetchRanking();
+      expect(callCount, 2);
+      expect(secondCallAuth, isNull);
+      expect(result, isA<RankingPage>());
+    });
+
+    test('no token + 401 → ProdeApiException, exactly 1 call', () async {
+      // empty storage → no token
+      var callCount = 0;
+      final client = MockClient((request) async {
+        callCount++;
+        return http.Response(
+          json.encode({'code': 'unauthorized'}),
+          401,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final service = _makeService(repo, client);
+      await expectLater(
+        () => service.fetchRanking(),
+        throwsA(isA<ProdeApiException>()),
+      );
+      expect(callCount, 1);
+    });
+
+    test('400 → ProdeApiException(statusCode:400)', () async {
+      final client = MockClient((_) async => http.Response(
+            json.encode({'code': 'invalid_params'}),
+            400,
+            headers: {'content-type': 'application/json'},
+          ));
+      final service = _makeService(repo, client);
+      await expectLater(
+        () => service.fetchRanking(),
+        throwsA(isA<ProdeApiException>()
+            .having((e) => e.statusCode, 'statusCode', equals(400))
+            .having((e) => e.code, 'code', equals('invalid_params'))),
+      );
+    });
+
+    test('500 → ProdeApiException', () async {
+      final client = MockClient((_) async => http.Response(
+            json.encode({'code': 'server_error'}),
+            500,
+            headers: {'content-type': 'application/json'},
+          ));
+      final service = _makeService(repo, client);
+      await expectLater(
+        () => service.fetchRanking(),
+        throwsA(isA<ProdeApiException>()),
+      );
+    });
+
+    test('query params: temporada=3, page=2, per_page=25 in URL', () async {
+      Uri? capturedUri;
+      final client = MockClient((request) async {
+        capturedUri = request.url;
+        return http.Response(
+          _rankingBody(),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final service = _makeService(repo, client);
+      await service.fetchRanking(temporada: 3, page: 2, perPage: 25);
+      expect(capturedUri?.queryParameters['temporada'], '3');
+      expect(capturedUri?.queryParameters['page'], '2');
+      expect(capturedUri?.queryParameters['per_page'], '25');
+    });
+
+    test('default query params: page=1, per_page=50, no temporada', () async {
+      Uri? capturedUri;
+      final client = MockClient((request) async {
+        capturedUri = request.url;
+        return http.Response(
+          _rankingBody(),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      final service = _makeService(repo, client);
+      await service.fetchRanking();
+      expect(capturedUri?.queryParameters['page'], '1');
+      expect(capturedUri?.queryParameters['per_page'], '50');
+      expect(capturedUri?.queryParameters.containsKey('temporada'), false);
+    });
+
+    test('never throws ProdeAuthRequired for any response code', () async {
+      for (final statusCode in [200, 401, 500]) {
+        store.clear();
+        _setUpFakeStorage(store);
+        repo = ProdeAuthRepository();
+        final client = MockClient((_) async => http.Response(
+              json.encode({'code': 'error', 'items': [], 'total': 0}),
+              statusCode,
+              headers: {'content-type': 'application/json'},
+            ));
+        final service = _makeService(repo, client);
+        try {
+          await service.fetchRanking();
+        } catch (e) {
+          expect(e, isNot(isA<ProdeAuthRequired>()),
+              reason: 'status $statusCode must not throw ProdeAuthRequired');
+        }
+      }
     });
   });
 }

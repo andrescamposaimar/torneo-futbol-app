@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import '../models/fecha_activa.dart';
+import '../models/prode_ranking.dart';
 import 'prode_auth_repository.dart';
 import 'prode_auth_state.dart';
 
@@ -261,6 +262,73 @@ class ProdeApiService {
     }
 
     return FechaActiva.fromJson(_decodeBody(response));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ranking endpoints
+  // ---------------------------------------------------------------------------
+
+  /// Fetches the public season leaderboard.
+  ///
+  /// This method does NOT route through [request] because [request] fails fast
+  /// with [ProdeAuthRequired] when no token is present (ADR-G5-1). The
+  /// leaderboard is an optionalAuth endpoint: it works anonymously and optionally
+  /// attaches a Bearer token when one is cached so the backend can mark the
+  /// caller's own row with `is_me: true`.
+  ///
+  /// Auth strategy (ADR-G5-2 / ADR-G5-3):
+  ///   - Peek the token via `_authRepo.readAccessToken()` (public, no guard).
+  ///   - Attach `Authorization: Bearer <token>` iff token is non-null and non-empty.
+  ///   - On 401 with a token → retry ONCE without auth (degrade to anonymous).
+  ///   - On 401 without a token → throw [ProdeApiException] (no retry possible).
+  ///   - On 200 → return a parsed [RankingPage].
+  ///   - On any other non-200 → throw [ProdeApiException].
+  ///
+  /// NEVER throws [ProdeAuthRequired] and NEVER calls [request].
+  /// Timeout: 15 s (mirrors [fetchFechaActiva]).
+  Future<RankingPage> fetchRanking({
+    int? temporada,
+    int page = 1,
+    int perPage = 50,
+  }) async {
+    final query = <String, String>{
+      'page': '$page',
+      'per_page': '$perPage',
+      if (temporada != null) 'temporada': '$temporada',
+    };
+    final uri = Uri.parse('${_config.prodeApiBaseUrl}/ranking')
+        .replace(queryParameters: query);
+
+    final token = await _authRepo.readAccessToken();
+
+    var resp = await _getWithOptionalBearer(uri, bearer: token)
+        .timeout(const Duration(seconds: 15));
+
+    // Degrade to anonymous on 401 when a token was attached — a stale/expired
+    // token must NOT block a public endpoint (ADR-G5-3).
+    if (resp.statusCode == 401 && token != null) {
+      resp = await _getWithOptionalBearer(uri, bearer: null)
+          .timeout(const Duration(seconds: 15));
+    }
+
+    if (resp.statusCode == 200) {
+      return RankingPage.fromJson(_decodeBody(resp));
+    }
+
+    throw ProdeApiException(
+      statusCode: resp.statusCode,
+      code: extractErrorCode(_decodeBody(resp)),
+    );
+  }
+
+  /// Executes a GET to [uri], attaching `Authorization: Bearer <bearer>` only
+  /// when [bearer] is non-null. Always sets `Accept: application/json`.
+  Future<http.Response> _getWithOptionalBearer(Uri uri, {String? bearer}) {
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      if (bearer != null) 'Authorization': 'Bearer $bearer',
+    };
+    return _httpClient.get(uri, headers: headers);
   }
 
   // ---------------------------------------------------------------------------
