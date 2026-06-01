@@ -61,7 +61,7 @@ class RankingRepositoryTest extends TestCase {
             $wpdb->prefix . 'prode_users',
             [
                 'id'           => $userId,
-                'tenant_id'    => 'test',
+                'tenant_id'    => PRODE_TENANT_ID,
                 'dni'          => "dni_{$userId}",
                 'provider'     => 'google',
                 'provider_id'  => "gid_{$userId}",
@@ -79,7 +79,7 @@ class RankingRepositoryTest extends TestCase {
         $wpdb->insert(
             $wpdb->prefix . 'prode_fechas',
             [
-                'tenant_id'    => 'test',
+                'tenant_id'    => PRODE_TENANT_ID,
                 'season_id'    => $seasonId,
                 'locked_at'    => '2026-05-30 10:00:00',
                 'state'        => $state,
@@ -303,7 +303,7 @@ class RankingRepositoryTest extends TestCase {
         $this->seedFecha( 'locked', 10 );   // should NOT appear
         $this->seedFecha( 'open', 10 );     // should NOT appear
 
-        $ids = $this->repo->listEvaluatedFechaIds( 'test' );
+        $ids = $this->repo->listEvaluatedFechaIds( PRODE_TENANT_ID );
 
         $this->assertCount( 2, $ids );
         $this->assertContains( $evaluatedId2, $ids );
