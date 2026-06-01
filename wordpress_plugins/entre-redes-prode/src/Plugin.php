@@ -53,19 +53,30 @@ final class Plugin {
                 $hasher
             );
 
+            $fecha_repo  = new Fecha\FechaRepository( $wpdb );
+            $pred_repo   = new Predictions\PredictionRepository( $wpdb );
+
             $fecha_controller = new Rest\FechaController(
-                new Fecha\FechaRepository( $wpdb ),
+                $fecha_repo,
                 new Fecha\FechaResolver(),
                 new Fecha\LockComputer(),
                 new Fecha\Settings( $wpdb ),
+                $middleware,
+                $pred_repo
+            );
+
+            $prediction_controller = new Rest\PredictionController(
+                $pred_repo,
+                $fecha_repo,
                 $middleware
             );
 
-            // Swap permission_callback to optionalAuth so the route is
-            // forward-compatible with G2 user_predictions (ADR-G0-5).
-            // The FechaController register_routes() is called by RestController.
-
-            $controller = new Rest\RestController( $auth_endpoints, $account_controller, $fecha_controller );
+            $controller = new Rest\RestController(
+                $auth_endpoints,
+                $account_controller,
+                $fecha_controller,
+                $prediction_controller
+            );
             $controller->register_routes();
         } );
 

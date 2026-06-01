@@ -55,6 +55,33 @@ class ProdeSsoException implements Exception {
   String toString() => 'ProdeSsoException($code): $message';
 }
 
+/// Thrown by [ProdeApiService.submitPrediction] when the server returns HTTP
+/// 423, signalling that the fecha is locked and no longer accepting predictions.
+///
+/// The controller maps this to a draft `error` status and the tile can surface
+/// a "fecha closed" message without inspecting a raw status code.
+class PredeLockedException implements Exception {
+  const PredeLockedException();
+
+  @override
+  String toString() => 'PredeLockedException: fecha is locked.';
+}
+
+/// Thrown by [ProdeApiService.submitPrediction] when the server returns a
+/// non-200, non-401, non-423 response (e.g. 400 validation, 422, 500).
+///
+/// [statusCode] lets the controller distinguish validation errors (400) from
+/// server errors (5xx) for UX purposes when needed.
+class ProdeApiException implements Exception {
+  final int statusCode;
+  final String code;
+
+  const ProdeApiException({required this.statusCode, this.code = 'api_error'});
+
+  @override
+  String toString() => 'ProdeApiException($statusCode, $code)';
+}
+
 // ---------------------------------------------------------------------------
 // SSO exchange result
 // ---------------------------------------------------------------------------
@@ -234,6 +261,57 @@ class ProdeApiService {
     }
 
     return FechaActiva.fromJson(_decodeBody(response));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Prediction endpoints
+  // ---------------------------------------------------------------------------
+
+  /// Submits a score prediction for a single match.
+  ///
+  /// POSTs `{fecha_id, match_id, score_home, score_away}` to
+  /// `/prode/prediccion` using the authenticated [request] transport, which
+  /// attaches the Bearer token and handles 401/refresh automatically.
+  ///
+  /// Outcomes:
+  /// - **200** — completes normally.
+  /// - **423** — throws [PredeLockedException] (fecha closed for predictions).
+  /// - **401 surviving refresh** — throws [ProdeAuthRequired].
+  /// - **any other non-200** — throws [ProdeApiException] with the status code.
+  ///
+  /// Timeout: 15 s (matches [fetchFechaActiva]).
+  Future<void> submitPrediction({
+    required int fechaId,
+    required int matchId,
+    required int scoreHome,
+    required int scoreAway,
+  }) async {
+    final req = http.Request(
+      'POST',
+      Uri.parse('${_config.prodeApiBaseUrl}/prediccion'),
+    )
+      ..headers['Content-Type'] = 'application/json'
+      ..headers['Accept'] = 'application/json'
+      ..body = json.encode({
+        'fecha_id': fechaId,
+        'match_id': matchId,
+        'score_home': scoreHome,
+        'score_away': scoreAway,
+      });
+
+    final response = await request(req).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) return;
+
+    if (response.statusCode == 423) {
+      throw const PredeLockedException();
+    }
+
+    final body = _decodeBody(response);
+    throw ProdeApiException(
+      statusCode: response.statusCode,
+      code: extractErrorCode(body),
+    );
   }
 
   /// Executes [request] with a Bearer token attached.

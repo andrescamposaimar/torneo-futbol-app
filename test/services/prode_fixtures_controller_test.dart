@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:torneo_futbol_app/models/fecha_activa.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_fixtures_controller.dart';
@@ -63,6 +65,7 @@ String _fechaBody({
   int seasonId = 10,
   String state = 'open',
   int matchCount = 2,
+  List<Map<String, dynamic>>? userPredictions,
 }) {
   final matches = List.generate(
     matchCount,
@@ -79,7 +82,33 @@ String _fechaBody({
     'state': state,
     'locked_at': null,
     'matches': matches,
+    'user_predictions': userPredictions ?? [],
   });
+}
+
+/// Builds a [FechaActiva] with optional userPredictions directly (no HTTP).
+FechaActiva _makeFechaActiva({
+  int fechaId = 1,
+  int matchCount = 2,
+  List<PredictionEntry>? userPredictions,
+}) {
+  final matches = List.generate(
+    matchCount,
+    (i) => FechaMatch(
+      matchId: i + 1,
+      homeTeam: 'Home $i',
+      awayTeam: 'Away $i',
+      kickoff: DateTime(2026, 6, 7, 14, 0),
+    ),
+  );
+  return FechaActiva(
+    fechaId: fechaId,
+    seasonId: 10,
+    state: ProdeFechaState.open,
+    lockedAt: null,
+    matches: matches,
+    userPredictions: userPredictions ?? [],
+  );
 }
 
 http.Response _fecha200({int matchCount = 2}) => http.Response(
@@ -305,5 +334,348 @@ void main() {
         expect(e.toString(), contains('test'));
       });
     });
+
+    // -----------------------------------------------------------------------
+    // PredictionDraft  (B2-1)
+    // -----------------------------------------------------------------------
+    group('PredictionDraft', () {
+      test('default draft has null scores and SubmitStatus.idle', () {
+        const draft = PredictionDraft();
+        expect(draft.scoreHome, isNull);
+        expect(draft.scoreAway, isNull);
+        expect(draft.status, equals(SubmitStatus.idle));
+      });
+
+      test('copyWith updates scoreHome only', () {
+        const draft = PredictionDraft();
+        final updated = draft.copyWith(scoreHome: 3);
+        expect(updated.scoreHome, equals(3));
+        expect(updated.scoreAway, isNull);
+        expect(updated.status, equals(SubmitStatus.idle));
+      });
+
+      test('copyWith updates all fields', () {
+        const draft = PredictionDraft();
+        final updated = draft.copyWith(
+          scoreHome: 2,
+          scoreAway: 1,
+          status: SubmitStatus.submitting,
+        );
+        expect(updated.scoreHome, equals(2));
+        expect(updated.scoreAway, equals(1));
+        expect(updated.status, equals(SubmitStatus.submitting));
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // ProdeFixturesLoaded draft seeding  (B2-1)
+    // -----------------------------------------------------------------------
+    group('draft seeding from userPredictions', () {
+      test('loaded state seeded from fecha with one prediction', () async {
+        final fecha = _makeFechaActiva(
+          userPredictions: [
+            PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1),
+          ],
+        );
+
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        final draft = loaded.drafts[1]!;
+        expect(draft.scoreHome, equals(2));
+        expect(draft.scoreAway, equals(1));
+        expect(draft.status, equals(SubmitStatus.idle));
+      });
+
+      test('match with no prediction has null draft scores', () async {
+        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
+
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        // match_id 1 has no prediction
+        final draft = loaded.drafts[1]!;
+        expect(draft.scoreHome, isNull);
+        expect(draft.scoreAway, isNull);
+        expect(draft.status, equals(SubmitStatus.idle));
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // updateDraft  (B2-2)
+    // -----------------------------------------------------------------------
+    group('updateDraft()', () {
+      test('updateDraft(1, 2, 1) emits new state with correct scores', () async {
+        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.drafts[1]!.scoreHome, equals(2));
+        expect(loaded.drafts[1]!.scoreAway, equals(1));
+      });
+
+      test('score persists across simulated state read (draft in controller, not widget)', () async {
+        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        controller.updateDraft(1, scoreHome: 3, scoreAway: 0);
+        // Read state from controller (as a widget would after scroll recycle)
+        final state = controller.state as ProdeFixturesLoaded;
+        expect(state.drafts[1]!.scoreHome, equals(3));
+        expect(state.drafts[1]!.scoreAway, equals(0));
+      });
+
+      test('clearing a field (null) clears the draft value, not keeps the stale one',
+          () async {
+        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+        // User deletes the home field; the tile re-sends both current values.
+        controller.updateDraft(1, scoreHome: null, scoreAway: 1);
+
+        final state = controller.state as ProdeFixturesLoaded;
+        expect(state.drafts[1]!.scoreHome, isNull);
+        expect(state.drafts[1]!.scoreAway, equals(1));
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // submitPrediction (controller method)  (B2-3)
+    // -----------------------------------------------------------------------
+    group('submitPrediction() — controller method', () {
+      test('success path: idle -> submitting -> submitted, service called once', () async {
+        var callCount = 0;
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () {
+            callCount++;
+            return Future.value(http.Response('{"status":"ok"}', 200,
+                headers: {'content-type': 'application/json'}));
+          },
+        );
+        await controller.load();
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        final states = <ProdeFixturesState>[];
+        controller.addListener((s) => states.add(s), fireImmediately: false);
+
+        await controller.submitPrediction(1);
+
+        expect(callCount, equals(1));
+        // Final status should be submitted
+        final finalLoaded = controller.state as ProdeFixturesLoaded;
+        expect(finalLoaded.drafts[1]!.status, equals(SubmitStatus.submitted));
+        // Should have transitioned through submitting
+        final submittingState = states
+            .whereType<ProdeFixturesLoaded>()
+            .where((s) => s.drafts[1]?.status == SubmitStatus.submitting)
+            .firstOrNull;
+        expect(submittingState, isNotNull);
+      });
+
+      test('double-submit guard: second call while submitting is no-op', () async {
+        var callCount = 0;
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        // Use a completer to keep the first call in flight
+        final completer = Completer<http.Response>();
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () {
+            callCount++;
+            if (callCount == 1) return completer.future;
+            return Future.value(http.Response('{"status":"ok"}', 200,
+                headers: {'content-type': 'application/json'}));
+          },
+        );
+        await controller.load();
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        // Start first submit — don't await yet
+        final first = controller.submitPrediction(1);
+        // Immediately call again while in-flight
+        await controller.submitPrediction(1);
+
+        // Complete the first
+        completer.complete(http.Response('{"status":"ok"}', 200,
+            headers: {'content-type': 'application/json'}));
+        await first;
+
+        expect(callCount, equals(1));
+      });
+
+      test('null scoreHome -> no-op, service not called', () async {
+        var callCount = 0;
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () {
+            callCount++;
+            return Future.value(http.Response('{"status":"ok"}', 200,
+                headers: {'content-type': 'application/json'}));
+          },
+        );
+        await controller.load();
+        // No updateDraft call — draft has null scores
+
+        await controller.submitPrediction(1);
+
+        expect(callCount, equals(0));
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.drafts[1]!.status, equals(SubmitStatus.idle));
+      });
+
+      test('PredeLockedException -> status = error', () async {
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () => Future.value(http.Response(
+              '{"code":"fecha_locked","message":"Locked."}',
+              423,
+              headers: {'content-type': 'application/json'})),
+        );
+        await controller.load();
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        await controller.submitPrediction(1);
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.drafts[1]!.status, equals(SubmitStatus.error));
+      });
+
+      test('ProdeApiException (400) -> status = error', () async {
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () => Future.value(http.Response(
+              '{"code":"invalid_score","message":"Bad."}',
+              400,
+              headers: {'content-type': 'application/json'})),
+        );
+        await controller.load();
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        await controller.submitPrediction(1);
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.drafts[1]!.status, equals(SubmitStatus.error));
+      });
+    });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Additional test helpers needed for draft/submit tests
+// ---------------------------------------------------------------------------
+
+/// Creates a controller that returns [fecha] on fetchFechaActiva.
+/// The client never handles submit — for load-only tests.
+Future<ProdeFixturesController> _makeControllerWithFecha(
+  FechaActiva fecha,
+) async {
+  _setUpFakeStorage({});
+  final repo = ProdeAuthRepository();
+  await repo.write(
+    accessToken: 'test-access',
+    refreshToken: 'test-refresh',
+    sessionVersion: '1',
+    tenantId: 'marianista',
+  );
+
+  final client = MockClient((request) async {
+    if (request.url.path.contains('fecha-activa')) {
+      return http.Response(
+        json.encode({
+          'fecha_id': fecha.fechaId,
+          'season_id': fecha.seasonId,
+          'state': fecha.state.name,
+          'locked_at': fecha.lockedAt?.toIso8601String(),
+          'matches': fecha.matches
+              .map((m) => {
+                    'match_id': m.matchId,
+                    'home_team': m.homeTeam,
+                    'away_team': m.awayTeam,
+                    'kickoff':
+                        '${m.kickoff.year}-${m.kickoff.month.toString().padLeft(2, '0')}-${m.kickoff.day.toString().padLeft(2, '0')} ${m.kickoff.hour.toString().padLeft(2, '0')}:${m.kickoff.minute.toString().padLeft(2, '0')}:00',
+                  })
+              .toList(),
+          'user_predictions': fecha.userPredictions
+              .map((p) => {
+                    'match_id': p.matchId,
+                    'score_home': p.scoreHome,
+                    'score_away': p.scoreAway,
+                  })
+              .toList(),
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    return http.Response('{}', 404);
+  });
+
+  final service = _makeService(client, repo);
+  return ProdeFixturesController(service);
+}
+
+/// Creates a controller that returns [fecha] on fetchFechaActiva and routes
+/// POST /prode/prediccion through [submitResponse].
+Future<ProdeFixturesController> _makeControllerWithFechaAndSubmit(
+  FechaActiva fecha, {
+  required Future<http.Response> Function() submitResponse,
+}) async {
+  _setUpFakeStorage({});
+  final repo = ProdeAuthRepository();
+  await repo.write(
+    accessToken: 'test-access',
+    refreshToken: 'test-refresh',
+    sessionVersion: '1',
+    tenantId: 'marianista',
+  );
+
+  final client = MockClient((request) async {
+    if (request.url.path.contains('fecha-activa')) {
+      return http.Response(
+        json.encode({
+          'fecha_id': fecha.fechaId,
+          'season_id': fecha.seasonId,
+          'state': fecha.state.name,
+          'locked_at': fecha.lockedAt?.toIso8601String(),
+          'matches': fecha.matches
+              .map((m) => {
+                    'match_id': m.matchId,
+                    'home_team': m.homeTeam,
+                    'away_team': m.awayTeam,
+                    'kickoff':
+                        '${m.kickoff.year}-${m.kickoff.month.toString().padLeft(2, '0')}-${m.kickoff.day.toString().padLeft(2, '0')} ${m.kickoff.hour.toString().padLeft(2, '0')}:${m.kickoff.minute.toString().padLeft(2, '0')}:00',
+                  })
+              .toList(),
+          'user_predictions': fecha.userPredictions
+              .map((p) => {
+                    'match_id': p.matchId,
+                    'score_home': p.scoreHome,
+                    'score_away': p.scoreAway,
+                  })
+              .toList(),
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    if (request.url.path.contains('prediccion')) {
+      return submitResponse();
+    }
+    return http.Response('{}', 404);
+  });
+
+  final service = _makeService(client, repo);
+  return ProdeFixturesController(service);
 }

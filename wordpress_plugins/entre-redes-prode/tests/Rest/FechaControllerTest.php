@@ -9,6 +9,7 @@ use EntreRedes\Prode\Fecha\FechaResolver;
 use EntreRedes\Prode\Fecha\LockComputer;
 use EntreRedes\Prode\Fecha\Settings;
 use EntreRedes\Prode\Migrations\InitialSchema;
+use EntreRedes\Prode\Predictions\PredictionRepository;
 use EntreRedes\Prode\Rest\FechaController;
 use PHPUnit\Framework\TestCase;
 
@@ -53,10 +54,11 @@ class FechaControllerTest extends TestCase {
     /**
      * Build a FechaController with a stub enrichMatches resolver.
      *
-     * @param array<int, array{match_id: int, home_team: string, away_team: string}> $enrichedMatches
+     * @param array<int, array{match_id: int, home_team: string, away_team: string}> $enrichedTeamMap
      *        Team-name map to return from the stub (keyed by position, merged by match_id).
+     * @param PredictionRepository|null $predRepo  Optional prediction repo for G2 tests.
      */
-    private function makeController( array $enrichedTeamMap = [] ): FechaController {
+    private function makeController( array $enrichedTeamMap = [], ?PredictionRepository $predRepo = null ): FechaController {
         $lockComputer = new LockComputer();
 
         // Stub resolver: enrichMatches merges $enrichedTeamMap by match_id.
@@ -81,7 +83,9 @@ class FechaControllerTest extends TestCase {
             $this->repo,
             $resolver,
             $lockComputer,
-            $this->settings
+            $this->settings,
+            null,
+            $predRepo
         );
     }
 
@@ -239,5 +243,72 @@ class FechaControllerTest extends TestCase {
             $this->assertArrayHasKey( 'away_team', $match );
             $this->assertArrayHasKey( 'kickoff', $match );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // A2-4 RED — user_predictions population when PredictionRepository injected
+    // -------------------------------------------------------------------------
+
+    public function test_anonymous_get_returns_empty_user_predictions(): void {
+        // No _prode_user on request → user_predictions must be [].
+        $this->seedOpenFecha();
+        global $wpdb;
+        $predRepo   = new PredictionRepository( $wpdb );
+        $controller = $this->makeController( [], $predRepo );
+        $request    = new \WP_REST_Request( 'GET', '' );
+        // No _prode_user set on request.
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+
+        $this->assertSame( [], $body['user_predictions'] );
+    }
+
+    public function test_authenticated_get_populates_user_predictions(): void {
+        // Seed a fecha and a prediction row for user 1, then assert it comes back.
+        $fechaId = $this->seedOpenFecha();
+
+        global $wpdb;
+        // Insert a prediction row directly for user_id=1, match_id=10.
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_predictions',
+            [
+                'user_id'            => 1,
+                'fecha_id'           => $fechaId,
+                'match_id'           => 10,
+                'result'             => '1',
+                'score_home'         => 2,
+                'score_away'         => 1,
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+                'locked_at_snapshot' => '2099-12-31 23:59:00',
+            ]
+        );
+
+        $predRepo   = new PredictionRepository( $wpdb );
+        $controller = $this->makeController( [], $predRepo );
+        $request    = new \WP_REST_Request( 'GET', '' );
+        // Attach user as requireAuth would.
+        $request->set_param( '_prode_user', [ 'id' => 1, 'session_version' => 1 ] );
+
+        $body        = $controller->getActiveFecha( $request )->get_data();
+        $predictions = $body['user_predictions'];
+
+        $this->assertCount( 1, $predictions );
+        $this->assertSame( 10, (int) $predictions[0]['match_id'] );
+        $this->assertSame( 2, (int) $predictions[0]['score_home'] );
+        $this->assertSame( 1, (int) $predictions[0]['score_away'] );
+    }
+
+    public function test_anonymous_path_unchanged_when_no_pred_repo_injected(): void {
+        // Regression guard: when no PredictionRepository is injected (null),
+        // the anonymous path continues to return user_predictions = [].
+        $this->seedOpenFecha();
+        // makeController without predRepo (null by default).
+        $controller = $this->makeController();
+        $request    = new \WP_REST_Request( 'GET', '' );
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+
+        $this->assertSame( [], $body['user_predictions'] );
     }
 }
