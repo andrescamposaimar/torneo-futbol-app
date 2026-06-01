@@ -243,6 +243,21 @@ class FechaEvaluatorTest extends TestCase {
         $this->assertSame( 1, did_action( 'prode_recompute_rankings_cron' ) );
         $this->assertSame( 6, $summary['scored_rows'] );
         $this->assertSame( 'evaluated', $summary['fecha_state'] );
+
+        // Integration-level DB assertion (closes verify WARNING RF-1): every
+        // prediction is exact (2-1 vs real 2-1, 0-1 vs real 0-1), so each of the
+        // 6 rows must carry points=3 / evaluation_method='exact_score' — proving
+        // the formula reaches the persisted rows, not just the unit boundary.
+        global $wpdb;
+        $rows = $wpdb->get_results(
+            "SELECT points, evaluation_method FROM {$wpdb->prefix}prode_scores",
+            ARRAY_A
+        );
+        $this->assertCount( 6, $rows );
+        foreach ( $rows as $row ) {
+            $this->assertSame( 3, (int) $row['points'] );
+            $this->assertSame( 'exact_score', $row['evaluation_method'] );
+        }
     }
 
     // -------------------------------------------------------------------------
