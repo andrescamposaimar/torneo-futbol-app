@@ -82,8 +82,8 @@ class PredictionControllerTest extends TestCase {
         global $wpdb;
         $wpdb->query(
             "INSERT OR REPLACE INTO {$wpdb->prefix}prode_users
-               (id, dni_hash, alias, season_version, session_version, created_at)
-             VALUES (1, 'abc', 'tester', 1, 1, '2026-01-01 00:00:00')"
+               (id, tenant_id, dni, provider, provider_id, display_name, session_version, created_at)
+             VALUES (1, '" . PRODE_TENANT_ID . "', 'abc', 'google', 'gid_1', 'tester', 1, '2026-01-01 00:00:00')"
         );
     }
 
