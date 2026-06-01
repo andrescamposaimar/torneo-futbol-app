@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -100,8 +101,9 @@ class ProdeFixturesView extends StatelessWidget {
           onRetry: onRetry,
           onLogout: onLogout,
         ),
-      ProdeFixturesLoaded(:final fecha) => _LoadedView(
+      ProdeFixturesLoaded(:final fecha, :final drafts) => _LoadedView(
           fecha: fecha,
+          drafts: drafts,
           stale: stale,
           onLogout: onLogout,
           onRefresh: onRefresh,
@@ -205,22 +207,30 @@ class _ErrorView extends StatelessWidget {
 ///
 /// Wraps a scrollable list in a [RefreshIndicator]. The stale banner is
 /// rendered above the list when [stale] is true. Each match is rendered by
-/// a [_MatchTile]. When the match list is empty a note replaces the list items.
-class _LoadedView extends StatelessWidget {
+/// a [_PredictionMatchTile] (which owns score input fields and a per-match
+/// submit button). When the match list is empty a note replaces the list items.
+class _LoadedView extends ConsumerWidget {
   final FechaActiva fecha;
+  final Map<int, PredictionDraft> drafts;
   final bool stale;
   final VoidCallback onLogout;
   final Future<void> Function() onRefresh;
 
   const _LoadedView({
     required this.fecha,
+    required this.drafts,
     required this.stale,
     required this.onLogout,
     required this.onRefresh,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(prodeFixturesControllerProvider.notifier);
+    // UX-only client-side lock check. Server lock (423) is the security boundary.
+    final isLocked =
+        fecha.lockedAt != null && DateTime.now().isAfter(fecha.lockedAt!);
+
     return Column(
       children: [
         if (stale) const _StaleBanner(),
@@ -237,9 +247,15 @@ class _LoadedView extends StatelessWidget {
                     child: Center(child: Text('Sin partidos en esta fecha.')),
                   )
                 else
-                  ...fecha.matches
-                      .map((m) => _MatchTile(match: m))
-                      .toList(),
+                  ...fecha.matches.map((m) => _PredictionMatchTile(
+                        match: m,
+                        draft: drafts[m.matchId] ?? const PredictionDraft(),
+                        isLocked: isLocked,
+                        onUpdateDraft: (home, away) =>
+                            controller.updateDraft(m.matchId,
+                                scoreHome: home, scoreAway: away),
+                        onSubmit: () => controller.submitPrediction(m.matchId),
+                      )),
                 const SizedBox(height: 8),
                 Center(
                   child: TextButton.icon(
@@ -324,19 +340,106 @@ class _FechaBadge extends StatelessWidget {
   }
 }
 
-/// A single match row: home team, "vs", away team, formatted kickoff.
+/// A single match row with score prediction inputs and a submit button.
 ///
-/// Kickoff is displayed as-is (ART local time from backend) with no timezone
-/// conversion per the G1 design decision.
-class _MatchTile extends StatelessWidget {
+/// Score inputs are seeded from [draft] on [initState] and [didUpdateWidget].
+/// The Riverpod [draft] is the source of truth; [TextEditingController]s are
+/// derived state, re-seeded on rebuild so scores survive ListView recycling.
+///
+/// Inputs are locked ([enabled: false]) and submit disabled when [isLocked]
+/// is true (client-side UX check only — the server 423 is the security boundary).
+///
+/// Score values are validated client-side: numeric-only input, max 3 chars,
+/// clamped to [0, 255] before calling [onUpdateDraft].
+class _PredictionMatchTile extends StatefulWidget {
   final FechaMatch match;
+  final PredictionDraft draft;
+  final bool isLocked;
+  final void Function(int? home, int? away) onUpdateDraft;
+  final VoidCallback onSubmit;
 
-  const _MatchTile({required this.match});
+  const _PredictionMatchTile({
+    required this.match,
+    required this.draft,
+    required this.isLocked,
+    required this.onUpdateDraft,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_PredictionMatchTile> createState() => _PredictionMatchTileState();
+}
+
+class _PredictionMatchTileState extends State<_PredictionMatchTile> {
+  late TextEditingController _homeCtrl;
+  late TextEditingController _awayCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _homeCtrl = TextEditingController(
+      text: widget.draft.scoreHome?.toString() ?? '',
+    );
+    _awayCtrl = TextEditingController(
+      text: widget.draft.scoreAway?.toString() ?? '',
+    );
+  }
+
+  @override
+  void didUpdateWidget(_PredictionMatchTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Re-seed only when the draft value itself changed (not just status),
+    // to avoid clobbering an in-progress keystroke.
+    if (oldWidget.draft.scoreHome != widget.draft.scoreHome) {
+      final newText = widget.draft.scoreHome?.toString() ?? '';
+      if (_homeCtrl.text != newText) _homeCtrl.text = newText;
+    }
+    if (oldWidget.draft.scoreAway != widget.draft.scoreAway) {
+      final newText = widget.draft.scoreAway?.toString() ?? '';
+      if (_awayCtrl.text != newText) _awayCtrl.text = newText;
+    }
+  }
+
+  @override
+  void dispose() {
+    _homeCtrl.dispose();
+    _awayCtrl.dispose();
+    super.dispose();
+  }
+
+  int? _parseAndClamp(String text) {
+    final v = int.tryParse(text);
+    if (v == null) return null;
+    return v.clamp(0, 255);
+  }
+
+  void _onHomeChanged(String value) {
+    final home = _parseAndClamp(value);
+    final away = _parseAndClamp(_awayCtrl.text);
+    widget.onUpdateDraft(home, away);
+  }
+
+  void _onAwayChanged(String value) {
+    final home = _parseAndClamp(_homeCtrl.text);
+    final away = _parseAndClamp(value);
+    widget.onUpdateDraft(home, away);
+  }
+
+  bool get _canSubmit =>
+      !widget.isLocked &&
+      widget.draft.status != SubmitStatus.submitting;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final kickoff = DateFormat('dd/MM HH:mm').format(match.kickoff);
+    final matchId = widget.match.matchId;
+    final kickoff = DateFormat('dd/MM HH:mm').format(widget.match.kickoff);
+
+    final inputDecoration = InputDecoration(
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      border: const OutlineInputBorder(),
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -346,11 +449,12 @@ class _MatchTile extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Team names row
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      match.homeTeam,
+                      widget.match.homeTeam,
                       style: theme.textTheme.titleMedium,
                       textAlign: TextAlign.right,
                     ),
@@ -361,7 +465,7 @@ class _MatchTile extends StatelessWidget {
                   ),
                   Expanded(
                     child: Text(
-                      match.awayTeam,
+                      widget.match.awayTeam,
                       style: theme.textTheme.titleMedium,
                     ),
                   ),
@@ -369,6 +473,81 @@ class _MatchTile extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(kickoff, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 8),
+              // Score input row
+              Row(
+                children: [
+                  SizedBox(
+                    width: 60,
+                    child: TextField(
+                      key: Key('score_home_$matchId'),
+                      controller: _homeCtrl,
+                      enabled: !widget.isLocked,
+                      decoration: inputDecoration,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      onChanged: _onHomeChanged,
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('-'),
+                  ),
+                  SizedBox(
+                    width: 60,
+                    child: TextField(
+                      key: Key('score_away_$matchId'),
+                      controller: _awayCtrl,
+                      enabled: !widget.isLocked,
+                      decoration: inputDecoration,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      onChanged: _onAwayChanged,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton(
+                    key: Key('submit_$matchId'),
+                    onPressed: _canSubmit ? widget.onSubmit : null,
+                    child: widget.draft.status == SubmitStatus.submitting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Submit'),
+                  ),
+                ],
+              ),
+              // Status feedback
+              if (widget.draft.status == SubmitStatus.submitted)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Prediction saved!',
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              if (widget.draft.status == SubmitStatus.error)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    'Could not save. Try again.',
+                    style: TextStyle(
+                      color: theme.colorScheme.error,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
