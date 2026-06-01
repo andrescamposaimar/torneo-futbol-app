@@ -107,14 +107,13 @@ class FechaEvaluatorTest extends TestCase {
         $wpdb->insert(
             $wpdb->prefix . 'prode_users',
             [
-                'id'               => $userId,
-                'tenant_id'        => 'test',
-                'wp_user_id'       => $userId,
-                'display_name'     => "User {$userId}",
-                'provider'         => 'google',
-                'provider_user_id' => "gid_{$userId}",
-                'status'           => 'active',
-                'created_at'       => '2026-01-01 00:00:00',
+                'id'           => $userId,
+                'tenant_id'    => PRODE_TENANT_ID,
+                'dni'          => "dni_{$userId}",
+                'provider'     => 'google',
+                'provider_id'  => "gid_{$userId}",
+                'display_name' => "User {$userId}",
+                'created_at'   => '2026-01-01 00:00:00',
             ]
         );
     }
