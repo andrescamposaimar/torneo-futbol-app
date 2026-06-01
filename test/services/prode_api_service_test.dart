@@ -1092,5 +1092,105 @@ void main() {
         ),
       );
     });
+
+    // W-B2: submitPrediction delegates transport to request(), which owns the
+    // 401-refresh-retry. This pins the refresh path FROM submitPrediction's POST
+    // to /prediccion (not just from a GET, as the request() interceptor group
+    // covers): a stale-token 401 must refresh, retry with the new bearer, and
+    // complete normally — the prediction is not lost to a one-shot 401.
+    test('401 token_expired on POST /prediccion -> refreshes, retries, completes', () async {
+      // Seed a stale access token; the first POST will 401.
+      await repo.write(
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        sessionVersion: '1',
+        tenantId: 'test',
+      );
+
+      final bearers = <String>[];
+      var refreshCalls = 0;
+      var predictionPosts = 0;
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/refresh')) {
+            refreshCalls++;
+            return _refreshSuccessResponse(
+              accessToken: 'new-access',
+              refreshToken: 'new-refresh',
+            );
+          }
+          // POST /prediccion
+          predictionPosts++;
+          bearers.add(req.headers['Authorization'] ?? '');
+          if (req.headers['Authorization'] == 'Bearer old-access') {
+            return http.Response(
+              json.encode({'code': 'token_expired', 'message': 'expired'}),
+              401,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(
+            '{"status":"ok"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      await expectLater(
+        service.submitPrediction(
+          fechaId: 1,
+          matchId: 5,
+          scoreHome: 2,
+          scoreAway: 1,
+        ),
+        completes,
+      );
+
+      expect(refreshCalls, equals(1));
+      expect(predictionPosts, equals(2));
+      // First POST used the stale token; the retry used the refreshed one.
+      expect(bearers, equals(['Bearer old-access', 'Bearer new-access']));
+      // Rotated tokens persisted.
+      expect(await repo.readAccessToken(), equals('new-access'));
+      expect(await repo.readRefreshToken(), equals('new-refresh'));
+    });
+
+    // W-B2 negative: a 401 whose refresh fails must surface ProdeAuthRequired
+    // through submitPrediction, not silently swallow the locked prediction.
+    test('401 session_revoked on POST /prediccion -> throws ProdeAuthRequired', () async {
+      await repo.write(
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        sessionVersion: '1',
+        tenantId: 'test',
+      );
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          if (req.url.path.endsWith('/auth/refresh')) {
+            return _refresh401Response(code: 'session_revoked');
+          }
+          return http.Response(
+            json.encode({'code': 'token_expired', 'message': 'expired'}),
+            401,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      await expectLater(
+        service.submitPrediction(
+          fechaId: 1,
+          matchId: 5,
+          scoreHome: 2,
+          scoreAway: 1,
+        ),
+        throwsA(isA<ProdeAuthRequired>()),
+      );
+    });
   });
 }

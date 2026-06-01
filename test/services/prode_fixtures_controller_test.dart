@@ -365,6 +365,32 @@ void main() {
         expect(updated.scoreAway, equals(1));
         expect(updated.status, equals(SubmitStatus.submitting));
       });
+
+      test('copyWith clearScoreHome: true clears scoreHome, keeps scoreAway', () {
+        const draft = PredictionDraft(scoreHome: 2, scoreAway: 1);
+        final updated = draft.copyWith(clearScoreHome: true);
+        expect(updated.scoreHome, isNull);
+        expect(updated.scoreAway, equals(1));
+        expect(updated.status, equals(SubmitStatus.idle));
+      });
+
+      test('copyWith clearScoreAway: true clears scoreAway, keeps scoreHome', () {
+        const draft = PredictionDraft(scoreHome: 2, scoreAway: 1);
+        final updated = draft.copyWith(clearScoreAway: true);
+        expect(updated.scoreHome, equals(2));
+        expect(updated.scoreAway, isNull);
+        expect(updated.status, equals(SubmitStatus.idle));
+      });
+
+      test('copyWith clear sentinel wins over a passed score value', () {
+        // The sentinel must take precedence: even if a value is supplied,
+        // clearScoreHome:true forces null. This pins the precedence in
+        // copyWith (clearScoreHome ? null : (scoreHome ?? this.scoreHome)).
+        const draft = PredictionDraft(scoreHome: 2, scoreAway: 1);
+        final updated = draft.copyWith(scoreHome: 9, clearScoreHome: true);
+        expect(updated.scoreHome, isNull);
+        expect(updated.scoreAway, equals(1));
+      });
     });
 
     // -----------------------------------------------------------------------
