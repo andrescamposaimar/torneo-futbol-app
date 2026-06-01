@@ -1339,7 +1339,9 @@ void main() {
       final service = _makeService(repo, client);
       await expectLater(
         () => service.fetchRanking(),
-        throwsA(isA<ProdeApiException>()),
+        throwsA(isA<ProdeApiException>()
+            .having((e) => e.statusCode, 'statusCode', equals(400))
+            .having((e) => e.code, 'code', equals('invalid_params'))),
       );
     });
 
