@@ -3,7 +3,7 @@
  * Plugin Name:       Entre Redes — Prode Interno
  * Plugin URI:        https://entreredespadres.com.ar
  * Description:       Authenticated predictions game for the Entre Redes football league. Requires the Entre Redes main plugin.
- * Version:           0.2.0
+ * Version:           0.3.0
  * Requires at least: 6.2
  * Requires PHP:      8.0
  * Author:            Entre Redes
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'ENTRE_REDES_PRODE_VERSION', '0.2.0' );
+define( 'ENTRE_REDES_PRODE_VERSION', '0.3.0' );
 define( 'ENTRE_REDES_PRODE_FILE', __FILE__ );
 define( 'ENTRE_REDES_PRODE_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ENTRE_REDES_PRODE_URL', plugin_dir_url( __FILE__ ) );
