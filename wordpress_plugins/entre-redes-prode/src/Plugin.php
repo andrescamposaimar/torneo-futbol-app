@@ -76,11 +76,16 @@ final class Plugin {
                 $middleware
             );
 
+            // G3: admin endpoint for manual fecha evaluation (ADR-G3-4).
+            $cap_check = static fn() => current_user_can( 'manage_options' );
+            $evaluation_controller = new Rest\EvaluationController( $fecha_evaluator, $cap_check );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
                 $fecha_controller,
-                $prediction_controller
+                $prediction_controller,
+                $evaluation_controller
             );
             $controller->register_routes();
         } );
