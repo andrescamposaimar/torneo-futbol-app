@@ -239,6 +239,39 @@ class PredictionControllerTest extends TestCase {
         $this->assertSame( 'invalid_score', $response->get_data()['code'] );
     }
 
+    public function test_negative_score_away_returns_400_invalid_score(): void {
+        // score_away has a symmetric validation path; cover it independently of score_home.
+        $this->seedActiveFecha();
+        $controller = $this->makeController();
+        $request    = $this->makeAuthedRequest( [
+            'fecha_id'   => $this->fechaId,
+            'match_id'   => 10,
+            'score_home' => 0,
+            'score_away' => -1,
+        ] );
+
+        $response = $controller->submitPrediction( $request );
+
+        $this->assertSame( 400, $response->get_status() );
+        $this->assertSame( 'invalid_score', $response->get_data()['code'] );
+    }
+
+    public function test_score_away_above_255_returns_400_invalid_score(): void {
+        $this->seedActiveFecha();
+        $controller = $this->makeController();
+        $request    = $this->makeAuthedRequest( [
+            'fecha_id'   => $this->fechaId,
+            'match_id'   => 10,
+            'score_home' => 0,
+            'score_away' => 256,
+        ] );
+
+        $response = $controller->submitPrediction( $request );
+
+        $this->assertSame( 400, $response->get_status() );
+        $this->assertSame( 'invalid_score', $response->get_data()['code'] );
+    }
+
     public function test_match_id_not_in_active_fecha_returns_400_match_not_found(): void {
         $this->seedActiveFecha();
         $controller = $this->makeController();
@@ -297,7 +330,15 @@ class PredictionControllerTest extends TestCase {
         $this->assertSame( 'ok', $response->get_data()['status'] );
 
         global $wpdb;
-        $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}prode_predictions WHERE match_id = 10 AND user_id = 1" );
-        $this->assertSame( 1, $count );
+        $row = $wpdb->get_row( "SELECT * FROM {$wpdb->prefix}prode_predictions WHERE match_id = 10 AND user_id = 1", ARRAY_A );
+
+        // Assert the controller passed the right arguments to the repository upsert,
+        // not just that a row exists — guards against scrambled argument order.
+        $this->assertNotNull( $row );
+        $this->assertSame( 2, (int) $row['score_home'] );
+        $this->assertSame( 1, (int) $row['score_away'] );
+        $this->assertSame( '1', $row['result'] ); // 2 > 1 → home win
+        $this->assertSame( $this->fechaId, (int) $row['fecha_id'] );
+        $this->assertSame( '2099-12-31 23:59:00', $row['locked_at_snapshot'] );
     }
 }
