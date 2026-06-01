@@ -86,6 +86,13 @@ class PredictionRepositoryTest extends TestCase {
         $this->assertSame( '2', $this->repo->deriveResult( 0, 2 ) );
     }
 
+    public function test_derive_result_handles_max_score_boundary(): void {
+        // Scores are TINYINT UNSIGNED [0, 255]; the comparator must hold at the bound.
+        $this->assertSame( '1', $this->repo->deriveResult( 255, 0 ) );
+        $this->assertSame( 'X', $this->repo->deriveResult( 255, 255 ) );
+        $this->assertSame( '2', $this->repo->deriveResult( 0, 255 ) );
+    }
+
     // -------------------------------------------------------------------------
     // upsert — insert on first call (A1-2)
     // -------------------------------------------------------------------------
@@ -182,6 +189,22 @@ class PredictionRepositoryTest extends TestCase {
         $rowAfterUpdate = $this->fetchRow( 1, 5 );
 
         $this->assertSame( $rowAfterInsert['created_at'], $rowAfterUpdate['created_at'] );
+    }
+
+    public function test_upsert_second_call_bumps_updated_at(): void {
+        $this->repo->upsert( 1, 10, 5, 2, 1, '2026-06-01 10:00:00' );
+        $rowAfterInsert = $this->fetchRow( 1, 5 );
+
+        // current_time('mysql') has 1-second resolution; sleep >1s to guarantee
+        // the formatted timestamp changes, so a dropped 'updated_at' in the UPDATE
+        // map would be caught instead of silently passing.
+        usleep( 1100000 ); // 1.1 seconds
+
+        $this->repo->upsert( 1, 10, 5, 3, 1, '2026-06-01 10:00:00' );
+        $rowAfterUpdate = $this->fetchRow( 1, 5 );
+
+        $this->assertNotSame( $rowAfterInsert['updated_at'], $rowAfterUpdate['updated_at'] );
+        $this->assertGreaterThan( $rowAfterUpdate['created_at'], $rowAfterUpdate['updated_at'] );
     }
 
     public function test_upsert_second_call_updates_locked_at_snapshot(): void {
