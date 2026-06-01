@@ -16,7 +16,12 @@ const marianistaTenant = TenantConfig(
     waitingLists: true,
     newsTab: true,
     ads: true,
-    prode: true,
+    // Shipped dark: the Prode UI (incl. the G5 leaderboard) is complete in the
+    // app, but the WordPress plugin in production is still pre-G3/G4 — the
+    // /prode/ranking endpoint 404s. Keep Prode hidden until the updated plugin
+    // is deployed, then flip this back to true. prodeAuth below stays set so
+    // re-enabling is a one-line change.
+    prode: false,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
