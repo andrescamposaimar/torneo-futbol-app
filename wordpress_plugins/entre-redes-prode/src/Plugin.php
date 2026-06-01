@@ -80,12 +80,23 @@ final class Plugin {
             $cap_check = static fn() => current_user_can( 'manage_options' );
             $evaluation_controller = new Rest\EvaluationController( $fecha_evaluator, $cap_check );
 
+            // G4: ranking endpoint (PR-G4-C).
+            $ranking_repo       = new Scoring\RankingRepository( $wpdb );
+            $ranking_computer   = new Scoring\RankingComputer();
+            $ranking_controller = new Rest\RankingController(
+                $ranking_repo,
+                $ranking_computer,
+                new Fecha\Settings( $wpdb ),
+                $middleware
+            );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
                 $fecha_controller,
                 $prediction_controller,
-                $evaluation_controller
+                $evaluation_controller,
+                $ranking_controller
             );
             $controller->register_routes();
         } );
