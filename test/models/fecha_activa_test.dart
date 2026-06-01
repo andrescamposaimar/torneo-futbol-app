@@ -219,4 +219,65 @@ void main() {
       expect(a, isNot(equals(b)));
     });
   });
+
+  // -------------------------------------------------------------------------
+  // PredictionEntry.fromJson  (B1-1, B1-2)
+  // -------------------------------------------------------------------------
+  group('PredictionEntry.fromJson', () {
+    test('parses match_id, score_home, score_away correctly', () {
+      final entry = PredictionEntry.fromJson({
+        'match_id': 5,
+        'score_home': 2,
+        'score_away': 1,
+      });
+      expect(entry.matchId, equals(5));
+      expect(entry.scoreHome, equals(2));
+      expect(entry.scoreAway, equals(1));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // FechaActiva.userPredictions  (B1-1, B1-2)
+  // -------------------------------------------------------------------------
+  group('FechaActiva.userPredictions', () {
+    test('populated user_predictions parses to one PredictionEntry', () {
+      final fecha = FechaActiva.fromJson({
+        'fecha_id': 1,
+        'season_id': 10,
+        'state': 'open',
+        'locked_at': null,
+        'matches': [],
+        'user_predictions': [
+          {'match_id': 5, 'score_home': 2, 'score_away': 1},
+        ],
+      });
+      expect(fecha.userPredictions, hasLength(1));
+      expect(fecha.userPredictions.first.matchId, equals(5));
+      expect(fecha.userPredictions.first.scoreHome, equals(2));
+      expect(fecha.userPredictions.first.scoreAway, equals(1));
+    });
+
+    test('absent user_predictions key → empty list, no exception', () {
+      final fecha = FechaActiva.fromJson({
+        'fecha_id': 1,
+        'season_id': 10,
+        'state': 'open',
+        'locked_at': null,
+        'matches': [],
+      });
+      expect(fecha.userPredictions, isEmpty);
+    });
+
+    test('null user_predictions value → empty list, no exception', () {
+      final fecha = FechaActiva.fromJson({
+        'fecha_id': 1,
+        'season_id': 10,
+        'state': 'open',
+        'locked_at': null,
+        'matches': [],
+        'user_predictions': null,
+      });
+      expect(fecha.userPredictions, isEmpty);
+    });
+  });
 }

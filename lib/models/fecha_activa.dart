@@ -1,6 +1,54 @@
 import 'package:flutter/foundation.dart';
 
 // ---------------------------------------------------------------------------
+// PredictionEntry DTO
+// ---------------------------------------------------------------------------
+
+/// A stored prediction for a single match, returned by `GET /prode/fecha-activa`
+/// inside the `user_predictions` array when the caller is authenticated.
+///
+/// Immutable value object. Carries only the wire fields that the client needs:
+/// match identity and the stored score pair.
+@immutable
+class PredictionEntry {
+  final int matchId;
+  final int scoreHome;
+  final int scoreAway;
+
+  const PredictionEntry({
+    required this.matchId,
+    required this.scoreHome,
+    required this.scoreAway,
+  });
+
+  /// Parses a single entry from `{match_id, score_home, score_away}`.
+  factory PredictionEntry.fromJson(Map<String, dynamic> json) {
+    return PredictionEntry(
+      matchId: json['match_id'] as int,
+      scoreHome: json['score_home'] as int,
+      scoreAway: json['score_away'] as int,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PredictionEntry &&
+          runtimeType == other.runtimeType &&
+          matchId == other.matchId &&
+          scoreHome == other.scoreHome &&
+          scoreAway == other.scoreAway;
+
+  @override
+  int get hashCode => Object.hash(matchId, scoreHome, scoreAway);
+
+  @override
+  String toString() =>
+      'PredictionEntry(matchId: $matchId, scoreHome: $scoreHome, '
+      'scoreAway: $scoreAway)';
+}
+
+// ---------------------------------------------------------------------------
 // ProdeFechaState enum
 // ---------------------------------------------------------------------------
 
@@ -132,19 +180,24 @@ class FechaActiva {
   /// The fixtures in this round. May be empty.
   final List<FechaMatch> matches;
 
+  /// Stored predictions for the authenticated user. Empty list for anonymous
+  /// callers or when the user has made no predictions yet.
+  final List<PredictionEntry> userPredictions;
+
   const FechaActiva({
     required this.fechaId,
     required this.seasonId,
     required this.state,
     required this.lockedAt,
     required this.matches,
+    this.userPredictions = const [],
   });
 
   /// Parses the top-level backend response for `GET /prode/fecha-activa`.
   ///
-  /// `user_predictions` at the top level is silently ignored (G1 is
-  /// read-only). A missing `locked_at` key or an explicit JSON `null`
-  /// both produce `lockedAt == null`.
+  /// `user_predictions` is parsed into [userPredictions]; an absent or null
+  /// key defaults to an empty list. A missing `locked_at` key or an explicit
+  /// JSON `null` both produce `lockedAt == null`.
   factory FechaActiva.fromJson(Map<String, dynamic> json) {
     final rawLockedAt = json['locked_at'];
     final DateTime? lockedAt =
@@ -155,12 +208,20 @@ class FechaActiva {
         .map((e) => FechaMatch.fromJson(e as Map<String, dynamic>))
         .toList(growable: false);
 
+    final rawPredictions = json['user_predictions'];
+    final userPredictions = (rawPredictions is List)
+        ? rawPredictions
+            .map((e) => PredictionEntry.fromJson(e as Map<String, dynamic>))
+            .toList(growable: false)
+        : const <PredictionEntry>[];
+
     return FechaActiva(
       fechaId: json['fecha_id'] as int,
       seasonId: json['season_id'] as int,
       state: ProdeFechaState.fromWire(json['state'] as String),
       lockedAt: lockedAt,
       matches: matches,
+      userPredictions: userPredictions,
     );
   }
 
@@ -173,7 +234,8 @@ class FechaActiva {
           seasonId == other.seasonId &&
           state == other.state &&
           lockedAt == other.lockedAt &&
-          listEquals(matches, other.matches);
+          listEquals(matches, other.matches) &&
+          listEquals(userPredictions, other.userPredictions);
 
   @override
   int get hashCode => Object.hash(
@@ -182,10 +244,12 @@ class FechaActiva {
         state,
         lockedAt,
         Object.hashAll(matches),
+        Object.hashAll(userPredictions),
       );
 
   @override
   String toString() =>
       'FechaActiva(fechaId: $fechaId, seasonId: $seasonId, '
-      'state: $state, lockedAt: $lockedAt, matches: ${matches.length})';
+      'state: $state, lockedAt: $lockedAt, matches: ${matches.length}, '
+      'userPredictions: ${userPredictions.length})';
 }
