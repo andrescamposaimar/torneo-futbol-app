@@ -54,8 +54,8 @@ class FechaControllerTest extends TestCase {
     /**
      * Build a FechaController with a stub enrichMatches resolver.
      *
-     * @param array<int, array{match_id: int, home_team: string, away_team: string}> $enrichedTeamMap
-     *        Team-name map to return from the stub (keyed by position, merged by match_id).
+     * @param array<int, array{home_team: string, away_team: string, zona?: string, home_escudo?: string|null, away_escudo?: string|null}> $enrichedTeamMap
+     *        Team-name (and optional enrichment) map — keyed by match_id.
      * @param PredictionRepository|null $predRepo  Optional prediction repo for G2 tests.
      */
     private function makeController( array $enrichedTeamMap = [], ?PredictionRepository $predRepo = null ): FechaController {
@@ -66,7 +66,7 @@ class FechaControllerTest extends TestCase {
             // Build a fake items array so enrichMatches() can build its team map.
             $items = [];
             foreach ( $enrichedTeamMap as $matchId => $names ) {
-                $items[] = [
+                $item = [
                     'id'                => $matchId,
                     'fecha'             => '2026-05-30',
                     'hora'              => '13:45',
@@ -75,6 +75,17 @@ class FechaControllerTest extends TestCase {
                     'goles_local'       => null,
                     'goles_visitante'   => null,
                 ];
+                // Forward G6-a fields when present in the map entry.
+                if ( array_key_exists( 'liga', $names ) ) {
+                    $item['liga'] = $names['liga'];
+                }
+                if ( array_key_exists( 'escudo_local', $names ) ) {
+                    $item['escudo_local'] = $names['escudo_local'];
+                }
+                if ( array_key_exists( 'escudo_visitante', $names ) ) {
+                    $item['escudo_visitante'] = $names['escudo_visitante'];
+                }
+                $items[] = $item;
             }
             return $items;
         } );
@@ -310,5 +321,121 @@ class FechaControllerTest extends TestCase {
         $body = $controller->getActiveFecha( $request )->get_data();
 
         $this->assertSame( [], $body['user_predictions'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // G6-a: getActiveFecha — zona + escudos in match objects
+    // -------------------------------------------------------------------------
+
+    public function test_match_objects_contain_zona_and_escudos(): void {
+        $enrichedTeamMap = [
+            10 => [
+                'home_team'         => 'Marianista FC',
+                'away_team'         => 'Rival United',
+                'liga'              => '2026 - Apertura Zona A',
+                'escudo_local'      => 'https://example.com/escudo-marianista.png',
+                'escudo_visitante'  => 'https://example.com/escudo-rival.png',
+            ],
+            11 => [
+                'home_team'         => 'Eagles SC',
+                'away_team'         => 'Lions CF',
+                'liga'              => '2026 - Apertura Zona B',
+                'escudo_local'      => 'https://example.com/escudo-eagles.png',
+                'escudo_visitante'  => 'https://example.com/escudo-lions.png',
+            ],
+        ];
+
+        $this->seedOpenFecha();
+        $controller = $this->makeController( $enrichedTeamMap );
+        $request    = new \WP_REST_Request( 'GET', '' );
+
+        $body    = $controller->getActiveFecha( $request )->get_data();
+        $matches = $body['matches'];
+
+        $matchById = [];
+        foreach ( $matches as $m ) {
+            $matchById[ $m['match_id'] ] = $m;
+        }
+
+        // Match 10 — assert new fields present and correct.
+        $this->assertArrayHasKey( 'zona', $matchById[10] );
+        $this->assertArrayHasKey( 'home_escudo', $matchById[10] );
+        $this->assertArrayHasKey( 'away_escudo', $matchById[10] );
+        $this->assertSame( '2026 - Apertura Zona A', $matchById[10]['zona'] );
+        $this->assertSame( 'https://example.com/escudo-marianista.png', $matchById[10]['home_escudo'] );
+        $this->assertSame( 'https://example.com/escudo-rival.png', $matchById[10]['away_escudo'] );
+
+        // Match 11
+        $this->assertSame( '2026 - Apertura Zona B', $matchById[11]['zona'] );
+        $this->assertSame( 'https://example.com/escudo-eagles.png', $matchById[11]['home_escudo'] );
+        $this->assertSame( 'https://example.com/escudo-lions.png', $matchById[11]['away_escudo'] );
+    }
+
+    public function test_match_objects_original_keys_are_still_present(): void {
+        // Additive contract: new G6-a fields must NOT remove existing fields.
+        $enrichedTeamMap = [
+            10 => [
+                'home_team'         => 'Team Alpha',
+                'away_team'         => 'Team Beta',
+                'liga'              => 'Zona A',
+                'escudo_local'      => 'https://example.com/a.png',
+                'escudo_visitante'  => 'https://example.com/b.png',
+            ],
+        ];
+
+        $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2099-12-31 23:59:00',
+            [
+                [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'A', 'away_team' => 'B' ],
+            ]
+        );
+        $controller = $this->makeController( $enrichedTeamMap );
+        $request    = new \WP_REST_Request( 'GET', '' );
+
+        $body  = $controller->getActiveFecha( $request )->get_data();
+        $match = $body['matches'][0];
+
+        // Original keys must still exist.
+        $this->assertArrayHasKey( 'match_id', $match );
+        $this->assertArrayHasKey( 'home_team', $match );
+        $this->assertArrayHasKey( 'away_team', $match );
+        $this->assertArrayHasKey( 'kickoff', $match );
+
+        // New G6-a keys must also exist.
+        $this->assertArrayHasKey( 'zona', $match );
+        $this->assertArrayHasKey( 'home_escudo', $match );
+        $this->assertArrayHasKey( 'away_escudo', $match );
+    }
+
+    public function test_match_objects_escudos_are_null_when_upstream_omits_them(): void {
+        // When upstream does NOT send escudo fields, match objects should have null escudos
+        // and empty-string zona — no crash.
+        $enrichedTeamMap = [
+            10 => [
+                'home_team' => 'Team Alpha',
+                'away_team' => 'Team Beta',
+                // no liga / escudo_local / escudo_visitante
+            ],
+        ];
+
+        $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2099-12-31 23:59:00',
+            [
+                [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'A', 'away_team' => 'B' ],
+            ]
+        );
+        $controller = $this->makeController( $enrichedTeamMap );
+        $request    = new \WP_REST_Request( 'GET', '' );
+
+        $body  = $controller->getActiveFecha( $request )->get_data();
+        $match = $body['matches'][0];
+
+        $this->assertSame( '', $match['zona'] );
+        $this->assertNull( $match['home_escudo'] );
+        $this->assertNull( $match['away_escudo'] );
     }
 }

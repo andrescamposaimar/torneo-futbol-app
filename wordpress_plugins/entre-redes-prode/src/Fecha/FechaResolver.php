@@ -119,26 +119,38 @@ class FechaResolver {
     public function enrichMatches( array $persistedMatches ): array {
         $items = $this->dispatch();
 
-        // Build map: match_id => [home_team, away_team]
+        // Build map: match_id => [home_team, away_team, zona, home_escudo, away_escudo]
         $teamMap = [];
         foreach ( $items as $item ) {
             if ( empty( $item['id'] ) ) {
                 continue;
             }
             $teamMap[ (int) $item['id'] ] = [
-                'home_team' => $item['equipo_local'] ?? '',
-                'away_team' => $item['equipo_visitante'] ?? '',
+                'home_team'   => $item['equipo_local'] ?? '',
+                'away_team'   => $item['equipo_visitante'] ?? '',
+                'zona'        => $item['liga'] ?? '',
+                'home_escudo' => $item['escudo_local'] ?? null,
+                'away_escudo' => $item['escudo_visitante'] ?? null,
             ];
         }
 
         // Merge into persisted rows.
         $enriched = [];
         foreach ( $persistedMatches as $row ) {
-            $matchId           = (int) ( $row['match_id'] ?? 0 );
-            $names             = $teamMap[ $matchId ] ?? [ 'home_team' => '', 'away_team' => '' ];
-            $row['home_team']  = $names['home_team'];
-            $row['away_team']  = $names['away_team'];
-            $enriched[]        = $row;
+            $matchId             = (int) ( $row['match_id'] ?? 0 );
+            $names               = $teamMap[ $matchId ] ?? [
+                'home_team'   => '',
+                'away_team'   => '',
+                'zona'        => '',
+                'home_escudo' => null,
+                'away_escudo' => null,
+            ];
+            $row['home_team']   = $names['home_team'];
+            $row['away_team']   = $names['away_team'];
+            $row['zona']        = $names['zona'];
+            $row['home_escudo'] = $names['home_escudo'];
+            $row['away_escudo'] = $names['away_escudo'];
+            $enriched[]          = $row;
         }
 
         return $enriched;

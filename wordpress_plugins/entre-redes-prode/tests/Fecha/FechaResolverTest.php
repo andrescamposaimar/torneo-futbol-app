@@ -269,4 +269,98 @@ class FechaResolverTest extends TestCase {
         $this->assertSame( '', $enriched[0]['home_team'] );
         $this->assertSame( '', $enriched[0]['away_team'] );
     }
+
+    // -------------------------------------------------------------------------
+    // G6-a: enrichMatches — zona + escudos pass-through
+    // -------------------------------------------------------------------------
+
+    public function test_enrich_matches_passes_through_zona_and_escudos(): void {
+        // Upstream items include liga, escudo_local, escudo_visitante.
+        $liveItems = [
+            [
+                'id'                => 10,
+                'fecha'             => '2026-05-30',
+                'hora'              => '13:45',
+                'equipo_local'      => 'Marianista FC',
+                'equipo_visitante'  => 'Rival United',
+                'goles_local'       => null,
+                'goles_visitante'   => null,
+                'liga'              => '2026 - Apertura Zona A',
+                'escudo_local'      => 'https://example.com/escudo-marianista.png',
+                'escudo_visitante'  => 'https://example.com/escudo-rival.png',
+            ],
+            [
+                'id'                => 11,
+                'fecha'             => '2026-05-30',
+                'hora'              => '15:10',
+                'equipo_local'      => 'Eagles SC',
+                'equipo_visitante'  => 'Lions CF',
+                'goles_local'       => null,
+                'goles_visitante'   => null,
+                'liga'              => '2026 - Apertura Zona B',
+                'escudo_local'      => 'https://example.com/escudo-eagles.png',
+                'escudo_visitante'  => 'https://example.com/escudo-lions.png',
+            ],
+        ];
+        $resolver = new FechaResolver( $this->stubDispatcher( $liveItems ) );
+
+        $persisted = [
+            [ 'match_id' => 10, 'match_kickoff' => '2026-05-30 13:45:00' ],
+            [ 'match_id' => 11, 'match_kickoff' => '2026-05-30 15:10:00' ],
+        ];
+
+        $enriched = $resolver->enrichMatches( $persisted );
+
+        // Match 10
+        $this->assertSame( '2026 - Apertura Zona A', $enriched[0]['zona'] );
+        $this->assertSame( 'https://example.com/escudo-marianista.png', $enriched[0]['home_escudo'] );
+        $this->assertSame( 'https://example.com/escudo-rival.png', $enriched[0]['away_escudo'] );
+
+        // Match 11
+        $this->assertSame( '2026 - Apertura Zona B', $enriched[1]['zona'] );
+        $this->assertSame( 'https://example.com/escudo-eagles.png', $enriched[1]['home_escudo'] );
+        $this->assertSame( 'https://example.com/escudo-lions.png', $enriched[1]['away_escudo'] );
+    }
+
+    public function test_enrich_matches_missing_upstream_fields_returns_safe_defaults(): void {
+        // Upstream items do NOT include liga / escudo_local / escudo_visitante.
+        $liveItems = [
+            [
+                'id'                => 10,
+                'fecha'             => '2026-05-30',
+                'hora'              => '13:45',
+                'equipo_local'      => 'Marianista FC',
+                'equipo_visitante'  => 'Rival United',
+                'goles_local'       => null,
+                'goles_visitante'   => null,
+                // no liga, no escudo_local, no escudo_visitante
+            ],
+        ];
+        $resolver = new FechaResolver( $this->stubDispatcher( $liveItems ) );
+
+        $persisted = [
+            [ 'match_id' => 10, 'match_kickoff' => '2026-05-30 13:45:00' ],
+        ];
+
+        $enriched = $resolver->enrichMatches( $persisted );
+
+        $this->assertSame( '', $enriched[0]['zona'] );
+        $this->assertNull( $enriched[0]['home_escudo'] );
+        $this->assertNull( $enriched[0]['away_escudo'] );
+    }
+
+    public function test_enrich_matches_unknown_match_id_escudos_are_null_and_zona_empty(): void {
+        // When match_id is not in the live payload, zona/escudos should default gracefully.
+        $resolver = new FechaResolver( $this->stubDispatcher( [] ) );
+
+        $persisted = [
+            [ 'match_id' => 99, 'match_kickoff' => '2026-05-30 13:45:00' ],
+        ];
+
+        $enriched = $resolver->enrichMatches( $persisted );
+
+        $this->assertSame( '', $enriched[0]['zona'] );
+        $this->assertNull( $enriched[0]['home_escudo'] );
+        $this->assertNull( $enriched[0]['away_escudo'] );
+    }
 }
