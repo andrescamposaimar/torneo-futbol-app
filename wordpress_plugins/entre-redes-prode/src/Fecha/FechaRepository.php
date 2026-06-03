@@ -154,6 +154,149 @@ class FechaRepository {
         ];
     }
 
+    /**
+     * Return all fechas for a season, ordered by locked_at ASC, with derived
+     * state and match_count. Suitable for the "Fecha N" selector UI.
+     *
+     * Each item:
+     *   { fecha_id: int, season_id: int, state: string, locked_at: string, match_count: int }
+     *
+     * The optional $lockComputer is used to derive the effective state; when
+     * null the persisted state column value is returned as-is.
+     *
+     * @param string            $tenantId
+     * @param int               $seasonId
+     * @param LockComputer|null $lockComputer
+     * @return array<int, array{fecha_id: int, season_id: int, state: string, locked_at: string, match_count: int}>
+     */
+    public function listFechasBySeasonId( string $tenantId, int $seasonId, ?LockComputer $lockComputer = null ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $fechas = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}prode_fechas
+                  WHERE tenant_id = %s
+                    AND season_id = %d
+                  ORDER BY locked_at ASC",
+                $tenantId,
+                $seasonId
+            ),
+            ARRAY_A
+        );
+
+        if ( empty( $fechas ) ) {
+            return [];
+        }
+
+        // Collect match counts in one query (shim-safe: simple COUNT + GROUP BY).
+        $fechaIds    = array_column( $fechas, 'id' );
+        $placeholders = implode( ',', array_fill( 0, count( $fechaIds ), '%d' ) );
+        $matchCounts = [];
+
+        // phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+        $countRows = $wpdb->get_results(
+            $wpdb->prepare(
+                // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+                "SELECT fecha_id, COUNT(*) AS match_count
+                   FROM {$p}prode_fecha_matches
+                  WHERE fecha_id IN ({$placeholders})
+                  GROUP BY fecha_id",
+                ...$fechaIds
+            ),
+            ARRAY_A
+        );
+
+        foreach ( $countRows as $countRow ) {
+            $matchCounts[ (int) $countRow['fecha_id'] ] = (int) $countRow['match_count'];
+        }
+
+        $now = current_time( 'mysql' );
+
+        $list = [];
+        foreach ( $fechas as $fecha ) {
+            $fechaId       = (int) $fecha['id'];
+            $persistedState = (string) $fecha['state'];
+            $lockedAt       = (string) $fecha['locked_at'];
+
+            $state = null !== $lockComputer
+                ? $lockComputer->deriveState( $lockedAt, $persistedState, $now )
+                : $persistedState;
+
+            $list[] = [
+                'fecha_id'    => $fechaId,
+                'season_id'   => (int) $fecha['season_id'],
+                'state'       => $state,
+                'locked_at'   => $lockedAt,
+                'match_count' => $matchCounts[ $fechaId ] ?? 0,
+            ];
+        }
+
+        return $list;
+    }
+
+    /**
+     * Fetch one fecha (ANY state) by id for the given tenant.
+     *
+     * Returns the SAME structure as findActiveFecha (fecha + matches array) so
+     * it can be enriched and shaped identically by the controller. Returns null
+     * when the fecha does not exist or belongs to a different tenant.
+     *
+     * @return array{fecha: array<string, mixed>, matches: array<int, array<string, mixed>>}|null
+     */
+    public function findFechaById( string $tenantId, int $fechaId ): ?array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $fecha = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}prode_fechas
+                  WHERE id = %d
+                    AND tenant_id = %s
+                  LIMIT 1",
+                $fechaId,
+                $tenantId
+            ),
+            ARRAY_A
+        );
+
+        if ( empty( $fecha ) ) {
+            return null;
+        }
+
+        $matchRows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}prode_fecha_matches
+                  WHERE fecha_id = %d",
+                (int) $fecha['id']
+            ),
+            ARRAY_A
+        );
+
+        return [
+            'fecha'   => $fecha,
+            'matches' => $matchRows,
+        ];
+    }
+
+    /**
+     * Return the MAX season_id present across all fechas for the given tenant.
+     * Returns null when no fechas exist.
+     */
+    public function findMaxSeasonId( string $tenantId ): ?int {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $value = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT MAX(season_id) FROM {$p}prode_fechas WHERE tenant_id = %s",
+                $tenantId
+            )
+        );
+
+        return null !== $value ? (int) $value : null;
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
