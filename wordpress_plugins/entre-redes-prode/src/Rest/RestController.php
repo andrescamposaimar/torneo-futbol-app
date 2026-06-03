@@ -20,6 +20,7 @@ class RestController {
     private ?\EntreRedes\Prode\Rest\AuthEndpoints         $auth_endpoints;
     private ?\EntreRedes\Prode\Account\AccountController  $account_controller;
     private ?\EntreRedes\Prode\Rest\FechaController       $fecha_controller;
+    private ?\EntreRedes\Prode\Rest\FechaListController   $fecha_list_controller;
     private ?\EntreRedes\Prode\Rest\PredictionController  $prediction_controller;
     private ?\EntreRedes\Prode\Rest\EvaluationController  $evaluation_controller;
     private ?\EntreRedes\Prode\Rest\RankingController     $ranking_controller;
@@ -30,11 +31,13 @@ class RestController {
         ?\EntreRedes\Prode\Rest\FechaController $fecha_controller = null,
         ?\EntreRedes\Prode\Rest\PredictionController $prediction_controller = null,
         ?\EntreRedes\Prode\Rest\EvaluationController $evaluation_controller = null,
-        ?\EntreRedes\Prode\Rest\RankingController $ranking_controller = null
+        ?\EntreRedes\Prode\Rest\RankingController $ranking_controller = null,
+        ?\EntreRedes\Prode\Rest\FechaListController $fecha_list_controller = null
     ) {
         $this->auth_endpoints        = $auth_endpoints;
         $this->account_controller    = $account_controller;
         $this->fecha_controller      = $fecha_controller;
+        $this->fecha_list_controller = $fecha_list_controller;
         $this->prediction_controller = $prediction_controller;
         $this->evaluation_controller = $evaluation_controller;
         $this->ranking_controller    = $ranking_controller;
@@ -92,6 +95,11 @@ class RestController {
         // Ranking endpoints (PR-G4-C): GET /prode/ranking.
         if ( null !== $this->ranking_controller ) {
             $this->ranking_controller->register_routes();
+        }
+
+        // Fecha list endpoints (PR-G6-B): GET /prode/fechas, GET /prode/fecha/{id}.
+        if ( null !== $this->fecha_list_controller ) {
+            $this->fecha_list_controller->register_routes();
         }
     }
 

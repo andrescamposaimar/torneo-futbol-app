@@ -90,13 +90,24 @@ final class Plugin {
                 $middleware
             );
 
+            // G6-b: multi-fecha navigation endpoints (PR-G6-B).
+            $fecha_list_controller = new Rest\FechaListController(
+                $fecha_repo,
+                new Fecha\FechaResolver(),
+                new Fecha\LockComputer(),
+                new Fecha\Settings( $wpdb ),
+                $middleware,
+                $pred_repo
+            );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
                 $fecha_controller,
                 $prediction_controller,
                 $evaluation_controller,
-                $ranking_controller
+                $ranking_controller,
+                $fecha_list_controller
             );
             $controller->register_routes();
         } );

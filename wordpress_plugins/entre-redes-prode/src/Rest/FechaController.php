@@ -111,18 +111,8 @@ class FechaController {
         // Enrich match rows with live team names from the resolver.
         $enrichedMatches = $this->resolver->enrichMatches( $matches );
 
-        // Shape the match array to the public contract.
-        $matchesResponse = array_map( static function ( array $m ): array {
-            return [
-                'match_id'    => (int) ( $m['match_id'] ?? 0 ),
-                'home_team'   => (string) ( $m['home_team'] ?? '' ),
-                'away_team'   => (string) ( $m['away_team'] ?? '' ),
-                'kickoff'     => (string) ( $m['match_kickoff'] ?? '' ),
-                'zona'        => (string) ( $m['zona'] ?? '' ),
-                'home_escudo' => isset( $m['home_escudo'] ) ? (string) $m['home_escudo'] : null,
-                'away_escudo' => isset( $m['away_escudo'] ) ? (string) $m['away_escudo'] : null,
-            ];
-        }, $enrichedMatches );
+        // Shape the match array to the public contract (shared with FechaListController).
+        $matchesResponse = MatchShaper::shapeAll( $enrichedMatches );
 
         // Populate user_predictions when the request carries an authenticated user
         // and a PredictionRepository is available (ADR-G2-3).
