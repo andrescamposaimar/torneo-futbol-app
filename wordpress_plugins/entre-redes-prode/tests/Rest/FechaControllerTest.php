@@ -32,6 +32,7 @@ class FechaControllerTest extends TestCase {
         InitialSchema::up();
 
         global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_predictions" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
 
@@ -41,6 +42,7 @@ class FechaControllerTest extends TestCase {
 
     protected function tearDown(): void {
         global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_predictions" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_settings" );
@@ -437,5 +439,163 @@ class FechaControllerTest extends TestCase {
         $this->assertSame( '', $match['zona'] );
         $this->assertNull( $match['home_escudo'] );
         $this->assertNull( $match['away_escudo'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // G6-c: populares gate — open → null, locked/evaluated → populated
+    // -------------------------------------------------------------------------
+
+    /**
+     * Helper: insert a prediction row directly into the DB.
+     */
+    private function insertPrediction( int $userId, int $fechaId, int $matchId, string $result ): void {
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_predictions',
+            [
+                'user_id'            => $userId,
+                'fecha_id'           => $fechaId,
+                'match_id'           => $matchId,
+                'result'             => $result,
+                'score_home'         => 1,
+                'score_away'         => 0,
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+                'locked_at_snapshot' => '2026-01-01 00:00:00',
+            ]
+        );
+    }
+
+    public function test_matches_include_populares_key_with_null_when_state_open(): void {
+        // State OPEN → populares must be null even if predictions exist (gate).
+        global $wpdb;
+        $predRepo = new PredictionRepository( $wpdb );
+        $fechaId  = $this->seedOpenFecha( '2099-12-31 23:59:00' ); // future → open
+
+        // Seed predictions for match 10 in this open fecha.
+        $this->insertPrediction( 1, $fechaId, 10, '1' );
+        $this->insertPrediction( 2, $fechaId, 10, 'X' );
+
+        $controller = $this->makeController( [
+            10 => [ 'home_team' => 'A', 'away_team' => 'B' ],
+            11 => [ 'home_team' => 'C', 'away_team' => 'D' ],
+        ], $predRepo );
+        $request = new \WP_REST_Request( 'GET', '' );
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+
+        // Every match must have populares === null when state is open.
+        foreach ( $body['matches'] as $match ) {
+            $this->assertArrayHasKey( 'populares', $match );
+            $this->assertNull( $match['populares'] );
+        }
+    }
+
+    public function test_matches_have_populares_null_when_no_pred_repo_injected(): void {
+        // Regression: when predRepo is null (controller built without it),
+        // populares must still appear as null — no fatal error.
+        $this->seedOpenFecha( '2000-01-01 00:00:00' ); // past → locked
+        $controller = $this->makeController( [
+            10 => [ 'home_team' => 'A', 'away_team' => 'B' ],
+            11 => [ 'home_team' => 'C', 'away_team' => 'D' ],
+        ] ); // no predRepo
+
+        $body = $this->makeController()->getActiveFecha( new \WP_REST_Request( 'GET', '' ) )->get_data();
+
+        foreach ( $body['matches'] as $match ) {
+            $this->assertArrayHasKey( 'populares', $match );
+            $this->assertNull( $match['populares'] );
+        }
+    }
+
+    public function test_populares_populated_when_state_locked_and_predictions_exist(): void {
+        // State LOCKED (locked_at in the past) → populares populated for matches with predictions.
+        global $wpdb;
+        $predRepo = new PredictionRepository( $wpdb );
+
+        $fechaId = $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2000-01-01 00:00:00', // past → locked
+            [
+                [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'A', 'away_team' => 'B' ],
+                [ 'match_id' => 11, 'kickoff' => '2026-05-30 15:10', 'home_team' => 'C', 'away_team' => 'D' ],
+            ]
+        );
+
+        // 2×'1', 1×'X' for match 10 → '1'=66.7%, 'X'=33.3%, '2'=0.0%.
+        $this->insertPrediction( 1, $fechaId, 10, '1' );
+        $this->insertPrediction( 2, $fechaId, 10, '1' );
+        $this->insertPrediction( 3, $fechaId, 10, 'X' );
+        // match 11: no predictions.
+
+        $controller = $this->makeController( [
+            10 => [ 'home_team' => 'A', 'away_team' => 'B' ],
+            11 => [ 'home_team' => 'C', 'away_team' => 'D' ],
+        ], $predRepo );
+        $request = new \WP_REST_Request( 'GET', '' );
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+        $this->assertSame( 'locked', $body['state'] );
+
+        $matchById = [];
+        foreach ( $body['matches'] as $m ) {
+            $matchById[ $m['match_id'] ] = $m;
+        }
+
+        // Match 10: populated.
+        $this->assertNotNull( $matchById[10]['populares'] );
+        $this->assertSame( 66.7, $matchById[10]['populares']['1'] );
+        $this->assertSame( 33.3, $matchById[10]['populares']['X'] );
+        $this->assertSame( 0.0, $matchById[10]['populares']['2'] );
+
+        // Match 11: no predictions → null.
+        $this->assertNull( $matchById[11]['populares'] );
+    }
+
+    public function test_anonymous_gets_populares_when_locked_it_is_aggregate_not_user_specific(): void {
+        // Anonymous users ALSO get populares when locked — it's aggregate data.
+        global $wpdb;
+        $predRepo = new PredictionRepository( $wpdb );
+
+        $fechaId = $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2000-01-01 00:00:00', // past → locked
+            [
+                [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'A', 'away_team' => 'B' ],
+            ]
+        );
+        $this->insertPrediction( 1, $fechaId, 10, '2' );
+
+        $controller = $this->makeController( [
+            10 => [ 'home_team' => 'A', 'away_team' => 'B' ],
+        ], $predRepo );
+        // Anonymous — no _prode_user set.
+        $request = new \WP_REST_Request( 'GET', '' );
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+
+        $this->assertSame( [], $body['user_predictions'] );
+        $this->assertNotNull( $body['matches'][0]['populares'] );
+        $this->assertSame( 100.0, $body['matches'][0]['populares']['2'] );
+    }
+
+    public function test_regression_fecha_activa_shape_now_includes_populares_null_key(): void {
+        // G6-c CONTRACT CHANGE: populares is always present (null when open).
+        // This regression test replaces the prior implicit absence — it now MUST be null.
+        $this->seedOpenFecha();
+        $controller = $this->makeController( [
+            10 => [ 'home_team' => 'Alpha', 'away_team' => 'Beta' ],
+            11 => [ 'home_team' => 'Gamma', 'away_team' => 'Delta' ],
+        ] );
+        $request = new \WP_REST_Request( 'GET', '' );
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+
+        foreach ( $body['matches'] as $match ) {
+            $this->assertArrayHasKey( 'populares', $match );
+            $this->assertNull( $match['populares'] );
+        }
     }
 }

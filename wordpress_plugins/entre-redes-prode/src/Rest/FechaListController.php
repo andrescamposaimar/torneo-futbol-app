@@ -159,8 +159,15 @@ class FechaListController {
         // Enrich matches with live team names, zona, escudos from the resolver.
         $enrichedMatches = $this->resolver->enrichMatches( $matches );
 
+        // Compute populares when state is locked/evaluated and predRepo is available.
+        // Gate: 'open' state → null (no aggregate data leaked before the fecha locks).
+        $popularesByMatch = null;
+        if ( 'open' !== $state && null !== $this->predRepo ) {
+            $popularesByMatch = $this->predRepo->aggregatePopulares( (int) $fecha['id'] );
+        }
+
         // Shape matches to the public contract (shared with FechaController via MatchShaper).
-        $matchesResponse = MatchShaper::shapeAll( $enrichedMatches );
+        $matchesResponse = MatchShaper::shapeAll( $enrichedMatches, $popularesByMatch );
 
         // Populate user_predictions when authenticated (mirrors FechaController).
         $userPredictions = [];

@@ -125,6 +125,71 @@ class PredictionRepository {
     }
 
     /**
+     * Aggregate populares percentages for all matches in a fecha.
+     *
+     * Runs a single GROUP BY query (no window functions — SQLite shim compatible).
+     * Percentage computation is done in PHP after grouping by match_id.
+     *
+     * Returns a map: [ matchId => ['1' => float, 'X' => float, '2' => float] ]
+     *   - Percentages are rounded to 1 decimal place.
+     *   - All three result keys ('1', 'X', '2') are always present for each match.
+     *   - A result with zero predictions for a match appears as 0.0.
+     *   - Matches with NO predictions are absent from the returned map.
+     *
+     * Gate: callers are responsible for checking state — this method always runs
+     * the query. The open/locked gate is enforced in FechaController and
+     * FechaListController before calling this method.
+     *
+     * @param int $fechaId The prode_fechas.id to aggregate.
+     * @return array<int, array{'1': float, 'X': float, '2': float}>
+     */
+    public function aggregatePopulares( int $fechaId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT match_id, result, COUNT(*) AS cnt
+                   FROM {$p}prode_predictions
+                  WHERE fecha_id = %d
+                  GROUP BY match_id, result",
+                $fechaId
+            ),
+            ARRAY_A
+        );
+
+        if ( empty( $rows ) ) {
+            return [];
+        }
+
+        // Group counts by match_id and compute totals.
+        $counts = []; // match_id => [ result => count ]
+        $totals = []; // match_id => total count
+
+        foreach ( $rows as $row ) {
+            $matchId = (int) $row['match_id'];
+            $result  = (string) $row['result'];
+            $cnt     = (int) $row['cnt'];
+
+            $counts[ $matchId ][ $result ] = $cnt;
+            $totals[ $matchId ]            = ( $totals[ $matchId ] ?? 0 ) + $cnt;
+        }
+
+        // Build percentages map with all three result keys per match.
+        $map = [];
+        foreach ( $counts as $matchId => $resultCounts ) {
+            $total = $totals[ $matchId ];
+            $map[ $matchId ] = [
+                '1' => round( ( ( $resultCounts['1'] ?? 0 ) / $total ) * 100, 1 ),
+                'X' => round( ( ( $resultCounts['X'] ?? 0 ) / $total ) * 100, 1 ),
+                '2' => round( ( ( $resultCounts['2'] ?? 0 ) / $total ) * 100, 1 ),
+            ];
+        }
+
+        return $map;
+    }
+
+    /**
      * Return all predictions submitted by a user for a given fecha.
      *
      * Used by FechaController to back-populate user_predictions in the GET

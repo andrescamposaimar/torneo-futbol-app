@@ -267,4 +267,144 @@ class PredictionRepositoryTest extends TestCase {
         $this->assertCount( 1, $results );
         $this->assertSame( 5, (int) $results[0]['match_id'] );
     }
+
+    // -------------------------------------------------------------------------
+    // aggregatePopulares — percentage breakdown per match (G6-c)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Helper: insert a raw prediction row directly (bypasses upsert dedup logic,
+     * useful for seeding multiple users' predictions quickly).
+     */
+    private function insertPrediction( int $userId, int $fechaId, int $matchId, string $result ): void {
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_predictions',
+            [
+                'user_id'            => $userId,
+                'fecha_id'           => $fechaId,
+                'match_id'           => $matchId,
+                'result'             => $result,
+                'score_home'         => 1,
+                'score_away'         => 0,
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+                'locked_at_snapshot' => '2026-01-01 00:00:00',
+            ]
+        );
+    }
+
+    public function test_aggregate_populares_returns_empty_map_when_no_predictions(): void {
+        // fecha_id 99 has no predictions at all.
+        $result = $this->repo->aggregatePopulares( 99 );
+
+        $this->assertSame( [], $result );
+    }
+
+    public function test_aggregate_populares_computes_percentages_for_single_match(): void {
+        // Match 5, fecha 10: 2×'1', 1×'X', 1×'2' → 50.0 / 25.0 / 25.0.
+        $this->insertPrediction( 1, 10, 5, '1' );
+        $this->insertPrediction( 2, 10, 5, '1' );
+        $this->insertPrediction( 3, 10, 5, 'X' );
+        $this->insertPrediction( 4, 10, 5, '2' );
+
+        $result = $this->repo->aggregatePopulares( 10 );
+
+        $this->assertArrayHasKey( 5, $result );
+        $this->assertSame( 50.0, $result[5]['1'] );
+        $this->assertSame( 25.0, $result[5]['X'] );
+        $this->assertSame( 25.0, $result[5]['2'] );
+    }
+
+    public function test_aggregate_populares_result_with_zero_votes_appears_as_zero_point_zero(): void {
+        // Match 6, fecha 10: only '1' predictions → X and 2 must appear as 0.0.
+        $this->insertPrediction( 1, 10, 6, '1' );
+        $this->insertPrediction( 2, 10, 6, '1' );
+        $this->insertPrediction( 3, 10, 6, '1' );
+
+        $result = $this->repo->aggregatePopulares( 10 );
+
+        $this->assertArrayHasKey( 6, $result );
+        $this->assertSame( 100.0, $result[6]['1'] );
+        $this->assertSame( 0.0, $result[6]['X'] );
+        $this->assertSame( 0.0, $result[6]['2'] );
+    }
+
+    public function test_aggregate_populares_always_has_all_three_result_keys(): void {
+        // Even when only one result type exists, all three keys ('1', 'X', '2') must be present.
+        $this->insertPrediction( 1, 10, 7, 'X' );
+
+        $result = $this->repo->aggregatePopulares( 10 );
+
+        $this->assertArrayHasKey( 7, $result );
+        $this->assertArrayHasKey( '1', $result[7] );
+        $this->assertArrayHasKey( 'X', $result[7] );
+        $this->assertArrayHasKey( '2', $result[7] );
+    }
+
+    public function test_aggregate_populares_spans_multiple_matches(): void {
+        // Match 10: 2 predictions (1, X). Match 11: 1 prediction (2).
+        $this->insertPrediction( 1, 20, 10, '1' );
+        $this->insertPrediction( 2, 20, 10, 'X' );
+        $this->insertPrediction( 3, 20, 11, '2' );
+
+        $result = $this->repo->aggregatePopulares( 20 );
+
+        $this->assertArrayHasKey( 10, $result );
+        $this->assertArrayHasKey( 11, $result );
+
+        // Match 10: 50/50.
+        $this->assertSame( 50.0, $result[10]['1'] );
+        $this->assertSame( 50.0, $result[10]['X'] );
+        $this->assertSame( 0.0, $result[10]['2'] );
+
+        // Match 11: 100% for '2'.
+        $this->assertSame( 0.0, $result[11]['1'] );
+        $this->assertSame( 0.0, $result[11]['X'] );
+        $this->assertSame( 100.0, $result[11]['2'] );
+    }
+
+    public function test_aggregate_populares_excludes_other_fecha_predictions(): void {
+        // Predictions in fecha 30 must NOT appear in fecha 40's aggregate.
+        $this->insertPrediction( 1, 30, 5, '1' );
+        $this->insertPrediction( 2, 30, 5, '1' );
+        $this->insertPrediction( 3, 40, 5, 'X' );
+
+        $resultFecha30 = $this->repo->aggregatePopulares( 30 );
+        $resultFecha40 = $this->repo->aggregatePopulares( 40 );
+
+        // Fecha 30: match 5 all '1'.
+        $this->assertSame( 100.0, $resultFecha30[5]['1'] );
+        $this->assertSame( 0.0, $resultFecha30[5]['X'] );
+
+        // Fecha 40: match 5 all 'X'.
+        $this->assertSame( 0.0, $resultFecha40[5]['1'] );
+        $this->assertSame( 100.0, $resultFecha40[5]['X'] );
+    }
+
+    public function test_aggregate_populares_rounds_to_one_decimal(): void {
+        // 1/3 = 33.333... → must round to 33.3.
+        // 3 predictions: one for each result.
+        $this->insertPrediction( 1, 50, 5, '1' );
+        $this->insertPrediction( 2, 50, 5, 'X' );
+        $this->insertPrediction( 3, 50, 5, '2' );
+
+        $result = $this->repo->aggregatePopulares( 50 );
+
+        // Each is 33.3%.
+        $this->assertSame( 33.3, $result[5]['1'] );
+        $this->assertSame( 33.3, $result[5]['X'] );
+        $this->assertSame( 33.3, $result[5]['2'] );
+    }
+
+    public function test_aggregate_populares_match_absent_when_no_predictions_for_it(): void {
+        // Fecha 60: match 5 has predictions, match 9 has none.
+        // match 9 must NOT appear in the result map.
+        $this->insertPrediction( 1, 60, 5, '1' );
+
+        $result = $this->repo->aggregatePopulares( 60 );
+
+        $this->assertArrayHasKey( 5, $result );
+        $this->assertArrayNotHasKey( 9, $result );
+    }
 }
