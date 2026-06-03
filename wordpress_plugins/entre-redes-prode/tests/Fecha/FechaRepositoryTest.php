@@ -212,4 +212,218 @@ class FechaRepositoryTest extends TestCase {
         $this->assertNotNull( $result );
         $this->assertSame( 'open', $result['fecha']['state'] );
     }
+
+    // -------------------------------------------------------------------------
+    // G6-b: listFechasBySeasonId
+    // -------------------------------------------------------------------------
+
+    public function test_list_fechas_by_season_returns_empty_array_when_no_fechas(): void {
+        $result = $this->repo->listFechasBySeasonId( 'test_tenant', 359 );
+        $this->assertSame( [], $result );
+    }
+
+    public function test_list_fechas_by_season_returns_all_states_ordered_by_locked_at_asc(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        // Insert three fechas: evaluated (oldest locked_at), open (mid), open (future).
+        // Inserted out of order on purpose to prove ORDER BY locked_at ASC works.
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2026-04-01 13:00:00',
+            'state'      => 'evaluated',
+            'created_at' => '2026-03-01 00:00:00',
+        ] );
+        $idA = (int) $wpdb->insert_id;
+
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2099-06-15 13:00:00',
+            'state'      => 'open',
+            'created_at' => '2026-04-01 00:00:00',
+        ] );
+        $idC = (int) $wpdb->insert_id;
+
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2026-05-01 13:00:00',
+            'state'      => 'open',
+            'created_at' => '2026-04-15 00:00:00',
+        ] );
+        $idB = (int) $wpdb->insert_id;
+
+        $list = $this->repo->listFechasBySeasonId( 'test_tenant', 359 );
+
+        $this->assertCount( 3, $list );
+
+        // Ordered by locked_at ASC: A (Apr 1) → B (May 1) → C (Jun 15).
+        $ids = array_column( $list, 'fecha_id' );
+        $this->assertSame( [ $idA, $idB, $idC ], $ids );
+    }
+
+    public function test_list_fechas_by_season_returns_correct_item_shape(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2099-12-31 23:59:00',
+            'state'      => 'open',
+            'created_at' => '2026-01-01 00:00:00',
+        ] );
+        $fechaId = (int) $wpdb->insert_id;
+
+        // Add two matches so match_count = 2.
+        $wpdb->insert( $p . 'prode_fecha_matches', [
+            'fecha_id'      => $fechaId,
+            'match_id'      => 10,
+            'match_kickoff' => '2099-12-31 13:45:00',
+        ] );
+        $wpdb->insert( $p . 'prode_fecha_matches', [
+            'fecha_id'      => $fechaId,
+            'match_id'      => 11,
+            'match_kickoff' => '2099-12-31 15:10:00',
+        ] );
+
+        $list = $this->repo->listFechasBySeasonId( 'test_tenant', 359 );
+
+        $this->assertCount( 1, $list );
+        $item = $list[0];
+
+        $this->assertArrayHasKey( 'fecha_id', $item );
+        $this->assertArrayHasKey( 'season_id', $item );
+        $this->assertArrayHasKey( 'state', $item );
+        $this->assertArrayHasKey( 'locked_at', $item );
+        $this->assertArrayHasKey( 'match_count', $item );
+
+        $this->assertSame( $fechaId, $item['fecha_id'] );
+        $this->assertSame( 359, $item['season_id'] );
+        $this->assertSame( '2099-12-31 23:59:00', $item['locked_at'] );
+        $this->assertSame( 2, $item['match_count'] );
+    }
+
+    public function test_list_fechas_by_season_derives_state_via_lock_computer(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        // Insert a fecha with locked_at in the past but DB state = 'open'.
+        // deriveState should return 'locked'.
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2000-01-01 00:00:00',
+            'state'      => 'open',
+            'created_at' => '1999-12-01 00:00:00',
+        ] );
+
+        $lock = new \EntreRedes\Prode\Fecha\LockComputer();
+        $list = $this->repo->listFechasBySeasonId( 'test_tenant', 359, $lock );
+
+        $this->assertCount( 1, $list );
+        $this->assertSame( 'locked', $list[0]['state'] );
+    }
+
+    public function test_list_fechas_by_season_tenant_isolation(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        // Insert for test_tenant and other_tenant.
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2099-01-01 00:00:00',
+            'state'      => 'open',
+            'created_at' => '2026-01-01 00:00:00',
+        ] );
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'other_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2099-01-02 00:00:00',
+            'state'      => 'open',
+            'created_at' => '2026-01-01 00:00:00',
+        ] );
+
+        $list = $this->repo->listFechasBySeasonId( 'test_tenant', 359 );
+
+        $this->assertCount( 1, $list );
+    }
+
+    // -------------------------------------------------------------------------
+    // G6-b: findFechaById
+    // -------------------------------------------------------------------------
+
+    public function test_find_fecha_by_id_returns_null_when_not_found(): void {
+        $result = $this->repo->findFechaById( 'test_tenant', 9999 );
+        $this->assertNull( $result );
+    }
+
+    public function test_find_fecha_by_id_returns_null_for_wrong_tenant(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'other_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2099-01-01 00:00:00',
+            'state'      => 'open',
+            'created_at' => '2026-01-01 00:00:00',
+        ] );
+        $fechaId = (int) $wpdb->insert_id;
+
+        $result = $this->repo->findFechaById( 'test_tenant', $fechaId );
+        $this->assertNull( $result );
+    }
+
+    public function test_find_fecha_by_id_returns_any_state(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        // Insert an evaluated fecha (findActiveFecha would return null for this).
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'    => 'test_tenant',
+            'season_id'    => 359,
+            'locked_at'    => '2026-01-01 00:00:00',
+            'state'        => 'evaluated',
+            'created_at'   => '2025-12-01 00:00:00',
+            'evaluated_at' => '2026-01-02 00:00:00',
+        ] );
+        $fechaId = (int) $wpdb->insert_id;
+
+        $result = $this->repo->findFechaById( 'test_tenant', $fechaId );
+
+        $this->assertNotNull( $result );
+        $this->assertSame( $fechaId, (int) $result['fecha']['id'] );
+        $this->assertSame( 'evaluated', $result['fecha']['state'] );
+    }
+
+    public function test_find_fecha_by_id_returns_same_struct_as_find_active(): void {
+        $fechaId = $this->repo->upsertFecha( 'test_tenant', 359, '2099-12-31 23:59:00', $this->sampleMatches() );
+
+        $byActive = $this->repo->findActiveFecha( 'test_tenant', 359 );
+        $byId     = $this->repo->findFechaById( 'test_tenant', $fechaId );
+
+        $this->assertNotNull( $byId );
+        $this->assertArrayHasKey( 'fecha', $byId );
+        $this->assertArrayHasKey( 'matches', $byId );
+        $this->assertSame( $byActive['fecha']['id'], $byId['fecha']['id'] );
+        $this->assertCount( count( $byActive['matches'] ), $byId['matches'] );
+    }
+
+    public function test_find_fecha_by_id_includes_matches(): void {
+        $fechaId = $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2099-12-31 23:59:00',
+            $this->sampleMatches()
+        );
+
+        $result = $this->repo->findFechaById( 'test_tenant', $fechaId );
+
+        $this->assertNotNull( $result );
+        $this->assertCount( 2, $result['matches'] );
+    }
 }
