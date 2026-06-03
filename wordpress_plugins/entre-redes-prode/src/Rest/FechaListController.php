@@ -101,6 +101,10 @@ class FechaListController {
         $rawSeasonId = $request->get_param( 'season_id' );
 
         if ( null !== $rawSeasonId ) {
+            // Validate: must be a positive integer string (rejects '', '0', negatives, non-digits).
+            if ( ! ctype_digit( (string) $rawSeasonId ) || (int) $rawSeasonId < 1 ) {
+                return new \WP_REST_Response( [ 'error' => 'invalid_season_id' ], 400 );
+            }
             $seasonId = (int) $rawSeasonId;
         } else {
             // Default: use the active fecha's season.

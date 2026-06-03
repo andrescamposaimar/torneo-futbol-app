@@ -439,4 +439,41 @@ class FechaListControllerTest extends TestCase {
         $this->assertArrayHasKey( 'home_escudo', $match );
         $this->assertArrayHasKey( 'away_escudo', $match );
     }
+
+    // -------------------------------------------------------------------------
+    // GET /prode/fechas — season_id validation (400 on invalid values)
+    // -------------------------------------------------------------------------
+
+    public function test_list_fechas_returns_400_for_non_numeric_season_id(): void {
+        $controller = $this->makeController();
+        $request    = new \WP_REST_Request( 'GET', '' );
+        $request->set_param( 'season_id', 'abc' );
+
+        $response = $controller->listFechas( $request );
+
+        $this->assertSame( 400, $response->get_status() );
+        $this->assertSame( [ 'error' => 'invalid_season_id' ], $response->get_data() );
+    }
+
+    public function test_list_fechas_returns_400_for_zero_season_id(): void {
+        $controller = $this->makeController();
+        $request    = new \WP_REST_Request( 'GET', '' );
+        $request->set_param( 'season_id', '0' );
+
+        $response = $controller->listFechas( $request );
+
+        $this->assertSame( 400, $response->get_status() );
+        $this->assertSame( [ 'error' => 'invalid_season_id' ], $response->get_data() );
+    }
+
+    public function test_list_fechas_returns_400_for_empty_season_id(): void {
+        $controller = $this->makeController();
+        $request    = new \WP_REST_Request( 'GET', '' );
+        $request->set_param( 'season_id', '' );
+
+        $response = $controller->listFechas( $request );
+
+        $this->assertSame( 400, $response->get_status() );
+        $this->assertSame( [ 'error' => 'invalid_season_id' ], $response->get_data() );
+    }
 }
