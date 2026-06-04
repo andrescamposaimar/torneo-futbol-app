@@ -126,7 +126,7 @@ class _RoutingMockClient extends http.BaseClient {
             ]
           });
           return http.StreamedResponse(
-            Stream.value(summaryBody.codeUnits.map((c) => c).toList() as dynamic),
+            Stream.value(summaryBody.codeUnits.toList()),
             200,
             headers: {'content-type': 'application/json'},
           );
@@ -1053,7 +1053,13 @@ void main() {
         final loadedAfterSwitch = controller.state as ProdeFixturesLoaded;
         expect(loadedAfterSwitch.selectedFechaId, equals(2));
 
-        // Complete the submit for old fecha 1
+        // Capture fecha 2's savedMatchIds and drafts before the stale submit resolves.
+        final savedBeforeStale = Set<int>.from(loadedAfterSwitch.savedMatchIds);
+        final draftStatusBeforeStale = loadedAfterSwitch.drafts.map(
+          (id, d) => MapEntry(id, d.status),
+        );
+
+        // Complete the submit for old fecha 1.
         submitCompleter.complete(http.Response(
           '{"status":"ok"}',
           200,
@@ -1061,9 +1067,28 @@ void main() {
         ));
         await submitFuture;
 
-        // State should still show fecha 2, no mutation from stale submit
+        // State should still show fecha 2, no mutation from stale submit.
         final finalLoaded = controller.state as ProdeFixturesLoaded;
         expect(finalLoaded.selectedFechaId, equals(2));
+
+        // savedMatchIds for fecha 2 must NOT have been mutated by the stale
+        // fecha-1 submit (match 1 should not appear unless fecha 2 already had it).
+        expect(
+          finalLoaded.savedMatchIds,
+          equals(savedBeforeStale),
+          reason: 'Stale fecha-1 submit must not mutate fecha-2 savedMatchIds',
+        );
+
+        // Draft statuses for fecha 2 must not have been promoted to submitted
+        // by the stale result.
+        for (final entry in draftStatusBeforeStale.entries) {
+          expect(
+            finalLoaded.drafts[entry.key]?.status,
+            equals(entry.value),
+            reason: 'Draft status for match ${entry.key} in fecha 2 must not '
+                'be mutated by the stale fecha-1 submit',
+          );
+        }
       });
 
       test('refresh on non-active fecha — re-fetches fechas list AND fecha/{id} (AC12)', () async {

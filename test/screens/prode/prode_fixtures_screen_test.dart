@@ -831,6 +831,81 @@ void main() {
         expect(find.text('Seleccionar fecha'), findsOneWidget);
       });
 
+      // W-1: selector row MUST appear above the progress header.
+      testWidgets('selector row renders above progress header in loaded state (W-1)', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+
+        final selectorFinder = find.byKey(const Key('fecha_selector_label'));
+        final progressFinder = find.byType(LinearProgressIndicator);
+
+        expect(selectorFinder, findsOneWidget);
+        expect(progressFinder, findsOneWidget);
+
+        final selectorDy = tester.getTopLeft(selectorFinder).dy;
+        final progressDy = tester.getTopLeft(progressFinder).dy;
+
+        expect(
+          selectorDy,
+          lessThan(progressDy),
+          reason: '_FechaSelectorRow must be rendered above the progress header',
+        );
+      });
+
+      // W-2: dismissing the picker without selecting must NOT change the
+      // label and must NOT call selectFecha.
+      testWidgets('dismiss picker without selecting keeps label and fires no selectFecha (W-2)', (tester) async {
+        final fecha = _makeFecha();
+        final fechas = List.generate(3, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        // selectedFechaId == 2 → label should show "Fecha 2"
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 2,
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Label shows "Fecha 2" before open.
+        expect(find.textContaining('Fecha 2'), findsAtLeastNWidgets(1));
+
+        // Open picker.
+        await tester.tap(find.byKey(const Key('fecha_selector_label')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Seleccionar fecha'), findsOneWidget);
+
+        // Dismiss via barrier (tap near top-left of screen, outside the sheet).
+        await tester.tapAt(const Offset(200, 10));
+        await tester.pumpAndSettle();
+
+        // Sheet is gone.
+        expect(find.text('Seleccionar fecha'), findsNothing);
+
+        // Label still shows the same fecha and no selectFecha was called.
+        expect(find.textContaining('Fecha 2'), findsAtLeastNWidgets(1));
+        expect(stub.selectFechaCalls, isEmpty);
+      });
+
       testWidgets('tapping picker entry closes sheet and calls selectFecha (AC6)', (tester) async {
         final fecha = _makeFecha();
         final fechas = List.generate(3, (i) => FechaSummary(
