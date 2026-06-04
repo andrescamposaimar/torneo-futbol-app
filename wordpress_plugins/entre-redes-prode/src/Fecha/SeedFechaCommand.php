@@ -7,18 +7,17 @@ namespace EntreRedes\Prode\Fecha;
 /**
  * WP-CLI command: wp prode seed-fecha
  *
- * Runs the full fecha creation pipeline (Resolve → Lock → Upsert) against the
- * live deployed plugin. Useful for E2E seeding before a production redeploy.
+ * Thin CLI wrapper around SeedFechaService. All business logic lives in the
+ * service; this command constructs it from its deps and delegates execute().
  *
- * Design (ADR-G0-7 extended):
- *   All logic is extracted into the testable execute() method. The WP-CLI
- *   entrypoint __invoke() is a thin wrapper that calls execute() and prints
- *   human-readable output via WP_CLI::success / WP_CLI::line.
+ * Design D6: SeedFechaService is shared by CLI (this command) and the admin UI
+ * (SettingsPage in WU-C). Constructor signature is preserved so Plugin.php
+ * requires no changes in this PR.
  *
- *   The command is registered in Plugin::boot() behind a WP_CLI guard:
- *     if ( defined('WP_CLI') && WP_CLI ) {
- *         WP_CLI::add_command('prode seed-fecha', SeedFechaCommand::class);
- *     }
+ * The command is registered in Plugin::boot() behind a WP_CLI guard:
+ *   if ( defined('WP_CLI') && WP_CLI ) {
+ *       WP_CLI::add_command('prode seed-fecha', SeedFechaCommand::class);
+ *   }
  *
  * Idempotency:
  *   FechaRepository::upsertFecha is idempotent — a second seed for the same
@@ -26,11 +25,7 @@ namespace EntreRedes\Prode\Fecha;
  */
 class SeedFechaCommand {
 
-    private Settings $settings;
-    private LockComputer $lockComputer;
-    private FechaRepository $repository;
-    /** @var callable */
-    private $resolverFn;
+    private SeedFechaService $service;
 
     /**
      * @param callable $resolverFn  Returns array|null from FechaResolver::resolveNext().
@@ -43,10 +38,7 @@ class SeedFechaCommand {
         FechaRepository $repository,
         callable $resolverFn
     ) {
-        $this->settings     = $settings;
-        $this->lockComputer = $lockComputer;
-        $this->repository   = $repository;
-        $this->resolverFn   = $resolverFn;
+        $this->service = new SeedFechaService( $settings, $lockComputer, $repository, $resolverFn );
     }
 
     /**
@@ -76,63 +68,14 @@ class SeedFechaCommand {
     }
 
     /**
-     * Core logic — fully testable without WP_CLI.
+     * Delegates to SeedFechaService::execute().
      *
-     * Mirrors the FechaCreationCron::execute() compose path so both
-     * the cron and the seed command share the same resolve→lock→upsert
-     * logic without duplicating implementation.
+     * Kept public for backward compatibility with existing tests and any
+     * callers that invoke execute() directly (e.g. FechaCreationCron path).
      *
      * @return array{fecha_id: int, match_count: int, skipped: bool, reused: bool}
      */
     public function execute(): array {
-        $result = ( $this->resolverFn )();
-
-        if ( null === $result ) {
-            return [
-                'fecha_id'    => 0,
-                'match_count' => 0,
-                'skipped'     => true,
-                'reused'      => false,
-            ];
-        }
-
-        $lockedAt = $this->lockComputer->computeLockedAt(
-            $result['earliest_kickoff'],
-            $this->settings->lockHoursBefore()
-        );
-
-        $tenantId = defined( 'PRODE_TENANT_ID' ) ? (string) PRODE_TENANT_ID : '';
-        $seasonId = $this->settings->seasonId();
-
-        // Detect pre-existence BEFORE upsert so the operator gets accurate
-        // "created" vs "already exists" feedback. upsertFecha reuses the row
-        // either way (idempotent), but the return value alone can't tell the
-        // two apart, so we compare the resolved play-date against any active
-        // fecha already persisted for this tenant+season.
-        $reused   = false;
-        $playDate = substr( min( array_column( $result['matches'], 'kickoff' ) ), 0, 10 );
-        $existing = $this->repository->findActiveFecha( $tenantId, $seasonId );
-        if ( null !== $existing && ! empty( $existing['matches'] ) ) {
-            $existingPlayDate = substr(
-                min( array_column( $existing['matches'], 'match_kickoff' ) ),
-                0,
-                10
-            );
-            $reused = ( $existingPlayDate === $playDate );
-        }
-
-        $fechaId = $this->repository->upsertFecha(
-            $tenantId,
-            $seasonId,
-            $lockedAt,
-            $result['matches']
-        );
-
-        return [
-            'fecha_id'    => $fechaId,
-            'match_count' => count( $result['matches'] ),
-            'skipped'     => false,
-            'reused'      => $reused,
-        ];
+        return $this->service->execute();
     }
 }
