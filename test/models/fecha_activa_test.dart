@@ -280,4 +280,142 @@ void main() {
       expect(fecha.userPredictions, isEmpty);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // G6-d: FechaMatch new fields (zona, homeEscudo, awayEscudo, populares)
+  // -------------------------------------------------------------------------
+  group('FechaMatch G6-d new fields', () {
+    Map<String, dynamic> _matchJsonG6d({
+      int matchId = 1,
+      String zona = 'Zona A',
+      String? homeEscudo = 'https://example.com/home.png',
+      String? awayEscudo = 'https://example.com/away.png',
+      Map<String, dynamic>? populares,
+      bool includePopulares = false,
+    }) {
+      return {
+        'match_id': matchId,
+        'home_team': 'Equipo A',
+        'away_team': 'Equipo B',
+        'kickoff': '2026-06-06 13:45:00',
+        'zona': zona,
+        'home_escudo': homeEscudo,
+        'away_escudo': awayEscudo,
+        if (includePopulares) 'populares': populares,
+      };
+    }
+
+    test('zona field is parsed correctly', () {
+      final match = FechaMatch.fromJson(_matchJsonG6d(zona: 'Zona Norte'));
+      expect(match.zona, equals('Zona Norte'));
+    });
+
+    test('zona absent → defaults to empty string', () {
+      final json = {
+        'match_id': 1,
+        'home_team': 'A',
+        'away_team': 'B',
+        'kickoff': '2026-06-06 13:45:00',
+      };
+      final match = FechaMatch.fromJson(json);
+      expect(match.zona, equals(''));
+    });
+
+    test('homeEscudo and awayEscudo are parsed correctly', () {
+      final match = FechaMatch.fromJson(
+        _matchJsonG6d(
+          homeEscudo: 'https://cdn.test/home.png',
+          awayEscudo: 'https://cdn.test/away.png',
+        ),
+      );
+      expect(match.homeEscudo, equals('https://cdn.test/home.png'));
+      expect(match.awayEscudo, equals('https://cdn.test/away.png'));
+    });
+
+    test('null homeEscudo → homeEscudo is null', () {
+      final match = FechaMatch.fromJson(_matchJsonG6d(homeEscudo: null));
+      expect(match.homeEscudo, isNull);
+    });
+
+    test('null awayEscudo → awayEscudo is null', () {
+      final match = FechaMatch.fromJson(_matchJsonG6d(awayEscudo: null));
+      expect(match.awayEscudo, isNull);
+    });
+
+    test('absent home_escudo key → homeEscudo is null', () {
+      final json = {
+        'match_id': 1,
+        'home_team': 'A',
+        'away_team': 'B',
+        'kickoff': '2026-06-06 13:45:00',
+        'zona': 'Z',
+        'away_escudo': null,
+      };
+      final match = FechaMatch.fromJson(json);
+      expect(match.homeEscudo, isNull);
+    });
+
+    test('populares parsed — keys 1, X, 2 → home/draw/away doubles', () {
+      final match = FechaMatch.fromJson(
+        _matchJsonG6d(
+          includePopulares: true,
+          populares: {'1': 0.5, 'X': 0.3, '2': 0.2},
+        ),
+      );
+      expect(match.populares, isNotNull);
+      expect(match.populares!.home, closeTo(0.5, 0.001));
+      expect(match.populares!.draw, closeTo(0.3, 0.001));
+      expect(match.populares!.away, closeTo(0.2, 0.001));
+    });
+
+    test('populares as int values → parsed as doubles', () {
+      final match = FechaMatch.fromJson(
+        _matchJsonG6d(
+          includePopulares: true,
+          populares: {'1': 1, 'X': 0, '2': 0},
+        ),
+      );
+      expect(match.populares!.home, equals(1.0));
+    });
+
+    test('populares null value → populares is null', () {
+      final match = FechaMatch.fromJson(
+        _matchJsonG6d(includePopulares: true, populares: null),
+      );
+      expect(match.populares, isNull);
+    });
+
+    test('populares key absent → populares is null', () {
+      final match = FechaMatch.fromJson(_matchJsonG6d(includePopulares: false));
+      expect(match.populares, isNull);
+    });
+
+    test('existing fields unchanged after G6-d additions', () {
+      final match = FechaMatch.fromJson(
+        _matchJsonG6d(matchId: 42),
+      );
+      expect(match.matchId, equals(42));
+      expect(match.homeTeam, equals('Equipo A'));
+      expect(match.awayTeam, equals('Equipo B'));
+      expect(match.kickoff.year, equals(2026));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // G6-d: Populares model
+  // -------------------------------------------------------------------------
+  group('Populares', () {
+    test('fromJson parses keys 1, X, 2 correctly', () {
+      final p = Populares.fromJson({'1': 0.6, 'X': 0.25, '2': 0.15});
+      expect(p.home, closeTo(0.6, 0.001));
+      expect(p.draw, closeTo(0.25, 0.001));
+      expect(p.away, closeTo(0.15, 0.001));
+    });
+
+    test('fromJson converts int values to double', () {
+      final p = Populares.fromJson({'1': 1, 'X': 0, '2': 0});
+      expect(p.home, isA<double>());
+      expect(p.home, equals(1.0));
+    });
+  });
 }

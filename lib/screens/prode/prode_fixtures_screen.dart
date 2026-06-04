@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -101,9 +100,11 @@ class ProdeFixturesView extends StatelessWidget {
           onRetry: onRetry,
           onLogout: onLogout,
         ),
-      ProdeFixturesLoaded(:final fecha, :final drafts) => _LoadedView(
+      ProdeFixturesLoaded(:final fecha, :final drafts, :final savedMatchIds) =>
+        _LoadedView(
           fecha: fecha,
           drafts: drafts,
+          savedMatchIds: savedMatchIds,
           stale: stale,
           onLogout: onLogout,
           onRefresh: onRefresh,
@@ -205,13 +206,13 @@ class _ErrorView extends StatelessWidget {
 
 /// Shown when a fecha is loaded successfully.
 ///
-/// Wraps a scrollable list in a [RefreshIndicator]. The stale banner is
-/// rendered above the list when [stale] is true. Each match is rendered by
-/// a [_PredictionMatchTile] (which owns score input fields and a per-match
-/// submit button). When the match list is empty a note replaces the list items.
+/// Renders a progress header ("Pronósticos X/Y") above the match list,
+/// a section title, and a list of tappable [_MatchCard]s that open a
+/// [_PredictionSheet] modal on tap.
 class _LoadedView extends ConsumerWidget {
   final FechaActiva fecha;
   final Map<int, PredictionDraft> drafts;
+  final Set<int> savedMatchIds;
   final bool stale;
   final VoidCallback onLogout;
   final Future<void> Function() onRefresh;
@@ -219,6 +220,7 @@ class _LoadedView extends ConsumerWidget {
   const _LoadedView({
     required this.fecha,
     required this.drafts,
+    required this.savedMatchIds,
     required this.stale,
     required this.onLogout,
     required this.onRefresh,
@@ -231,30 +233,58 @@ class _LoadedView extends ConsumerWidget {
     final isLocked =
         fecha.lockedAt != null && !DateTime.now().isBefore(fecha.lockedAt!);
 
+    final totalCount = fecha.matches.length;
+    // Intersect with the fecha's matches so stray prediction entries for
+    // matches no longer in the fecha can never push progress past totalCount.
+    final predictedCount =
+        fecha.matches.where((m) => savedMatchIds.contains(m.matchId)).length;
+
     return Column(
       children: [
         if (stale) const _StaleBanner(),
         _FechaBadge(state: fecha.state),
+        // Progress header
+        if (totalCount > 0)
+          _ProgressHeader(
+            predictedCount: predictedCount,
+            totalCount: totalCount,
+          ),
         Expanded(
           child: RefreshIndicator(
             onRefresh: onRefresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
+                // Section title
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    'PRÓXIMOS PARTIDOS',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
                 if (fecha.matches.isEmpty)
                   const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(child: Text('Sin partidos en esta fecha.')),
                   )
                 else
-                  ...fecha.matches.map((m) => _PredictionMatchTile(
+                  ...fecha.matches.map((m) => _MatchCard(
                         match: m,
                         draft: drafts[m.matchId] ?? const PredictionDraft(),
+                        isSaved: savedMatchIds.contains(m.matchId),
                         isLocked: isLocked,
-                        onUpdateDraft: (home, away) =>
-                            controller.updateDraft(m.matchId,
-                                scoreHome: home, scoreAway: away),
-                        onSubmit: () => controller.submitPrediction(m.matchId),
+                        onTap: () => _openPredictionSheet(
+                          context,
+                          match: m,
+                          draft: drafts[m.matchId] ?? const PredictionDraft(),
+                          isLocked: isLocked,
+                          controller: controller,
+                        ),
                       )),
                 const SizedBox(height: 8),
                 Center(
@@ -272,7 +302,355 @@ class _LoadedView extends ConsumerWidget {
       ],
     );
   }
+
+  /// Opens the prediction modal sheet for [match].
+  void _openPredictionSheet(
+    BuildContext context, {
+    required FechaMatch match,
+    required PredictionDraft draft,
+    required bool isLocked,
+    required ProdeFixturesController controller,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _PredictionSheet(
+        match: match,
+        initialDraft: draft,
+        isLocked: isLocked,
+        controller: controller,
+      ),
+    );
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Progress header widget
+// ---------------------------------------------------------------------------
+
+/// "Pronósticos X/Y" header with a [LinearProgressIndicator].
+class _ProgressHeader extends StatelessWidget {
+  final int predictedCount;
+  final int totalCount;
+
+  const _ProgressHeader({
+    required this.predictedCount,
+    required this.totalCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final progress = totalCount > 0 ? predictedCount / totalCount : 0.0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pronósticos',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                '$predictedCount/$totalCount',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: progress,
+            backgroundColor: theme.colorScheme.primary.withAlpha(30),
+            color: theme.colorScheme.primary,
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Match card (tappable, shows score boxes + status icon)
+// ---------------------------------------------------------------------------
+
+/// Tappable match card. Tapping anywhere opens [_PredictionSheet].
+///
+/// Layout:
+///   Header row: kickoff + zona | status icon
+///   Divider
+///   Body row: [home escudo+name] | [home score box] - [away score box] | [away escudo+name]
+class _MatchCard extends StatelessWidget {
+  final FechaMatch match;
+  final PredictionDraft draft;
+  final bool isSaved;
+  final bool isLocked;
+  final VoidCallback onTap;
+
+  const _MatchCard({
+    required this.match,
+    required this.draft,
+    required this.isSaved,
+    required this.isLocked,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    // Format: "Dom. 07/06 - 14:00" (abbreviated weekday, capitalized)
+    final kickoffFormatted = _formatKickoff(match.kickoff);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Card(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey.shade200),
+        ),
+        elevation: 1,
+        child: InkWell(
+          key: Key('match_card_${match.matchId}'),
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header row: kickoff/zona + status icon
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            kickoffFormatted,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (match.zona.isNotEmpty)
+                            Text(
+                              match.zona,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: Colors.grey.shade500,
+                                fontSize: 11,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                        ],
+                      ),
+                    ),
+                    // Status icon
+                    if (isSaved)
+                      Icon(
+                        key: Key('status_icon_saved_${match.matchId}'),
+                        Icons.check_box_outlined,
+                        color: primary,
+                        size: 20,
+                      )
+                    else if (isLocked)
+                      Icon(
+                        key: Key('status_icon_locked_${match.matchId}'),
+                        Icons.lock_outline,
+                        color: Colors.grey.shade400,
+                        size: 20,
+                      )
+                    else
+                      Icon(
+                        key: Key('status_icon_pending_${match.matchId}'),
+                        Icons.indeterminate_check_box_outlined,
+                        color: Colors.grey.shade400,
+                        size: 20,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Divider(height: 1, thickness: 1),
+                const SizedBox(height: 8),
+                // Body row: home | score boxes | away
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Home side
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _EscudoImage(url: match.homeEscudo, size: 40),
+                          const SizedBox(height: 4),
+                          Text(
+                            match.homeTeam,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Score display boxes
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          _ScoreDisplayBox(
+                            value: draft.scoreHome,
+                            primaryColor: primary,
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4),
+                            child: Text(
+                              '-',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          _ScoreDisplayBox(
+                            value: draft.scoreAway,
+                            primaryColor: primary,
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Away side
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _EscudoImage(url: match.awayEscudo, size: 40),
+                          const SizedBox(height: 4),
+                          Text(
+                            match.awayTeam,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Formats kickoff as "Dom. 07/06 - 14:00".
+  ///
+  /// Uses a manual Spanish weekday abbreviation to avoid requiring
+  /// [initializeDateFormatting] in widget tests (bootstrap.dart handles it
+  /// in production via `await initializeDateFormatting('es')`).
+  String _formatKickoff(DateTime kickoff) {
+    const weekdays = ['Lun.', 'Mar.', 'Mié.', 'Jue.', 'Vie.', 'Sáb.', 'Dom.'];
+    final dayLabel = weekdays[kickoff.weekday - 1]; // weekday: 1=Mon, 7=Sun
+    final rest = DateFormat('dd/MM - HH:mm').format(kickoff);
+    return '$dayLabel $rest';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Score display box (read-only, shown on the card)
+// ---------------------------------------------------------------------------
+
+/// Read-only score display for the match card.
+/// Shows the draft score value or an em dash when null.
+class _ScoreDisplayBox extends StatelessWidget {
+  final int? value;
+  final Color primaryColor;
+
+  const _ScoreDisplayBox({required this.value, required this.primaryColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: value != null ? primaryColor : Colors.grey.shade300,
+          width: value != null ? 1.5 : 1.0,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          value != null ? value.toString() : '—',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+            color: value != null ? primaryColor : Colors.grey.shade400,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Escudo image with error fallback
+// ---------------------------------------------------------------------------
+
+/// Renders a team escudo (shield/logo) from a URL.
+/// Falls back to a grey shield icon when URL is null or load fails.
+class _EscudoImage extends StatelessWidget {
+  final String? url;
+  final double size;
+
+  const _EscudoImage({required this.url, this.size = 40});
+
+  @override
+  Widget build(BuildContext context) {
+    if (url == null || url!.isEmpty) {
+      return _placeholder();
+    }
+    return Image.network(
+      url!,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) => _placeholder(),
+    );
+  }
+
+  Widget _placeholder() => SizedBox(
+        width: size,
+        height: size,
+        child: Icon(Icons.shield, size: size * 0.7, color: Colors.grey.shade300),
+      );
+}
+
+// ---------------------------------------------------------------------------
+// Stale-session banner
+// ---------------------------------------------------------------------------
 
 /// Stale-session banner — mirrors the banner in the deleted [_ProdeHome].
 ///
@@ -295,6 +673,10 @@ class _StaleBanner extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fecha badge
+// ---------------------------------------------------------------------------
 
 /// Optional badge shown near the top of the list when the fecha is not open.
 ///
@@ -340,218 +722,311 @@ class _FechaBadge extends StatelessWidget {
   }
 }
 
-/// A single match row with score prediction inputs and a submit button.
-///
-/// Score inputs are seeded from [draft] on [initState] and [didUpdateWidget].
-/// The Riverpod [draft] is the source of truth; [TextEditingController]s are
-/// derived state, re-seeded on rebuild so scores survive ListView recycling.
-///
-/// Inputs are locked ([enabled: false]) and submit disabled when [isLocked]
-/// is true (client-side UX check only — the server 423 is the security boundary).
-///
-/// Score values are validated client-side: numeric-only input, max 3 chars,
-/// clamped to [0, 255] before calling [onUpdateDraft].
-class _PredictionMatchTile extends StatefulWidget {
-  final FechaMatch match;
-  final PredictionDraft draft;
-  final bool isLocked;
-  final void Function(int? home, int? away) onUpdateDraft;
-  final VoidCallback onSubmit;
+// ---------------------------------------------------------------------------
+// Prediction sheet (modal bottom sheet)
+// ---------------------------------------------------------------------------
 
-  const _PredictionMatchTile({
+/// Modal bottom sheet for entering or editing a match prediction.
+///
+/// Opened via [showModalBottomSheet]. Holds local score state initialized
+/// from the existing [initialDraft] (or 0/0 when no prior prediction).
+///
+/// When [isLocked] is true, steppers and the GUARDAR button are disabled.
+class _PredictionSheet extends StatefulWidget {
+  final FechaMatch match;
+  final PredictionDraft initialDraft;
+  final bool isLocked;
+  final ProdeFixturesController controller;
+
+  const _PredictionSheet({
     required this.match,
-    required this.draft,
+    required this.initialDraft,
     required this.isLocked,
-    required this.onUpdateDraft,
-    required this.onSubmit,
+    required this.controller,
   });
 
   @override
-  State<_PredictionMatchTile> createState() => _PredictionMatchTileState();
+  State<_PredictionSheet> createState() => _PredictionSheetState();
 }
 
-class _PredictionMatchTileState extends State<_PredictionMatchTile> {
-  late TextEditingController _homeCtrl;
-  late TextEditingController _awayCtrl;
+class _PredictionSheetState extends State<_PredictionSheet> {
+  late int _homeScore;
+  late int _awayScore;
+  bool _submitting = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _homeCtrl = TextEditingController(
-      text: widget.draft.scoreHome?.toString() ?? '',
+    _homeScore = widget.initialDraft.scoreHome ?? 0;
+    _awayScore = widget.initialDraft.scoreAway ?? 0;
+  }
+
+  int _clamp(int value) => value.clamp(0, 255);
+
+  void _incrementHome() => setState(() => _homeScore = _clamp(_homeScore + 1));
+  void _decrementHome() => setState(() => _homeScore = _clamp(_homeScore - 1));
+  void _incrementAway() => setState(() => _awayScore = _clamp(_awayScore + 1));
+  void _decrementAway() => setState(() => _awayScore = _clamp(_awayScore - 1));
+
+  Future<void> _onGuardar() async {
+    if (widget.isLocked || _submitting) return;
+
+    setState(() {
+      _submitting = true;
+      _errorMessage = null;
+    });
+
+    widget.controller.updateDraft(
+      widget.match.matchId,
+      scoreHome: _homeScore,
+      scoreAway: _awayScore,
     );
-    _awayCtrl = TextEditingController(
-      text: widget.draft.scoreAway?.toString() ?? '',
-    );
-  }
 
-  @override
-  void didUpdateWidget(_PredictionMatchTile oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Re-seed only when the draft value itself changed (not just status),
-    // to avoid clobbering an in-progress keystroke.
-    if (oldWidget.draft.scoreHome != widget.draft.scoreHome) {
-      final newText = widget.draft.scoreHome?.toString() ?? '';
-      if (_homeCtrl.text != newText) _homeCtrl.text = newText;
-    }
-    if (oldWidget.draft.scoreAway != widget.draft.scoreAway) {
-      final newText = widget.draft.scoreAway?.toString() ?? '';
-      if (_awayCtrl.text != newText) _awayCtrl.text = newText;
+    // submitPrediction returns true on success, false on error/no-op.
+    // This avoids reading the protected StateNotifier.state from outside the notifier.
+    final success =
+        await widget.controller.submitPrediction(widget.match.matchId);
+
+    if (!mounted) return;
+
+    if (success) {
+      Navigator.of(context).pop();
+    } else {
+      setState(() {
+        _submitting = false;
+        _errorMessage = 'No se pudo guardar. Intentá de nuevo.';
+      });
     }
   }
-
-  @override
-  void dispose() {
-    _homeCtrl.dispose();
-    _awayCtrl.dispose();
-    super.dispose();
-  }
-
-  int? _parseAndClamp(String text) {
-    final v = int.tryParse(text);
-    if (v == null) return null;
-    return v.clamp(0, 255);
-  }
-
-  void _onHomeChanged(String value) {
-    final home = _parseAndClamp(value);
-    final away = _parseAndClamp(_awayCtrl.text);
-    widget.onUpdateDraft(home, away);
-  }
-
-  void _onAwayChanged(String value) {
-    final home = _parseAndClamp(_homeCtrl.text);
-    final away = _parseAndClamp(value);
-    widget.onUpdateDraft(home, away);
-  }
-
-  bool get _canSubmit =>
-      !widget.isLocked &&
-      widget.draft.status != SubmitStatus.submitting;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     final matchId = widget.match.matchId;
-    final kickoff = DateFormat('dd/MM HH:mm').format(widget.match.kickoff);
-
-    final inputDecoration = InputDecoration(
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      border: const OutlineInputBorder(),
-    );
+    final canInteract = !widget.isLocked && !_submitting;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Team names row
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      widget.match.homeTeam,
-                      style: theme.textTheme.titleMedium,
-                      textAlign: TextAlign.right,
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Text('vs'),
-                  ),
-                  Expanded(
-                    child: Text(
-                      widget.match.awayTeam,
-                      style: theme.textTheme.titleMedium,
-                    ),
-                  ),
-                ],
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
               ),
-              const SizedBox(height: 4),
-              Text(kickoff, style: theme.textTheme.bodyMedium),
-              const SizedBox(height: 8),
-              // Score input row
-              Row(
-                children: [
-                  SizedBox(
-                    width: 60,
-                    child: TextField(
-                      key: Key('score_home_$matchId'),
-                      controller: _homeCtrl,
-                      enabled: !widget.isLocked,
-                      decoration: inputDecoration,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(3),
-                      ],
-                      onChanged: _onHomeChanged,
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8),
-                    child: Text('-'),
-                  ),
-                  SizedBox(
-                    width: 60,
-                    child: TextField(
-                      key: Key('score_away_$matchId'),
-                      controller: _awayCtrl,
-                      enabled: !widget.isLocked,
-                      decoration: inputDecoration,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(3),
-                      ],
-                      onChanged: _onAwayChanged,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    key: Key('submit_$matchId'),
-                    onPressed: _canSubmit ? widget.onSubmit : null,
-                    child: widget.draft.status == SubmitStatus.submitting
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Submit'),
-                  ),
-                ],
-              ),
-              // Status feedback
-              if (widget.draft.status == SubmitStatus.submitted)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Prediction saved!',
-                    style: TextStyle(
-                      color: theme.colorScheme.primary,
-                      fontSize: 12,
-                    ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // G6-f: populares section goes here
+
+          // Score stepper row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Home team
+                Expanded(
+                  child: Column(
+                    children: [
+                      _EscudoImage(url: widget.match.homeEscudo, size: 48),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.match.homeTeam,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ),
                 ),
-              if (widget.draft.status == SubmitStatus.error)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    'Could not save. Try again.',
-                    style: TextStyle(
-                      color: theme.colorScheme.error,
-                      fontSize: 12,
-                    ),
+                // Home stepper
+                _ScoreStepper(
+                  matchId: matchId,
+                  side: 'home',
+                  value: _homeScore,
+                  enabled: canInteract,
+                  onIncrement: canInteract ? _incrementHome : null,
+                  onDecrement: canInteract ? _decrementHome : null,
+                  primaryColor: primary,
+                ),
+                const SizedBox(width: 8),
+                // Away stepper
+                _ScoreStepper(
+                  matchId: matchId,
+                  side: 'away',
+                  value: _awayScore,
+                  enabled: canInteract,
+                  onIncrement: canInteract ? _incrementAway : null,
+                  onDecrement: canInteract ? _decrementAway : null,
+                  primaryColor: primary,
+                ),
+                // Away team
+                Expanded(
+                  child: Column(
+                    children: [
+                      _EscudoImage(url: widget.match.awayEscudo, size: 48),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.match.awayTeam,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ),
                 ),
-            ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Error message
+          if (_errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                _errorMessage!,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          if (_errorMessage != null) const SizedBox(height: 8),
+
+          // GUARDAR button
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                key: Key('guardar_$matchId'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                onPressed: canInteract ? _onGuardar : null,
+                child: _submitting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'GUARDAR',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Score stepper widget
+// ---------------------------------------------------------------------------
+
+/// +/value/- stepper for the prediction modal.
+///
+/// Uses semantic keys so tests can drive interactions:
+///   `stepper_{side}_plus_{matchId}`
+///   `stepper_{side}_minus_{matchId}`
+///   `stepper_{side}_value_{matchId}`
+class _ScoreStepper extends StatelessWidget {
+  final int matchId;
+  final String side; // 'home' or 'away'
+  final int value;
+  final bool enabled;
+  final VoidCallback? onIncrement;
+  final VoidCallback? onDecrement;
+  final Color primaryColor;
+
+  const _ScoreStepper({
+    required this.matchId,
+    required this.side,
+    required this.value,
+    required this.enabled,
+    required this.onIncrement,
+    required this.onDecrement,
+    required this.primaryColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          key: Key('stepper_${side}_plus_$matchId'),
+          icon: const Icon(Icons.add_circle_outline),
+          color: enabled ? primaryColor : Colors.grey.shade300,
+          iconSize: 28,
+          onPressed: onIncrement,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+        const SizedBox(height: 2),
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: enabled ? primaryColor : Colors.grey.shade300,
+              width: 1.5,
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Center(
+            child: Text(
+              key: Key('stepper_${side}_value_$matchId'),
+              value.toString(),
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: enabled ? primaryColor : Colors.grey.shade400,
+              ),
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 2),
+        IconButton(
+          key: Key('stepper_${side}_minus_$matchId'),
+          icon: const Icon(Icons.remove_circle_outline),
+          color: enabled ? primaryColor : Colors.grey.shade300,
+          iconSize: 28,
+          onPressed: onDecrement,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(),
+        ),
+      ],
     );
   }
 }

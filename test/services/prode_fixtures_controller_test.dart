@@ -595,6 +595,105 @@ void main() {
         expect(loaded.drafts[1]!.status, equals(SubmitStatus.error));
       });
     });
+
+    // -----------------------------------------------------------------------
+    // G6-d: savedMatchIds and predictedCount
+    // -----------------------------------------------------------------------
+    group('savedMatchIds and predictedCount (G6-d)', () {
+      test('savedMatchIds seeded from userPredictions on load', () async {
+        final fecha = _makeFechaActiva(
+          matchCount: 2,
+          userPredictions: [
+            PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1),
+          ],
+        );
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.savedMatchIds, contains(1));
+        expect(loaded.savedMatchIds, isNot(contains(2)));
+      });
+
+      test('predictedCount reflects savedMatchIds length', () async {
+        final fecha = _makeFechaActiva(
+          matchCount: 2,
+          userPredictions: [
+            PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1),
+          ],
+        );
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.predictedCount, equals(1));
+      });
+
+      test('no userPredictions -> savedMatchIds empty, predictedCount 0', () async {
+        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.savedMatchIds, isEmpty);
+        expect(loaded.predictedCount, equals(0));
+      });
+
+      test('submitPrediction success adds matchId to savedMatchIds', () async {
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () => Future.value(http.Response(
+            '{"status":"ok"}',
+            200,
+            headers: {'content-type': 'application/json'},
+          )),
+        );
+        await controller.load();
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        await controller.submitPrediction(1);
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.savedMatchIds, contains(1));
+        expect(loaded.predictedCount, equals(1));
+      });
+
+      test('submitPrediction error does NOT add matchId to savedMatchIds', () async {
+        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
+        final controller = await _makeControllerWithFechaAndSubmit(
+          fecha,
+          submitResponse: () => Future.value(http.Response(
+            '{"code":"error","message":"fail"}',
+            500,
+            headers: {'content-type': 'application/json'},
+          )),
+        );
+        await controller.load();
+        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
+
+        await controller.submitPrediction(1);
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.savedMatchIds, isNot(contains(1)));
+        expect(loaded.predictedCount, equals(0));
+      });
+
+      test('predictedCount and total: 2 matches, 1 predicted', () async {
+        final fecha = _makeFechaActiva(
+          matchCount: 2,
+          userPredictions: [
+            PredictionEntry(matchId: 1, scoreHome: 1, scoreAway: 0),
+          ],
+        );
+        final controller = await _makeControllerWithFecha(fecha);
+        await controller.load();
+
+        final loaded = controller.state as ProdeFixturesLoaded;
+        expect(loaded.predictedCount, equals(1));
+        expect(loaded.fecha.matches.length, equals(2));
+      });
+    });
   });
 }
 
