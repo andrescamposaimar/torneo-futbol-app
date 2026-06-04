@@ -107,11 +107,28 @@ final class ProdeFixturesLoading extends ProdeFixturesState {
 /// [FechaActiva.userPredictions]. Matches without a stored prediction get an
 /// empty draft (null scores, idle status). This is the single source of truth
 /// for score inputs — widgets re-seed their [TextEditingController]s from here.
+///
+/// G6-d: [savedMatchIds] tracks which match IDs have a confirmed server-side
+/// prediction. Seeded from [FechaActiva.userPredictions] on load; updated
+/// when [submitPrediction] succeeds. Provides [predictedCount] as a shorthand.
 final class ProdeFixturesLoaded extends ProdeFixturesState {
   final FechaActiva fecha;
   final Map<int, PredictionDraft> drafts;
 
-  const ProdeFixturesLoaded(this.fecha, {this.drafts = const {}});
+  /// Set of match IDs whose prediction has been saved on the server.
+  ///
+  /// Seeded from [FechaActiva.userPredictions] on load so existing predictions
+  /// are reflected immediately. Grows on each successful [submitPrediction].
+  final Set<int> savedMatchIds;
+
+  /// Number of matches in this fecha that have a confirmed server prediction.
+  int get predictedCount => savedMatchIds.length;
+
+  const ProdeFixturesLoaded(
+    this.fecha, {
+    this.drafts = const {},
+    this.savedMatchIds = const {},
+  });
 
   @override
   bool operator ==(Object other) =>
@@ -119,7 +136,8 @@ final class ProdeFixturesLoaded extends ProdeFixturesState {
       other is ProdeFixturesLoaded &&
           runtimeType == other.runtimeType &&
           fecha == other.fecha &&
-          _mapsEqual(drafts, other.drafts);
+          _mapsEqual(drafts, other.drafts) &&
+          _setsEqual(savedMatchIds, other.savedMatchIds);
 
   static bool _mapsEqual(
       Map<int, PredictionDraft> a, Map<int, PredictionDraft> b) {
@@ -130,12 +148,23 @@ final class ProdeFixturesLoaded extends ProdeFixturesState {
     return true;
   }
 
+  static bool _setsEqual(Set<int> a, Set<int> b) {
+    if (a.length != b.length) return false;
+    return a.containsAll(b);
+  }
+
   @override
-  int get hashCode => Object.hash(runtimeType, fecha, Object.hashAll(drafts.values));
+  int get hashCode => Object.hash(
+        runtimeType,
+        fecha,
+        Object.hashAll(drafts.values),
+        Object.hashAll(savedMatchIds),
+      );
 
   @override
   String toString() =>
-      'ProdeFixturesLoaded(fecha: ${fecha.fechaId}, drafts: ${drafts.length})';
+      'ProdeFixturesLoaded(fecha: ${fecha.fechaId}, drafts: ${drafts.length}, '
+      'savedMatchIds: ${savedMatchIds.length})';
 }
 
 /// The backend returned 404: no active fecha for this tenant right now.
@@ -256,7 +285,11 @@ class ProdeFixturesController
     );
     final newDrafts = Map<int, PredictionDraft>.from(current.drafts)
       ..[matchId] = updated;
-    state = ProdeFixturesLoaded(current.fecha, drafts: newDrafts);
+    state = ProdeFixturesLoaded(
+      current.fecha,
+      drafts: newDrafts,
+      savedMatchIds: current.savedMatchIds,
+    );
   }
 
   /// Submits the prediction for [matchId] via [ProdeApiService.submitPrediction].
@@ -290,7 +323,7 @@ class ProdeFixturesController
         scoreHome: draft.scoreHome!,
         scoreAway: draft.scoreAway!,
       );
-      _setDraftStatus(matchId, SubmitStatus.submitted);
+      _setDraftStatusAndMarkSaved(matchId);
     } catch (_) {
       _setDraftStatus(matchId, SubmitStatus.error);
     }
@@ -307,7 +340,27 @@ class ProdeFixturesController
     final existing = current.drafts[matchId] ?? const PredictionDraft();
     final newDrafts = Map<int, PredictionDraft>.from(current.drafts)
       ..[matchId] = existing.copyWith(status: status);
-    state = ProdeFixturesLoaded(current.fecha, drafts: newDrafts);
+    state = ProdeFixturesLoaded(
+      current.fecha,
+      drafts: newDrafts,
+      savedMatchIds: current.savedMatchIds,
+    );
+  }
+
+  /// Sets [matchId]'s draft status to [SubmitStatus.submitted] AND adds it
+  /// to [savedMatchIds] so the card's progress/check-icon updates immediately.
+  void _setDraftStatusAndMarkSaved(int matchId) {
+    final current = state;
+    if (current is! ProdeFixturesLoaded) return;
+    final existing = current.drafts[matchId] ?? const PredictionDraft();
+    final newDrafts = Map<int, PredictionDraft>.from(current.drafts)
+      ..[matchId] = existing.copyWith(status: SubmitStatus.submitted);
+    final newSaved = {...current.savedMatchIds, matchId};
+    state = ProdeFixturesLoaded(
+      current.fecha,
+      drafts: newDrafts,
+      savedMatchIds: newSaved,
+    );
   }
 
   Future<void> _fetch({required bool keepCurrentOnStart}) async {
@@ -317,7 +370,8 @@ class ProdeFixturesController
     try {
       final fecha = await _service.fetchFechaActiva();
       final drafts = _seedDrafts(fecha);
-      state = ProdeFixturesLoaded(fecha, drafts: drafts);
+      final savedMatchIds = _seedSavedMatchIds(fecha);
+      state = ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds);
     } on ProdeNoActiveFecha {
       state = const ProdeFixturesEmpty();
     } on ProdeAuthRequired {
@@ -354,5 +408,15 @@ class ProdeFixturesController
       for (final m in fecha.matches)
         m.matchId: predictionMap[m.matchId] ?? const PredictionDraft(),
     };
+  }
+
+  /// Builds the initial set of saved match IDs from [fecha.userPredictions].
+  ///
+  /// Any match that has a stored prediction entry is considered "saved" — i.e.,
+  /// the server already has a score for that match. This seeds the progress
+  /// header and card check icons without requiring a submit in the current
+  /// session.
+  static Set<int> _seedSavedMatchIds(FechaActiva fecha) {
+    return {for (final p in fecha.userPredictions) p.matchId};
   }
 }

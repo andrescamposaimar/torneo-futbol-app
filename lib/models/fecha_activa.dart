@@ -1,6 +1,61 @@
 import 'package:flutter/foundation.dart';
 
 // ---------------------------------------------------------------------------
+// Populares DTO  (G6-d)
+// ---------------------------------------------------------------------------
+
+/// Aggregate popularity percentages for a match's three outcomes.
+///
+/// Parsed from the `populares` key in the match wire object when non-null.
+/// Keys from the backend: '1' (home), 'X' (draw), '2' (away).
+/// All values are doubles in [0.0, 1.0] representing fractions of voters.
+@immutable
+class Populares {
+  /// Fraction of voters that predicted a home win ('1').
+  final double home;
+
+  /// Fraction of voters that predicted a draw ('X').
+  final double draw;
+
+  /// Fraction of voters that predicted an away win ('2').
+  final double away;
+
+  const Populares({
+    required this.home,
+    required this.draw,
+    required this.away,
+  });
+
+  /// Parses a `{"1": num, "X": num, "2": num}` map.
+  ///
+  /// Accepts both int and double values from the backend — the backend may
+  /// return integers (e.g. `0`) for outcomes with zero votes.
+  factory Populares.fromJson(Map<String, dynamic> json) {
+    return Populares(
+      home: (json['1'] as num).toDouble(),
+      draw: (json['X'] as num).toDouble(),
+      away: (json['2'] as num).toDouble(),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Populares &&
+          runtimeType == other.runtimeType &&
+          home == other.home &&
+          draw == other.draw &&
+          away == other.away;
+
+  @override
+  int get hashCode => Object.hash(home, draw, away);
+
+  @override
+  String toString() =>
+      'Populares(home: $home, draw: $draw, away: $away)';
+}
+
+// ---------------------------------------------------------------------------
 // PredictionEntry DTO
 // ---------------------------------------------------------------------------
 
@@ -109,6 +164,10 @@ DateTime _parseProdeDateTime(String s) {
 ///
 /// Immutable value object. Uses strict `as` casts so malformed data fails
 /// loudly rather than producing silent defaults, matching the auth DTO idiom.
+///
+/// G6-d additions: [zona], [homeEscudo], [awayEscudo], [populares].
+/// All new fields are optional/nullable for backward compatibility with
+/// callers that construct [FechaMatch] directly (e.g., tests).
 @immutable
 class FechaMatch {
   final int matchId;
@@ -119,23 +178,54 @@ class FechaMatch {
   /// Stored as a naive local DateTime (ART); do NOT call toLocal/toUtc.
   final DateTime kickoff;
 
+  /// Competition zone/group label (e.g. "Zona A — Apertura 2026").
+  /// Defaults to empty string when absent from the wire payload.
+  final String zona;
+
+  /// URL of the home team's shield/logo. Null when not provided by the backend.
+  final String? homeEscudo;
+
+  /// URL of the away team's shield/logo. Null when not provided by the backend.
+  final String? awayEscudo;
+
+  /// Prediction popularity distribution. Null when absent or null in the wire
+  /// payload (i.e., no votes have been cast yet, or backend omits the field).
+  final Populares? populares;
+
   const FechaMatch({
     required this.matchId,
     required this.homeTeam,
     required this.awayTeam,
     required this.kickoff,
+    this.zona = '',
+    this.homeEscudo,
+    this.awayEscudo,
+    this.populares,
   });
 
   /// Parses a match object from the backend wire shape.
   ///
   /// `user_predictions` is silently ignored (out of scope for G1).
   /// A malformed `kickoff` propagates a [FormatException].
+  ///
+  /// G6-d: parses `zona`, `home_escudo`, `away_escudo`, and `populares`.
+  /// Absent or null values for the new fields produce safe defaults.
   factory FechaMatch.fromJson(Map<String, dynamic> json) {
+    // Parse populares: null JSON value or absent key both produce null.
+    final rawPopulares = json['populares'];
+    final Populares? populares = (rawPopulares is Map<String, dynamic>)
+        ? Populares.fromJson(rawPopulares)
+        : null;
+
     return FechaMatch(
       matchId: json['match_id'] as int,
       homeTeam: json['home_team'] as String,
       awayTeam: json['away_team'] as String,
       kickoff: _parseProdeDateTime(json['kickoff'] as String),
+      zona: (json['zona'] as String?) ?? '',
+      homeEscudo: json['home_escudo'] as String?,
+      awayEscudo: json['away_escudo'] as String?,
+      populares: populares,
     );
   }
 
@@ -147,15 +237,20 @@ class FechaMatch {
           matchId == other.matchId &&
           homeTeam == other.homeTeam &&
           awayTeam == other.awayTeam &&
-          kickoff == other.kickoff;
+          kickoff == other.kickoff &&
+          zona == other.zona &&
+          homeEscudo == other.homeEscudo &&
+          awayEscudo == other.awayEscudo &&
+          populares == other.populares;
 
   @override
-  int get hashCode => Object.hash(matchId, homeTeam, awayTeam, kickoff);
+  int get hashCode =>
+      Object.hash(matchId, homeTeam, awayTeam, kickoff, zona, homeEscudo, awayEscudo, populares);
 
   @override
   String toString() =>
       'FechaMatch(matchId: $matchId, homeTeam: $homeTeam, '
-      'awayTeam: $awayTeam, kickoff: $kickoff)';
+      'awayTeam: $awayTeam, kickoff: $kickoff, zona: $zona)';
 }
 
 // ---------------------------------------------------------------------------
