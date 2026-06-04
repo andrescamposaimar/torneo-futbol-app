@@ -59,6 +59,7 @@ class RegistryRepository {
                     u.created_at,
                     u.last_login_at,
                     u.deleted_at,
+                    a.id AS assoc_id,
                     a.provider,
                     a.dni,
                     a.player_id,
