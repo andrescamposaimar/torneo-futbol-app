@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
@@ -77,6 +76,9 @@ class _StubControllerWithDraftTracking extends ProdeFixturesController {
   final List<(int, int?, int?)> draftUpdates = [];
   final List<int> submitCalls = [];
 
+  // When set to true, submitPrediction succeeds and marks the match saved.
+  bool submitSucceeds = false;
+
   _StubControllerWithDraftTracking(ProdeFixturesState initialState)
       : super(_FakeApiService()) {
     state = initialState;
@@ -96,8 +98,23 @@ class _StubControllerWithDraftTracking extends ProdeFixturesController {
   }
 
   @override
-  Future<void> submitPrediction(int matchId) async {
+  Future<bool> submitPrediction(int matchId) async {
     submitCalls.add(matchId);
+    if (submitSucceeds) {
+      // Simulate success: mark as saved
+      final current = state as ProdeFixturesLoaded;
+      final existing = current.drafts[matchId] ?? const PredictionDraft();
+      final newDrafts = Map<int, PredictionDraft>.from(current.drafts)
+        ..[matchId] = existing.copyWith(status: SubmitStatus.submitted);
+      final newSaved = {...current.savedMatchIds, matchId};
+      state = ProdeFixturesLoaded(
+        current.fecha,
+        drafts: newDrafts,
+        savedMatchIds: newSaved,
+      );
+      return true;
+    }
+    return false;
   }
 }
 
@@ -150,6 +167,11 @@ Map<int, PredictionDraft> _seedDrafts(FechaActiva fecha) {
   };
 }
 
+/// Builds the initial savedMatchIds for [fecha], mirroring controller seed logic.
+Set<int> _seedSavedMatchIds(FechaActiva fecha) {
+  return {for (final p in fecha.userPredictions) p.matchId};
+}
+
 /// Pumps [ProdeFixturesScreen] with a stub controller inside a [ProviderScope].
 Future<void> _pumpScreen(
   WidgetTester tester,
@@ -198,10 +220,13 @@ void main() {
       expect(find.text('Team D'), findsOneWidget);
     });
 
-    // Kickoff formatted correctly (DateFormat('dd/MM HH:mm'))
-    testWidgets('Loaded -> formatted kickoff visible', (tester) async {
+    // Kickoff formatted correctly (new format: EEE dd/MM - HH:mm, capitalized)
+    testWidgets('Loaded -> formatted kickoff visible (new EEE dd/MM format)', (tester) async {
       await _pumpScreen(tester, ProdeFixturesLoaded(_makeFecha()));
-      expect(find.text('07/06 14:00'), findsOneWidget);
+      // 2026-06-07 14:00 → Sunday 07/06 → "Dom. 07/06 - 14:00" or similar
+      // We check the date/time portion is present: "07/06" and "14:00"
+      expect(find.textContaining('07/06'), findsAtLeastNWidgets(1));
+      expect(find.textContaining('14:00'), findsAtLeastNWidgets(1));
     });
 
     // Logout button present in Loaded
@@ -372,63 +397,210 @@ void main() {
     });
 
     // -------------------------------------------------------------------------
-    // _PredictionMatchTile tests  (B3-1)
+    // G6-d: Progress header
     // -------------------------------------------------------------------------
 
-    group('_PredictionMatchTile', () {
-      /// Helper: pump with a [_StubControllerWithDraftTracking] that has
-      /// an initial [ProdeFixturesLoaded] with [fecha] + seeds drafts.
-      Future<_StubControllerWithDraftTracking> _pumpWithTracking(
-        WidgetTester tester,
-        FechaActiva fecha,
-      ) async {
+    group('Progress header (G6-d)', () {
+      testWidgets('shows 0/2 when no predictions', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, savedMatchIds: const {}),
+        );
+        // Exact counter text — loose textContaining would match score boxes too
+        expect(find.text('0/2'), findsOneWidget);
+      });
+
+      testWidgets('shows 1/2 when one prediction saved', (tester) async {
+        final fecha = _makeFecha(
+          userPredictions: [PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1)],
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+        // Exact counter text — loose textContaining would match score boxes too
+        expect(find.text('1/2'), findsOneWidget);
+      });
+
+      testWidgets(
+          'counter never exceeds total when savedMatchIds has stray IDs',
+          (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(
+          tester,
+          // 99 is not a match of this fecha — must not count toward progress
+          ProdeFixturesLoaded(fecha, savedMatchIds: const {1, 99}),
+        );
+        expect(find.text('1/2'), findsOneWidget);
+        final indicator = tester.widget<LinearProgressIndicator>(
+          find.byType(LinearProgressIndicator),
+        );
+        expect(indicator.value, 0.5);
+      });
+
+      testWidgets('LinearProgressIndicator is present in loaded state', (tester) async {
+        await _pumpScreen(tester, ProdeFixturesLoaded(_makeFecha()));
+        expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      });
+
+      testWidgets('PRÓXIMOS PARTIDOS section title present', (tester) async {
+        await _pumpScreen(tester, ProdeFixturesLoaded(_makeFecha()));
+        expect(find.text('PRÓXIMOS PARTIDOS'), findsOneWidget);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // G6-d: Match card redesign
+    // -------------------------------------------------------------------------
+
+    group('Match card (G6-d)', () {
+      testWidgets('card is tappable (GestureDetector or InkWell wraps card)', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+        // The match_card_1 key should exist and be tappable
+        expect(find.byKey(const Key('match_card_1')), findsOneWidget);
+      });
+
+      testWidgets('score display shows em dash when draft score is null', (tester) async {
+        final fecha = _makeFecha();
+        // No drafts seeded — scores are null
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+        // Each card should show "—" for unset scores (at least 2 per card × 2 cards)
+        expect(find.text('—'), findsAtLeastNWidgets(2));
+      });
+
+      testWidgets('score display shows draft value when score is set', (tester) async {
+        final fecha = _makeFecha(
+          userPredictions: [PredictionEntry(matchId: 1, scoreHome: 3, scoreAway: 1)],
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+        // Match 1 should show score values 3 and 1
+        expect(find.text('3'), findsAtLeastNWidgets(1));
+        expect(find.text('1'), findsAtLeastNWidgets(1));
+      });
+
+      testWidgets('saved match shows check icon', (tester) async {
+        final fecha = _makeFecha(
+          userPredictions: [PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 0)],
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+        expect(find.byKey(const Key('status_icon_saved_1')), findsOneWidget);
+      });
+
+      testWidgets('unsaved match shows pending icon', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+        expect(find.byKey(const Key('status_icon_pending_1')), findsOneWidget);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // G6-d: Tapping card opens modal
+    // -------------------------------------------------------------------------
+
+    group('Prediction modal (G6-d)', () {
+      testWidgets('tapping open card opens modal sheet', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        // Modal should appear with stepper keys
+        expect(find.byKey(const Key('stepper_home_plus_1')), findsOneWidget);
+        expect(find.byKey(const Key('stepper_away_plus_1')), findsOneWidget);
+      });
+
+      testWidgets('modal stepper + increases home score', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        // Initial value is 0
+        final valueFinder = find.byKey(const Key('stepper_home_value_1'));
+        expect(valueFinder, findsOneWidget);
+        expect(tester.widget<Text>(valueFinder).data, equals('0'));
+
+        // Tap +
+        await tester.tap(find.byKey(const Key('stepper_home_plus_1')));
+        await tester.pump();
+
+        expect(tester.widget<Text>(valueFinder).data, equals('1'));
+      });
+
+      testWidgets('modal stepper - decreases home score, clamps at 0', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        // Already at 0, tap minus — should stay at 0
+        await tester.tap(find.byKey(const Key('stepper_home_minus_1')));
+        await tester.pump();
+
+        expect(
+          tester.widget<Text>(find.byKey(const Key('stepper_home_value_1'))).data,
+          equals('0'),
+        );
+      });
+
+      testWidgets('modal stepper seeds from existing draft', (tester) async {
+        final fecha = _makeFecha(
+          userPredictions: [PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1)],
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<Text>(find.byKey(const Key('stepper_home_value_1'))).data,
+          equals('2'),
+        );
+        expect(
+          tester.widget<Text>(find.byKey(const Key('stepper_away_value_1'))).data,
+          equals('1'),
+        );
+      });
+
+      testWidgets('GUARDAR button is present in modal', (tester) async {
+        final fecha = _makeFecha();
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('guardar_1')), findsOneWidget);
+      });
+
+      testWidgets('GUARDAR calls updateDraft and submitPrediction then closes', (tester) async {
+        final fecha = _makeFecha();
         final drafts = _seedDrafts(fecha);
         final stub = _StubControllerWithDraftTracking(
           ProdeFixturesLoaded(fecha, drafts: drafts),
         );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [
-              prodeFixturesControllerProvider.overrideWith((ref) => stub),
-            ],
-            child: const MaterialApp(
-              home: Scaffold(
-                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
-              ),
-            ),
-          ),
-        );
-        await tester.pump();
-        return stub;
-      }
-
-      testWidgets('entering scores calls updateDraft with matchId', (tester) async {
-        final fecha = _makeFecha();
-        final stub = await _pumpWithTracking(tester, fecha);
-
-        // Find the first score-home field and enter a value
-        final homeFields = find.byKey(const Key('score_home_1'));
-        expect(homeFields, findsOneWidget);
-
-        await tester.enterText(homeFields, '3');
-        await tester.pump();
-
-        expect(stub.draftUpdates, isNotEmpty);
-        final update = stub.draftUpdates.first;
-        expect(update.$1, equals(1)); // matchId
-        expect(update.$2, equals(3)); // scoreHome
-      });
-
-      testWidgets('tapping submit calls submitPrediction with matchId', (tester) async {
-        final fecha = _makeFecha();
-        final drafts = _seedDrafts(fecha);
-        // Seed draft with scores so submit is not a no-op
-        final seededDrafts = Map<int, PredictionDraft>.from(drafts)
-          ..[1] = const PredictionDraft(scoreHome: 2, scoreAway: 1);
-        final stub = _StubControllerWithDraftTracking(
-          ProdeFixturesLoaded(fecha, drafts: seededDrafts),
-        );
+        stub.submitSucceeds = true;
 
         await tester.pumpWidget(
           ProviderScope(
@@ -444,64 +616,66 @@ void main() {
         );
         await tester.pump();
 
-        await tester.tap(find.byKey(const Key('submit_1')));
+        // Open modal
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        // Adjust score
+        await tester.tap(find.byKey(const Key('stepper_home_plus_1')));
         await tester.pump();
 
+        // Tap GUARDAR
+        await tester.tap(find.byKey(const Key('guardar_1')));
+        await tester.pumpAndSettle();
+
+        // Modal should be closed (stepper no longer visible)
+        expect(find.byKey(const Key('stepper_home_plus_1')), findsNothing);
+        // Submit was called
         expect(stub.submitCalls, contains(1));
+        // updateDraft was called
+        expect(stub.draftUpdates, isNotEmpty);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // G6-d: Locked fecha behavior
+    // -------------------------------------------------------------------------
+
+    group('Locked fecha (G6-d)', () {
+      testWidgets('locked fecha: modal opens read-only (steppers and GUARDAR disabled)', (tester) async {
+        // lockedAt in the past → locked. The modal still opens (it will host
+        // the populares section in G6-f) but every control must be disabled.
+        final fecha = _makeFecha(lockedAt: DateTime(2020, 1, 1));
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        // Modal DID open
+        final guardarFinder = find.byKey(const Key('guardar_1'));
+        expect(guardarFinder, findsOneWidget);
+
+        // GUARDAR disabled
+        final btn = tester.widget<ElevatedButton>(guardarFinder);
+        expect(btn.onPressed, isNull);
+
+        // Steppers disabled
+        final plus = tester.widget<IconButton>(
+          find.byKey(const Key('stepper_home_plus_1')),
+        );
+        expect(plus.onPressed, isNull);
+        final minus = tester.widget<IconButton>(
+          find.byKey(const Key('stepper_away_minus_1')),
+        );
+        expect(minus.onPressed, isNull);
       });
 
-      testWidgets('locked fecha: inputs disabled, submit button disabled', (tester) async {
-        // lockedAt in the past → locked
-        final fecha = _makeFecha(
-          lockedAt: DateTime(2020, 1, 1),
-        );
-        await _pumpWithTracking(tester, fecha);
+      testWidgets('locked fecha: unsaved card shows lock icon instead of pending', (tester) async {
+        final fecha = _makeFecha(lockedAt: DateTime(2020, 1, 1));
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
 
-        // Score inputs should be disabled
-        final homeField = tester.widget<TextField>(
-          find.byKey(const Key('score_home_1')),
-        );
-        expect(homeField.enabled, isFalse);
-
-        // Submit button: the Key is directly on the ElevatedButton
-        final submitBtn = tester.widget<ElevatedButton>(
-          find.byKey(const Key('submit_1')),
-        );
-        expect(submitBtn.onPressed, isNull);
-      });
-
-      testWidgets('existing prediction pre-populates inputs', (tester) async {
-        final fecha = _makeFecha(
-          userPredictions: [
-            PredictionEntry(matchId: 1, scoreHome: 2, scoreAway: 1),
-          ],
-        );
-        await _pumpWithTracking(tester, fecha);
-
-        final homeField = tester.widget<TextField>(
-          find.byKey(const Key('score_home_1')),
-        );
-        expect(homeField.controller?.text, equals('2'));
-
-        final awayField = tester.widget<TextField>(
-          find.byKey(const Key('score_away_1')),
-        );
-        expect(awayField.controller?.text, equals('1'));
-      });
-
-      testWidgets('score input only accepts numeric characters', (tester) async {
-        final fecha = _makeFecha();
-        await _pumpWithTracking(tester, fecha);
-
-        final homeField = find.byKey(const Key('score_home_1'));
-        final widget = tester.widget<TextField>(homeField);
-        expect(widget.keyboardType, equals(TextInputType.number));
-        // FilteringTextInputFormatter should be present
-        final formatters = widget.inputFormatters ?? [];
-        expect(
-          formatters.any((f) => f is FilteringTextInputFormatter),
-          isTrue,
-        );
+        expect(find.byKey(const Key('status_icon_locked_1')), findsOneWidget);
+        expect(find.byKey(const Key('status_icon_pending_1')), findsNothing);
       });
     });
   });

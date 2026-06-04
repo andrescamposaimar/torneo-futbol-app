@@ -295,22 +295,26 @@ class ProdeFixturesController
   /// Submits the prediction for [matchId] via [ProdeApiService.submitPrediction].
   ///
   /// Guards:
-  /// - If draft scores are null → no-op.
-  /// - If draft status is already [SubmitStatus.submitting] → no-op (double-submit
-  ///   guard). The UNIQUE KEY on the backend is the final safety net.
+  /// - If draft scores are null → no-op (returns false).
+  /// - If draft status is already [SubmitStatus.submitting] → no-op (returns false).
+  ///   The UNIQUE KEY on the backend is the final safety net.
   ///
-  /// Status transitions: idle → submitting → submitted (on 200) / error (on any failure).
-  Future<void> submitPrediction(int matchId) async {
+  /// Status transitions: idle → submitting → submitted (on 200) / error (on failure).
+  ///
+  /// Returns `true` on success, `false` on failure or no-op. Callers (e.g., the
+  /// prediction modal sheet) can use this return value to decide whether to
+  /// close the sheet without reading protected [state] directly.
+  Future<bool> submitPrediction(int matchId) async {
     final current = state;
-    if (current is! ProdeFixturesLoaded) return;
+    if (current is! ProdeFixturesLoaded) return false;
 
     final draft = current.drafts[matchId] ?? const PredictionDraft();
 
     // Guard: null scores
-    if (draft.scoreHome == null || draft.scoreAway == null) return;
+    if (draft.scoreHome == null || draft.scoreAway == null) return false;
 
     // Guard: already in flight
-    if (draft.status == SubmitStatus.submitting) return;
+    if (draft.status == SubmitStatus.submitting) return false;
 
     // Set submitting
     _setDraftStatus(matchId, SubmitStatus.submitting);
@@ -324,8 +328,10 @@ class ProdeFixturesController
         scoreAway: draft.scoreAway!,
       );
       _setDraftStatusAndMarkSaved(matchId);
+      return true;
     } catch (_) {
       _setDraftStatus(matchId, SubmitStatus.error);
+      return false;
     }
   }
 
