@@ -7,7 +7,6 @@ import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:torneo_futbol_app/models/fecha_activa.dart';
-import 'package:torneo_futbol_app/models/fecha_summary.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_fixtures_controller.dart';
@@ -203,12 +202,6 @@ FechaActiva _makeFechaActiva({
 http.Response _fecha200({int matchCount = 2}) => http.Response(
       _fechaBody(matchCount: matchCount),
       200,
-      headers: {'content-type': 'application/json'},
-    );
-
-http.Response _fecha404() => http.Response(
-      json.encode({'code': 'no_active_fecha', 'message': 'Not found'}),
-      404,
       headers: {'content-type': 'application/json'},
     );
 
