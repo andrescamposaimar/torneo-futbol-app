@@ -10,6 +10,7 @@ import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/models/fecha_activa.dart';
+import 'package:torneo_futbol_app/models/fecha_summary.dart';
 import 'package:torneo_futbol_app/models/prode_ranking.dart';
 
 // ---------------------------------------------------------------------------
@@ -1410,6 +1411,280 @@ void main() {
               reason: 'status $statusCode must not throw ProdeAuthRequired');
         }
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ProdeApiService.fetchFechas()  (G6-e WU-A)
+  // ---------------------------------------------------------------------------
+
+  group('ProdeApiService.fetchFechas()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    Map<String, dynamic> _fechaSummaryEntry({
+      int fechaId = 1,
+      int seasonId = 10,
+      String state = 'open',
+      String? lockedAt,
+      int matchCount = 2,
+    }) => {
+      'fecha_id': fechaId,
+      'season_id': seasonId,
+      'state': state,
+      'locked_at': lockedAt,
+      'match_count': matchCount,
+    };
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+    });
+
+    test('200 with non-empty fechas array → returns typed List<FechaSummary> preserving order',
+        () async {
+      await repo.write(
+        accessToken: 'tok',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final expectedBody = json.encode({
+        'fechas': [
+          _fechaSummaryEntry(fechaId: 1, state: 'open'),
+          _fechaSummaryEntry(fechaId: 2, state: 'locked', lockedAt: '2026-06-01 18:00:00'),
+          _fechaSummaryEntry(fechaId: 3, state: 'evaluated'),
+        ],
+      });
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              expectedBody,
+              200,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      final result = await service.fetchFechas();
+
+      expect(result, isA<List<FechaSummary>>());
+      expect(result.length, equals(3));
+      expect(result[0].fechaId, equals(1));
+      expect(result[1].fechaId, equals(2));
+      expect(result[2].fechaId, equals(3));
+      expect(result[1].state, equals(ProdeFechaState.locked));
+      expect(result[1].lockedAt, isNotNull);
+    });
+
+    test('200 with empty fechas array → returns empty list', () async {
+      await repo.write(
+        accessToken: 'tok',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({'fechas': []}),
+              200,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      final result = await service.fetchFechas();
+
+      expect(result, isEmpty);
+    });
+
+    test('non-200 → throws ProdeSsoException', () async {
+      await repo.write(
+        accessToken: 'tok',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({'code': 'server_error'}),
+              500,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.fetchFechas(),
+        throwsA(isA<ProdeSsoException>()),
+      );
+    });
+
+    test('401-degrade: token → 401 → retry without bearer → 200', () async {
+      await repo.write(
+        accessToken: 'stale-tok',
+        refreshToken: 'ref',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+
+      var callCount = 0;
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          callCount++;
+          if (callCount == 1) {
+            return http.Response(
+              json.encode({'code': 'token_expired'}),
+              401,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          // Second call without bearer
+          return http.Response(
+            json.encode({'fechas': [_fechaSummaryEntry(fechaId: 1)]}),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final result = await service.fetchFechas();
+
+      expect(callCount, equals(2));
+      expect(result.length, equals(1));
+      expect(result[0].fechaId, equals(1));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ProdeApiService.fetchFechaById()  (G6-e WU-A)
+  // ---------------------------------------------------------------------------
+
+  group('ProdeApiService.fetchFechaById()', () {
+    late Map<String, String> store;
+    late ProdeAuthRepository repo;
+
+    Map<String, dynamic> _validFechaById({int fechaId = 5}) => {
+      'fecha_id': fechaId,
+      'season_id': 10,
+      'state': 'open',
+      'locked_at': null,
+      'matches': [
+        {
+          'match_id': 1,
+          'home_team': 'Home A',
+          'away_team': 'Away A',
+          'kickoff': '2026-06-07 14:00:00',
+        },
+      ],
+      'user_predictions': [],
+    };
+
+    setUp(() {
+      store = {};
+      _setUpFakeStorage(store);
+      repo = ProdeAuthRepository();
+      // Pre-seed token
+    });
+
+    Future<void> _seedToken() async {
+      await repo.write(
+        accessToken: 'test-access',
+        refreshToken: 'test-refresh',
+        sessionVersion: '1',
+        tenantId: 'marianista',
+      );
+    }
+
+    test('200 → returns FechaActiva with correct fechaId', () async {
+      await _seedToken();
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode(_validFechaById(fechaId: 5)),
+              200,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      final result = await service.fetchFechaById(5);
+
+      expect(result, isA<FechaActiva>());
+      expect(result.fechaId, equals(5));
+      expect(result.matches.length, equals(1));
+    });
+
+    test('404 → throws ProdeNoActiveFecha', () async {
+      await _seedToken();
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({'code': 'not_found'}),
+              404,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.fetchFechaById(99),
+        throwsA(isA<ProdeNoActiveFecha>()),
+      );
+    });
+
+    test('non-200 non-404 → throws ProdeSsoException', () async {
+      await _seedToken();
+
+      final service = _makeService(
+        repo,
+        MockClient((_) async => http.Response(
+              json.encode({'code': 'server_error'}),
+              500,
+              headers: {'content-type': 'application/json'},
+            )),
+      );
+
+      await expectLater(
+        service.fetchFechaById(5),
+        throwsA(isA<ProdeSsoException>()),
+      );
+    });
+
+    test('401-degrade: token → 401 → retry without bearer → 200', () async {
+      await _seedToken();
+
+      var callCount = 0;
+
+      final service = _makeService(
+        repo,
+        MockClient((req) async {
+          callCount++;
+          if (callCount == 1) {
+            return http.Response(
+              json.encode({'code': 'token_expired'}),
+              401,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return http.Response(
+            json.encode(_validFechaById(fechaId: 5)),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final result = await service.fetchFechaById(5);
+
+      expect(callCount, equals(2));
+      expect(result.fechaId, equals(5));
     });
   });
 }

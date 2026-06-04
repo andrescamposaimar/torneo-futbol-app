@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/models/fecha_activa.dart';
+import 'package:torneo_futbol_app/models/fecha_summary.dart';
 import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/screens/prode/prode_fixtures_screen.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
@@ -115,6 +116,27 @@ class _StubControllerWithDraftTracking extends ProdeFixturesController {
       return true;
     }
     return false;
+  }
+}
+
+/// Stub controller that records selectFecha calls — for G6-e selector tests.
+class _StubControllerWithFechaTracking extends ProdeFixturesController {
+  final List<int> selectFechaCalls = [];
+
+  _StubControllerWithFechaTracking(ProdeFixturesState initialState)
+      : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  Future<void> selectFecha(int fechaId) async {
+    selectFechaCalls.add(fechaId);
   }
 }
 
@@ -638,6 +660,352 @@ void main() {
     });
 
     // -------------------------------------------------------------------------
+    // G6-e: Fecha selector row
+    // -------------------------------------------------------------------------
+
+    group('Fecha selector (G6-e)', () {
+      // Helper: build a ProdeFixturesLoaded with multiple fechas for G6-e tests.
+      ProdeFixturesLoaded _loadedWithFechas({
+        int selectedIndex = 0,
+        int fechaCount = 3,
+        bool isFechaLoading = false,
+        ProdeFixturesFechaError? fechaLoadError,
+        ProdeFechaState selectedFechaState = ProdeFechaState.open,
+      }) {
+        final fecha = _makeFecha(state: selectedFechaState);
+        final fechas = List.generate(fechaCount, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: i == selectedIndex ? selectedFechaState : ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        return ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: fechas[selectedIndex].fechaId,
+          isFechaLoading: isFechaLoading,
+          fechaLoadError: fechaLoadError,
+        );
+      }
+
+      testWidgets('selector row present when fechas >= 1', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+        expect(find.byKey(const Key('fecha_selector_label')), findsOneWidget);
+      });
+
+      testWidgets('selector row absent when fechas list is empty', (tester) async {
+        // ProdeFixturesLoaded with empty fechas list
+        final fecha = _makeFecha();
+        final emptyLoaded = ProdeFixturesLoaded(fecha, fechas: const []);
+        await _pumpScreen(tester, emptyLoaded);
+        expect(find.byKey(const Key('fecha_selector_label')), findsNothing);
+      });
+
+      testWidgets('label shows "Fecha N" where N = selectedIndex + 1', (tester) async {
+        // selectedIndex=1 → N=2
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 1));
+        expect(find.byKey(const Key('fecha_selector_label')), findsOneWidget);
+        expect(find.textContaining('Fecha 2'), findsAtLeastNWidgets(1));
+      });
+
+      testWidgets('prev arrow tap calls selectFecha with previous id (AC4)', (tester) async {
+        final fecha = _makeFecha();
+        final fechas = List.generate(3, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 2, // middle
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('fecha_selector_prev')));
+        await tester.pump();
+
+        expect(stub.selectFechaCalls, contains(1)); // id=1 (previous)
+      });
+
+      testWidgets('next arrow tap calls selectFecha with next id (AC4)', (tester) async {
+        final fecha = _makeFecha();
+        final fechas = List.generate(3, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 2, // middle
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('fecha_selector_next')));
+        await tester.pump();
+
+        expect(stub.selectFechaCalls, contains(3)); // id=3 (next)
+      });
+
+      testWidgets('prev arrow non-interactive when first fecha selected (AC5)', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+
+        // The prev button should exist but be non-interactive (disabled/no onTap)
+        final prevFinder = find.byKey(const Key('fecha_selector_prev'));
+        expect(prevFinder, findsOneWidget);
+
+        // Attempt tap — should NOT call selectFecha (no callback set up)
+        await tester.tap(prevFinder, warnIfMissed: false);
+        await tester.pump();
+        // If it's truly non-interactive, no error thrown and no side effect.
+        // The visual state is tested by checking the widget has null onTap.
+        final widget = tester.widget(prevFinder);
+        if (widget is InkWell) {
+          expect(widget.onTap, isNull);
+        } else if (widget is GestureDetector) {
+          expect(widget.onTap, isNull);
+        }
+        // Widget exists — just muted; test passes by not throwing.
+      });
+
+      testWidgets('next arrow non-interactive when last fecha selected (AC5)', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 2));
+
+        final nextFinder = find.byKey(const Key('fecha_selector_next'));
+        expect(nextFinder, findsOneWidget);
+
+        final widget = tester.widget(nextFinder);
+        if (widget is InkWell) {
+          expect(widget.onTap, isNull);
+        } else if (widget is GestureDetector) {
+          expect(widget.onTap, isNull);
+        }
+      });
+
+      testWidgets('tapping label opens bottom sheet with Fecha N entries (AC6)', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+
+        await tester.tap(find.byKey(const Key('fecha_selector_label')));
+        await tester.pumpAndSettle();
+
+        // Bottom sheet should be open with entries
+        expect(find.byKey(const Key('fecha_picker_entry_1')), findsOneWidget);
+        expect(find.byKey(const Key('fecha_picker_entry_2')), findsOneWidget);
+        expect(find.byKey(const Key('fecha_picker_entry_3')), findsOneWidget);
+        expect(find.text('Seleccionar fecha'), findsOneWidget);
+      });
+
+      // W-1: selector row MUST appear above the progress header.
+      testWidgets('selector row renders above progress header in loaded state (W-1)', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+
+        final selectorFinder = find.byKey(const Key('fecha_selector_label'));
+        final progressFinder = find.byType(LinearProgressIndicator);
+
+        expect(selectorFinder, findsOneWidget);
+        expect(progressFinder, findsOneWidget);
+
+        final selectorDy = tester.getTopLeft(selectorFinder).dy;
+        final progressDy = tester.getTopLeft(progressFinder).dy;
+
+        expect(
+          selectorDy,
+          lessThan(progressDy),
+          reason: '_FechaSelectorRow must be rendered above the progress header',
+        );
+      });
+
+      // W-2: dismissing the picker without selecting must NOT change the
+      // label and must NOT call selectFecha.
+      testWidgets('dismiss picker without selecting keeps label and fires no selectFecha (W-2)', (tester) async {
+        final fecha = _makeFecha();
+        final fechas = List.generate(3, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        // selectedFechaId == 2 → label should show "Fecha 2"
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 2,
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Label shows "Fecha 2" before open.
+        expect(find.textContaining('Fecha 2'), findsAtLeastNWidgets(1));
+
+        // Open picker.
+        await tester.tap(find.byKey(const Key('fecha_selector_label')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Seleccionar fecha'), findsOneWidget);
+
+        // Dismiss via barrier (tap near top-left of screen, outside the sheet).
+        await tester.tapAt(const Offset(200, 10));
+        await tester.pumpAndSettle();
+
+        // Sheet is gone.
+        expect(find.text('Seleccionar fecha'), findsNothing);
+
+        // Label still shows the same fecha and no selectFecha was called.
+        expect(find.textContaining('Fecha 2'), findsAtLeastNWidgets(1));
+        expect(stub.selectFechaCalls, isEmpty);
+      });
+
+      testWidgets('tapping picker entry closes sheet and calls selectFecha (AC6)', (tester) async {
+        final fecha = _makeFecha();
+        final fechas = List.generate(3, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 1,
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Open dropdown
+        await tester.tap(find.byKey(const Key('fecha_selector_label')));
+        await tester.pumpAndSettle();
+
+        // Tap entry for fecha 3
+        await tester.tap(find.byKey(const Key('fecha_picker_entry_3')));
+        await tester.pumpAndSettle();
+
+        expect(stub.selectFechaCalls, contains(3));
+        // Sheet should be closed
+        expect(find.byKey(const Key('fecha_picker_entry_3')), findsNothing);
+      });
+
+      testWidgets('isFechaLoading true → scoped spinner present, selector row still mounted (AC7)', (tester) async {
+        await _pumpScreen(tester, _loadedWithFechas(isFechaLoading: true));
+
+        expect(find.byKey(const Key('fecha_load_spinner')), findsOneWidget);
+        expect(find.byKey(const Key('fecha_selector_label')), findsOneWidget);
+      });
+
+      testWidgets('fechaLoadError set → inline error and Reintentar button present (AC8)', (tester) async {
+        final error = ProdeFixturesFechaError(code: 'fetch_error', fechaId: 2);
+        await _pumpScreen(tester, _loadedWithFechas(fechaLoadError: error));
+
+        expect(find.text('No pudimos cargar esta fecha.'), findsOneWidget);
+        expect(find.byKey(const Key('fecha_load_retry')), findsOneWidget);
+      });
+
+      testWidgets('Reintentar tap re-calls selectFecha with same fechaId (AC8)', (tester) async {
+        final fecha = _makeFecha();
+        final fechas = List.generate(3, (i) => FechaSummary(
+          fechaId: i + 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matchCount: 2,
+        ));
+        final error = ProdeFixturesFechaError(code: 'fetch_error', fechaId: 2);
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 1,
+          fechaLoadError: error,
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('fecha_load_retry')));
+        await tester.pump();
+
+        expect(stub.selectFechaCalls, contains(2)); // retry with same fechaId
+      });
+    });
+
+    // -------------------------------------------------------------------------
     // G6-d: Locked fecha behavior
     // -------------------------------------------------------------------------
 
@@ -676,6 +1044,64 @@ void main() {
 
         expect(find.byKey(const Key('status_icon_locked_1')), findsOneWidget);
         expect(find.byKey(const Key('status_icon_pending_1')), findsNothing);
+      });
+
+      // G6-e AC11: selected FechaSummary.state == locked → guardar disabled
+      testWidgets('G6-e: selected fecha state=locked → guardar_{id} disabled (AC11)', (tester) async {
+        final fecha = _makeFecha(state: ProdeFechaState.locked);
+        final fechas = [
+          FechaSummary(
+            fechaId: 1,
+            seasonId: 10,
+            state: ProdeFechaState.locked,
+            lockedAt: null,
+            matchCount: 2,
+          ),
+        ];
+        final loadedState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 1,
+        );
+
+        await _pumpScreen(tester, loadedState);
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        final guardarFinder = find.byKey(const Key('guardar_1'));
+        expect(guardarFinder, findsOneWidget);
+        final btn = tester.widget<ElevatedButton>(guardarFinder);
+        expect(btn.onPressed, isNull);
+      });
+
+      // G6-e AC11: selected FechaSummary.state == open → guardar enabled
+      testWidgets('G6-e: selected fecha state=open → guardar_{id} enabled (AC11)', (tester) async {
+        final fecha = _makeFecha(state: ProdeFechaState.open);
+        final fechas = [
+          FechaSummary(
+            fechaId: 1,
+            seasonId: 10,
+            state: ProdeFechaState.open,
+            lockedAt: null,
+            matchCount: 2,
+          ),
+        ];
+        final loadedState = ProdeFixturesLoaded(
+          fecha,
+          fechas: fechas,
+          selectedFechaId: 1,
+        );
+
+        await _pumpScreen(tester, loadedState);
+
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        final guardarFinder = find.byKey(const Key('guardar_1'));
+        expect(guardarFinder, findsOneWidget);
+        final btn = tester.widget<ElevatedButton>(guardarFinder);
+        expect(btn.onPressed, isNotNull);
       });
     });
   });

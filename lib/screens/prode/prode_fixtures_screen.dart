@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/fecha_activa.dart';
+import '../../models/fecha_summary.dart';
 import '../../providers/prode_providers.dart';
 import '../../services/prode_fixtures_controller.dart';
 
@@ -100,11 +101,23 @@ class ProdeFixturesView extends StatelessWidget {
           onRetry: onRetry,
           onLogout: onLogout,
         ),
-      ProdeFixturesLoaded(:final fecha, :final drafts, :final savedMatchIds) =>
+      ProdeFixturesLoaded(
+        :final fecha,
+        :final drafts,
+        :final savedMatchIds,
+        :final fechas,
+        :final selectedFechaId,
+        :final isFechaLoading,
+        :final fechaLoadError,
+      ) =>
         _LoadedView(
           fecha: fecha,
           drafts: drafts,
           savedMatchIds: savedMatchIds,
+          fechas: fechas,
+          selectedFechaId: selectedFechaId,
+          isFechaLoading: isFechaLoading,
+          fechaLoadError: fechaLoadError,
           stale: stale,
           onLogout: onLogout,
           onRefresh: onRefresh,
@@ -206,13 +219,19 @@ class _ErrorView extends StatelessWidget {
 
 /// Shown when a fecha is loaded successfully.
 ///
-/// Renders a progress header ("Pronósticos X/Y") above the match list,
-/// a section title, and a list of tappable [_MatchCard]s that open a
-/// [_PredictionSheet] modal on tap.
+/// G6-e: renders [_FechaSelectorRow] above the progress header when the
+/// fechas list is non-empty. A scoped loader ([fecha_load_spinner]) or inline
+/// error ([fecha_load_retry]) replaces the card list while the selection is
+/// in flight or has failed. The prediction modal lock gate is now driven by
+/// the selected [FechaSummary.state] rather than only the client-side lockedAt.
 class _LoadedView extends ConsumerWidget {
   final FechaActiva fecha;
   final Map<int, PredictionDraft> drafts;
   final Set<int> savedMatchIds;
+  final List<FechaSummary> fechas;
+  final int selectedFechaId;
+  final bool isFechaLoading;
+  final ProdeFixturesFechaError? fechaLoadError;
   final bool stale;
   final VoidCallback onLogout;
   final Future<void> Function() onRefresh;
@@ -221,6 +240,10 @@ class _LoadedView extends ConsumerWidget {
     required this.fecha,
     required this.drafts,
     required this.savedMatchIds,
+    required this.fechas,
+    required this.selectedFechaId,
+    required this.isFechaLoading,
+    required this.fechaLoadError,
     required this.stale,
     required this.onLogout,
     required this.onRefresh,
@@ -229,22 +252,54 @@ class _LoadedView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(prodeFixturesControllerProvider.notifier);
-    // UX-only client-side lock check. Server lock (423) is the security boundary.
-    final isLocked =
+
+    // G6-e: lock gate derives from the selected FechaSummary.state when
+    // available, falling back to the legacy client-side lockedAt check.
+    final selectedSummary = fechas.isEmpty
+        ? null
+        : fechas.cast<FechaSummary?>().firstWhere(
+              (f) => f!.fechaId == selectedFechaId,
+              orElse: () => null,
+            );
+
+    final bool isLockedByState = selectedSummary != null &&
+        (selectedSummary.state == ProdeFechaState.locked ||
+            selectedSummary.state == ProdeFechaState.evaluated);
+
+    // Legacy UX-only lock check (pre-G6-e). The summary-state check above
+    // takes precedence; this is kept as belt-and-suspenders for the
+    // "open but lockedAt in past" edge case.
+    final isLockedByTime =
         fecha.lockedAt != null && !DateTime.now().isBefore(fecha.lockedAt!);
 
+    final isLocked = isLockedByState || isLockedByTime;
+
     final totalCount = fecha.matches.length;
-    // Intersect with the fecha's matches so stray prediction entries for
-    // matches no longer in the fecha can never push progress past totalCount.
     final predictedCount =
         fecha.matches.where((m) => savedMatchIds.contains(m.matchId)).length;
+
+    // Current 0-based index of the selected fecha in the list.
+    final selectedIndex = fechas.indexWhere((f) => f.fechaId == selectedFechaId);
 
     return Column(
       children: [
         if (stale) const _StaleBanner(),
         _FechaBadge(state: fecha.state),
+        // G6-e: selector row above progress header, only when list is non-empty.
+        if (fechas.isNotEmpty)
+          _FechaSelectorRow(
+            fechas: fechas,
+            selectedIndex: selectedIndex,
+            onPrev: selectedIndex > 0
+                ? () => controller.selectFecha(fechas[selectedIndex - 1].fechaId)
+                : null,
+            onNext: selectedIndex < fechas.length - 1
+                ? () => controller.selectFecha(fechas[selectedIndex + 1].fechaId)
+                : null,
+            onSelect: (id) => controller.selectFecha(id),
+          ),
         // Progress header
-        if (totalCount > 0)
+        if (totalCount > 0 && !isFechaLoading && fechaLoadError == null)
           _ProgressHeader(
             predictedCount: predictedCount,
             totalCount: totalCount,
@@ -252,58 +307,92 @@ class _LoadedView extends ConsumerWidget {
         Expanded(
           child: RefreshIndicator(
             onRefresh: onRefresh,
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              children: [
-                // Section title
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                    'PRÓXIMOS PARTIDOS',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-                if (fecha.matches.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: Text('Sin partidos en esta fecha.')),
-                  )
-                else
-                  ...fecha.matches.map((m) => _MatchCard(
-                        match: m,
-                        draft: drafts[m.matchId] ?? const PredictionDraft(),
-                        isSaved: savedMatchIds.contains(m.matchId),
-                        isLocked: isLocked,
-                        onTap: () => _openPredictionSheet(
-                          context,
-                          match: m,
-                          draft: drafts[m.matchId] ?? const PredictionDraft(),
-                          isLocked: isLocked,
-                          controller: controller,
-                        ),
-                      )),
-                const SizedBox(height: 8),
-                Center(
-                  child: TextButton.icon(
-                    onPressed: onLogout,
-                    icon: const Icon(Icons.logout),
-                    label: const Text('Cerrar sesión'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-            ),
+            child: _buildCardArea(context, controller, isLocked),
           ),
         ),
       ],
     );
   }
 
-  /// Opens the prediction modal sheet for [match].
+  Widget _buildCardArea(
+    BuildContext context,
+    ProdeFixturesController controller,
+    bool isLocked,
+  ) {
+    // G6-e: scoped loading indicator.
+    if (isFechaLoading) {
+      return const Center(
+        child: CircularProgressIndicator(key: Key('fecha_load_spinner')),
+      );
+    }
+
+    // G6-e: inline error with retry.
+    if (fechaLoadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('No pudimos cargar esta fecha.'),
+              const SizedBox(height: 12),
+              TextButton(
+                key: const Key('fecha_load_retry'),
+                onPressed: () => controller.selectFecha(fechaLoadError!.fechaId),
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(
+            'PRÓXIMOS PARTIDOS',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        if (fecha.matches.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: Text('Sin partidos en esta fecha.')),
+          )
+        else
+          ...fecha.matches.map((m) => _MatchCard(
+                match: m,
+                draft: drafts[m.matchId] ?? const PredictionDraft(),
+                isSaved: savedMatchIds.contains(m.matchId),
+                isLocked: isLocked,
+                onTap: () => _openPredictionSheet(
+                  context,
+                  match: m,
+                  draft: drafts[m.matchId] ?? const PredictionDraft(),
+                  isLocked: isLocked,
+                  controller: controller,
+                ),
+              )),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            onPressed: onLogout,
+            icon: const Icon(Icons.logout),
+            label: const Text('Cerrar sesión'),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
   void _openPredictionSheet(
     BuildContext context, {
     required FechaMatch match,
@@ -377,6 +466,160 @@ class _ProgressHeader extends StatelessWidget {
             minHeight: 6,
             borderRadius: BorderRadius.circular(4),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fecha selector row  (G6-e)
+// ---------------------------------------------------------------------------
+
+/// "< Fecha N ⌄ >" row rendered above the progress header when the season
+/// has multiple fechas. Arrows navigate to adjacent fechas; the label opens
+/// a bottom sheet with all fechas listed.
+class _FechaSelectorRow extends StatelessWidget {
+  final List<FechaSummary> fechas;
+
+  /// 0-based index of the currently selected fecha.
+  final int selectedIndex;
+
+  /// Called when the user taps `<` to go to the previous fecha.
+  /// Null when [selectedIndex] is 0 (arrow is disabled).
+  final VoidCallback? onPrev;
+
+  /// Called when the user taps `>` to go to the next fecha.
+  /// Null when [selectedIndex] is the last index (arrow is disabled).
+  final VoidCallback? onNext;
+
+  /// Called when the user picks a fecha from the bottom sheet.
+  final void Function(int fechaId) onSelect;
+
+  const _FechaSelectorRow({
+    required this.fechas,
+    required this.selectedIndex,
+    required this.onPrev,
+    required this.onNext,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    // N is 1-based.
+    final n = selectedIndex >= 0 ? selectedIndex + 1 : 1;
+    final disabledColor = Colors.grey.shade400;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Previous arrow
+          InkWell(
+            key: const Key('fecha_selector_prev'),
+            onTap: onPrev,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(
+                Icons.chevron_left,
+                color: onPrev != null ? primary : disabledColor,
+              ),
+            ),
+          ),
+          // Label — tapping opens the picker bottom sheet
+          InkWell(
+            key: const Key('fecha_selector_label'),
+            onTap: () => _openPicker(context),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(
+                'Fecha $n  ⌄',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: primary,
+                ),
+              ),
+            ),
+          ),
+          // Next arrow
+          InkWell(
+            key: const Key('fecha_selector_next'),
+            onTap: onNext,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Icon(
+                Icons.chevron_right,
+                color: onNext != null ? primary : disabledColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openPicker(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => _FechaPickerSheet(
+        fechas: fechas,
+        selectedIndex: selectedIndex,
+        onSelect: (id) {
+          Navigator.of(context).pop();
+          onSelect(id);
+        },
+      ),
+    );
+  }
+}
+
+/// Bottom sheet showing all fechas for the picker.
+class _FechaPickerSheet extends StatelessWidget {
+  final List<FechaSummary> fechas;
+  final int selectedIndex;
+  final void Function(int fechaId) onSelect;
+
+  const _FechaPickerSheet({
+    required this.fechas,
+    required this.selectedIndex,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Text(
+            'Seleccionar fecha',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const Divider(),
+          ...fechas.asMap().entries.map((entry) {
+            final i = entry.key;
+            final f = entry.value;
+            final isSelected = i == selectedIndex;
+            return ListTile(
+              key: Key('fecha_picker_entry_${f.fechaId}'),
+              title: Text('Fecha ${i + 1}'),
+              selected: isSelected,
+              trailing: isSelected
+                  ? Icon(Icons.check, color: theme.colorScheme.primary)
+                  : null,
+              onTap: () => onSelect(f.fechaId),
+            );
+          }),
+          const SizedBox(height: 8),
         ],
       ),
     );
