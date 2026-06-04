@@ -7,20 +7,34 @@ namespace EntreRedes\Prode\Admin;
 /**
  * Registers the "Prode" top-level menu and its submenus in wp-admin.
  *
- * PR-01 scope: all subpages show a "Próximamente" placeholder.
- * Real implementations arrive in PR-09.
+ * PR-01 scope: all subpages showed a "Próximamente" placeholder.
+ * PR-09 scope: real Page implementations wired here.
  *
  * All pages are gated by the `manage_options` capability (ADR-P014).
+ *
+ * @see SettingsPage
+ * @see RegistryPage
+ * @see AuditLogPage
  */
 class AdminMenu {
 
-    public static function register(): void {
+    public function __construct(
+        private SettingsPage $settingsPage,
+        private RegistryPage $registryPage,
+        private AuditLogPage $auditLogPage
+    ) {}
+
+    /**
+     * Called on admin_menu hook. Registers top-level menu + three submenus,
+     * and registers POST handlers on admin_init.
+     */
+    public function register(): void {
         add_menu_page(
             __( 'Prode Interno', 'entre-redes-prode' ),
             __( 'Prode', 'entre-redes-prode' ),
             'manage_options',
             'prode',
-            [ self::class, 'renderPlaceholder' ],
+            [ $this->settingsPage, 'render' ],
             'dashicons-welcome-learn-more',
             56
         );
@@ -31,7 +45,7 @@ class AdminMenu {
             __( 'Configuración', 'entre-redes-prode' ),
             'manage_options',
             'prode-settings',
-            [ self::class, 'renderPlaceholder' ]
+            [ $this->settingsPage, 'render' ]
         );
 
         add_submenu_page(
@@ -40,7 +54,7 @@ class AdminMenu {
             __( 'Registro de jugadores', 'entre-redes-prode' ),
             'manage_options',
             'prode-registry',
-            [ self::class, 'renderPlaceholder' ]
+            [ $this->registryPage, 'render' ]
         );
 
         add_submenu_page(
@@ -49,20 +63,12 @@ class AdminMenu {
             __( 'Bitácora', 'entre-redes-prode' ),
             'manage_options',
             'prode-audit-log',
-            [ self::class, 'renderPlaceholder' ]
+            [ $this->auditLogPage, 'render' ]
         );
-    }
 
-    public static function renderPlaceholder(): void {
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( esc_html__( 'You do not have permission to access this page.', 'entre-redes-prode' ) );
-        }
-
-        echo '<div class="wrap">';
-        echo '<h1>' . esc_html( get_admin_page_title() ) . '</h1>';
-        echo '<p>';
-        esc_html_e( 'Próximamente — esta sección estará disponible en una versión futura del plugin.', 'entre-redes-prode' );
-        echo '</p>';
-        echo '</div>';
+        // Register POST handlers on admin_init (D3: same-page POST + PRG).
+        add_action( 'admin_init', [ $this->settingsPage, 'handlePost' ] );
+        add_action( 'admin_init', [ $this->registryPage, 'handlePost' ] );
+        // AuditLogPage has no POST handler (BIT-04: read-only page).
     }
 }
