@@ -215,4 +215,46 @@ class RegistryRepositoryTest extends TestCase {
 
         $this->assertFalse( $result );
     }
+
+    // -------------------------------------------------------------------------
+    // listUsers assoc_id sentinel — production bugfix (0.5.0)
+    // -------------------------------------------------------------------------
+
+    /**
+     * listUsers must expose assoc_id so the render layer can distinguish
+     * "has active association" (non-null assoc_id) from "no active association"
+     * (assoc_id IS NULL via unmatched LEFT JOIN).
+     *
+     * Before the fix: only assoc_deleted_at was selected; both matched and
+     * unmatched LEFT JOIN rows returned NULL for that column, making the gate
+     * always true (ambiguous NULL sentinel bug).
+     */
+    public function test_listUsers_exposes_assoc_id_non_null_when_active_association_exists(): void {
+        $uid = $this->insertUser( 'test_tenant', 'a@example.com', 'Alice' );
+        $this->insertAssociation( $uid );
+
+        $rows = $this->repo->listUsers( 'test_tenant', true, 25, 0 );
+
+        $this->assertCount( 1, $rows );
+        $this->assertArrayHasKey( 'assoc_id', $rows[0], 'assoc_id key must be present in listUsers row' );
+        $this->assertNotNull( $rows[0]['assoc_id'], 'assoc_id must be non-null when active association exists' );
+    }
+
+    public function test_listUsers_exposes_assoc_id_null_after_association_unlinked(): void {
+        $uid = $this->insertUser( 'test_tenant', 'a@example.com', 'Alice' );
+        $this->insertAssociation( $uid );
+
+        // Perform the unlink.
+        $this->repo->unlinkAssociation( $uid, 1 );
+
+        // After unlink the LEFT JOIN finds no active row → assoc_id must be NULL.
+        $rows = $this->repo->listUsers( 'test_tenant', true, 25, 0 );
+
+        $this->assertCount( 1, $rows );
+        $this->assertArrayHasKey( 'assoc_id', $rows[0], 'assoc_id key must be present even after unlink' );
+        $this->assertNull( $rows[0]['assoc_id'], 'assoc_id must be null after unlinkAssociation' );
+        // dni and player_id must also be null (LEFT JOIN returns NULLs for all assoc columns).
+        $this->assertNull( $rows[0]['dni'], 'dni must be null after unlink' );
+        $this->assertNull( $rows[0]['player_id'], 'player_id must be null after unlink' );
+    }
 }

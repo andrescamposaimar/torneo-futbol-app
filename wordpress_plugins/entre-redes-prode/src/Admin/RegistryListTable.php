@@ -113,7 +113,10 @@ class RegistryListTable extends \WP_List_Table {
      */
     protected function column_actions( $item ): string {
         // REG-05: show action only when active association exists.
-        $hasActiveAssoc = array_key_exists( 'assoc_deleted_at', $item ) && $item['assoc_deleted_at'] === null;
+        // Gate on assoc_id (non-null = matched LEFT JOIN row) rather than
+        // assoc_deleted_at, which is NULL for both matched and unmatched rows
+        // (ambiguous NULL sentinel fixed in RegistryRepository::listUsers).
+        $hasActiveAssoc = ! empty( $item['assoc_id'] );
 
         if ( ! $hasActiveAssoc ) {
             return '—';
