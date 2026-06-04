@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/prode_auth_state.dart';
+import '../../widgets/prode_sign_in_buttons.dart';
 import 'prode_fixtures_screen.dart';
 
 /// Presentational view for the Prode auth feature.
@@ -124,31 +125,10 @@ class _SignInView extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onGoogleSignIn,
-                icon: const Icon(Icons.account_circle),
-                label: const Text('Continuar con Google'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
+            ProdeSignInButtons(
+              onGoogleSignIn: onGoogleSignIn,
+              onAppleSignIn: onAppleSignIn,
             ),
-            if (onAppleSignIn != null) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onAppleSignIn,
-                  icon: const Icon(Icons.apple),
-                  label: const Text('Continuar con Apple'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
-              ),
-            ],
             const SizedBox(height: 20),
             Text(
               'Al continuar aceptás los Términos del Servicio y la Política de '
