@@ -86,6 +86,9 @@ class RegistryPage {
             $key = sanitize_text_field( (string) $_GET['prode_registry_notice'] );
             if ( $key === 'unlinked' ) {
                 $notice = __( 'El usuario fue desvinculado correctamente.', 'entre-redes-prode' );
+            } elseif ( $key === 'unlinked_no_audit' ) {
+                $notice     = __( 'El usuario fue desvinculado, pero no se pudo registrar la entrada en la bitácora de auditoría. Verificá la configuración del plugin (pepper de auditoría).', 'entre-redes-prode' );
+                $noticeType = 'warning';
             } elseif ( $key === 'already_unlinked' ) {
                 $notice     = __( 'El usuario ya fue desvinculado.', 'entre-redes-prode' );
                 $noticeType = 'info';
@@ -110,7 +113,7 @@ class RegistryPage {
             <ul class="subsubsub">
                 <li>
                     <a href="<?php echo esc_url( $adminUrl ); ?>"
-                       class="<?php echo $activeFilter === 'active' ? 'current' : ''; ?>">
+                       class="<?php echo esc_attr( $activeFilter === 'active' ? 'current' : '' ); ?>">
                         <?php
                         echo esc_html(
                             sprintf(
@@ -124,7 +127,7 @@ class RegistryPage {
                 </li>
                 <li>
                     <a href="<?php echo esc_url( add_query_arg( 'filter', 'deleted', $adminUrl ) ); ?>"
-                       class="<?php echo $activeFilter === 'deleted' ? 'current' : ''; ?>">
+                       class="<?php echo esc_attr( $activeFilter === 'deleted' ? 'current' : '' ); ?>">
                         <?php
                         echo esc_html(
                             sprintf(
@@ -192,14 +195,18 @@ class RegistryPage {
 
         // Hash DNI and log the admin unlink event (REG-06 step 4).
         // Only called when the soft-delete succeeded (REG-06: do NOT log if delete failed).
+        $auditFailed = false;
         try {
             $dniHash = $this->dniHasher->hash( $dni );
             $this->auditLogger->logAdminUnlink( $userId, $actorWpId, $playerName, $provider, $dniHash );
         } catch ( \Throwable ) {
-            // Audit log failure must NOT roll back the unlink — log silently and continue.
+            // Audit log failure must NOT roll back the unlink.
+            // Surface a warning notice so the operator knows the audit entry was not written.
+            $auditFailed = true;
         }
 
-        wp_safe_redirect( add_query_arg( 'prode_registry_notice', 'unlinked', $redirectBase ) );
+        $noticeKey = $auditFailed ? 'unlinked_no_audit' : 'unlinked';
+        wp_safe_redirect( add_query_arg( 'prode_registry_notice', $noticeKey, $redirectBase ) );
         exit;
     }
 }

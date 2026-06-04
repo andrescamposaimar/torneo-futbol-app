@@ -67,6 +67,7 @@
 | REG-09 | Empty state — Spanish no-items message | Filter so no users match (switch to Eliminados when none exist) — confirm Spanish "no se encontraron jugadores" message. | | |
 | REG-10 | DNI displayed with esc_html | Confirm DNI column renders plain text (escaped). Inject `<b>test</b>` as a DNI value in DB — confirm HTML is not rendered. | | |
 | EDGE-03 | Concurrent unlink — already_unlinked notice | Manually set `prode_associations.deleted_at` to a past timestamp. Then trigger the unlink POST for that user — confirm "El usuario ya fue desvinculado" informational notice appears (no error). | | |
+| EDGE-07 | Audit write failure — unlinked_no_audit warning notice | Temporarily remove or corrupt the `prode_audit_dni_pepper` option (or undefine it) so `DniHasher::hash()` throws. Trigger an unlink POST for an active user. Confirm: (a) the unlink is applied (`prode_associations.deleted_at` is set), (b) NO row is inserted in `prode_audit_log`, (c) the operator sees a **yellow warning notice** (notice-warning) in Spanish stating the unlink succeeded but the audit entry could not be written, (d) restoring the pepper and unlinking a different user produces the normal green success notice. | | |
 
 ---
 
