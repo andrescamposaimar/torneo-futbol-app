@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import '../models/fecha_activa.dart';
+import '../models/fecha_summary.dart';
 import '../models/prode_ranking.dart';
 import 'prode_auth_repository.dart';
 import 'prode_auth_state.dart';
@@ -262,6 +263,86 @@ class ProdeApiService {
     }
 
     return FechaActiva.fromJson(_decodeBody(response));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fecha list endpoint  (G6-e)
+  // ---------------------------------------------------------------------------
+
+  /// Fetches the season's fecha (round) summary list.
+  ///
+  /// Uses `_getWithOptionalBearer` (same optionalAuth strategy as
+  /// [fetchRanking]): attaches a Bearer token when one is cached, degrades
+  /// to anonymous on 401, never throws [ProdeAuthRequired].
+  ///
+  /// Outcomes:
+  /// - **200** — returns a `List<FechaSummary>` preserving server order.
+  /// - **401** with a token — retries once without auth; on second 401 throws
+  ///   [ProdeApiException].
+  /// - **any other non-200** — throws [ProdeSsoException].
+  ///
+  /// Timeout: 15 s.
+  Future<List<FechaSummary>> fetchFechas() async {
+    final uri = Uri.parse('${_config.prodeApiBaseUrl}/fechas');
+    final token = await _authRepo.readAccessToken();
+
+    var resp = await _getWithOptionalBearer(uri, bearer: token)
+        .timeout(const Duration(seconds: 15));
+
+    if (resp.statusCode == 401 && token != null) {
+      resp = await _getWithOptionalBearer(uri, bearer: null)
+          .timeout(const Duration(seconds: 15));
+    }
+
+    if (resp.statusCode == 200) {
+      return fechaSummaryListFromJson(_decodeBody(resp));
+    }
+
+    throw ProdeSsoException(
+      code: 'fetch_fechas_error',
+      message: 'status ${resp.statusCode}',
+    );
+  }
+
+  /// Fetches the full payload for a specific fecha by [id].
+  ///
+  /// The response body is shape-compatible with [FechaActiva] (same fields
+  /// as `/fecha-activa` but for any fecha in the season, regardless of state).
+  ///
+  /// Uses `_getWithOptionalBearer` (optionalAuth, 401-degrade, no
+  /// [ProdeAuthRequired]).
+  ///
+  /// Outcomes:
+  /// - **200** — returns a parsed [FechaActiva].
+  /// - **404** — throws [ProdeNoActiveFecha] (consistent with [fetchFechaActiva]).
+  /// - **401** with token — retries once without auth.
+  /// - **any other non-200** — throws [ProdeSsoException].
+  ///
+  /// Timeout: 15 s.
+  Future<FechaActiva> fetchFechaById(int id) async {
+    final uri = Uri.parse('${_config.prodeApiBaseUrl}/fecha/$id');
+    final token = await _authRepo.readAccessToken();
+
+    var resp = await _getWithOptionalBearer(uri, bearer: token)
+        .timeout(const Duration(seconds: 15));
+
+    if (resp.statusCode == 401 && token != null) {
+      resp = await _getWithOptionalBearer(uri, bearer: null)
+          .timeout(const Duration(seconds: 15));
+    }
+
+    if (resp.statusCode == 404) {
+      throw const ProdeNoActiveFecha();
+    }
+
+    if (resp.statusCode == 200) {
+      return FechaActiva.fromJson(_decodeBody(resp));
+    }
+
+    throw ProdeSsoException(
+      code: 'fetch_fecha_by_id_error',
+      message: 'status ${resp.statusCode}',
+    );
   }
 
   // ---------------------------------------------------------------------------
