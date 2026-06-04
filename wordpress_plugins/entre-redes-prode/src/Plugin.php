@@ -130,7 +130,29 @@ final class Plugin {
 
         // 4. Admin menu (only in wp-admin context).
         if ( is_admin() ) {
-            add_action( 'admin_menu', [ Admin\AdminMenu::class, 'register' ] );
+            add_action( 'admin_menu', static function () {
+                global $wpdb;
+
+                $settingsRepo = new Admin\SettingsRepository( $wpdb );
+                $registryRepo = new Admin\RegistryRepository( $wpdb );
+                $auditLogRepo = new Admin\AuditLogRepository( $wpdb );
+                $auditLogger  = new Audit\AuditLogger();
+                $hasher       = new Audit\DniHasher();
+
+                $adminSettings    = new Fecha\Settings( $wpdb );
+                $adminLock        = new Fecha\LockComputer();
+                $adminFechaRepo   = new Fecha\FechaRepository( $wpdb );
+                $adminResolver    = new Fecha\FechaResolver();
+                $adminResolverFn  = fn() => $adminResolver->resolveNext( $adminSettings->fechaWindowDays() );
+                $seedService      = new Fecha\SeedFechaService( $adminSettings, $adminLock, $adminFechaRepo, $adminResolverFn );
+
+                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService );
+                $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
+                $auditLogPage = new Admin\AuditLogPage( $auditLogRepo );
+
+                $adminMenu = new Admin\AdminMenu( $settingsPage, $registryPage, $auditLogPage );
+                $adminMenu->register();
+            } );
         }
 
         // 5. Cron action handlers (registered here; scheduled at activation).
