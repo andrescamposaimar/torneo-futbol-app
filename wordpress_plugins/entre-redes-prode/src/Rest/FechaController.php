@@ -18,11 +18,16 @@ use EntreRedes\Prode\Predictions\PredictionRepository;
  * {
  *   fecha_id:         int,
  *   season_id:        int,
- *   state:            "open"|"locked",
+ *   state:            "open"|"locked"|"evaluated",
  *   locked_at:        "Y-m-d H:i:s",
- *   matches:          [{match_id, home_team, away_team, kickoff, zona, home_escudo, away_escudo}],
+ *   matches:          [{match_id, home_team, away_team, kickoff, zona, home_escudo, away_escudo, populares}],
  *   user_predictions: [{match_id, score_home, score_away}]  // [] for anonymous
  * }
+ *
+ * Match.populares: null when state is 'open' (gate — no leak of aggregate data
+ * before the fecha locks). When state is 'locked' or 'evaluated', populares
+ * contains {'1': float, 'X': float, '2': float} percentage breakdown for
+ * matches with predictions, or null for matches with no predictions.
  *
  * Team names are enriched at read time via FechaResolver::enrichMatches()
  * (ADR-G0-2 / ADR-P008 — not stored in DB).
@@ -111,8 +116,15 @@ class FechaController {
         // Enrich match rows with live team names from the resolver.
         $enrichedMatches = $this->resolver->enrichMatches( $matches );
 
+        // Compute populares when state is locked/evaluated and predRepo is available.
+        // Gate: 'open' state → null (no aggregate data leaked before the fecha locks).
+        $popularesByMatch = null;
+        if ( 'open' !== $state && null !== $this->predRepo ) {
+            $popularesByMatch = $this->predRepo->aggregatePopulares( (int) $fecha['id'] );
+        }
+
         // Shape the match array to the public contract (shared with FechaListController).
-        $matchesResponse = MatchShaper::shapeAll( $enrichedMatches );
+        $matchesResponse = MatchShaper::shapeAll( $enrichedMatches, $popularesByMatch );
 
         // Populate user_predictions when the request carries an authenticated user
         // and a PredictionRepository is available (ADR-G2-3).
