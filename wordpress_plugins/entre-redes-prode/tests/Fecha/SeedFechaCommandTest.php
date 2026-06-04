@@ -7,6 +7,7 @@ namespace EntreRedes\Prode\Tests\Fecha;
 use EntreRedes\Prode\Fecha\FechaRepository;
 use EntreRedes\Prode\Fecha\LockComputer;
 use EntreRedes\Prode\Fecha\SeedFechaCommand;
+use EntreRedes\Prode\Fecha\SeedFechaService;
 use EntreRedes\Prode\Fecha\Settings;
 use EntreRedes\Prode\Migrations\InitialSchema;
 use PHPUnit\Framework\TestCase;
@@ -138,5 +139,37 @@ class SeedFechaCommandTest extends TestCase {
         // Exactly 1 fecha and 2 matches after two runs.
         $this->assertSame( 1, $this->countFechas() );
         $this->assertSame( 2, $this->countFechaMatches() );
+    }
+
+    // -------------------------------------------------------------------------
+    // Smoke test: SeedFechaCommand delegates to SeedFechaService (D6)
+    // -------------------------------------------------------------------------
+
+    public function test_command_execute_returns_same_shape_as_service_execute(): void {
+        global $wpdb;
+
+        $resolverFn  = fn() => $this->resolverResult();
+        $settings    = new Settings( $wpdb );
+        $lockComputer = new LockComputer();
+        $repository  = new FechaRepository( $wpdb );
+
+        // Both paths must produce the same result shape for a fresh seed.
+        $service = new SeedFechaService( $settings, $lockComputer, $repository, $resolverFn );
+        $svcResult = $service->execute();
+
+        // Clean up so the command sees a fresh state (no pre-existing fecha).
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
+
+        $cmd    = $this->makeCommand( $resolverFn );
+        $cmdResult = $cmd->execute();
+
+        $this->assertArrayHasKey( 'fecha_id', $cmdResult );
+        $this->assertArrayHasKey( 'match_count', $cmdResult );
+        $this->assertArrayHasKey( 'skipped', $cmdResult );
+        $this->assertArrayHasKey( 'reused', $cmdResult );
+        $this->assertSame( $svcResult['match_count'], $cmdResult['match_count'] );
+        $this->assertSame( $svcResult['skipped'], $cmdResult['skipped'] );
+        $this->assertSame( $svcResult['reused'], $cmdResult['reused'] );
     }
 }

@@ -548,6 +548,98 @@ if ( ! class_exists( 'WP_REST_Response' ) ) {
     }
 }
 
+// ─── WP escaping and i18n shims ──────────────────────────────────────────────
+
+if ( ! function_exists( 'esc_html' ) ) {
+    function esc_html( string $text ): string {
+        return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+    }
+}
+
+if ( ! function_exists( 'esc_attr' ) ) {
+    function esc_attr( string $text ): string {
+        return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+    }
+}
+
+if ( ! function_exists( 'esc_url' ) ) {
+    function esc_url( string $url ): string {
+        return $url;
+    }
+}
+
+if ( ! function_exists( 'esc_html__' ) ) {
+    function esc_html__( string $text, string $domain = '' ): string {
+        return $text;
+    }
+}
+
+if ( ! function_exists( 'esc_html_e' ) ) {
+    function esc_html_e( string $text, string $domain = '' ): void {
+        echo $text;
+    }
+}
+
+if ( ! function_exists( 'esc_attr__' ) ) {
+    function esc_attr__( string $text, string $domain = '' ): string {
+        return $text;
+    }
+}
+
+if ( ! function_exists( '__' ) ) {
+    function __( string $text, string $domain = '' ): string {
+        return $text;
+    }
+}
+
+if ( ! function_exists( 'absint' ) ) {
+    function absint( mixed $v ): int {
+        return abs( (int) $v );
+    }
+}
+
+if ( ! function_exists( 'sanitize_text_field' ) ) {
+    function sanitize_text_field( string $text ): string {
+        return trim( strip_tags( $text ) );
+    }
+}
+
+if ( ! function_exists( 'get_current_user_id' ) ) {
+    function get_current_user_id(): int {
+        return 1;
+    }
+}
+
+if ( ! function_exists( 'check_admin_referer' ) ) {
+    function check_admin_referer( string $action = '-1' ): int {
+        return 1;
+    }
+}
+
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+    function wp_nonce_field( string $action, string $name, bool $referer = true, bool $echo = true ): string {
+        return '';
+    }
+}
+
+if ( ! function_exists( 'wp_verify_nonce' ) ) {
+    function wp_verify_nonce( string $nonce, string $action ): int|false {
+        return 1;
+    }
+}
+
+if ( ! function_exists( 'wp_redirect' ) ) {
+    function wp_redirect( string $location, int $status = 302 ): bool {
+        return true;
+    }
+}
+
+if ( ! function_exists( 'add_query_arg' ) ) {
+    function add_query_arg( mixed ...$args ): string {
+        return '';
+    }
+}
+
 // ─── Misc WP functions ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'version_compare' ) ) {
