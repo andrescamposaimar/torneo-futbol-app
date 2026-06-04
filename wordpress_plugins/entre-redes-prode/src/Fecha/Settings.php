@@ -45,6 +45,22 @@ class Settings {
         return $this->readInt( 'fecha_window_days', 1 );
     }
 
+    /**
+     * Number of hours before the lock when a warning notification is sent.
+     * Default: 2.
+     */
+    public function lockWarningHoursBefore(): int {
+        return $this->readInt( 'lock_warning_hours_before', 2 );
+    }
+
+    /**
+     * Interval in minutes between evaluator cron runs.
+     * Default: 5.
+     */
+    public function evaluatorCronIntervalMinutes(): int {
+        return $this->readInt( 'evaluator_cron_interval_minutes', 5 );
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
