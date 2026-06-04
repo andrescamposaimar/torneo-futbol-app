@@ -1104,6 +1104,301 @@ void main() {
         expect(btn.onPressed, isNotNull);
       });
     });
+
+    // -------------------------------------------------------------------------
+    // G6-f: Populares section
+    // -------------------------------------------------------------------------
+
+    group('Populares section (G6-f)', () {
+      // Helper: pump screen and open the modal for a given match card.
+      Future<void> _openModal(
+        WidgetTester tester,
+        ProdeFixturesState state,
+        int matchId,
+      ) async {
+        await _pumpScreen(tester, state);
+        await tester.tap(find.byKey(Key('match_card_$matchId')));
+        await tester.pumpAndSettle();
+      }
+
+      // POP-1-a: section container and all 3 chips present when locked + populares non-null.
+      testWidgets('POP-1-a: section + chips present when isLocked=true + populares!=null', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .45, draw: .30, away: .25),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.byKey(const Key('populares_section_1')), findsOneWidget);
+        expect(find.byKey(const Key('populares_chip_1_1')), findsOneWidget);
+        expect(find.byKey(const Key('populares_chip_X_1')), findsOneWidget);
+        expect(find.byKey(const Key('populares_chip_2_1')), findsOneWidget);
+      });
+
+      // POP-2-a: chips show correct percentages when locked + populares non-null.
+      testWidgets('POP-2-a: chips show 45%, 30%, 25% when locked + populares set', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .45, draw: .30, away: .25),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.text('45%'), findsOneWidget);
+        expect(find.text('30%'), findsOneWidget);
+        expect(find.text('25%'), findsOneWidget);
+      });
+
+      // POP-2-b: away chip shows "0%" when away=0.0.
+      testWidgets('POP-2-b: away chip shows 0% when away=0.0', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .70, draw: .30, away: 0.0),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.text('0%'), findsOneWidget);
+        expect(find.text('70%'), findsOneWidget);
+        expect(find.text('30%'), findsOneWidget);
+      });
+
+      // POP-2-c: rounding artifact — values round independently, no normalization, no error.
+      testWidgets('POP-2-c: rounding artifact — each chip rounds independently', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              // .334 * 100 → 33, .333 * 100 → 33, .333 * 100 → 33 (sum = 99)
+              populares: Populares(home: .334, draw: .333, away: .333),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        // All three chips should show "33%" — no crash, no normalization.
+        expect(find.text('33%'), findsNWidgets(3));
+      });
+
+      // POP-2-d: 100/0/0 case.
+      testWidgets('POP-2-d: chip "1" shows 100%, X and 2 show 0% (all votes on home)', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: 1.0, draw: 0.0, away: 0.0),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.text('100%'), findsOneWidget);
+        expect(find.text('0%'), findsNWidgets(2));
+      });
+
+      // POP-3-a: open fecha + populares null → locked hint visible, no % anywhere.
+      testWidgets('POP-3-a: open fecha + populares null → locked_hint visible, no % shown', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: null,
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
+        expect(find.textContaining('%'), findsNothing);
+      });
+
+      // POP-3-b: locked fecha + populares null → locked presentation, no crash, no %.
+      testWidgets('POP-3-b: locked fecha + populares null → locked presentation, no crash', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: null,
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
+        expect(find.textContaining('%'), findsNothing);
+      });
+
+      // POP-3-c: open fecha + populares non-null → isLocked takes precedence, no % revealed.
+      testWidgets('POP-3-c: open fecha + populares non-null → locked presentation (isLocked wins)', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .45, draw: .30, away: .25),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
+        expect(find.textContaining('%'), findsNothing);
+      });
+
+      // POP-4-a: match card in list does NOT contain populares_section.
+      testWidgets('POP-4-a: populares_section not present in match card list (no modal)', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .45, draw: .30, away: .25),
+            ),
+          ],
+        );
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        // Do NOT open the modal — card list must not show the section.
+        expect(find.byKey(const Key('populares_section_1')), findsNothing);
+      });
+
+      // POP-5-a: mixed populares in a locked fecha.
+      testWidgets('POP-5-a: mixed populares — match 1 shows %, match 2 shows locked hint', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .45, draw: .30, away: .25),
+            ),
+            FechaMatch(
+              matchId: 2,
+              homeTeam: 'Team C',
+              awayTeam: 'Team D',
+              kickoff: DateTime(2026, 6, 7, 16, 0),
+              populares: null,
+            ),
+          ],
+        );
+
+        // Open match 1 — should reveal percentages.
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        expect(find.text('45%'), findsOneWidget);
+        expect(find.byKey(const Key('populares_locked_hint')), findsNothing);
+
+        // Close modal.
+        await tester.tapAt(const Offset(200, 10));
+        await tester.pumpAndSettle();
+
+        // Open match 2 — should show locked hint.
+        await tester.tap(find.byKey(const Key('match_card_2')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
+        expect(find.textContaining('%'), findsNothing);
+      });
+
+      // POP-6-a: info icon has non-empty Semantics label.
+      testWidgets('POP-6-a: info icon has Semantics label "Información sobre pronósticos populares"', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: Populares(home: .45, draw: .30, away: .25),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        final semanticsWidget = find.bySemanticsLabel(
+          RegExp('Información sobre pronósticos populares'),
+        );
+        expect(semanticsWidget, findsAtLeastNWidgets(1));
+      });
+    });
   });
 }
 

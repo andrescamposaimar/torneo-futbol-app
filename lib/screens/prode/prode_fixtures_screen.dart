@@ -1071,7 +1071,12 @@ class _PredictionSheetState extends State<_PredictionSheet> {
           ),
           const SizedBox(height: 16),
 
-          // G6-f: populares section goes here
+          _PopularesSection(
+            populares: widget.match.populares,
+            isLocked: widget.isLocked,
+            matchId: matchId,
+            primaryColor: primary,
+          ),
 
           // Score stepper row
           Padding(
@@ -1187,6 +1192,180 @@ class _PredictionSheetState extends State<_PredictionSheet> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Populares section widget
+// ---------------------------------------------------------------------------
+
+/// Displays the "Pronósticos populares" block inside [_PredictionSheet].
+///
+/// Reveal condition: [isLocked] == true AND [populares] != null.
+/// In all other states (open fecha OR no populares data) the locked
+/// presentation is shown — [isLocked] always takes precedence (POP-3-c).
+class _PopularesSection extends StatelessWidget {
+  final Populares? populares;
+  final bool isLocked;
+  final int matchId;
+  final Color primaryColor;
+
+  const _PopularesSection({
+    required this.populares,
+    required this.isLocked,
+    required this.matchId,
+    required this.primaryColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final reveal = isLocked && populares != null;
+
+    int? homePercent;
+    int? drawPercent;
+    int? awayPercent;
+    if (reveal) {
+      homePercent = (populares!.home * 100).round();
+      drawPercent = (populares!.draw * 100).round();
+      awayPercent = (populares!.away * 100).round();
+    }
+
+    return Container(
+      key: Key('populares_section_$matchId'),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header row
+          Row(
+            children: [
+              Icon(Icons.workspace_premium, size: 18, color: primaryColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Pronósticos populares',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: primaryColor,
+                  ),
+                ),
+              ),
+              Semantics(
+                label: 'Información sobre pronósticos populares',
+                child: Tooltip(
+                  message: 'Se revelan cuando cierra la fecha',
+                  child: IconButton(
+                    icon: const Icon(Icons.info_outline, size: 18),
+                    color: Colors.grey.shade500,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {},
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Chip row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _PopularesChip(
+                key: Key('populares_chip_1_$matchId'),
+                label: '1',
+                percent: homePercent,
+                primaryColor: primaryColor,
+              ),
+              _PopularesChip(
+                key: Key('populares_chip_X_$matchId'),
+                label: 'X',
+                percent: drawPercent,
+                primaryColor: primaryColor,
+              ),
+              _PopularesChip(
+                key: Key('populares_chip_2_$matchId'),
+                label: '2',
+                percent: awayPercent,
+                primaryColor: primaryColor,
+              ),
+            ],
+          ),
+          // Locked hint — visible when not revealing percentages.
+          if (!reveal) ...[
+            const SizedBox(height: 6),
+            Center(
+              child: Text(
+                key: const Key('populares_locked_hint'),
+                'Se revelan cuando cierra la fecha',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade500,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// A single outcome chip in the populares section.
+///
+/// When [percent] is non-null (reveal mode), shows the label and percentage.
+/// When [percent] is null (locked mode), shows a lock icon in grey.
+class _PopularesChip extends StatelessWidget {
+  final String label; // '1', 'X', or '2'
+  final int? percent; // null → locked presentation
+  final Color primaryColor;
+
+  const _PopularesChip({
+    super.key,
+    required this.label,
+    required this.percent,
+    required this.primaryColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isRevealed = percent != null;
+    final color = isRevealed ? primaryColor : Colors.grey.shade400;
+
+    return Container(
+      width: 72,
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 2),
+          if (isRevealed)
+            Text(
+              '${percent!}%',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            )
+          else
+            Icon(Icons.lock_outline, size: 14, color: color),
         ],
       ),
     );
