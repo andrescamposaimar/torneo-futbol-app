@@ -79,11 +79,11 @@ void main() {
   });
 
   group('marianistaTenant', () {
-    test('has prode: false (shipped dark; WP plugin G3/G4 not yet deployed)', () {
-      expect(marianistaTenant.features.prode, isFalse);
+    test('has prode: true (launched 1.5.0; full G0-G6 backend live)', () {
+      expect(marianistaTenant.features.prode, isTrue);
     });
 
-    test('keeps prodeAuth set so re-enabling prode is a one-line flip', () {
+    test('has prodeAuth set (required while prode is enabled)', () {
       expect(marianistaTenant.integrations.prodeAuth, isNotNull);
     });
 

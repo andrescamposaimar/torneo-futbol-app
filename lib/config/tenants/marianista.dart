@@ -21,7 +21,7 @@ const marianistaTenant = TenantConfig(
     // /prode/ranking endpoint 404s. Keep Prode hidden until the updated plugin
     // is deployed, then flip this back to true. prodeAuth below stays set so
     // re-enabling is a one-line change.
-    prode: false,
+    prode: true,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
