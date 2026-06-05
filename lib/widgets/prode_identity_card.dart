@@ -139,24 +139,36 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
           ),
         ),
 
-      // Unauthenticated: compact sign-in prompt
+      // Unauthenticated: guest profile row + compact side-by-side sign-in
       ProdeAuthUnauthenticated() => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                Icon(
-                  Icons.sports_soccer,
-                  color: Theme.of(context).colorScheme.primary,
+                CircleAvatar(
+                  backgroundColor: Theme.of(context)
+                      .colorScheme
+                      .primary
+                      .withValues(alpha: 0.15),
+                  child: Icon(
+                    Icons.person_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('Sumate al Prode — iniciá sesión'),
+                const SizedBox(width: 12),
+                const Text(
+                  'Invitado',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 16,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             ProdeSignInButtons(
+              compact: true,
               onGoogleSignIn: notifier.signInWithGoogle,
               onAppleSignIn:
                   Platform.isIOS ? notifier.signInWithApple : null,

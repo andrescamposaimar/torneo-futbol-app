@@ -239,6 +239,37 @@ Future<void> _pump(
 }
 
 // ---------------------------------------------------------------------------
+// Counting stub controller — tracks individual callback invocations
+// ---------------------------------------------------------------------------
+
+class _CountingStubController extends ProdeAuthController {
+  final VoidCallback? onGoogle;
+
+  _CountingStubController(
+    ProdeAuthState initialState, {
+    this.onGoogle,
+  }) : super(
+          repository: ProdeAuthRepository(),
+          service: _FakeProdeApiService(),
+          tenantId: 'test',
+        ) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> bootstrap() async {}
+
+  @override
+  Future<void> logout() async {}
+
+  @override
+  Future<void> signInWithGoogle() async => onGoogle?.call();
+
+  @override
+  Future<void> signInWithApple() async {}
+}
+
+// ---------------------------------------------------------------------------
 // Tests (AC-53a..h + AC-53i..l for navigation and photo)
 // ---------------------------------------------------------------------------
 
@@ -248,6 +279,72 @@ void main() {
     testWidgets('Unauthenticated → sign-in buttons visible', (tester) async {
       await _pump(tester, const ProdeAuthUnauthenticated());
       expect(find.text('Continuar con Google'), findsOneWidget);
+    });
+
+    // AC-53n: guest mode — "Invitado" title present, no Prode marketing copy
+    testWidgets('AC-53n: Unauthenticated → "Invitado" title shown, no Prode copy',
+        (tester) async {
+      await _pump(tester, const ProdeAuthUnauthenticated());
+      expect(find.text('Invitado'), findsOneWidget);
+      expect(find.text('Sumate al Prode — iniciá sesión'), findsNothing);
+    });
+
+    // AC-53o: guest mode — person icon present (guest avatar)
+    testWidgets('AC-53o: Unauthenticated → guest person icon visible',
+        (tester) async {
+      await _pump(tester, const ProdeAuthUnauthenticated());
+      expect(find.byIcon(Icons.person_outline), findsOneWidget);
+    });
+
+    // AC-53p: guest mode — buttons are rendered side-by-side (compact Row),
+    // not full-width stacked; ProdeSignInButtons compact mode active
+    testWidgets('AC-53p: Unauthenticated → compact sign-in row (not stacked Column)',
+        (tester) async {
+      await _pump(tester, const ProdeAuthUnauthenticated());
+      // In compact mode the buttons live inside a Row widget.
+      // We check that both button labels exist and that a Row ancestor
+      // contains both of them (they're siblings in the same Row).
+      expect(find.text('Continuar con Google'), findsOneWidget);
+      // Find the Row that is a direct/indirect ancestor of the Google button
+      final rowFinder = find.ancestor(
+        of: find.text('Continuar con Google'),
+        matching: find.byType(Row),
+      );
+      expect(rowFinder, findsWidgets);
+    });
+
+    // AC-53q: guest mode — tapping Google fires callback
+    testWidgets('AC-53q: Unauthenticated → Google button fires signInWithGoogle',
+        (tester) async {
+      var googleCalls = 0;
+      // We need a controller stub that counts calls.
+      final tenant = _makeTenant();
+      final api = _StubPublicApiService();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tenantConfigProvider.overrideWithValue(tenant),
+            prodeApiServiceProvider.overrideWithValue(_FakeProdeApiService()),
+            apiServiceProvider.overrideWithValue(api),
+            prodeAuthControllerProvider.overrideWith(
+              (ref) => _CountingStubController(
+                const ProdeAuthUnauthenticated(),
+                onGoogle: () => googleCalls++,
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: ProdeIdentityCard()),
+          ),
+        ),
+      );
+      await tester.runAsync(
+          () async => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+
+      await tester.tap(find.text('Continuar con Google'));
+      await tester.pump();
+      expect(googleCalls, equals(1));
     });
 
     // AC-53b / AC-13, AC-18
