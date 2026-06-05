@@ -5,6 +5,9 @@ import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/config/tenant_config.dart';
 import 'package:torneo_futbol_app/config/tenant_provider.dart';
 import 'package:torneo_futbol_app/providers/prode_providers.dart';
+import 'package:torneo_futbol_app/providers/service_providers.dart';
+import 'package:torneo_futbol_app/screens/player_detail_screen.dart';
+import 'package:torneo_futbol_app/services/i_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_controller.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
@@ -12,7 +15,7 @@ import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/widgets/prode_identity_card.dart';
 
 // ---------------------------------------------------------------------------
-// Fake API service (no platform channels)
+// Fake Prode API service (no platform channels)
 // ---------------------------------------------------------------------------
 
 const _kProdeConfig = ProdeAuthConfig(
@@ -21,9 +24,135 @@ const _kProdeConfig = ProdeAuthConfig(
   appleTeamId: 'TEST',
 );
 
-class _FakeApiService extends ProdeApiService {
-  _FakeApiService()
+class _FakeProdeApiService extends ProdeApiService {
+  _FakeProdeApiService()
       : super(config: _kProdeConfig, authRepo: ProdeAuthRepository());
+}
+
+// ---------------------------------------------------------------------------
+// Stub public API service — controls getJugadorPorId return value
+// ---------------------------------------------------------------------------
+
+class _StubPublicApiService implements IApiService {
+  final String? imagenUrl;
+  final bool shouldThrow;
+
+  _StubPublicApiService({this.imagenUrl, this.shouldThrow = false});
+
+  @override
+  Future<Map<String, dynamic>> getJugadorPorId(int id) async {
+    if (shouldThrow) throw Exception('network error');
+    return {
+      'id': id,
+      'title': {'rendered': 'Test Player'},
+      'featured_image': imagenUrl,
+      'posicion': 'Delantero',
+      'numero': '9',
+      'equipo': 'Test FC',
+      'equipo_id': 1,
+      'acf': {},
+    };
+  }
+
+  // All other methods throw — they should not be called by ProdeIdentityCard.
+  @override
+  Future<Map<String, dynamic>> getPartidos({
+    String? fecha,
+    int? liga,
+    int? temporada,
+    String? equipo,
+    int? page,
+    int? perPage,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getPartidosProgramados({int? page, int? perPage}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getLigas({int? temporada}) => throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getTemporadas() => throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getZonas({int? liga}) => throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getEquipos({int? liga, int? temporada}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getTablas({
+    String? temporada,
+    String? zona,
+    String? search,
+    int? page,
+    int? perPage,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getJugadoresRaw({
+    int? temporada,
+    int? liga,
+    int? zona,
+    int? equipoId,
+    String? search,
+    int? page,
+    int? perPage,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getJugadores({
+    int page = 1,
+    int perPage = 20,
+    int? equipoId,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getPartidosPorJugador(int jugadorId,
+      {int? page, int? perPage}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getGoleadoresDelPartido(int partidoId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getTablaGoleadores({
+    int? temporada,
+    int? liga,
+    int page = 1,
+    int perPage = 50,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getHistorialDePartidosPorEquipo(String equipo) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getJugadoresTemporadaActual(int temporadaId,
+      {int page = 1, int perPage = 20}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getJugadoresPorEquipoId(int equipoId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<dynamic>> getPartidosPorEquipoId(int equipoId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getTablaImbatibles({
+    required int temporada,
+    int page = 1,
+    int perPage = 10,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Map<String, dynamic>> getNoticias({int page = 1, int perPage = 10}) =>
+      throw UnimplementedError();
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +163,7 @@ class _StubAuthController extends ProdeAuthController {
   _StubAuthController(ProdeAuthState initialState)
       : super(
           repository: ProdeAuthRepository(),
-          service: _FakeApiService(),
+          service: _FakeProdeApiService(),
           tenantId: 'test',
         ) {
     state = initialState;
@@ -80,15 +209,18 @@ Future<void> _pump(
   WidgetTester tester,
   ProdeAuthState authState, {
   bool prode = true,
+  IApiService? publicApi,
 }) async {
   final tenant = _makeTenant(prode: prode);
+  final api = publicApi ?? _StubPublicApiService();
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         tenantConfigProvider.overrideWithValue(tenant),
         prodeApiServiceProvider.overrideWithValue(
-          _FakeApiService(),
+          _FakeProdeApiService(),
         ),
+        apiServiceProvider.overrideWithValue(api),
         prodeAuthControllerProvider.overrideWith(
           (ref) => _StubAuthController(authState),
         ),
@@ -98,12 +230,16 @@ Future<void> _pump(
       ),
     ),
   );
-  // Settle microtask from initState bootstrap guard
+  // Let microtasks and async futures complete (bootstrap guard + photo fetch).
+  // We need multiple event loop turns: microtask → async fetch → setState.
+  await tester.runAsync(() async {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  });
   await tester.pump();
 }
 
 // ---------------------------------------------------------------------------
-// Tests (AC-53a..h)
+// Tests (AC-53a..h + AC-53i..l for navigation and photo)
 // ---------------------------------------------------------------------------
 
 void main() {
@@ -212,6 +348,160 @@ void main() {
       // No sign-in copy, no spinner — card is invisible
       expect(find.text('Continuar con Google'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    // -----------------------------------------------------------------------
+    // AC-53i: Authenticated with playerId > 0 → tap navigates to
+    // PlayerDetailScreen
+    // -----------------------------------------------------------------------
+    testWidgets(
+        'AC-53i: Authenticated playerId>0 → tapping tile pushes PlayerDetailScreen',
+        (tester) async {
+      const user = ProdeUser(
+        userId: 1,
+        playerId: 42,
+        name: 'Carlos Ruiz',
+        sessionVersion: 1,
+      );
+      await _pump(
+        tester,
+        ProdeAuthAuthenticated(user: user, stale: false),
+        publicApi: _StubPublicApiService(imagenUrl: null),
+      );
+
+      // Tap the list tile
+      await tester.tap(find.byType(ListTile).first);
+      await tester.pumpAndSettle();
+
+      // Should have navigated to PlayerDetailScreen
+      expect(find.byType(PlayerDetailScreen), findsOneWidget);
+    });
+
+    // -----------------------------------------------------------------------
+    // AC-53j: Authenticated with playerId == 0 → no navigation on tap
+    // -----------------------------------------------------------------------
+    testWidgets(
+        'AC-53j: Authenticated playerId==0 → tapping tile does NOT navigate',
+        (tester) async {
+      const user = ProdeUser(
+        userId: 1,
+        playerId: 0,
+        name: 'Sin Jugador',
+        sessionVersion: 1,
+      );
+      await _pump(
+        tester,
+        ProdeAuthAuthenticated(user: user, stale: false),
+        publicApi: _StubPublicApiService(imagenUrl: null),
+      );
+
+      await tester.tap(find.byType(ListTile).first);
+      await tester.pumpAndSettle();
+
+      // Should NOT have navigated — PlayerDetailScreen absent
+      expect(find.byType(PlayerDetailScreen), findsNothing);
+    });
+
+    // -----------------------------------------------------------------------
+    // AC-53k: Authenticated with playerId > 0 and imagen URL → photo avatar
+    // shown (CircleAvatar with photo key; no initials key).
+    //
+    // Note: Flutter test binding intercepts all HTTP and returns 400, so
+    // NetworkImage will fail. We suppress that expected error via
+    // onBackgroundImageError in the widget and ignore it here.
+    // -----------------------------------------------------------------------
+    testWidgets(
+        'AC-53k: Authenticated playerId>0 with imagen → photo avatar key present, no initials',
+        (tester) async {
+      const user = ProdeUser(
+        userId: 1,
+        playerId: 7,
+        name: 'Lionel Messi',
+        sessionVersion: 1,
+      );
+
+      // Suppress the expected NetworkImageLoadException that Flutter test
+      // binding produces for all HTTP calls (returns 400).
+      final originalOnError = FlutterError.onError;
+      FlutterError.onError = (details) {
+        if (details.exception is NetworkImageLoadException) return;
+        originalOnError?.call(details);
+      };
+
+      await _pump(
+        tester,
+        ProdeAuthAuthenticated(user: user, stale: false),
+        publicApi: _StubPublicApiService(
+          imagenUrl: 'https://example.com/player.jpg',
+        ),
+      );
+      // Let the microtask + setState complete
+      await tester.pump();
+
+      FlutterError.onError = originalOnError;
+
+      // Photo avatar key is present (backgroundImage set on CircleAvatar)
+      expect(find.byKey(const ValueKey('prode-avatar-photo')), findsOneWidget);
+      // Initials avatar key is absent
+      expect(
+          find.byKey(const ValueKey('prode-avatar-initials')), findsNothing);
+    });
+
+    // -----------------------------------------------------------------------
+    // AC-53l: Authenticated with playerId > 0 but imagen == null → initials
+    // avatar shown
+    // -----------------------------------------------------------------------
+    testWidgets(
+        'AC-53l: Authenticated playerId>0, no imagen → initials avatar shown',
+        (tester) async {
+      const user = ProdeUser(
+        userId: 1,
+        playerId: 7,
+        name: 'Lionel Messi',
+        sessionVersion: 1,
+      );
+      await _pump(
+        tester,
+        ProdeAuthAuthenticated(user: user, stale: false),
+        publicApi: _StubPublicApiService(imagenUrl: null),
+      );
+      await tester.pump();
+
+      // Initials avatar key present
+      expect(
+          find.byKey(const ValueKey('prode-avatar-initials')),
+          findsOneWidget);
+      // Photo avatar key absent
+      expect(
+          find.byKey(const ValueKey('prode-avatar-photo')), findsNothing);
+    });
+
+    // -----------------------------------------------------------------------
+    // AC-53m: playerId == 0 → no fetch called (initials avatar, no photo)
+    // -----------------------------------------------------------------------
+    testWidgets(
+        'AC-53m: Authenticated playerId==0 → initials avatar, no photo fetch',
+        (tester) async {
+      const user = ProdeUser(
+        userId: 1,
+        playerId: 0,
+        name: 'Sin Jugador',
+        sessionVersion: 1,
+      );
+      // Use a stub that throws if getJugadorPorId is called
+      await _pump(
+        tester,
+        ProdeAuthAuthenticated(user: user, stale: false),
+        publicApi: _StubPublicApiService(shouldThrow: true),
+      );
+      await tester.pump();
+
+      // No exception — fetch was never triggered
+      expect(tester.takeException(), isNull);
+      // Initials avatar is shown
+      expect(
+          find.byKey(const ValueKey('prode-avatar-initials')),
+          findsOneWidget);
     });
   });
 }
