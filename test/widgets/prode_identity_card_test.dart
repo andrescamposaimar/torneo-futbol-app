@@ -286,7 +286,14 @@ void main() {
         (tester) async {
       await _pump(tester, const ProdeAuthUnauthenticated());
       expect(find.text('Invitado'), findsOneWidget);
-      expect(find.text('Iniciá sesión para ver tus datos'), findsOneWidget);
+      expect(
+        find.textContaining('Iniciá sesión para ver tus datos'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('recordá ingresar el DNI'),
+        findsOneWidget,
+      );
       expect(find.text('Sumate al Prode — iniciá sesión'), findsNothing);
     });
 
