@@ -54,7 +54,7 @@ class _ProdeRankingScreenState extends ConsumerState<ProdeRankingScreen> {
     final notifier = ref.read(prodeRankingControllerProvider.notifier);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Tabla de posiciones')),
+      appBar: AppBar(title: const Text('Ranking')),
       body: ProdeRankingView(
         state: state,
         onRetry: notifier.load,

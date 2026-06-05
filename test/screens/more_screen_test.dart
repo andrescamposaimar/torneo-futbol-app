@@ -183,7 +183,7 @@ void main() {
 
       // Prode section tiles (AC-25)
       expect(find.text('Mis pronósticos'), findsOneWidget);
-      expect(find.text('Tabla de posiciones'), findsOneWidget);
+      expect(find.text('Ranking'), findsOneWidget);
     });
 
     // AC-52b / AC-07, AC-48: prode=false → no identity card, no prode tiles, no crash
@@ -212,7 +212,7 @@ void main() {
 
       // No prode UI
       expect(find.text('Mis pronósticos'), findsNothing);
-      expect(find.text('Tabla de posiciones'), findsNothing);
+      expect(find.text('Ranking'), findsNothing);
     });
 
     // AC-52c / AC-33: anuarios non-empty → single "Anuarios" tile present;

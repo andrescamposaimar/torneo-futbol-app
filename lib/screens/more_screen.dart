@@ -175,7 +175,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                 _tile(
                   context,
                   'Mis pronósticos',
-                  Icons.emoji_events,
+                  Icons.scoreboard,
                   () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
@@ -185,8 +185,8 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                 ),
                 _tile(
                   context,
-                  'Tabla de posiciones',
-                  Icons.leaderboard,
+                  'Ranking',
+                  Icons.military_tech,
                   () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(

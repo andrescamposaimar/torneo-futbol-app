@@ -346,15 +346,14 @@ void main() {
       await _setUpFirebase();
     });
 
-    testWidgets('prode enabled → tile with text containing "posiciones" found',
-        (tester) async {
+    testWidgets('prode enabled → Ranking tile found', (tester) async {
       await _pumpMoreScreen(tester, prode: true);
-      expect(find.textContaining('posiciones'), findsWidgets);
+      expect(find.text('Ranking'), findsOneWidget);
     });
 
     testWidgets('tapping tile pushes ProdeRankingScreen', (tester) async {
       await _pumpMoreScreen(tester, prode: true);
-      await tester.tap(find.text('Tabla de posiciones'));
+      await tester.tap(find.text('Ranking'));
       // Use pump with duration to advance the navigator animation without
       // waiting for pumpAndSettle (which can time out if there are pending
       // microtasks from the pushed screen's initState).
@@ -363,9 +362,9 @@ void main() {
       expect(find.byType(ProdeRankingScreen), findsOneWidget);
     });
 
-    testWidgets('prode disabled → no tile with "posiciones"', (tester) async {
+    testWidgets('prode disabled → no Ranking tile', (tester) async {
       await _pumpMoreScreen(tester, prode: false);
-      expect(find.text('Tabla de posiciones'), findsNothing);
+      expect(find.text('Ranking'), findsNothing);
     });
   });
 }
