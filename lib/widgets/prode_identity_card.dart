@@ -73,6 +73,8 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
     if (_fetchedForPlayerId == playerId) return;
 
     _fetchedForPlayerId = playerId;
+    // Different player than the cached photo → drop it while the new one loads.
+    _playerImageUrl = null;
 
     Future.microtask(() async {
       if (!mounted) return;
@@ -244,31 +246,26 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
 
     final hasPhoto = _playerImageUrl != null && _playerImageUrl!.isNotEmpty;
 
-    final Widget avatar = hasPhoto
-        ? CircleAvatar(
-            key: const ValueKey('prode-avatar-photo'),
-            backgroundImage: NetworkImage(_playerImageUrl!),
-            // Silently ignore load errors — keep showing the placeholder color.
-            onBackgroundImageError: (_, __) {},
-            backgroundColor: Theme.of(context)
-                .colorScheme
-                .primary
-                .withValues(alpha: 0.15),
-          )
-        : CircleAvatar(
-            key: const ValueKey('prode-avatar-initials'),
-            backgroundColor: Theme.of(context)
-                .colorScheme
-                .primary
-                .withValues(alpha: 0.15),
-            child: Text(
-              user.name[0].toUpperCase(),
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          );
+    final initials = Text(
+      user.name[0].toUpperCase(),
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.primary,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+
+    // foregroundImage + child: the initial letter renders underneath and
+    // remains visible while the photo loads or if it fails to load.
+    final Widget avatar = CircleAvatar(
+      key: hasPhoto
+          ? const ValueKey('prode-avatar-photo')
+          : const ValueKey('prode-avatar-initials'),
+      foregroundImage: hasPhoto ? NetworkImage(_playerImageUrl!) : null,
+      onForegroundImageError: hasPhoto ? (_, __) {} : null,
+      backgroundColor:
+          Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
+      child: initials,
+    );
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
