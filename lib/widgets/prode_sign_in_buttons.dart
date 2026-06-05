@@ -33,6 +33,20 @@ class ProdeSignInButtons extends StatelessWidget {
     this.compact = false,
   });
 
+  /// Official multicolor Google "G" (brand guidelines require the real asset).
+  static Widget _googleLogo(double size) => Image.asset(
+        'assets/images/google_logo.png',
+        height: size,
+        width: size,
+        // Fallback if the asset fails to load (e.g. stripped bundle).
+        errorBuilder: (_, __, ___) =>
+            Icon(Icons.account_circle, size: size),
+      );
+
+  /// Apple mark in its brand color (black).
+  static Widget _appleLogo(double size) =>
+      Icon(Icons.apple, size: size, color: Colors.black);
+
   @override
   Widget build(BuildContext context) {
     if (compact) {
@@ -48,7 +62,7 @@ class ProdeSignInButtons extends StatelessWidget {
       children: [
         OutlinedButton.icon(
           onPressed: onGoogleSignIn,
-          icon: const Icon(Icons.account_circle),
+          icon: _googleLogo(20),
           label: const Text('Continuar con Google'),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -58,7 +72,7 @@ class ProdeSignInButtons extends StatelessWidget {
           const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: onAppleSignIn,
-            icon: const Icon(Icons.apple),
+            icon: _appleLogo(20),
             label: const Text('Continuar con Apple'),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -82,7 +96,7 @@ class ProdeSignInButtons extends StatelessWidget {
         Expanded(
           child: OutlinedButton.icon(
             onPressed: onGoogleSignIn,
-            icon: const Icon(Icons.account_circle, size: 18),
+            icon: _googleLogo(18),
             label: const Text('Google', overflow: TextOverflow.ellipsis),
             style: compactStyle,
           ),
@@ -92,7 +106,7 @@ class ProdeSignInButtons extends StatelessWidget {
           Expanded(
             child: OutlinedButton.icon(
               onPressed: onAppleSignIn,
-              icon: const Icon(Icons.apple, size: 18),
+              icon: _appleLogo(18),
               label: const Text('Apple', overflow: TextOverflow.ellipsis),
               style: compactStyle,
             ),

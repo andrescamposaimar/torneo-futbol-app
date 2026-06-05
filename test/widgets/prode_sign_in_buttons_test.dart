@@ -52,6 +52,22 @@ void main() {
       expect(calls, equals(1));
     });
 
+    testWidgets('branded icons: Google asset image + black Apple mark',
+        (tester) async {
+      await _pump(tester, onAppleSignIn: () {});
+
+      // Google button uses the official multicolor G asset
+      final image = tester.widget<Image>(find.byType(Image));
+      expect(
+        (image.image as AssetImage).assetName,
+        'assets/images/google_logo.png',
+      );
+
+      // Apple button uses the Apple mark in brand black
+      final appleIcon = tester.widget<Icon>(find.byIcon(Icons.apple));
+      expect(appleIcon.color, Colors.black);
+    });
+
     group('compact mode', () {
       testWidgets('shows short labels Google/Apple side by side',
           (tester) async {
