@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/tenant_provider.dart';
 import '../providers/prode_providers.dart';
+import '../providers/service_providers.dart';
+import '../screens/player_detail_screen.dart';
 import '../screens/prode/prode_auth_gate.dart';
 import '../services/prode_auth_controller.dart';
 import '../services/prode_auth_state.dart';
@@ -20,6 +22,9 @@ import 'prode_sign_in_buttons.dart';
 /// - Calls [ProdeAuthController.bootstrap] once on first mount if the current
 ///   state is [ProdeAuthUnauthenticated] (same guard as [ProdeAuthGate]).
 /// - Renders a compact per-state UI driven by [prodeAuthControllerProvider].
+/// - When authenticated with a valid [ProdeUser.playerId], tapping the tile
+///   pushes [PlayerDetailScreen] and the avatar shows the player photo when
+///   available.
 ///
 /// Sign-in (Google/Apple) happens in-place; the card re-renders reactively.
 /// DNI confirmation and error retry push [ProdeAuthGate] which owns those forms.
@@ -32,6 +37,14 @@ class ProdeIdentityCard extends ConsumerStatefulWidget {
 
 class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
   bool _bootstrapped = false;
+
+  /// Cached player image URL fetched from the public API.
+  /// Null means: not yet fetched, fetch in progress, or no image available.
+  String? _playerImageUrl;
+
+  /// The playerId for which [_playerImageUrl] was fetched.
+  /// Used to avoid re-fetching when the widget rebuilds with the same user.
+  int? _fetchedForPlayerId;
 
   @override
   void initState() {
@@ -49,6 +62,29 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
       if (current is ProdeAuthUnauthenticated) {
         _bootstrapped = true;
         ref.read(prodeAuthControllerProvider.notifier).bootstrap();
+      }
+    });
+  }
+
+  /// Fetches the player photo once for the given [playerId].
+  /// Safe to call multiple times — guards against duplicate fetches.
+  void _fetchPlayerPhoto(int playerId) {
+    if (playerId == 0) return;
+    if (_fetchedForPlayerId == playerId) return;
+
+    _fetchedForPlayerId = playerId;
+
+    Future.microtask(() async {
+      if (!mounted) return;
+      try {
+        final api = ref.read(apiServiceProvider);
+        final data = await api.getJugadorPorId(playerId);
+        final imageUrl = data['featured_image'] as String?;
+        if (mounted) {
+          setState(() => _playerImageUrl = imageUrl);
+        }
+      } catch (_) {
+        // Network error: keep initials avatar — no crash.
       }
     });
   }
@@ -145,24 +181,7 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
       // Authenticated with a real name
       ProdeAuthAuthenticated(:final user, :final stale)
           when user.name.isNotEmpty && !stale =>
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: CircleAvatar(
-            backgroundColor: Theme.of(context)
-                .colorScheme
-                .primary
-                .withValues(alpha: 0.15),
-            child: Text(
-              user.name[0].toUpperCase(),
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          title: Text(user.name),
-          trailing: const Icon(Icons.chevron_right),
-        ),
+        _buildAuthenticatedTile(context, user),
 
       // Authenticated but stale or empty name (placeholder)
       ProdeAuthAuthenticated() => ListTile(
@@ -215,5 +234,56 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
           ],
         ),
     };
+  }
+
+  Widget _buildAuthenticatedTile(BuildContext context, ProdeUser user) {
+    // Trigger photo fetch on the next microtask (safe during build).
+    if (user.playerId > 0 && _fetchedForPlayerId != user.playerId) {
+      Future.microtask(() => _fetchPlayerPhoto(user.playerId));
+    }
+
+    final hasPhoto = _playerImageUrl != null && _playerImageUrl!.isNotEmpty;
+
+    final Widget avatar = hasPhoto
+        ? CircleAvatar(
+            key: const ValueKey('prode-avatar-photo'),
+            backgroundImage: NetworkImage(_playerImageUrl!),
+            // Silently ignore load errors — keep showing the placeholder color.
+            onBackgroundImageError: (_, __) {},
+            backgroundColor: Theme.of(context)
+                .colorScheme
+                .primary
+                .withValues(alpha: 0.15),
+          )
+        : CircleAvatar(
+            key: const ValueKey('prode-avatar-initials'),
+            backgroundColor: Theme.of(context)
+                .colorScheme
+                .primary
+                .withValues(alpha: 0.15),
+            child: Text(
+              user.name[0].toUpperCase(),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          );
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: avatar,
+      title: Text(user.name),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: user.playerId > 0
+          ? () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlayerDetailScreen(
+                    player: {'id': user.playerId},
+                  ),
+                ),
+              )
+          : null,
+    );
   }
 }
