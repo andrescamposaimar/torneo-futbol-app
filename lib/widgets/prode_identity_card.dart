@@ -170,7 +170,9 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Iniciá sesión para ver tus datos',
+                        'Iniciá sesión para ver tus datos '
+                        '(recordá ingresar el DNI con el que te '
+                        'inscribiste al torneo)',
                         style: TextStyle(
                           fontSize: 13,
                           color: Colors.grey.shade600,
