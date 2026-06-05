@@ -278,7 +278,7 @@ void main() {
     // AC-53a / AC-10
     testWidgets('Unauthenticated → sign-in buttons visible', (tester) async {
       await _pump(tester, const ProdeAuthUnauthenticated());
-      expect(find.text('Continuar con Google'), findsOneWidget);
+      expect(find.text('Google'), findsOneWidget);
     });
 
     // AC-53n: guest mode — "Invitado" title present, no Prode marketing copy
@@ -301,16 +301,30 @@ void main() {
     testWidgets('AC-53p: Unauthenticated → compact sign-in row (not stacked Column)',
         (tester) async {
       await _pump(tester, const ProdeAuthUnauthenticated());
-      // In compact mode the buttons live inside a Row widget.
-      // We check that both button labels exist and that a Row ancestor
-      // contains both of them (they're siblings in the same Row).
-      expect(find.text('Continuar con Google'), findsOneWidget);
+      // In compact mode the buttons live inside a Row widget with short labels.
+      expect(find.text('Google'), findsOneWidget);
       // Find the Row that is a direct/indirect ancestor of the Google button
       final rowFinder = find.ancestor(
-        of: find.text('Continuar con Google'),
+        of: find.text('Google'),
         matching: find.byType(Row),
       );
       expect(rowFinder, findsWidgets);
+    });
+
+    // Regression: the compact row must fit on a NARROW phone (the original
+    // implementation overflowed 56px on a 390pt-wide device). Overflow errors
+    // surface as exceptions in widget tests — assert there are none.
+    testWidgets(
+        'AC-53r: Unauthenticated → no overflow on narrow viewport (360pt, iOS both buttons)',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 690);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await _pump(tester, const ProdeAuthUnauthenticated());
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Google'), findsOneWidget);
     });
 
     // AC-53q: guest mode — tapping Google fires callback
@@ -342,7 +356,7 @@ void main() {
           () async => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
 
-      await tester.tap(find.text('Continuar con Google'));
+      await tester.tap(find.text('Google'));
       await tester.pump();
       expect(googleCalls, equals(1));
     });

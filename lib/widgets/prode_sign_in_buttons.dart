@@ -71,27 +71,31 @@ class ProdeSignInButtons extends StatelessWidget {
 
   Widget _buildCompactRow(BuildContext context) {
     final compactStyle = OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       textStyle: const TextStyle(fontSize: 13),
     );
 
+    // Expanded halves + short labels: the row can never overflow, regardless
+    // of device width (full "Continuar con…" labels did not fit side by side).
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
       children: [
-        OutlinedButton.icon(
-          onPressed: onGoogleSignIn,
-          icon: const Icon(Icons.account_circle, size: 18),
-          label: const Text('Continuar con Google'),
-          style: compactStyle,
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: onGoogleSignIn,
+            icon: const Icon(Icons.account_circle, size: 18),
+            label: const Text('Google', overflow: TextOverflow.ellipsis),
+            style: compactStyle,
+          ),
         ),
         if (onAppleSignIn != null) ...[
           const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: onAppleSignIn,
-            icon: const Icon(Icons.apple, size: 18),
-            label: const Text('Continuar con Apple'),
-            style: compactStyle,
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: onAppleSignIn,
+              icon: const Icon(Icons.apple, size: 18),
+              label: const Text('Apple', overflow: TextOverflow.ellipsis),
+              style: compactStyle,
+            ),
           ),
         ],
       ],
