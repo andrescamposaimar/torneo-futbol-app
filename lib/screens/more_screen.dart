@@ -174,7 +174,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
               children: [
                 _tile(
                   context,
-                  'Prode del torneo',
+                  'Mis pronósticos',
                   Icons.emoji_events,
                   () => Navigator.push(
                     context,

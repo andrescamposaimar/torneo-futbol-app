@@ -182,7 +182,7 @@ void main() {
       expect(find.byType(ProdeIdentityCard), findsOneWidget);
 
       // Prode section tiles (AC-25)
-      expect(find.text('Prode del torneo'), findsOneWidget);
+      expect(find.text('Mis pronósticos'), findsOneWidget);
       expect(find.text('Tabla de posiciones'), findsOneWidget);
     });
 
@@ -211,7 +211,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       // No prode UI
-      expect(find.text('Prode del torneo'), findsNothing);
+      expect(find.text('Mis pronósticos'), findsNothing);
       expect(find.text('Tabla de posiciones'), findsNothing);
     });
 
@@ -318,7 +318,7 @@ void main() {
       double dyOf(String text) =>
           tester.getTopLeft(find.text(text).first).dy;
 
-      final prode = dyOf('Prode del torneo');
+      final prode = dyOf('Mis pronósticos');
       final stats = dyOf('Goleadores');
       final gestion = dyOf('Lista de Espera');
       final informacion = dyOf('Reglamento');
