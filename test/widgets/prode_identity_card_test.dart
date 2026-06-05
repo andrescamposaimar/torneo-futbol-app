@@ -239,6 +239,37 @@ Future<void> _pump(
 }
 
 // ---------------------------------------------------------------------------
+// Counting stub controller — tracks individual callback invocations
+// ---------------------------------------------------------------------------
+
+class _CountingStubController extends ProdeAuthController {
+  final VoidCallback? onGoogle;
+
+  _CountingStubController(
+    ProdeAuthState initialState, {
+    this.onGoogle,
+  }) : super(
+          repository: ProdeAuthRepository(),
+          service: _FakeProdeApiService(),
+          tenantId: 'test',
+        ) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> bootstrap() async {}
+
+  @override
+  Future<void> logout() async {}
+
+  @override
+  Future<void> signInWithGoogle() async => onGoogle?.call();
+
+  @override
+  Future<void> signInWithApple() async {}
+}
+
+// ---------------------------------------------------------------------------
 // Tests (AC-53a..h + AC-53i..l for navigation and photo)
 // ---------------------------------------------------------------------------
 
@@ -247,7 +278,88 @@ void main() {
     // AC-53a / AC-10
     testWidgets('Unauthenticated → sign-in buttons visible', (tester) async {
       await _pump(tester, const ProdeAuthUnauthenticated());
-      expect(find.text('Continuar con Google'), findsOneWidget);
+      expect(find.text('Google'), findsOneWidget);
+    });
+
+    // AC-53n: guest mode — "Invitado" title present, no Prode marketing copy
+    testWidgets('AC-53n: Unauthenticated → "Invitado" title shown, no Prode copy',
+        (tester) async {
+      await _pump(tester, const ProdeAuthUnauthenticated());
+      expect(find.text('Invitado'), findsOneWidget);
+      expect(find.text('Iniciá sesión para ver tus datos'), findsOneWidget);
+      expect(find.text('Sumate al Prode — iniciá sesión'), findsNothing);
+    });
+
+    // AC-53o: guest mode — person icon present (guest avatar)
+    testWidgets('AC-53o: Unauthenticated → guest person icon visible',
+        (tester) async {
+      await _pump(tester, const ProdeAuthUnauthenticated());
+      expect(find.byIcon(Icons.person_outline), findsOneWidget);
+    });
+
+    // AC-53p: guest mode — buttons are rendered side-by-side (compact Row),
+    // not full-width stacked; ProdeSignInButtons compact mode active
+    testWidgets('AC-53p: Unauthenticated → compact sign-in row (not stacked Column)',
+        (tester) async {
+      await _pump(tester, const ProdeAuthUnauthenticated());
+      // In compact mode the buttons live inside a Row widget with short labels.
+      expect(find.text('Google'), findsOneWidget);
+      // Find the Row that is a direct/indirect ancestor of the Google button
+      final rowFinder = find.ancestor(
+        of: find.text('Google'),
+        matching: find.byType(Row),
+      );
+      expect(rowFinder, findsWidgets);
+    });
+
+    // Regression: the compact row must fit on a NARROW phone (the original
+    // implementation overflowed 56px on a 390pt-wide device). Overflow errors
+    // surface as exceptions in widget tests — assert there are none.
+    testWidgets(
+        'AC-53r: Unauthenticated → no overflow on narrow viewport (360pt, iOS both buttons)',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 690);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await _pump(tester, const ProdeAuthUnauthenticated());
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Google'), findsOneWidget);
+    });
+
+    // AC-53q: guest mode — tapping Google fires callback
+    testWidgets('AC-53q: Unauthenticated → Google button fires signInWithGoogle',
+        (tester) async {
+      var googleCalls = 0;
+      // We need a controller stub that counts calls.
+      final tenant = _makeTenant();
+      final api = _StubPublicApiService();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tenantConfigProvider.overrideWithValue(tenant),
+            prodeApiServiceProvider.overrideWithValue(_FakeProdeApiService()),
+            apiServiceProvider.overrideWithValue(api),
+            prodeAuthControllerProvider.overrideWith(
+              (ref) => _CountingStubController(
+                const ProdeAuthUnauthenticated(),
+                onGoogle: () => googleCalls++,
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: ProdeIdentityCard()),
+          ),
+        ),
+      );
+      await tester.runAsync(
+          () async => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+
+      await tester.tap(find.text('Google'));
+      await tester.pump();
+      expect(googleCalls, equals(1));
     });
 
     // AC-53b / AC-13, AC-18

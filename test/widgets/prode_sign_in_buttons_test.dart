@@ -6,6 +6,7 @@ Future<void> _pump(
   WidgetTester tester, {
   VoidCallback? onGoogleSignIn,
   VoidCallback? onAppleSignIn,
+  bool compact = false,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -13,6 +14,7 @@ Future<void> _pump(
         body: ProdeSignInButtons(
           onGoogleSignIn: onGoogleSignIn ?? () {},
           onAppleSignIn: onAppleSignIn,
+          compact: compact,
         ),
       ),
     ),
@@ -48,6 +50,47 @@ void main() {
       await _pump(tester, onAppleSignIn: () => calls++);
       await tester.tap(find.text('Continuar con Apple'));
       expect(calls, equals(1));
+    });
+
+    group('compact mode', () {
+      testWidgets('shows short labels Google/Apple side by side',
+          (tester) async {
+        await _pump(tester, onAppleSignIn: () {}, compact: true);
+        expect(find.text('Google'), findsOneWidget);
+        expect(find.text('Apple'), findsOneWidget);
+        expect(find.text('Continuar con Google'), findsNothing);
+      });
+
+      testWidgets('compact callbacks fire on tap', (tester) async {
+        var google = 0;
+        var apple = 0;
+        await _pump(
+          tester,
+          onGoogleSignIn: () => google++,
+          onAppleSignIn: () => apple++,
+          compact: true,
+        );
+        await tester.tap(find.text('Google'));
+        await tester.tap(find.text('Apple'));
+        expect(google, equals(1));
+        expect(apple, equals(1));
+      });
+
+      // Regression: BOTH buttons at narrow phone width must not overflow.
+      // The original compact row (full 'Continuar con…' labels, no Expanded)
+      // overflowed 56px on a 390pt device. Overflow = exception in tests.
+      testWidgets('no overflow with both buttons at 320pt width',
+          (tester) async {
+        tester.view.physicalSize = const Size(320, 690);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await _pump(tester, onAppleSignIn: () {}, compact: true);
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('Google'), findsOneWidget);
+        expect(find.text('Apple'), findsOneWidget);
+      });
     });
   });
 }
