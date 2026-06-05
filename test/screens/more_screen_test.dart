@@ -226,9 +226,11 @@ void main() {
 
       await _pump(tester, anuarios: anuarios);
 
-      expect(find.text('Anuarios'), findsOneWidget);
+      // 'Anuarios' appears twice: section header + tile label
+      expect(find.text('Anuarios'), findsNWidgets(2));
 
-      await tester.tap(find.text('Anuarios'));
+      // Tap the tile (the one inside an InkWell), not the section header
+      await tester.tap(find.widgetWithText(InkWell, 'Anuarios'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -272,11 +274,11 @@ void main() {
       expect(notifPos, greaterThan(goleadoresPos));
     });
 
-    // AC-29: Gestión Torneo card with no tiles — no exception thrown
+    // AC-29 (locked: HIDE): Gestión Torneo card absent when no tiles visible
     testWidgets(
-        'AC-29: Gestión Torneo card with zero visible tiles causes no exception',
+        'AC-29: Gestión Torneo card hidden when zero visible tiles',
         (tester) async {
-      // solicitudCambioUrl == null AND waitingLists == false → both tiles hidden
+      // solicitudCambioUrl == null AND waitingLists == false → whole card hidden
       await _pump(
         tester,
         solicitudCambioUrl: null,
@@ -284,6 +286,50 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
+      expect(find.text('Gestión Torneo'), findsNothing);
+    });
+
+    // AC-29 inverse: card present when at least one tile is visible
+    testWidgets(
+        'AC-29: Gestión Torneo card present when waitingLists enabled',
+        (tester) async {
+      await _pump(tester, waitingLists: true);
+
+      expect(find.text('Gestión Torneo'), findsOneWidget);
+      expect(find.text('Lista de Espera'), findsOneWidget);
+    });
+
+    // AC-06: full section order — each section strictly below the previous
+    testWidgets('AC-06: full section render order is pinned', (tester) async {
+      // Tall viewport so the lazy ListView builds every section
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await _pump(
+        tester,
+        waitingLists: true,
+        reglamentoUrl: 'https://test.example.com/reglamento.pdf',
+        anuarios: const [
+          TenantAnuario(label: 'Anuario 2025', url: 'https://t.example/a.pdf'),
+        ],
+      );
+
+      double dyOf(String text) =>
+          tester.getTopLeft(find.text(text).first).dy;
+
+      final prode = dyOf('Prode del torneo');
+      final stats = dyOf('Goleadores');
+      final gestion = dyOf('Lista de Espera');
+      final informacion = dyOf('Reglamento');
+      final anuarios = dyOf('Anuarios');
+      final notificaciones = dyOf('Avisos del torneo');
+
+      expect(stats, greaterThan(prode));
+      expect(gestion, greaterThan(stats));
+      expect(informacion, greaterThan(gestion));
+      expect(anuarios, greaterThan(informacion));
+      expect(notificaciones, greaterThan(anuarios));
     });
 
     // AC-01: grey scaffold background

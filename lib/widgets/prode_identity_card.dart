@@ -78,7 +78,8 @@ class _ProdeIdentityCardState extends ConsumerState<ProdeIdentityCard> {
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: Colors.grey.shade200),
       ),
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      // Margin is the caller's responsibility (MoreScreen wraps with padding).
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: _buildContent(context, state, notifier),

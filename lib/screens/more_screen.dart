@@ -229,7 +229,8 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 4. Gestión Torneo (card always shown, tiles conditional — AC-28, AC-29)
+          // 4. Gestión Torneo (card hidden when no tiles are visible — AC-28, AC-29)
+          if (docs.solicitudCambioUrl != null || features.waitingLists) ...[
           _SectionCard(
             title: 'Gestión Torneo',
             children: [
@@ -262,6 +263,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             ],
           ),
           const SizedBox(height: 12),
+          ],
 
           // 5. Información (shown only when at least one URL is present — AC-30)
           if (docs.reglamentoUrl != null || docs.modalidadUrl != null) ...[
@@ -290,7 +292,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
           // 6. Anuarios — single tile → AnuariosScreen (AC-32, AC-33)
           if (docs.anuarios.isNotEmpty) ...[
             _SectionCard(
-              title: 'Publicaciones',
+              title: 'Anuarios',
               children: [
                 _tile(
                   context,
