@@ -135,11 +135,16 @@ class EvaluationController {
             return $this->error400( 'fecha_not_found', "Fecha with id={$fechaId} not found." );
         }
 
-        // 3. Enforce locked state (R7.5, spec A3).
-        if ( 'locked' !== $fecha['state'] ) {
+        // 3. Enforce locked state (R7.5, spec A3). 'locked' is DERIVED, never
+        // persisted (mirrors LockComputer::deriveState): a fecha is evaluable when
+        // it is not yet 'evaluated' AND now >= locked_at. The persisted state
+        // column only holds 'open' or 'evaluated', so comparing it to 'locked'
+        // literally rejected every still-open-but-due fecha.
+        $now = current_time( 'mysql' );
+        if ( 'evaluated' === $fecha['state'] || $now < (string) $fecha['locked_at'] ) {
             return $this->error400(
                 'fecha_not_locked',
-                "Fecha {$fechaId} is not in 'locked' state (current: {$fecha['state']})."
+                "Fecha {$fechaId} is not in 'locked' state (persisted: {$fecha['state']}, locked_at: {$fecha['locked_at']}, now: {$now})."
             );
         }
 

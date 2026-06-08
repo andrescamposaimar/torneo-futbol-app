@@ -172,6 +172,29 @@ final class Plugin {
         }
 
         // 5. Cron action handlers (registered here; scheduled at activation).
+        //
+        // Custom recurrence intervals MUST be registered on every request (not
+        // just at activation inside MigrationRunner::scheduleCrons), otherwise
+        // WP-Cron cannot resolve 'every_5_minutes' / 'every_15_minutes' when it
+        // reschedules the recurring events at runtime — the events silently fail
+        // to re-fire. Guard each with isset() so this composes with the
+        // activation-time registration.
+        add_filter( 'cron_schedules', static function ( array $schedules ): array {
+            if ( ! isset( $schedules['every_5_minutes'] ) ) {
+                $schedules['every_5_minutes'] = [
+                    'interval' => 5 * MINUTE_IN_SECONDS,
+                    'display'  => __( 'Every 5 minutes', 'entre-redes-prode' ),
+                ];
+            }
+            if ( ! isset( $schedules['every_15_minutes'] ) ) {
+                $schedules['every_15_minutes'] = [
+                    'interval' => 15 * MINUTE_IN_SECONDS,
+                    'display'  => __( 'Every 15 minutes', 'entre-redes-prode' ),
+                ];
+            }
+            return $schedules;
+        } );
+
         add_action( 'prode_evaluate_matches_cron',      [ Cron\EvaluatorCron::class, 'run' ] );
         // prode_recompute_rankings_cron is event-driven (fired on-demand by EvaluatorCron
         // after match evaluations land), NOT on a fixed schedule — per design.

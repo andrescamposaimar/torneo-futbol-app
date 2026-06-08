@@ -99,14 +99,14 @@ class EvaluationControllerTest extends TestCase {
     /**
      * @param array<int> $matchIds
      */
-    private function seedFecha( array $matchIds, string $state = 'locked', int $seasonId = 359 ): int {
+    private function seedFecha( array $matchIds, string $state = 'locked', int $seasonId = 359, string $lockedAt = '2026-05-30 10:00:00' ): int {
         global $wpdb;
         $wpdb->insert(
             $wpdb->prefix . 'prode_fechas',
             [
                 'tenant_id'    => 'test',
                 'season_id'    => $seasonId,
-                'locked_at'    => '2026-05-30 10:00:00',
+                'locked_at'    => $lockedAt,
                 'state'        => $state,
                 'created_at'   => '2026-05-28 00:00:00',
                 'evaluated_at' => null,
@@ -235,9 +235,12 @@ class EvaluationControllerTest extends TestCase {
     // Wrong state: AE-5, AE-6 → fecha not locked → 400
     // -------------------------------------------------------------------------
 
-    /** AE-5: fecha.state='open' → 400 fecha_not_locked. */
+    /** AE-5: fecha not yet locked (locked_at in the future) → 400 fecha_not_locked. */
     public function test_fecha_not_locked_open_state_returns_400(): void {
-        $fechaId    = $this->seedFecha( [ 101 ], 'open' );
+        // 'locked' is derived from now >= locked_at; a genuinely-open fecha has a
+        // future locked_at. (A past locked_at would make it derived-locked and
+        // therefore evaluable.)
+        $fechaId    = $this->seedFecha( [ 101 ], 'open', 359, '2099-01-01 00:00:00' );
         $controller = $this->buildController( $this->stubDispatcher( [] ), fn() => true );
         $request    = $this->buildRequest( [ 'fecha_id' => $fechaId ] );
 

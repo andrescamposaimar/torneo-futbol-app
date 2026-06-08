@@ -45,15 +45,21 @@ class EvaluatorCron {
         $tenantId = defined( 'PRODE_TENANT_ID' ) ? (string) PRODE_TENANT_ID : '';
         $seasonId = 0; // Resolved per-fecha; evaluateFecha reads season_id from the fecha row.
 
-        // findActiveFecha returns open/locked; we need specifically 'locked'.
-        // Query directly for the locked fecha to avoid evaluating 'open' ones.
+        // The 'locked' state is DERIVED, never persisted: a fecha is locked when
+        // now >= locked_at and it has not yet been evaluated (mirrors
+        // LockComputer::deriveState). The persisted state column only ever holds
+        // 'open' or 'evaluated', so the previous `state = 'locked'` filter matched
+        // nothing and evaluation never ran. Select the earliest due-but-unevaluated
+        // fecha instead.
+        $now         = current_time( 'mysql' );
         $lockedFecha = $wpdb->get_row(
             $wpdb->prepare(
                 "SELECT * FROM {$wpdb->prefix}prode_fechas
-                  WHERE tenant_id = %s AND state = 'locked'
+                  WHERE tenant_id = %s AND state != 'evaluated' AND locked_at <= %s
                   ORDER BY locked_at ASC, created_at DESC
                   LIMIT 1",
-                $tenantId
+                $tenantId,
+                $now
             ),
             ARRAY_A
         );

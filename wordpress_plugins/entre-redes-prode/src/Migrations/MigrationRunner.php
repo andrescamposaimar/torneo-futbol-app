@@ -34,10 +34,17 @@ class MigrationRunner {
             self::generateRsaKeyPair();
             self::generateDniPepper();
             self::writeTenantId();
-            self::scheduleCrons();
 
             update_option( self::DB_VERSION_OPTION, $current );
         }
+
+        // Schedule crons on EVERY activation, not only on version bumps.
+        // scheduleCrons() is idempotent (each hook guarded by wp_next_scheduled),
+        // so re-running is a no-op when the events already exist. Keeping this
+        // inside the version gate meant a plugin deployed by file overwrite — or
+        // one whose prode_db_version already matched the current version — never
+        // scheduled its crons, leaving evaluation/ranking permanently stalled.
+        self::scheduleCrons();
     }
 
     // -------------------------------------------------------------------------
