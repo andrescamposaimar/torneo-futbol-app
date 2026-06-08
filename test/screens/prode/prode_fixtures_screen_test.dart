@@ -257,30 +257,30 @@ void main() {
       expect(find.text('Cerrar sesión'), findsOneWidget);
     });
 
-    // locked state → "Cerrado" badge, no "Finalizada"
-    testWidgets('Loaded(locked) -> Cerrado badge, no Finalizada', (tester) async {
+    // locked state → "Fecha Cerrada" badge, no "Finalizada"
+    testWidgets('Loaded(locked) -> Fecha Cerrada badge, no Finalizada', (tester) async {
       await _pumpScreen(
           tester, ProdeFixturesLoaded(_makeFecha(state: ProdeFechaState.locked)));
-      expect(find.text('Cerrado'), findsOneWidget);
+      expect(find.text('Fecha Cerrada'), findsOneWidget);
       expect(find.text('Finalizada'), findsNothing);
     });
 
-    // evaluated state → "Finalizada" badge, no "Cerrado"
-    testWidgets('Loaded(evaluated) -> Finalizada badge, no Cerrado',
+    // evaluated state → "Finalizada" badge, no "Fecha Cerrada"
+    testWidgets('Loaded(evaluated) -> Finalizada badge, no Fecha Cerrada',
         (tester) async {
       await _pumpScreen(
           tester,
           ProdeFixturesLoaded(
               _makeFecha(state: ProdeFechaState.evaluated)));
       expect(find.text('Finalizada'), findsOneWidget);
-      expect(find.text('Cerrado'), findsNothing);
+      expect(find.text('Fecha Cerrada'), findsNothing);
     });
 
     // open state → no badge
-    testWidgets('Loaded(open) -> no Cerrado or Finalizada', (tester) async {
+    testWidgets('Loaded(open) -> no Fecha Cerrada or Finalizada', (tester) async {
       await _pumpScreen(
           tester, ProdeFixturesLoaded(_makeFecha(state: ProdeFechaState.open)));
-      expect(find.text('Cerrado'), findsNothing);
+      expect(find.text('Fecha Cerrada'), findsNothing);
       expect(find.text('Finalizada'), findsNothing);
     });
 
@@ -471,6 +471,20 @@ void main() {
       testWidgets('PRÓXIMOS PARTIDOS section title present', (tester) async {
         await _pumpScreen(tester, ProdeFixturesLoaded(_makeFecha()));
         expect(find.text('PRÓXIMOS PARTIDOS'), findsOneWidget);
+      });
+
+      testWidgets('PARTIDOS JUGADOS section title when fecha is locked', (tester) async {
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(
+            _makeFecha(
+              state: ProdeFechaState.locked,
+              lockedAt: DateTime(2000, 1, 1), // past → locked by time
+            ),
+          ),
+        );
+        expect(find.text('PARTIDOS JUGADOS'), findsOneWidget);
+        expect(find.text('PRÓXIMOS PARTIDOS'), findsNothing);
       });
     });
 
