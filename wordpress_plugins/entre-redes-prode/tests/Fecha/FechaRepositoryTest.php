@@ -497,6 +497,114 @@ class FechaRepositoryTest extends TestCase {
         $this->assertSame( [ $dueOld, $dueNew ], $ids );
     }
 
+    // -------------------------------------------------------------------------
+    // T-02: snapshotResult — idempotent SELECT-then-UPDATE
+    // -------------------------------------------------------------------------
+
+    /**
+     * Insert a prode_fecha_matches row with NULL real scores and return its fecha_id.
+     */
+    private function seedFechaMatchRow( int $matchId ): int {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->insert( $p . 'prode_fechas', [
+            'tenant_id'  => 'test_tenant',
+            'season_id'  => 359,
+            'locked_at'  => '2026-05-30 10:00:00',
+            'state'      => 'locked',
+            'created_at' => '2026-05-28 00:00:00',
+        ] );
+        $fechaId = (int) $wpdb->insert_id;
+
+        $wpdb->insert( $p . 'prode_fecha_matches', [
+            'fecha_id'      => $fechaId,
+            'match_id'      => $matchId,
+            'match_kickoff' => '2026-05-30 13:00:00',
+        ] );
+
+        return $fechaId;
+    }
+
+    public function test_snapshotResult_updates_row_with_real_scores(): void {
+        $matchId = 201;
+        $fechaId = $this->seedFechaMatchRow( $matchId );
+
+        $this->repo->snapshotResult( $fechaId, $matchId, 2, 1, true );
+
+        global $wpdb;
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT real_score_home, real_score_away, is_final
+                   FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                $matchId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertNotNull( $row );
+        $this->assertSame( 2, (int) $row['real_score_home'] );
+        $this->assertSame( 1, (int) $row['real_score_away'] );
+        $this->assertSame( 1, (int) $row['is_final'] );
+    }
+
+    public function test_snapshotResult_idempotent_second_call_overwrites(): void {
+        $matchId = 202;
+        $fechaId = $this->seedFechaMatchRow( $matchId );
+
+        $this->repo->snapshotResult( $fechaId, $matchId, 1, 0, true );
+        $this->repo->snapshotResult( $fechaId, $matchId, 3, 2, true );
+
+        global $wpdb;
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT real_score_home, real_score_away FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                $matchId
+            ),
+            ARRAY_A
+        );
+
+        // Row count must stay at 1; values must reflect second call.
+        $matchCount = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}prode_fecha_matches WHERE fecha_id = %d AND match_id = %d",
+                $fechaId,
+                $matchId
+            )
+        );
+        $this->assertSame( 1, $matchCount );
+        $this->assertSame( 3, (int) $row['real_score_home'] );
+        $this->assertSame( 2, (int) $row['real_score_away'] );
+    }
+
+    public function test_snapshotResult_handles_null_scores(): void {
+        $matchId = 203;
+        $fechaId = $this->seedFechaMatchRow( $matchId );
+
+        $this->repo->snapshotResult( $fechaId, $matchId, null, null, false );
+
+        global $wpdb;
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT real_score_home, real_score_away, is_final
+                   FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                $matchId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertNotNull( $row );
+        $this->assertNull( $row['real_score_home'] );
+        $this->assertNull( $row['real_score_away'] );
+        $this->assertSame( 0, (int) $row['is_final'] );
+    }
+
     /** No due fechas (all future or evaluated) → empty list. */
     public function test_list_due_fecha_ids_empty_when_none_due(): void {
         $now = '2026-06-08 00:00:00';
