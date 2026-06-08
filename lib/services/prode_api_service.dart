@@ -605,8 +605,23 @@ class ProdeApiService {
 
   /// Exchanges an Apple identity_token for a Prode session via
   /// `POST /auth/apple` (iOS-native flow). Same outcomes as [exchangeGoogleToken].
-  Future<ProdeSsoResult> exchangeAppleToken(String identityToken) =>
-      _exchangeSso(path: '/auth/apple', body: {'identity_token': identityToken});
+  ///
+  /// [givenName]/[familyName] come from the native credential and are only
+  /// present on the user's first authorization. When supplied they are sent in
+  /// the body so the backend can persist the real name (Apple omits the name
+  /// from the identity-token JWT on subsequent sign-ins). Empty/null names are
+  /// omitted so the backend can fall back to the JWT claim.
+  Future<ProdeSsoResult> exchangeAppleToken(
+    String identityToken, {
+    String? givenName,
+    String? familyName,
+  }) =>
+      _exchangeSso(path: '/auth/apple', body: {
+        'identity_token': identityToken,
+        if (givenName != null && givenName.isNotEmpty) 'given_name': givenName,
+        if (familyName != null && familyName.isNotEmpty)
+          'family_name': familyName,
+      });
 
   /// Shared SSO exchange: POSTs [body] to [path] and parses the two backend
   /// outcomes (`step=authenticated` → [ProdeSsoAuthenticated]; `dni_confirmation`
