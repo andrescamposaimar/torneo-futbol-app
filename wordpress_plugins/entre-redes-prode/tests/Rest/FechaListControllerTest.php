@@ -299,19 +299,25 @@ class FechaListControllerTest extends TestCase {
     public function test_get_fecha_by_id_match_objects_identical_shape_to_fecha_activa(): void {
         // The match shape must mirror FechaController exactly:
         // match_id, home_team, away_team, kickoff, zona, home_escudo, away_escudo.
-        $fechaId = $this->seedOpenFecha( 359, '2099-12-31 23:59:00', [ 10 ] );
+        // v0.5.2: surfaced from the persisted snapshot.
+        $fechaId = $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2099-12-31 23:59:00',
+            [
+                [
+                    'match_id'    => 10,
+                    'kickoff'     => '2026-05-30 13:45',
+                    'home_team'   => 'Marianista',
+                    'away_team'   => 'Rival',
+                    'zona'        => 'Zona A',
+                    'home_escudo' => 'https://example.com/esc1.png',
+                    'away_escudo' => 'https://example.com/esc2.png',
+                ],
+            ]
+        );
 
-        $teamMap = [
-            10 => [
-                'home_team'        => 'Marianista',
-                'away_team'        => 'Rival',
-                'liga'             => 'Zona A',
-                'escudo_local'     => 'https://example.com/esc1.png',
-                'escudo_visitante' => 'https://example.com/esc2.png',
-            ],
-        ];
-
-        $controller = $this->makeController( $teamMap );
+        $controller = $this->makeController();
         $request    = new \WP_REST_Request( 'GET', '' );
         $request->set_param( 'id', $fechaId );
 

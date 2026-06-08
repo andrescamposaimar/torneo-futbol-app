@@ -184,14 +184,17 @@ class FechaControllerTest extends TestCase {
         $this->assertSame( 'locked', $body['state'] );
     }
 
-    public function test_team_names_come_from_resolver_not_db(): void {
-        $enrichedTeamMap = [
+    public function test_team_names_prefer_persisted_snapshot_over_live(): void {
+        // v0.5.2: the persisted snapshot is authoritative. When a row carries a
+        // non-empty home_team, live enrichment must NOT override it — this is what
+        // keeps a played fecha (dropped from /partidos-programados) intact.
+        $liveTeamMap = [
             10 => [ 'home_team' => 'Live Home Name', 'away_team' => 'Live Away Name' ],
             11 => [ 'home_team' => 'Live Home 2',    'away_team' => 'Live Away 2' ],
         ];
 
-        $this->seedOpenFecha();
-        $controller = $this->makeController( $enrichedTeamMap );
+        $this->seedOpenFecha(); // snapshot: 10 => A/B, 11 => C/D
+        $controller = $this->makeController( $liveTeamMap );
         $request    = new \WP_REST_Request( 'GET', '' );
 
         $body    = $controller->getActiveFecha( $request )->get_data();
@@ -202,10 +205,32 @@ class FechaControllerTest extends TestCase {
             $matchById[ $m['match_id'] ] = $m;
         }
 
-        $this->assertSame( 'Live Home Name', $matchById[10]['home_team'] );
-        $this->assertSame( 'Live Away Name', $matchById[10]['away_team'] );
-        $this->assertSame( 'Live Home 2', $matchById[11]['home_team'] );
-        $this->assertSame( 'Live Away 2', $matchById[11]['away_team'] );
+        $this->assertSame( 'A', $matchById[10]['home_team'] );
+        $this->assertSame( 'B', $matchById[10]['away_team'] );
+        $this->assertSame( 'C', $matchById[11]['home_team'] );
+        $this->assertSame( 'D', $matchById[11]['away_team'] );
+    }
+
+    public function test_team_names_fall_back_to_live_when_snapshot_empty(): void {
+        // Rows seeded before v0.5.2 have an empty snapshot. enrichMatches must
+        // fill them from the live payload (legacy behavior for old fechas).
+        $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2099-12-31 23:59:00',
+            [
+                [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => '', 'away_team' => '' ],
+            ]
+        );
+        $controller = $this->makeController( [
+            10 => [ 'home_team' => 'Live Home Name', 'away_team' => 'Live Away Name' ],
+        ] );
+        $request = new \WP_REST_Request( 'GET', '' );
+
+        $body = $controller->getActiveFecha( $request )->get_data();
+
+        $this->assertSame( 'Live Home Name', $body['matches'][0]['home_team'] );
+        $this->assertSame( 'Live Away Name', $body['matches'][0]['away_team'] );
     }
 
     public function test_unknown_match_id_falls_back_to_empty_strings(): void {
@@ -330,25 +355,33 @@ class FechaControllerTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_match_objects_contain_zona_and_escudos(): void {
-        $enrichedTeamMap = [
-            10 => [
-                'home_team'         => 'Marianista FC',
-                'away_team'         => 'Rival United',
-                'liga'              => '2026 - Apertura Zona A',
-                'escudo_local'      => 'https://example.com/escudo-marianista.png',
-                'escudo_visitante'  => 'https://example.com/escudo-rival.png',
-            ],
-            11 => [
-                'home_team'         => 'Eagles SC',
-                'away_team'         => 'Lions CF',
-                'liga'              => '2026 - Apertura Zona B',
-                'escudo_local'      => 'https://example.com/escudo-eagles.png',
-                'escudo_visitante'  => 'https://example.com/escudo-lions.png',
-            ],
-        ];
-
-        $this->seedOpenFecha();
-        $controller = $this->makeController( $enrichedTeamMap );
+        // v0.5.2: zona + escudos are snapshotted at seed time and surfaced verbatim.
+        $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2099-12-31 23:59:00',
+            [
+                [
+                    'match_id'    => 10,
+                    'kickoff'     => '2026-05-30 13:45',
+                    'home_team'   => 'Marianista FC',
+                    'away_team'   => 'Rival United',
+                    'zona'        => '2026 - Apertura Zona A',
+                    'home_escudo' => 'https://example.com/escudo-marianista.png',
+                    'away_escudo' => 'https://example.com/escudo-rival.png',
+                ],
+                [
+                    'match_id'    => 11,
+                    'kickoff'     => '2026-05-30 15:10',
+                    'home_team'   => 'Eagles SC',
+                    'away_team'   => 'Lions CF',
+                    'zona'        => '2026 - Apertura Zona B',
+                    'home_escudo' => 'https://example.com/escudo-eagles.png',
+                    'away_escudo' => 'https://example.com/escudo-lions.png',
+                ],
+            ]
+        );
+        $controller = $this->makeController();
         $request    = new \WP_REST_Request( 'GET', '' );
 
         $body    = $controller->getActiveFecha( $request )->get_data();

@@ -170,6 +170,71 @@ AND post_id IN (SELECT ID FROM wp_posts WHERE post_type = 'sp_list');
 
 ---
 
+## Post-carga OBLIGATORIA — reconstruir índice y limpiar caché
+
+**CRÍTICO**: la carga por SQL directo **NO dispara los hooks de WordPress** (`save_post_sp_event`). El plugin `entre-redes-api` usa esos hooks para dos cosas que quedan desactualizadas si no se corrigen a mano:
+
+1. **Tabla índice `wpm2_jugador_partido`** (mapea `jugador_id → partido_id`). El endpoint `/partidos-jugador` (historial de partidos por jugador en la app) lee SOLO de esta tabla. Si no se rellena, los partidos nuevos **no aparecen** en el detalle del jugador, aunque estén publicados con alineación.
+2. **Transients de caché** de partidos, goleadores, imbatibles y tablas. No se invalidan → los endpoints sirven datos viejos hasta que expira el TTL.
+
+Ejecutar **siempre** estos dos bloques al terminar de cargar partidos **con alineación** (filas `sp_player`):
+
+```sql
+-- 1) BACKFILL del índice jugador↔partido (idempotente, anti-duplicados).
+--    Reconstruye los vínculos a partir de la metadata sp_player de cada evento.
+INSERT INTO wpm2_jugador_partido (jugador_id, partido_id)
+SELECT DISTINCT CAST(pm.meta_value AS UNSIGNED), pm.post_id
+FROM wp_postmeta pm
+JOIN wp_posts p ON p.ID = pm.post_id
+WHERE pm.meta_key = 'sp_player'
+  AND pm.meta_value REGEXP '^[0-9]+$'
+  AND CAST(pm.meta_value AS UNSIGNED) > 0
+  AND p.post_type = 'sp_event'
+  AND p.post_status = 'publish'
+  AND NOT EXISTS (
+    SELECT 1 FROM wpm2_jugador_partido x
+    WHERE x.jugador_id = CAST(pm.meta_value AS UNSIGNED)
+      AND x.partido_id = pm.post_id
+  );
+
+-- 2) FLUSH de transients (misma lista que invalida el hook save_post_sp_event).
+DELETE FROM wp_options
+WHERE option_name LIKE '_transient_entre_redes_partidos_%'
+   OR option_name LIKE '_transient_timeout_entre_redes_partidos_%'
+   OR option_name LIKE '_transient_partidos_equipo_%'
+   OR option_name LIKE '_transient_timeout_partidos_equipo_%'
+   OR option_name LIKE '_transient_partidos_jugador_%'
+   OR option_name LIKE '_transient_timeout_partidos_jugador_%'
+   OR option_name LIKE '_transient_goleadores_partido_%'
+   OR option_name LIKE '_transient_timeout_goleadores_partido_%'
+   OR option_name LIKE '_transient_tabla_goleadores_%'
+   OR option_name LIKE '_transient_timeout_tabla_goleadores_%'
+   OR option_name LIKE '_transient_tabla_imbatibles_%'
+   OR option_name LIKE '_transient_timeout_tabla_imbatibles_%'
+   OR option_name LIKE '_transient_entre_redes_tablas_%'
+   OR option_name LIKE '_transient_timeout_entre_redes_tablas_%'
+   OR option_name LIKE '_transient_sp_table_data_%'
+   OR option_name LIKE '_transient_timeout_sp_table_data_%';
+```
+
+**Verificación** (reemplazar `<ID_JUGADOR>` por uno que haya jugado partidos nuevos): el conteo del índice debe coincidir con la metadata.
+
+```sql
+SELECT
+  (SELECT COUNT(*) FROM wpm2_jugador_partido WHERE jugador_id = <ID_JUGADOR>) AS en_indice,
+  (SELECT COUNT(DISTINCT pm.post_id)
+     FROM wp_postmeta pm
+     JOIN wp_posts p ON p.ID = pm.post_id
+    WHERE pm.meta_key = 'sp_player'
+      AND pm.meta_value = '<ID_JUGADOR>'
+      AND p.post_type = 'sp_event'
+      AND p.post_status = 'publish') AS deberia_tener;
+```
+
+> Nota: los transients de imbatibles/goleadores se recalculan en vivo desde los eventos, así que se auto-corrigen al expirar el TTL. El índice `wpm2_jugador_partido` **NO** se auto-corrige — el backfill es la única vía.
+
+---
+
 ## Diagnóstico de errores comunes
 
 | Error en WordPress | Causa probable | Fix |
@@ -179,6 +244,8 @@ AND post_id IN (SELECT ID FROM wp_posts WHERE post_type = 'sp_list');
 | Jugadores no aparecen al seleccionar liga | Opción "Filter by league" activa, players sin sp_league | `UPDATE wp_options SET option_value='no' WHERE option_name='sportspress_event_filter_teams_by_league'` |
 | Jugadores no aparecen sin liga seleccionada | `sp_number='0'` en sp_list ó lista sin temporada | Ver verificación paso 3/4 |
 | Partido no aparece en calendario | Falta `wp_term_relationships` para temporada/liga | Verificar INSERT + UPDATE count |
+| Partidos nuevos no aparecen en el historial del jugador (`/partidos-jugador`) | Carga por SQL no disparó el hook → falta el vínculo en `wpm2_jugador_partido` | Correr el backfill de "Post-carga OBLIGATORIA" |
+| Tabla de imbatibles/goleadores desactualizada tras carga SQL | Transients no invalidados (el hook no se disparó) | Correr el flush de "Post-carga OBLIGATORIA" (o esperar el TTL) |
 
 ---
 

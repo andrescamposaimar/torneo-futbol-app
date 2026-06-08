@@ -30,9 +30,16 @@ Future<String?> _signInWithGoogleNative(ProdeAuthConfig cfg) async {
 }
 
 /// Drives the native Sign in with Apple sheet (iOS) and returns the Apple
-/// identity_token, or null if the user cancelled. The backend's AppleVerifier
-/// validates the token against Apple's JWKS, with `aud` = the app bundle id.
-Future<String?> _signInWithAppleNative() async {
+/// identity_token plus the user's name, or null if the user cancelled. The
+/// backend's AppleVerifier validates the token against Apple's JWKS, with
+/// `aud` = the app bundle id.
+///
+/// Apple delivers `givenName`/`familyName` on the native credential ONLY on the
+/// user's first authorization for this app (and never inside the identity-token
+/// JWT on later sign-ins). We capture them here and forward them so the backend
+/// can persist the real name on first contact — otherwise the identity card
+/// would show the private-relay email instead.
+Future<AppleCredential?> _signInWithAppleNative() async {
   try {
     final credential = await SignInWithApple.getAppleIDCredential(
       scopes: const [
@@ -40,7 +47,13 @@ Future<String?> _signInWithAppleNative() async {
         AppleIDAuthorizationScopes.fullName,
       ],
     );
-    return credential.identityToken;
+    final token = credential.identityToken;
+    if (token == null) return null;
+    return AppleCredential(
+      identityToken: token,
+      givenName: credential.givenName,
+      familyName: credential.familyName,
+    );
   } on SignInWithAppleAuthorizationException catch (e) {
     // Apple surfaces cancellation as an exception; map it to "cancelled" (null)
     // so the controller returns to Unauthenticated instead of showing an error.

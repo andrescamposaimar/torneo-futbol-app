@@ -4,6 +4,26 @@ import 'prode_auth_repository.dart';
 import 'prode_api_service.dart';
 import 'prode_auth_state.dart';
 
+/// The native Sign in with Apple credential.
+///
+/// Apple returns the user's name ONLY on the first authorization for the app;
+/// on every subsequent sign-in [givenName]/[familyName] are null and the name
+/// is also absent from the identity token's JWT claims. The controller forwards
+/// whatever is present to the backend so it can be persisted on first contact —
+/// otherwise the name is lost forever and the UI falls back to showing the
+/// (often private-relay) email.
+class AppleCredential {
+  final String identityToken;
+  final String? givenName;
+  final String? familyName;
+
+  const AppleCredential({
+    required this.identityToken,
+    this.givenName,
+    this.familyName,
+  });
+}
+
 /// State machine controller for Prode authentication.
 ///
 /// Manages the [ProdeAuthState] lifecycle:
@@ -30,17 +50,18 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   /// google_sign_in SDK; the provider wires the real implementation.
   final Future<String?> Function()? _googleIdToken;
 
-  /// Returns an Apple identity_token or null if the user cancelled. Injected
-  /// for the same reason as [_googleIdToken]. iOS-only (the provider leaves it
-  /// null on other platforms, since the backend only supports the native flow).
-  final Future<String?> Function()? _appleIdentityToken;
+  /// Returns an [AppleCredential] (identity_token + optional name) or null if
+  /// the user cancelled. Injected for the same reason as [_googleIdToken].
+  /// iOS-only (the provider leaves it null on other platforms, since the
+  /// backend only supports the native flow).
+  final Future<AppleCredential?> Function()? _appleIdentityToken;
 
   ProdeAuthController({
     required ProdeAuthRepository repository,
     required ProdeApiService service,
     required String tenantId,
     Future<String?> Function()? googleIdToken,
-    Future<String?> Function()? appleIdentityToken,
+    Future<AppleCredential?> Function()? appleIdentityToken,
   })  : _repository = repository,
         _service = service,
         _tenantId = tenantId,
@@ -199,7 +220,7 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   // ---------------------------------------------------------------------------
 
   /// Runs the Google Sign-In flow (id_token → `POST /auth/google`).
-  Future<void> signInWithGoogle() => _signInWithProvider(
+  Future<void> signInWithGoogle() => _signInWithProvider<String>(
         provider: 'google',
         getToken: _googleIdToken,
         exchange: _service.exchangeGoogleToken,
@@ -208,10 +229,18 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   /// Runs the Apple Sign-In flow (identity_token → `POST /auth/apple`). iOS
   /// only — on other platforms the provider leaves the token getter null and
   /// this surfaces a "not configured" error (the UI hides the button there).
-  Future<void> signInWithApple() => _signInWithProvider(
+  ///
+  /// Forwards the native credential's [AppleCredential.givenName]/[familyName]
+  /// (present only on the first authorization) so the backend can persist the
+  /// real name instead of falling back to the private-relay email.
+  Future<void> signInWithApple() => _signInWithProvider<AppleCredential>(
         provider: 'apple',
         getToken: _appleIdentityToken,
-        exchange: _service.exchangeAppleToken,
+        exchange: (credential) => _service.exchangeAppleToken(
+          credential.identityToken,
+          givenName: credential.givenName,
+          familyName: credential.familyName,
+        ),
       );
 
   /// Shared SSO flow for both providers:
@@ -223,10 +252,10 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   ///
   /// Cancellation (getToken returns null) returns to [ProdeAuthUnauthenticated]
   /// silently. Any failure surfaces as [ProdeAuthError].
-  Future<void> _signInWithProvider({
+  Future<void> _signInWithProvider<T>({
     required String provider,
-    required Future<String?> Function()? getToken,
-    required Future<ProdeSsoResult> Function(String token) exchange,
+    required Future<T?> Function()? getToken,
+    required Future<ProdeSsoResult> Function(T credential) exchange,
   }) async {
     if (getToken == null) {
       state = ProdeAuthError(
@@ -238,14 +267,14 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
 
     state = ProdeAuthAuthenticating(provider: provider);
     try {
-      final token = await getToken();
-      if (token == null) {
+      final credential = await getToken();
+      if (credential == null) {
         // User cancelled the provider sheet.
         state = const ProdeAuthUnauthenticated();
         return;
       }
 
-      final result = await exchange(token);
+      final result = await exchange(credential);
 
       switch (result) {
         case ProdeSsoAuthenticated(

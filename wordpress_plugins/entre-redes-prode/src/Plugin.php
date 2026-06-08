@@ -146,7 +146,23 @@ final class Plugin {
                 $adminResolverFn  = fn() => $adminResolver->resolveNext( $adminSettings->fechaWindowDays() );
                 $seedService      = new Fecha\SeedFechaService( $adminSettings, $adminLock, $adminFechaRepo, $adminResolverFn );
 
-                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService );
+                // Resolves a player's full name (sp_player post title) from the
+                // roster by player_id; used to backfill display_names stored as
+                // the SSO email (e.g. Apple @privaterelay.appleid.com addresses).
+                $playerNameByIdFn = static function ( int $playerId ) use ( $wpdb ): ?string {
+                    $title = $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT post_title FROM {$wpdb->posts}
+                              WHERE ID = %d AND post_type = 'sp_player' AND post_status = 'publish'
+                              LIMIT 1",
+                            $playerId
+                        )
+                    );
+                    return is_string( $title ) ? $title : null;
+                };
+                $repairService    = new Admin\RepairDisplayNamesService( $wpdb, $playerNameByIdFn );
+
+                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService );
                 $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
                 $auditLogPage = new Admin\AuditLogPage( $auditLogRepo );
 
@@ -162,6 +178,9 @@ final class Plugin {
         add_action( 'prode_recompute_rankings_cron',    [ Cron\RankingCron::class, 'run' ] );
         add_action( 'prode_notify_lock_approaching_cron', [ Cron\NotificationCron::class, 'runLockApproaching' ] );
         add_action( 'prode_create_new_fecha_cron',      [ Cron\FechaCreationCron::class, 'run' ] );
+        // Daily backfill of team-meta snapshots for fecha-match rows that still
+        // have none (legacy rows seeded before v0.5.2). Idempotent no-op once filled.
+        add_action( Cron\BackfillMatchMetaCron::HOOK,    [ Cron\BackfillMatchMetaCron::class, 'run' ] );
 
         // 6. Load text domain for i18n.
         load_plugin_textdomain(

@@ -363,4 +363,115 @@ class FechaResolverTest extends TestCase {
         $this->assertNull( $enriched[0]['home_escudo'] );
         $this->assertNull( $enriched[0]['away_escudo'] );
     }
+
+    // -------------------------------------------------------------------------
+    // v0.5.2: persisted snapshot precedence
+    // -------------------------------------------------------------------------
+
+    public function test_enrich_matches_persisted_snapshot_wins_over_live(): void {
+        // Live payload would return different names — the persisted snapshot must win.
+        $liveItems = [
+            [
+                'id'               => 10,
+                'fecha'            => '2026-05-30',
+                'hora'             => '13:45',
+                'equipo_local'     => 'Live Home',
+                'equipo_visitante' => 'Live Away',
+                'goles_local'      => null,
+                'goles_visitante'  => null,
+                'liga'             => 'Live Zona',
+                'escudo_local'     => 'https://example.com/live-home.png',
+                'escudo_visitante' => 'https://example.com/live-away.png',
+            ],
+        ];
+        $resolver = new FechaResolver( $this->stubDispatcher( $liveItems ) );
+
+        $persisted = [
+            [
+                'match_id'      => 10,
+                'match_kickoff' => '2026-05-30 13:45:00',
+                'home_team'     => 'Snapshot Home',
+                'away_team'     => 'Snapshot Away',
+                'zona'          => 'Snapshot Zona',
+                'home_escudo'   => 'https://example.com/snap-home.png',
+                'away_escudo'   => 'https://example.com/snap-away.png',
+            ],
+        ];
+
+        $enriched = $resolver->enrichMatches( $persisted );
+
+        $this->assertSame( 'Snapshot Home', $enriched[0]['home_team'] );
+        $this->assertSame( 'Snapshot Away', $enriched[0]['away_team'] );
+        $this->assertSame( 'Snapshot Zona', $enriched[0]['zona'] );
+        $this->assertSame( 'https://example.com/snap-home.png', $enriched[0]['home_escudo'] );
+        $this->assertSame( 'https://example.com/snap-away.png', $enriched[0]['away_escudo'] );
+    }
+
+    public function test_enrich_matches_skips_live_dispatch_when_all_snapshotted(): void {
+        // If the dispatcher is invoked despite a full snapshot, fail loudly.
+        $resolver = new FechaResolver( static function (): array {
+            throw new \RuntimeException( 'dispatcher must not be called when snapshot is complete' );
+        } );
+
+        $persisted = [
+            [
+                'match_id'      => 10,
+                'match_kickoff' => '2026-05-30 13:45:00',
+                'home_team'     => 'Snapshot Home',
+                'away_team'     => 'Snapshot Away',
+                'zona'          => 'Snapshot Zona',
+                'home_escudo'   => null,
+                'away_escudo'   => null,
+            ],
+        ];
+
+        $enriched = $resolver->enrichMatches( $persisted );
+
+        $this->assertSame( 'Snapshot Home', $enriched[0]['home_team'] );
+        $this->assertNull( $enriched[0]['home_escudo'] );
+    }
+
+    public function test_enrich_matches_mixed_snapshot_and_legacy_rows(): void {
+        // Row 10 has a snapshot; row 11 is legacy (empty) → only 11 uses live data.
+        $liveItems = [
+            [
+                'id'               => 10,
+                'fecha'            => '2026-05-30',
+                'hora'             => '13:45',
+                'equipo_local'     => 'Live Home 10',
+                'equipo_visitante' => 'Live Away 10',
+                'goles_local'      => null,
+                'goles_visitante'  => null,
+            ],
+            [
+                'id'               => 11,
+                'fecha'            => '2026-05-30',
+                'hora'             => '15:10',
+                'equipo_local'     => 'Live Home 11',
+                'equipo_visitante' => 'Live Away 11',
+                'goles_local'      => null,
+                'goles_visitante'  => null,
+            ],
+        ];
+        $resolver = new FechaResolver( $this->stubDispatcher( $liveItems ) );
+
+        $persisted = [
+            [
+                'match_id'      => 10,
+                'match_kickoff' => '2026-05-30 13:45:00',
+                'home_team'     => 'Snapshot Home 10',
+                'away_team'     => 'Snapshot Away 10',
+                'zona'          => '',
+                'home_escudo'   => null,
+                'away_escudo'   => null,
+            ],
+            [ 'match_id' => 11, 'match_kickoff' => '2026-05-30 15:10:00', 'home_team' => '', 'away_team' => '' ],
+        ];
+
+        $enriched = $resolver->enrichMatches( $persisted );
+
+        $this->assertSame( 'Snapshot Home 10', $enriched[0]['home_team'] );
+        $this->assertSame( 'Live Home 11', $enriched[1]['home_team'] );
+        $this->assertSame( 'Live Away 11', $enriched[1]['away_team'] );
+    }
 }

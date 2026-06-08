@@ -76,7 +76,7 @@ ProdeAuthController _makeController(
   ProdeAuthRepository repo,
   http.Client httpClient, {
   Future<String?> Function()? googleIdToken,
-  Future<String?> Function()? appleIdentityToken,
+  Future<AppleCredential?> Function()? appleIdentityToken,
 }) {
   final service = ProdeApiService(
     config: _testConfig,
@@ -714,7 +714,8 @@ void main() {
           }
           throw http.ClientException('Unexpected ${req.url}');
         }),
-        appleIdentityToken: () async => 'fake-identity-token',
+        appleIdentityToken: () async =>
+            const AppleCredential(identityToken: 'fake-identity-token'),
       );
 
       await controller.signInWithApple();
@@ -741,7 +742,8 @@ void main() {
           }
           throw http.ClientException('Unexpected ${req.url}');
         }),
-        appleIdentityToken: () async => 'fake-identity-token',
+        appleIdentityToken: () async =>
+            const AppleCredential(identityToken: 'fake-identity-token'),
       );
 
       await controller.signInWithApple();

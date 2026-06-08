@@ -19,8 +19,11 @@ namespace EntreRedes\Prode\Fecha;
  *   the authoritative dedup mechanism (INSERT IGNORE is also used as a belt,
  *   but tests prove idempotency via row count assertions, not DB constraint).
  *
- * Team names (home_team / away_team) are NOT persisted — ADR-G0-2 / ADR-P008.
- * The schema has no such columns; this class intentionally omits them.
+ * Team names, zona and escudos ARE persisted as a per-match snapshot since
+ * v0.5.2 (supersedes the original ADR-G0-2 / ADR-P008 "resolve live at read
+ * time" decision). The live endpoint drops matches once they are played, which
+ * left locked/evaluated fechas with empty team names; snapshotting at seed time
+ * makes a played fecha immutable and self-contained.
  */
 class FechaRepository {
 
@@ -72,6 +75,8 @@ class FechaRepository {
         }
 
         // Step 3: insert match rows (SELECT-then-insert dedup — ADR-G0-3).
+        // Team names, zona and escudos are snapshotted at seed time (v0.5.2) so a
+        // played fecha stays self-contained — see InitialSchema::sqlProdeFechaMatches.
         foreach ( $matches as $match ) {
             $matchId  = (int) $match['match_id'];
             $kickoff  = $match['kickoff'];
@@ -88,14 +93,26 @@ class FechaRepository {
             );
 
             if ( null === $exists ) {
+                $homeTeam   = (string) ( $match['home_team'] ?? '' );
+                $awayTeam   = (string) ( $match['away_team'] ?? '' );
+                $zona       = (string) ( $match['zona'] ?? '' );
+                $homeEscudo = isset( $match['home_escudo'] ) && '' !== $match['home_escudo'] ? (string) $match['home_escudo'] : null;
+                $awayEscudo = isset( $match['away_escudo'] ) && '' !== $match['away_escudo'] ? (string) $match['away_escudo'] : null;
+
                 // INSERT OR IGNORE as a belt — code guard above is the primary dedup.
                 $wpdb->query(
                     $wpdb->prepare(
-                        "INSERT IGNORE INTO {$p}prode_fecha_matches (fecha_id, match_id, match_kickoff)
-                         VALUES (%d, %d, %s)",
+                        "INSERT IGNORE INTO {$p}prode_fecha_matches
+                         (fecha_id, match_id, match_kickoff, home_team, away_team, zona, home_escudo, away_escudo)
+                         VALUES (%d, %d, %s, %s, %s, %s, %s, %s)",
                         $fechaId,
                         $matchId,
-                        $kickoff
+                        $kickoff,
+                        $homeTeam,
+                        $awayTeam,
+                        $zona,
+                        $homeEscudo,
+                        $awayEscudo
                     )
                 );
             }

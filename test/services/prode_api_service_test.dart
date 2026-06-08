@@ -891,6 +891,66 @@ void main() {
       expect(result, isA<ProdeSsoNeedsDni>());
       expect((result as ProdeSsoNeedsDni).intentToken, equals('intent-apple'));
     });
+
+    test('forwards given_name/family_name in the body when provided', () async {
+      String? sentBody;
+      final svc = _makeService(
+        repo,
+        MockClient((req) async {
+          sentBody = req.body;
+          return http.Response(
+            json.encode({
+              'step': 'dni_confirmation',
+              'intent_token': 'intent-apple',
+              'profile': {'name_first': 'Caro', 'name_last': 'Díaz'},
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      await svc.exchangeAppleToken(
+        'apple-identity-token',
+        givenName: 'Caro',
+        familyName: 'Díaz',
+      );
+
+      final decoded = json.decode(sentBody!) as Map<String, dynamic>;
+      expect(decoded['given_name'], equals('Caro'));
+      expect(decoded['family_name'], equals('Díaz'));
+    });
+
+    test('omits name keys when null or empty (later sign-ins)', () async {
+      String? sentBody;
+      final svc = _makeService(
+        repo,
+        MockClient((req) async {
+          sentBody = req.body;
+          return http.Response(
+            json.encode({
+              'step': 'authenticated',
+              'access_token': 'acc',
+              'refresh_token': 'ref',
+              'user': {
+                'user_id': 3,
+                'player_id': 1,
+                'name': 'Caro',
+                'session_version': 1,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      await svc.exchangeAppleToken('apple-identity-token', givenName: '');
+
+      final decoded = json.decode(sentBody!) as Map<String, dynamic>;
+      expect(decoded.containsKey('given_name'), isFalse);
+      expect(decoded.containsKey('family_name'), isFalse);
+    });
   });
 
   // ---------------------------------------------------------------------------

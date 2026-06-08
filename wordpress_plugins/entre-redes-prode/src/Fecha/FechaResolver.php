@@ -12,8 +12,10 @@ namespace EntreRedes\Prode\Fecha;
  * closure returning canned payloads without a real WP REST runtime.
  * The default closure wraps rest_do_request and is used in production.
  *
- * Team names (home_team / away_team) are mapped from the live payload for
- * in-memory use only — they are NOT persisted to the DB (ADR-G0-2 / ADR-P008).
+ * Team names, zona and escudos are mapped from the live payload. Since v0.5.2
+ * they are also snapshotted to the DB at seed time (see FechaRepository), so
+ * enrichMatches() prefers the persisted snapshot and only falls back to the
+ * live payload for rows seeded before the snapshot columns existed.
  */
 class FechaResolver {
 
@@ -62,11 +64,14 @@ class FechaResolver {
             }
             $hora    = ( isset( $item['hora'] ) && '' !== $item['hora'] ) ? $item['hora'] : '00:00';
             $matches[] = [
-                'match_id'   => (int) $item['id'],
-                'kickoff'    => $item['fecha'] . ' ' . $hora,
-                'home_team'  => $item['equipo_local'] ?? '',
-                'away_team'  => $item['equipo_visitante'] ?? '',
-                '_fecha'     => $item['fecha'], // internal grouping key
+                'match_id'    => (int) $item['id'],
+                'kickoff'     => $item['fecha'] . ' ' . $hora,
+                'home_team'   => $item['equipo_local'] ?? '',
+                'away_team'   => $item['equipo_visitante'] ?? '',
+                'zona'        => $item['liga'] ?? '',
+                'home_escudo' => $item['escudo_local'] ?? null,
+                'away_escudo' => $item['escudo_visitante'] ?? null,
+                '_fecha'      => $item['fecha'], // internal grouping key
             ];
         }
 
@@ -106,20 +111,79 @@ class FechaResolver {
     }
 
     /**
-     * Enrich persisted match rows with live team names from the dispatcher.
+     * Enrich persisted match rows with team names, zona and escudos.
      *
-     * The persisted rows contain match_id and match_kickoff but no team names
-     * (ADR-G0-2). This method fetches the live payload, builds a map by
-     * match_id, and merges the team names. Falls back to empty strings when
-     * the live endpoint no longer lists a match.
+     * Resolution order (v0.5.2):
+     *   1. PERSISTED SNAPSHOT wins. When a row already carries a non-empty
+     *      home_team (seeded at creation since v0.5.2), its snapshot fields are
+     *      kept verbatim — a played fecha is immutable and self-contained, and
+     *      no longer depends on the live endpoint that drops played matches.
+     *   2. LIVE FALLBACK. Rows without a snapshot (seeded before v0.5.2, e.g.
+     *      Fecha 1) are filled from the live /partidos-programados payload, as
+     *      before. Falls back to empty strings / null escudos when the live
+     *      endpoint no longer lists the match (the backfill command fixes those
+     *      durably).
      *
-     * @param array<int, array{match_id: int, match_kickoff: string}> $persistedMatches
-     * @return array<int, array{match_id: int, match_kickoff: string, home_team: string, away_team: string}>
+     * The live dispatch is skipped entirely when every row is already
+     * snapshotted, avoiding a wasted internal REST request on the common path.
+     *
+     * @param array<int, array<string, mixed>> $persistedMatches
+     * @return array<int, array{match_id: int, match_kickoff: string, home_team: string, away_team: string, zona: string, home_escudo: string|null, away_escudo: string|null}>
      */
     public function enrichMatches( array $persistedMatches ): array {
-        $items = $this->dispatch();
+        // A row is "complete" when its persisted snapshot has a team name.
+        $needsLive = false;
+        foreach ( $persistedMatches as $row ) {
+            if ( '' === (string) ( $row['home_team'] ?? '' ) ) {
+                $needsLive = true;
+                break;
+            }
+        }
 
-        // Build map: match_id => [home_team, away_team, zona, home_escudo, away_escudo]
+        $teamMap = $needsLive ? $this->buildTeamMap( $this->dispatch() ) : [];
+
+        $enriched = [];
+        foreach ( $persistedMatches as $row ) {
+            $hasSnapshot = '' !== (string) ( $row['home_team'] ?? '' );
+
+            if ( $hasSnapshot ) {
+                // Persisted snapshot is authoritative — normalize types only.
+                $row['home_team']   = (string) $row['home_team'];
+                $row['away_team']   = (string) ( $row['away_team'] ?? '' );
+                $row['zona']        = (string) ( $row['zona'] ?? '' );
+                $row['home_escudo'] = isset( $row['home_escudo'] ) && '' !== $row['home_escudo'] ? (string) $row['home_escudo'] : null;
+                $row['away_escudo'] = isset( $row['away_escudo'] ) && '' !== $row['away_escudo'] ? (string) $row['away_escudo'] : null;
+                $enriched[]         = $row;
+                continue;
+            }
+
+            // No snapshot — fall back to live data (empty defaults when absent).
+            $matchId            = (int) ( $row['match_id'] ?? 0 );
+            $names              = $teamMap[ $matchId ] ?? [
+                'home_team'   => '',
+                'away_team'   => '',
+                'zona'        => '',
+                'home_escudo' => null,
+                'away_escudo' => null,
+            ];
+            $row['home_team']   = $names['home_team'];
+            $row['away_team']   = $names['away_team'];
+            $row['zona']        = $names['zona'];
+            $row['home_escudo'] = $names['home_escudo'];
+            $row['away_escudo'] = $names['away_escudo'];
+            $enriched[]         = $row;
+        }
+
+        return $enriched;
+    }
+
+    /**
+     * Build a match_id => snapshot map from a live /partidos[-programados] payload.
+     *
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array{home_team: string, away_team: string, zona: string, home_escudo: string|null, away_escudo: string|null}>
+     */
+    private function buildTeamMap( array $items ): array {
         $teamMap = [];
         foreach ( $items as $item ) {
             if ( empty( $item['id'] ) ) {
@@ -133,27 +197,7 @@ class FechaResolver {
                 'away_escudo' => $item['escudo_visitante'] ?? null,
             ];
         }
-
-        // Merge into persisted rows.
-        $enriched = [];
-        foreach ( $persistedMatches as $row ) {
-            $matchId             = (int) ( $row['match_id'] ?? 0 );
-            $names               = $teamMap[ $matchId ] ?? [
-                'home_team'   => '',
-                'away_team'   => '',
-                'zona'        => '',
-                'home_escudo' => null,
-                'away_escudo' => null,
-            ];
-            $row['home_team']   = $names['home_team'];
-            $row['away_team']   = $names['away_team'];
-            $row['zona']        = $names['zona'];
-            $row['home_escudo'] = $names['home_escudo'];
-            $row['away_escudo'] = $names['away_escudo'];
-            $enriched[]          = $row;
-        }
-
-        return $enriched;
+        return $teamMap;
     }
 
     // -------------------------------------------------------------------------

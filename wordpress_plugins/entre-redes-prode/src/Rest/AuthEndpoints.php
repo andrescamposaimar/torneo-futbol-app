@@ -84,6 +84,19 @@ class AuthEndpoints {
                         'required' => true,
                         'type'     => 'string',
                     ],
+                    // Optional: the native iOS credential carries the user's
+                    // name only on first authorization; the app forwards it so
+                    // we can persist it (Apple omits it from the JWT later).
+                    'given_name' => [
+                        'required'          => false,
+                        'type'              => 'string',
+                        'sanitize_callback' => 'sanitize_text_field',
+                    ],
+                    'family_name' => [
+                        'required'          => false,
+                        'type'              => 'string',
+                        'sanitize_callback' => 'sanitize_text_field',
+                    ],
                 ],
             ]
         );
@@ -169,11 +182,20 @@ class AuthEndpoints {
 
         $provider_id = (string) ( $claims->sub ?? '' );
         $email       = (string) ( $claims->email ?? '' );
-        // Apple may omit given_name / family_name after first login. Extract from
-        // `name` claim if present; otherwise use empty strings (caller persists
-        // the name from the native credential).
-        $name_first  = (string) ( $claims->given_name ?? '' );
-        $name_last   = (string) ( $claims->family_name ?? '' );
+
+        // Apple includes given_name / family_name in the identity-token JWT ONLY
+        // on the user's first authorization; later sign-ins omit them. The native
+        // iOS credential, however, carries the name on first sign-in, and the app
+        // forwards it in the request body. Prefer the body-provided name and fall
+        // back to the JWT claim when the body is empty.
+        $name_first = trim( (string) $request->get_param( 'given_name' ) );
+        if ( '' === $name_first ) {
+            $name_first = (string) ( $claims->given_name ?? '' );
+        }
+        $name_last = trim( (string) $request->get_param( 'family_name' ) );
+        if ( '' === $name_last ) {
+            $name_last = (string) ( $claims->family_name ?? '' );
+        }
 
         return $this->handleProviderClaims( 'apple', $provider_id, $email, $name_first, $name_last );
     }

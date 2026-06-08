@@ -347,14 +347,18 @@ class _LoadedView extends ConsumerWidget {
       );
     }
 
+    // Section header reflects the fecha state: an open fecha lists upcoming
+    // matches, a locked/evaluated one lists matches that are already in play.
+    final sectionTitle = isLocked ? 'PARTIDOS JUGADOS' : 'PRÓXIMOS PARTIDOS';
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Text(
-            'PRÓXIMOS PARTIDOS',
-            style: TextStyle(
+            sectionTitle,
+            style: const TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 13,
               letterSpacing: 0.5,
@@ -923,7 +927,7 @@ class _StaleBanner extends StatelessWidget {
 
 /// Optional badge shown near the top of the list when the fecha is not open.
 ///
-/// - [ProdeFechaState.locked]    → amber "Cerrado" chip
+/// - [ProdeFechaState.locked]    → amber "Fecha Cerrada" chip
 /// - [ProdeFechaState.evaluated] → secondary "Finalizada" chip
 /// - [ProdeFechaState.open] / [ProdeFechaState.unknown] → nothing
 class _FechaBadge extends StatelessWidget {
@@ -941,7 +945,7 @@ class _FechaBadge extends StatelessWidget {
 
     switch (state) {
       case ProdeFechaState.locked:
-        label = 'Cerrado';
+        label = 'Fecha Cerrada';
         background = Colors.amber.shade100;
         foreground = Colors.orange.shade800;
       case ProdeFechaState.evaluated:
@@ -953,13 +957,19 @@ class _FechaBadge extends StatelessWidget {
         return const SizedBox.shrink();
     }
 
+    final baseStyle = theme.textTheme.labelMedium;
+
     return Container(
       width: double.infinity,
       color: background,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Text(
         label,
-        style: theme.textTheme.labelMedium?.copyWith(color: foreground),
+        textAlign: TextAlign.center,
+        style: baseStyle?.copyWith(
+          color: foreground,
+          fontSize: (baseStyle.fontSize ?? 12) + 1,
+        ),
       ),
     );
   }

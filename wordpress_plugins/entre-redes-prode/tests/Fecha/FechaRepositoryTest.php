@@ -139,28 +139,61 @@ class FechaRepositoryTest extends TestCase {
         $this->assertSame( 2, $this->countFechaMatches() );
     }
 
-    public function test_team_names_are_not_written_to_db(): void {
-        // The schema has no home_team / away_team columns — this test verifies
-        // the repository does NOT attempt to write them (would cause a SQL error
-        // if attempted). Success = no exception and row was inserted.
+    public function test_team_meta_is_snapshotted_to_db(): void {
+        // v0.5.2: home_team / away_team / zona / escudos ARE persisted at seed time
+        // so a played fecha stays self-contained (no live re-resolution needed).
         global $wpdb;
 
         $matches = [
-            [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'Should Not Persist', 'away_team' => 'Either' ],
+            [
+                'match_id'    => 10,
+                'kickoff'     => '2026-05-30 13:45',
+                'home_team'   => 'Marianista FC',
+                'away_team'   => 'Rival United',
+                'zona'        => '2026 - Apertura Zona A',
+                'home_escudo' => 'https://example.com/home.png',
+                'away_escudo' => 'https://example.com/away.png',
+            ],
         ];
 
         $fechaId = $this->repo->upsertFecha( 'test_tenant', 359, '2026-05-29 13:45:00', $matches );
 
         $this->assertGreaterThan( 0, $fechaId );
 
-        // Confirm match row was inserted with only the schema columns.
         $row = $wpdb->get_row(
-            "SELECT fecha_id, match_id, match_kickoff FROM {$wpdb->prefix}prode_fecha_matches LIMIT 1",
+            "SELECT home_team, away_team, zona, home_escudo, away_escudo
+               FROM {$wpdb->prefix}prode_fecha_matches LIMIT 1",
             ARRAY_A
         );
         $this->assertNotNull( $row );
-        $this->assertArrayNotHasKey( 'home_team', $row );
-        $this->assertArrayNotHasKey( 'away_team', $row );
+        $this->assertSame( 'Marianista FC', $row['home_team'] );
+        $this->assertSame( 'Rival United', $row['away_team'] );
+        $this->assertSame( '2026 - Apertura Zona A', $row['zona'] );
+        $this->assertSame( 'https://example.com/home.png', $row['home_escudo'] );
+        $this->assertSame( 'https://example.com/away.png', $row['away_escudo'] );
+    }
+
+    public function test_missing_team_meta_defaults_to_empty(): void {
+        // A match without zona/escudos persists empty values. wpdb->prepare coerces
+        // a NULL bound to %s into '', so the columns store '' (not SQL NULL) — the
+        // read path (FechaResolver::enrichMatches) normalizes '' escudos back to
+        // null in the API response, so the public contract is unaffected.
+        global $wpdb;
+
+        $matches = [
+            [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'Home', 'away_team' => 'Away' ],
+        ];
+
+        $this->repo->upsertFecha( 'test_tenant', 359, '2026-05-29 13:45:00', $matches );
+
+        $row = $wpdb->get_row(
+            "SELECT zona, home_escudo, away_escudo
+               FROM {$wpdb->prefix}prode_fecha_matches LIMIT 1",
+            ARRAY_A
+        );
+        $this->assertSame( '', $row['zona'] );
+        $this->assertSame( '', (string) $row['home_escudo'] );
+        $this->assertSame( '', (string) $row['away_escudo'] );
     }
 
     // -------------------------------------------------------------------------
