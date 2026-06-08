@@ -49,28 +49,25 @@ class EvaluatorCron {
         // now >= locked_at and it has not yet been evaluated (mirrors
         // LockComputer::deriveState). The persisted state column only ever holds
         // 'open' or 'evaluated', so the previous `state = 'locked'` filter matched
-        // nothing and evaluation never ran. Select the earliest due-but-unevaluated
-        // fecha instead.
-        $now         = current_time( 'mysql' );
-        $lockedFecha = $wpdb->get_row(
-            $wpdb->prepare(
-                "SELECT * FROM {$wpdb->prefix}prode_fechas
-                  WHERE tenant_id = %s AND state != 'evaluated' AND locked_at <= %s
-                  ORDER BY locked_at ASC, created_at DESC
-                  LIMIT 1",
-                $tenantId,
-                $now
-            ),
-            ARRAY_A
-        );
+        // nothing and evaluation never ran.
+        //
+        // Evaluate EVERY due fecha, not just the oldest: a fecha that can never
+        // complete (e.g. a postponed match that never gets a final result) stays
+        // un-evaluated forever, and a single-row LIMIT would let it permanently
+        // starve newer, complete fechas. evaluateFecha() is idempotent, so
+        // re-touching a still-pending fecha each run is a harmless no-op.
+        $now    = current_time( 'mysql' );
+        $dueIds = $fechaRepo->listDueFechaIds( $tenantId, $now );
 
-        if ( empty( $lockedFecha ) ) {
-            // EC-1: no locked fecha — exit cleanly, no hook fired.
+        if ( empty( $dueIds ) ) {
+            // EC-1: nothing due — exit cleanly.
             do_action( 'prode_evaluator_cron_ran' );
             return;
         }
 
-        $evaluator->evaluateFecha( (int) $lockedFecha['id'] );
+        foreach ( $dueIds as $fechaId ) {
+            $evaluator->evaluateFecha( $fechaId );
+        }
 
         do_action( 'prode_evaluator_cron_ran' );
     }

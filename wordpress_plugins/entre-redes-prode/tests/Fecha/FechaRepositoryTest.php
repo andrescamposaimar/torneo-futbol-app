@@ -459,4 +459,51 @@ class FechaRepositoryTest extends TestCase {
         $this->assertNotNull( $result );
         $this->assertCount( 2, $result['matches'] );
     }
+
+    // -------------------------------------------------------------------------
+    // listDueFechaIds — drives EvaluatorCron (derived-locked selection, no HOL)
+    // -------------------------------------------------------------------------
+
+    /** Insert a bare fecha row and return its id. */
+    private function insertFechaRow( string $tenantId, string $lockedAt, string $state ): int {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'prode_fechas', [
+            'tenant_id'  => $tenantId,
+            'season_id'  => 359,
+            'locked_at'  => $lockedAt,
+            'state'      => $state,
+            'created_at' => '2026-01-01 00:00:00',
+        ] );
+        return (int) $wpdb->insert_id;
+    }
+
+    /**
+     * Returns EVERY due-but-unevaluated fecha for the tenant, ordered by
+     * locked_at ASC — not just the oldest. This is the anti-head-of-line-blocking
+     * contract: a stuck oldest fecha must not hide newer due fechas from the cron.
+     */
+    public function test_list_due_fecha_ids_returns_all_due_unevaluated_ordered(): void {
+        $now = '2026-06-08 00:00:00';
+
+        $dueOld  = $this->insertFechaRow( 'test_tenant', '2026-04-01 10:00:00', 'open' );      // due (oldest)
+        $dueNew  = $this->insertFechaRow( 'test_tenant', '2026-05-01 10:00:00', 'open' );      // due (newer)
+        $this->insertFechaRow( 'test_tenant', '2026-04-15 10:00:00', 'evaluated' );            // excluded: evaluated
+        $this->insertFechaRow( 'test_tenant', '2099-01-01 00:00:00', 'open' );                 // excluded: not yet locked
+        $this->insertFechaRow( 'other_tenant', '2026-01-01 10:00:00', 'open' );                // excluded: other tenant
+
+        $ids = $this->repo->listDueFechaIds( 'test_tenant', $now );
+
+        // Both due fechas present (oldest does NOT starve the newer one), ASC order.
+        $this->assertSame( [ $dueOld, $dueNew ], $ids );
+    }
+
+    /** No due fechas (all future or evaluated) → empty list. */
+    public function test_list_due_fecha_ids_empty_when_none_due(): void {
+        $now = '2026-06-08 00:00:00';
+
+        $this->insertFechaRow( 'test_tenant', '2099-01-01 00:00:00', 'open' );       // future
+        $this->insertFechaRow( 'test_tenant', '2026-04-01 10:00:00', 'evaluated' );  // evaluated
+
+        $this->assertSame( [], $this->repo->listDueFechaIds( 'test_tenant', $now ) );
+    }
 }

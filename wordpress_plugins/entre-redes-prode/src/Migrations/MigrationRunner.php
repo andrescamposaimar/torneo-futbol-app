@@ -147,7 +147,7 @@ class MigrationRunner {
     // Cron scheduling
     // -------------------------------------------------------------------------
 
-    private static function scheduleCrons(): void {
+    public static function scheduleCrons(): void {
         $crons = [
             'prode_evaluate_matches_cron'       => 'every_5_minutes',
             'prode_notify_lock_approaching_cron' => 'every_15_minutes',

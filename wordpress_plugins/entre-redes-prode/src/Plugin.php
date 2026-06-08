@@ -205,6 +205,16 @@ final class Plugin {
         // have none (legacy rows seeded before v0.5.2). Idempotent no-op once filled.
         add_action( Cron\BackfillMatchMetaCron::HOOK,    [ Cron\BackfillMatchMetaCron::class, 'run' ] );
 
+        // Safety net: (re)schedule the crons on any normal request where the
+        // primary evaluation event is missing. MigrationRunner::run() only fires
+        // from the activation hook, so a plugin updated by file overwrite (which
+        // does NOT trigger activation) would otherwise never schedule its crons.
+        // The wp_next_scheduled() guard makes this a cheap no-op once events
+        // exist; scheduleCrons() is itself idempotent per hook.
+        if ( ! wp_next_scheduled( 'prode_evaluate_matches_cron' ) ) {
+            Migrations\MigrationRunner::scheduleCrons();
+        }
+
         // 6. Load text domain for i18n.
         load_plugin_textdomain(
             'entre-redes-prode',
