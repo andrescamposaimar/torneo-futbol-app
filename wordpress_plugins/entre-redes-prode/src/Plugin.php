@@ -146,7 +146,23 @@ final class Plugin {
                 $adminResolverFn  = fn() => $adminResolver->resolveNext( $adminSettings->fechaWindowDays() );
                 $seedService      = new Fecha\SeedFechaService( $adminSettings, $adminLock, $adminFechaRepo, $adminResolverFn );
 
-                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService );
+                // Resolves a player's full name (sp_player post title) from the
+                // roster by player_id; used to backfill display_names stored as
+                // the SSO email (e.g. Apple @privaterelay.appleid.com addresses).
+                $playerNameByIdFn = static function ( int $playerId ) use ( $wpdb ): ?string {
+                    $title = $wpdb->get_var(
+                        $wpdb->prepare(
+                            "SELECT post_title FROM {$wpdb->posts}
+                              WHERE ID = %d AND post_type = 'sp_player' AND post_status = 'publish'
+                              LIMIT 1",
+                            $playerId
+                        )
+                    );
+                    return is_string( $title ) ? $title : null;
+                };
+                $repairService    = new Admin\RepairDisplayNamesService( $wpdb, $playerNameByIdFn );
+
+                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService );
                 $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
                 $auditLogPage = new Admin\AuditLogPage( $auditLogRepo );
 

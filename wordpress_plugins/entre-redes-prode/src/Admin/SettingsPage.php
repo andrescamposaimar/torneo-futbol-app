@@ -26,6 +26,8 @@ class SettingsPage {
     private const NONCE_FIELD     = 'prode_settings_nonce';
     private const NONCE_SEED      = 'prode_seed_fecha';
     private const NONCE_SEED_FIELD = 'prode_seed_nonce';
+    private const NONCE_REPAIR       = 'prode_repair_names';
+    private const NONCE_REPAIR_FIELD = 'prode_repair_nonce';
 
     private const CRON_HOOKS = [
         'prode_create_new_fecha_cron',
@@ -44,7 +46,8 @@ class SettingsPage {
 
     public function __construct(
         private SettingsRepository $settingsRepo,
-        private SeedFechaService $seedService
+        private SeedFechaService $seedService,
+        private RepairDisplayNamesService $repairService
     ) {}
 
     // -------------------------------------------------------------------------
@@ -62,6 +65,8 @@ class SettingsPage {
             $this->handleSaveSettings();
         } elseif ( $action === 'seed_fecha' ) {
             $this->handleSeedFecha();
+        } elseif ( $action === 'repair_names' ) {
+            $this->handleRepairNames();
         }
     }
 
@@ -146,6 +151,36 @@ class SettingsPage {
             }
         }
 
+        // Repair-display-names notices.
+        $repairNotice     = '';
+        $repairNoticeType = 'info';
+        // phpcs:ignore WordPress.Security.NonceVerification
+        if ( isset( $_GET['prode_repair_notice'] ) ) {
+            // phpcs:ignore WordPress.Security.NonceVerification
+            $repairKey = sanitize_text_field( (string) $_GET['prode_repair_notice'] );
+            if ( $repairKey === 'done' ) {
+                // phpcs:ignore WordPress.Security.NonceVerification
+                $repairCount   = (int) ( $_GET['repaired'] ?? 0 );
+                // phpcs:ignore WordPress.Security.NonceVerification
+                $repairScanned = (int) ( $_GET['scanned'] ?? 0 );
+                if ( $repairCount > 0 ) {
+                    $repairNotice = sprintf(
+                        /* translators: 1: repaired count, 2: scanned count */
+                        __( 'Se repararon %1$d nombres (de %2$d candidatos revisados).', 'entre-redes-prode' ),
+                        $repairCount,
+                        $repairScanned
+                    );
+                    $repairNoticeType = 'success';
+                } else {
+                    $repairNotice     = __( 'No se encontraron nombres para reparar.', 'entre-redes-prode' );
+                    $repairNoticeType = 'info';
+                }
+            } elseif ( $repairKey === 'error' ) {
+                $repairNotice     = __( 'Error al reparar los nombres. Revisá los logs del servidor.', 'entre-redes-prode' );
+                $repairNoticeType = 'error';
+            }
+        }
+
         $adminUrl = admin_url( 'admin.php?page=prode-settings' );
 
         ?>
@@ -170,6 +205,12 @@ class SettingsPage {
             <?php if ( $seedNotice ) : ?>
             <div class="notice notice-<?php echo esc_attr( $seedNoticeType ); ?> is-dismissible">
                 <p><?php echo esc_html( $seedNotice ); ?></p>
+            </div>
+            <?php endif; ?>
+
+            <?php if ( $repairNotice ) : ?>
+            <div class="notice notice-<?php echo esc_attr( $repairNoticeType ); ?> is-dismissible">
+                <p><?php echo esc_html( $repairNotice ); ?></p>
             </div>
             <?php endif; ?>
 
@@ -315,6 +356,13 @@ class SettingsPage {
                 <?php submit_button( __( 'Crear fecha próxima', 'entre-redes-prode' ), 'secondary', 'submit', false ); ?>
             </form>
 
+            <form method="post" action="<?php echo esc_url( $adminUrl ); ?>" style="margin-top:1.5em;">
+                <?php wp_nonce_field( self::NONCE_REPAIR, self::NONCE_REPAIR_FIELD ); ?>
+                <input type="hidden" name="prode_action" value="repair_names">
+                <p><?php esc_html_e( 'Repara los nombres de usuarios que quedaron guardados como su email (por ejemplo, las cuentas de Apple que muestran una dirección @privaterelay.appleid.com). Toma el nombre real del padrón de jugadores según el DNI vinculado.', 'entre-redes-prode' ); ?></p>
+                <?php submit_button( __( 'Reparar nombres', 'entre-redes-prode' ), 'secondary', 'submit', false ); ?>
+            </form>
+
         </div>
         <?php
     }
@@ -415,6 +463,35 @@ class SettingsPage {
                     'prode_seed_notice' => 'created',
                     'fecha_id'          => $result['fecha_id'],
                     'match_count'       => $result['match_count'],
+                ],
+                $redirectBase
+            )
+        );
+        exit;
+    }
+
+    private function handleRepairNames(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'No tenés permiso para realizar esta acción.', 'entre-redes-prode' ) );
+        }
+
+        check_admin_referer( self::NONCE_REPAIR, self::NONCE_REPAIR_FIELD );
+
+        $redirectBase = admin_url( 'admin.php?page=prode-settings' );
+
+        try {
+            $result = $this->repairService->run();
+        } catch ( \Throwable $e ) {
+            wp_safe_redirect( add_query_arg( 'prode_repair_notice', 'error', $redirectBase ) );
+            exit;
+        }
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'prode_repair_notice' => 'done',
+                    'repaired'            => $result['repaired'],
+                    'scanned'             => $result['scanned'],
                 ],
                 $redirectBase
             )
