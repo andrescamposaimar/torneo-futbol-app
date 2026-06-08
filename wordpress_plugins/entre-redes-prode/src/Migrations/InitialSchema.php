@@ -229,6 +229,9 @@ class InitialSchema {
   zona VARCHAR(255) NOT NULL DEFAULT '',
   home_escudo VARCHAR(512) NULL DEFAULT NULL,
   away_escudo VARCHAR(512) NULL DEFAULT NULL,
+  real_score_home TINYINT UNSIGNED NULL DEFAULT NULL,
+  real_score_away TINYINT UNSIGNED NULL DEFAULT NULL,
+  is_final TINYINT(1) NOT NULL DEFAULT 0,
   PRIMARY KEY  (id),
   UNIQUE KEY uq_fecha_match (fecha_id, match_id),
   KEY idx_match (match_id)

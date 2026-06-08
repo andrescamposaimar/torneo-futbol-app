@@ -125,6 +125,33 @@ class InitialSchemaTest extends TestCase {
         $this->assertSame( 'test_tenant', $row['setting_value'] );
     }
 
+    public function test_fecha_matches_has_real_score_columns(): void {
+        // T-01: real_score_home, real_score_away, is_final must exist after up().
+        InitialSchema::up();
+
+        global $wpdb;
+        $pdo  = $wpdb->getPdo();
+        $stmt = $pdo->query( 'PRAGMA table_info(wp_prode_fecha_matches)' );
+        $rows = $stmt->fetchAll( \PDO::FETCH_ASSOC );
+        $cols = array_column( $rows, 'name' );
+
+        $this->assertContains(
+            'real_score_home',
+            $cols,
+            'prode_fecha_matches must have real_score_home column after T-01 migration.'
+        );
+        $this->assertContains(
+            'real_score_away',
+            $cols,
+            'prode_fecha_matches must have real_score_away column after T-01 migration.'
+        );
+        $this->assertContains(
+            'is_final',
+            $cols,
+            'prode_fecha_matches must have is_final column after T-01 migration.'
+        );
+    }
+
     public function test_prode_users_has_no_wp_user_id_column(): void {
         // AMENDMENT-001: prode_users must NOT have a wp_user_id column.
         InitialSchema::up();
