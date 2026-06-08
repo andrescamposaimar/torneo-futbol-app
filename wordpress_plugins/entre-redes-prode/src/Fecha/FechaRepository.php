@@ -172,6 +172,41 @@ class FechaRepository {
     }
 
     /**
+     * Return the IDs of every fecha that is DUE for evaluation: not yet
+     * 'evaluated' and whose derived lock time has passed (now >= locked_at).
+     *
+     * 'locked' is never persisted (mirrors LockComputer::deriveState), so the
+     * due set is selected by locked_at, not by the state column. Ordered by
+     * locked_at ASC, created_at DESC so the evaluator processes the oldest-due
+     * fecha first.
+     *
+     * EvaluatorCron evaluates EVERY returned id (not just the first), so a
+     * permanently-pending fecha — e.g. one with a match that never gets a final
+     * result — cannot starve evaluation of newer, complete fechas.
+     *
+     * @param string $tenantId
+     * @param string $now  Current datetime ('Y-m-d H:i:s'), e.g. current_time('mysql').
+     * @return array<int>
+     */
+    public function listDueFechaIds( string $tenantId, string $now ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id FROM {$p}prode_fechas
+                  WHERE tenant_id = %s AND state != 'evaluated' AND locked_at <= %s
+                  ORDER BY locked_at ASC, created_at DESC",
+                $tenantId,
+                $now
+            ),
+            ARRAY_A
+        );
+
+        return array_map( static fn( array $r ): int => (int) $r['id'], $rows ?: [] );
+    }
+
+    /**
      * Return all fechas for a season, ordered by locked_at ASC, with derived
      * state and match_count. Suitable for the "Fecha N" selector UI.
      *

@@ -172,6 +172,29 @@ final class Plugin {
         }
 
         // 5. Cron action handlers (registered here; scheduled at activation).
+        //
+        // Custom recurrence intervals MUST be registered on every request (not
+        // just at activation inside MigrationRunner::scheduleCrons), otherwise
+        // WP-Cron cannot resolve 'every_5_minutes' / 'every_15_minutes' when it
+        // reschedules the recurring events at runtime — the events silently fail
+        // to re-fire. Guard each with isset() so this composes with the
+        // activation-time registration.
+        add_filter( 'cron_schedules', static function ( array $schedules ): array {
+            if ( ! isset( $schedules['every_5_minutes'] ) ) {
+                $schedules['every_5_minutes'] = [
+                    'interval' => 5 * MINUTE_IN_SECONDS,
+                    'display'  => __( 'Every 5 minutes', 'entre-redes-prode' ),
+                ];
+            }
+            if ( ! isset( $schedules['every_15_minutes'] ) ) {
+                $schedules['every_15_minutes'] = [
+                    'interval' => 15 * MINUTE_IN_SECONDS,
+                    'display'  => __( 'Every 15 minutes', 'entre-redes-prode' ),
+                ];
+            }
+            return $schedules;
+        } );
+
         add_action( 'prode_evaluate_matches_cron',      [ Cron\EvaluatorCron::class, 'run' ] );
         // prode_recompute_rankings_cron is event-driven (fired on-demand by EvaluatorCron
         // after match evaluations land), NOT on a fixed schedule — per design.
@@ -181,6 +204,16 @@ final class Plugin {
         // Daily backfill of team-meta snapshots for fecha-match rows that still
         // have none (legacy rows seeded before v0.5.2). Idempotent no-op once filled.
         add_action( Cron\BackfillMatchMetaCron::HOOK,    [ Cron\BackfillMatchMetaCron::class, 'run' ] );
+
+        // Safety net: (re)schedule the crons on any normal request where the
+        // primary evaluation event is missing. MigrationRunner::run() only fires
+        // from the activation hook, so a plugin updated by file overwrite (which
+        // does NOT trigger activation) would otherwise never schedule its crons.
+        // The wp_next_scheduled() guard makes this a cheap no-op once events
+        // exist; scheduleCrons() is itself idempotent per hook.
+        if ( ! wp_next_scheduled( 'prode_evaluate_matches_cron' ) ) {
+            Migrations\MigrationRunner::scheduleCrons();
+        }
 
         // 6. Load text domain for i18n.
         load_plugin_textdomain(
