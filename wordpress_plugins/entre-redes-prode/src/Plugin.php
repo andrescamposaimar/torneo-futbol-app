@@ -162,6 +162,9 @@ final class Plugin {
         add_action( 'prode_recompute_rankings_cron',    [ Cron\RankingCron::class, 'run' ] );
         add_action( 'prode_notify_lock_approaching_cron', [ Cron\NotificationCron::class, 'runLockApproaching' ] );
         add_action( 'prode_create_new_fecha_cron',      [ Cron\FechaCreationCron::class, 'run' ] );
+        // Daily backfill of team-meta snapshots for fecha-match rows that still
+        // have none (legacy rows seeded before v0.5.2). Idempotent no-op once filled.
+        add_action( Cron\BackfillMatchMetaCron::HOOK,    [ Cron\BackfillMatchMetaCron::class, 'run' ] );
 
         // 6. Load text domain for i18n.
         load_plugin_textdomain(

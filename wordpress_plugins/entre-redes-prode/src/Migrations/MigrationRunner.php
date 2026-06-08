@@ -145,6 +145,10 @@ class MigrationRunner {
             'prode_evaluate_matches_cron'       => 'every_5_minutes',
             'prode_notify_lock_approaching_cron' => 'every_15_minutes',
             'prode_create_new_fecha_cron'        => 'daily',
+            // Daily safety net: snapshot team meta onto any fecha-match row that
+            // still has none (legacy rows seeded before v0.5.2, or any future gap).
+            // Idempotent — a no-op once every row is filled. See BackfillMatchMetaCron.
+            \EntreRedes\Prode\Cron\BackfillMatchMetaCron::HOOK => 'daily',
         ];
 
         // Register custom intervals if not already registered.

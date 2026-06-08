@@ -209,6 +209,14 @@ class InitialSchema {
     /**
      * prode_fecha_matches — matches that belong to a fecha (M:N).
      * match_kickoff is snapshotted at creation for reprogramming resilience (ADR-P008).
+     *
+     * v0.5.2 (snapshot fix): team names, zona and escudos are now snapshotted at
+     * seed time. Previously these were resolved live at read time from
+     * /partidos-programados (ADR-G0-2), but that endpoint drops matches once they
+     * are played — so any locked/evaluated fecha rendered with empty team names
+     * and missing escudos. Persisting a snapshot makes a played fecha immutable
+     * and self-contained. dbDelta adds these columns on upgrade; existing rows
+     * default to empty/null and are filled by the read-time fallback or backfill.
      */
     private static function sqlProdeFechaMatches( string $p, string $charset ): string {
         return "CREATE TABLE {$p}prode_fecha_matches (
@@ -216,6 +224,11 @@ class InitialSchema {
   fecha_id BIGINT UNSIGNED NOT NULL,
   match_id BIGINT UNSIGNED NOT NULL,
   match_kickoff DATETIME NOT NULL,
+  home_team VARCHAR(255) NOT NULL DEFAULT '',
+  away_team VARCHAR(255) NOT NULL DEFAULT '',
+  zona VARCHAR(255) NOT NULL DEFAULT '',
+  home_escudo VARCHAR(512) NULL DEFAULT NULL,
+  away_escudo VARCHAR(512) NULL DEFAULT NULL,
   PRIMARY KEY  (id),
   UNIQUE KEY uq_fecha_match (fecha_id, match_id),
   KEY idx_match (match_id)
