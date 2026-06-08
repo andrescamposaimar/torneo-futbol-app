@@ -161,6 +161,16 @@ class FechaEvaluator {
         foreach ( $matchIds as $matchId ) {
             $r = $resultsMap[ $matchId ] ?? [ 'isFinal' => false, 'realHome' => 0, 'realAway' => 0 ];
 
+            // Snapshot the real score into prode_fecha_matches (T-03).
+            // Idempotent: snapshotResult uses SELECT-then-UPDATE (ADR-G0-3).
+            $this->fechaRepo->snapshotResult(
+                $fechaId,
+                $matchId,
+                $r['isFinal'] ? $r['realHome'] : null,
+                $r['isFinal'] ? $r['realAway'] : null,
+                (bool) $r['isFinal']
+            );
+
             foreach ( $participants as $userId ) {
                 $pred = $predByUserMatch[ $userId ][ $matchId ] ?? null;
 
