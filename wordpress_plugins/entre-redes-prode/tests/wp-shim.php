@@ -646,4 +646,86 @@ if ( ! function_exists( 'version_compare' ) ) {
     // PHP built-in; never needed. Here only for clarity.
 }
 
+// ─── WP_List_Table stub ───────────────────────────────────────────────────────
+// Minimal stub so subclasses (PredictionsListTable, AuditLogListTable, etc.)
+// can be loaded and their non-rendering methods tested headlessly.
+
+if ( ! class_exists( 'WP_List_Table' ) ) {
+    class WP_List_Table {
+        /** @var array<string, mixed> */
+        protected array $_column_headers = [];
+        /** @var array<int, mixed> */
+        public array $items = [];
+
+        /** @param array<string, mixed> $args */
+        public function __construct( array $args = [] ) {}
+
+        /** @param array<string, mixed> $args */
+        protected function set_pagination_args( array $args ): void {}
+
+        public function prepare_items(): void {}
+
+        public function display(): void {}
+
+        public function no_items(): void {}
+
+        /** @return array<string, string> */
+        public function get_columns(): array {
+            return [];
+        }
+    }
+}
+
+// ─── WP admin URL shim ───────────────────────────────────────────────────────
+
+if ( ! function_exists( 'admin_url' ) ) {
+    function admin_url( string $path = '' ): string {
+        return 'http://example.com/wp-admin/' . ltrim( $path, '/' );
+    }
+}
+
+if ( ! function_exists( 'get_admin_page_title' ) ) {
+    function get_admin_page_title(): string {
+        return 'Admin Page';
+    }
+}
+
+if ( ! function_exists( 'current_user_can' ) ) {
+    function current_user_can( string $capability ): bool {
+        return false;
+    }
+}
+
+if ( ! function_exists( 'wp_die' ) ) {
+    function wp_die( string $message = '', string $title = '', mixed $args = [] ): void {
+        throw new \RuntimeException( $message );
+    }
+}
+
+if ( ! function_exists( 'selected' ) ) {
+    function selected( mixed $selected, mixed $current = true, bool $echo = true ): string {
+        $result = ( (string) $selected === (string) $current ) ? ' selected="selected"' : '';
+        if ( $echo ) {
+            echo $result;
+        }
+        return $result;
+    }
+}
+
+if ( ! function_exists( 'submit_button' ) ) {
+    function submit_button( string $text = '', string $type = 'primary', string $name = 'submit', bool $wrap = true, mixed $other_attributes = null ): void {
+        echo '<input type="submit" name="' . $name . '" value="' . $text . '">';
+    }
+}
+
+if ( ! function_exists( 'wp_safe_redirect' ) ) {
+    function wp_safe_redirect( string $location, int $status = 302 ): bool {
+        return true;
+    }
+}
+
+if ( ! defined( 'ABSPATH' ) ) {
+    define( 'ABSPATH', '/tmp/wp/' );
+}
+
 // phpcs:enable
