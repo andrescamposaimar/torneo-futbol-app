@@ -201,9 +201,9 @@ class PredictionRepository {
      * Design constraints:
      *   - LEFT JOIN on s.user_id + s.match_id (no window functions — SQLite shim compatible).
      *   - No wp_users JOIN.
-     *   - SQLite shim: the join condition uses literal %d for user_id in the ON clause
-     *     because SQLite-in-tests does not allow column references in the ON clause
-     *     that reference the outer query's bind position — we bind user_id explicitly.
+     *   - The ON clause joins on column references (s.user_id = p.user_id AND
+     *     s.match_id = p.match_id), not a literal user_id bind, so a user's score
+     *     rows match their own predictions only. user_id is filtered once in WHERE.
      *
      * @param int $fechaId The prode_fechas.id to filter by.
      * @param int $userId  The prode_users.id whose predictions to return.

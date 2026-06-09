@@ -150,6 +150,25 @@ class InitialSchemaTest extends TestCase {
             $cols,
             'prode_fecha_matches must have is_final column after T-01 migration.'
         );
+
+        // Beyond existence: type, nullability and defaults must match the DDL,
+        // because the is_final fail-closed gate relies on legacy rows defaulting
+        // to 0 and the real_score columns being nullable.
+        $byName = [];
+        foreach ( $rows as $r ) {
+            $byName[ $r['name'] ] = $r;
+        }
+
+        // real_score_home / real_score_away: TINYINT, nullable (notnull = 0).
+        foreach ( [ 'real_score_home', 'real_score_away' ] as $col ) {
+            $this->assertStringContainsStringIgnoringCase( 'tinyint', (string) $byName[ $col ]['type'], "$col should be a TINYINT column." );
+            $this->assertSame( 0, (int) $byName[ $col ]['notnull'], "$col must be nullable." );
+        }
+
+        // is_final: TINYINT, NOT NULL, DEFAULT 0 (fail-closed for legacy rows).
+        $this->assertStringContainsStringIgnoringCase( 'tinyint', (string) $byName['is_final']['type'], 'is_final should be a TINYINT column.' );
+        $this->assertSame( 1, (int) $byName['is_final']['notnull'], 'is_final must be NOT NULL.' );
+        $this->assertSame( '0', (string) $byName['is_final']['dflt_value'], 'is_final must default to 0 so legacy rows never leak real scores.' );
     }
 
     public function test_prode_users_has_no_wp_user_id_column(): void {
