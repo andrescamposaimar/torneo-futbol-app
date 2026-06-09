@@ -162,10 +162,16 @@ final class Plugin {
                 };
                 $repairService    = new Admin\RepairDisplayNamesService( $wpdb, $playerNameByIdFn );
 
+                // Backfills home_team/away_team snapshots on fecha-match rows that
+                // still have empty names (seeded before v0.5.2). Uses the same
+                // production dispatcher as the daily cron so team names are resolved
+                // from the /partidos endpoint on demand.
+                $backfillService  = new Fecha\BackfillMatchMetaService( $wpdb, Cron\BackfillMatchMetaCron::defaultDispatcher() );
+
                 $predRepo        = new Predictions\PredictionRepository( $wpdb );
                 $predictionsPage = new Admin\PredictionsPage( $predRepo, $registryRepo );
 
-                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService );
+                $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService, $backfillService );
                 $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
                 $auditLogPage = new Admin\AuditLogPage( $auditLogRepo );
 
