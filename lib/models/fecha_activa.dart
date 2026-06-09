@@ -62,26 +62,49 @@ class Populares {
 /// A stored prediction for a single match, returned by `GET /prode/fecha-activa`
 /// inside the `user_predictions` array when the caller is authenticated.
 ///
-/// Immutable value object. Carries only the wire fields that the client needs:
-/// match identity and the stored score pair.
+/// Immutable value object. Carries the wire fields that the client needs:
+/// match identity, the stored score pair, and (post-evaluation) points earned
+/// and the evaluation method applied.
+///
+/// [points] and [evaluationMethod] are null for non-evaluated fechas and for
+/// pre-change payloads that pre-date this feature. Both fields are parsed
+/// defensively — missing or null keys produce null values, never a crash.
 @immutable
 class PredictionEntry {
   final int matchId;
   final int scoreHome;
   final int scoreAway;
 
+  /// Points earned for this prediction after evaluation (0, 1, or 3).
+  /// Null when the fecha has not been evaluated yet or for pre-change payloads.
+  final int? points;
+
+  /// How the prediction was scored. One of:
+  ///   `exact_score`  — predicted score matches real score (+3 pts)
+  ///   `result_only`  — predicted outcome (W/D/L) matches (+1 pt if any)
+  ///   `no_prediction`— user submitted no prediction for this match (0 pts)
+  ///   `no_match_score` — match has no final score yet (0 pts)
+  /// Null when the fecha has not been evaluated or for pre-change payloads.
+  final String? evaluationMethod;
+
   const PredictionEntry({
     required this.matchId,
     required this.scoreHome,
     required this.scoreAway,
+    this.points,
+    this.evaluationMethod,
   });
 
-  /// Parses a single entry from `{match_id, score_home, score_away}`.
+  /// Parses a single entry from `{match_id, score_home, score_away, points?,
+  /// evaluation_method?}`. Absent or null values for [points] and
+  /// [evaluationMethod] produce null (defensive, backward-compatible).
   factory PredictionEntry.fromJson(Map<String, dynamic> json) {
     return PredictionEntry(
       matchId: json['match_id'] as int,
       scoreHome: json['score_home'] as int,
       scoreAway: json['score_away'] as int,
+      points: json['points'] as int?,
+      evaluationMethod: json['evaluation_method'] as String?,
     );
   }
 
@@ -92,15 +115,19 @@ class PredictionEntry {
           runtimeType == other.runtimeType &&
           matchId == other.matchId &&
           scoreHome == other.scoreHome &&
-          scoreAway == other.scoreAway;
+          scoreAway == other.scoreAway &&
+          points == other.points &&
+          evaluationMethod == other.evaluationMethod;
 
   @override
-  int get hashCode => Object.hash(matchId, scoreHome, scoreAway);
+  int get hashCode =>
+      Object.hash(matchId, scoreHome, scoreAway, points, evaluationMethod);
 
   @override
   String toString() =>
       'PredictionEntry(matchId: $matchId, scoreHome: $scoreHome, '
-      'scoreAway: $scoreAway)';
+      'scoreAway: $scoreAway, points: $points, '
+      'evaluationMethod: $evaluationMethod)';
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +219,20 @@ class FechaMatch {
   /// payload (i.e., no votes have been cast yet, or backend omits the field).
   final Populares? populares;
 
+  /// Real (official) home score after the match is finalised.
+  /// Null when the match has not ended or for pre-change payloads.
+  /// Always null unless [isFinal] is true in the REST response (is_final gate).
+  final int? realScoreHome;
+
+  /// Real (official) away score after the match is finalised.
+  /// Null when the match has not ended or for pre-change payloads.
+  final int? realScoreAway;
+
+  /// Whether the match result has been officially recorded and evaluation
+  /// can be derived from it. Defaults to false for backward compatibility
+  /// (absent key or pre-change payload).
+  final bool isFinal;
+
   const FechaMatch({
     required this.matchId,
     required this.homeTeam,
@@ -201,6 +242,9 @@ class FechaMatch {
     this.homeEscudo,
     this.awayEscudo,
     this.populares,
+    this.realScoreHome,
+    this.realScoreAway,
+    this.isFinal = false,
   });
 
   /// Parses a match object from the backend wire shape.
@@ -210,12 +254,20 @@ class FechaMatch {
   ///
   /// G6-d: parses `zona`, `home_escudo`, `away_escudo`, and `populares`.
   /// Absent or null values for the new fields produce safe defaults.
+  ///
+  /// T-09: parses `real_score_home` (int?), `real_score_away` (int?), and
+  /// `is_final` (bool, defaults false). All three are optional for backward
+  /// compatibility — pre-change payloads that omit them produce null/false.
   factory FechaMatch.fromJson(Map<String, dynamic> json) {
     // Parse populares: null JSON value or absent key both produce null.
     final rawPopulares = json['populares'];
     final Populares? populares = (rawPopulares is Map<String, dynamic>)
         ? Populares.fromJson(rawPopulares)
         : null;
+
+    // is_final: absent key → false; explicit false → false; explicit true → true.
+    final rawIsFinal = json['is_final'];
+    final bool isFinal = rawIsFinal == true;
 
     return FechaMatch(
       matchId: json['match_id'] as int,
@@ -226,6 +278,9 @@ class FechaMatch {
       homeEscudo: json['home_escudo'] as String?,
       awayEscudo: json['away_escudo'] as String?,
       populares: populares,
+      realScoreHome: json['real_score_home'] as int?,
+      realScoreAway: json['real_score_away'] as int?,
+      isFinal: isFinal,
     );
   }
 
@@ -241,11 +296,25 @@ class FechaMatch {
           zona == other.zona &&
           homeEscudo == other.homeEscudo &&
           awayEscudo == other.awayEscudo &&
-          populares == other.populares;
+          populares == other.populares &&
+          realScoreHome == other.realScoreHome &&
+          realScoreAway == other.realScoreAway &&
+          isFinal == other.isFinal;
 
   @override
-  int get hashCode =>
-      Object.hash(matchId, homeTeam, awayTeam, kickoff, zona, homeEscudo, awayEscudo, populares);
+  int get hashCode => Object.hash(
+        matchId,
+        homeTeam,
+        awayTeam,
+        kickoff,
+        zona,
+        homeEscudo,
+        awayEscudo,
+        populares,
+        realScoreHome,
+        realScoreAway,
+        isFinal,
+      );
 
   @override
   String toString() =>

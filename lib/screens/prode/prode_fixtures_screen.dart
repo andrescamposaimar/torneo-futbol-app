@@ -6,6 +6,7 @@ import '../../models/fecha_activa.dart';
 import '../../models/fecha_summary.dart';
 import '../../providers/prode_providers.dart';
 import '../../services/prode_fixtures_controller.dart';
+import 'prediction_result_style.dart';
 
 /// Container for the Prode Fixtures screen.
 ///
@@ -371,19 +372,29 @@ class _LoadedView extends ConsumerWidget {
             child: Center(child: Text('Sin partidos en esta fecha.')),
           )
         else
-          ...fecha.matches.map((m) => _MatchCard(
+          ...fecha.matches.map((m) {
+            // Find the user's saved prediction for this match (if any).
+            final PredictionEntry? predEntry =
+                fecha.userPredictions.cast<PredictionEntry?>().firstWhere(
+                      (p) => p!.matchId == m.matchId,
+                      orElse: () => null,
+                    );
+            return _MatchCard(
+              match: m,
+              draft: drafts[m.matchId] ?? const PredictionDraft(),
+              isSaved: savedMatchIds.contains(m.matchId),
+              isLocked: isLocked,
+              isEvaluated: fecha.state == ProdeFechaState.evaluated,
+              predictionEntry: predEntry,
+              onTap: () => _openPredictionSheet(
+                context,
                 match: m,
                 draft: drafts[m.matchId] ?? const PredictionDraft(),
-                isSaved: savedMatchIds.contains(m.matchId),
                 isLocked: isLocked,
-                onTap: () => _openPredictionSheet(
-                  context,
-                  match: m,
-                  draft: drafts[m.matchId] ?? const PredictionDraft(),
-                  isLocked: isLocked,
-                  controller: controller,
-                ),
-              )),
+                controller: controller,
+              ),
+            );
+          }),
         const SizedBox(height: 8),
         Center(
           child: TextButton.icon(
@@ -640,11 +651,20 @@ class _FechaPickerSheet extends StatelessWidget {
 ///   Header row: kickoff + zona | status icon
 ///   Divider
 ///   Body row: [home escudo+name] | [home score box] - [away score box] | [away escudo+name]
+///   (evaluated + isFinal) Result badge row: color badge + real-score line
 class _MatchCard extends StatelessWidget {
   final FechaMatch match;
   final PredictionDraft draft;
   final bool isSaved;
   final bool isLocked;
+
+  /// True when the parent fecha is in the [ProdeFechaState.evaluated] state.
+  final bool isEvaluated;
+
+  /// The user's saved prediction for this match. Null when the user has not
+  /// predicted this match or the fecha is not yet evaluated.
+  final PredictionEntry? predictionEntry;
+
   final VoidCallback onTap;
 
   const _MatchCard({
@@ -653,6 +673,8 @@ class _MatchCard extends StatelessWidget {
     required this.isSaved,
     required this.isLocked,
     required this.onTap,
+    this.isEvaluated = false,
+    this.predictionEntry,
   });
 
   @override
@@ -663,13 +685,30 @@ class _MatchCard extends StatelessWidget {
     // Format: "Dom. 07/06 - 14:00" (abbreviated weekday, capitalized)
     final kickoffFormatted = _formatKickoff(match.kickoff);
 
+    // Resolve evaluation style when the fecha is evaluated and the user has
+    // a prediction for this match. Null otherwise (open/locked fecha, or no
+    // prediction — no badge shown).
+    final PredictionResultStyle? evalStyle =
+        (isEvaluated && predictionEntry != null)
+            ? resolvePredictionStyle(
+                method: predictionEntry!.evaluationMethod,
+                points: predictionEntry!.points,
+              )
+            : null;
+
+    // Border color: use evalStyle color when final+evaluated, else default grey.
+    final borderColor = (evalStyle != null && match.isFinal)
+        ? evalStyle.color.withAlpha(180)
+        : Colors.grey.shade200;
+    final borderWidth = (evalStyle != null && match.isFinal) ? 1.5 : 1.0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Card(
         color: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.grey.shade200),
+          side: BorderSide(color: borderColor, width: borderWidth),
         ),
         elevation: 1,
         child: InkWell(
@@ -757,7 +796,7 @@ class _MatchCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Score display boxes
+                    // Score display boxes (user's predicted score)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Row(
@@ -803,6 +842,66 @@ class _MatchCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                // Evaluation badge — shown when fecha is evaluated and user
+                // has a prediction (regardless of isFinal).
+                if (evalStyle != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        key: Key('result_badge_${match.matchId}'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: evalStyle.color.withAlpha(30),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: evalStyle.color.withAlpha(180),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              evalStyle.icon,
+                              size: 14,
+                              color: evalStyle.color,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              evalStyle.label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: evalStyle.color,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                // Real-score line — shown only when match.isFinal is true.
+                if (match.isFinal &&
+                    match.realScoreHome != null &&
+                    match.realScoreAway != null) ...[
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      key: Key('real_score_line_${match.matchId}'),
+                      'Resultado: ${match.realScoreHome} - ${match.realScoreAway}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.grey.shade600,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
