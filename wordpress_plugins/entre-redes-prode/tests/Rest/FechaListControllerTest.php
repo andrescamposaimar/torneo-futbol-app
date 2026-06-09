@@ -33,6 +33,7 @@ class FechaListControllerTest extends TestCase {
         InitialSchema::up();
 
         global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_predictions" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
@@ -43,6 +44,7 @@ class FechaListControllerTest extends TestCase {
 
     protected function tearDown(): void {
         global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_predictions" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
@@ -658,5 +660,105 @@ class FechaListControllerTest extends TestCase {
         foreach ( $body['matches'] as $match ) {
             $this->assertArrayHasKey( 'populares', $match );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // T-08 — getFechaById user_predictions map includes points + evaluation_method
+    // -------------------------------------------------------------------------
+
+    /**
+     * Helper: insert a prode_scores row.
+     */
+    private function insertScore( int $userId, int $fechaId, int $matchId, int $points, string $method ): void {
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_scores',
+            [
+                'user_id'           => $userId,
+                'fecha_id'          => $fechaId,
+                'match_id'          => $matchId,
+                'prediction_id'     => null,
+                'points'            => $points,
+                'evaluation_method' => $method,
+                'evaluated_at'      => '2026-06-01 00:00:00',
+            ]
+        );
+    }
+
+    public function test_fecha_list_includes_points_in_user_predictions_when_evaluated(): void {
+        // Evaluated fecha with a prode_scores row → getFechaById response includes points + method.
+        $fechaId = $this->repo->upsertFecha(
+            'test_tenant',
+            359,
+            '2000-01-01 00:00:00', // past → locked/evaluated
+            [
+                [ 'match_id' => 10, 'kickoff' => '2026-05-30 13:45', 'home_team' => 'A', 'away_team' => 'B' ],
+            ]
+        );
+
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_predictions',
+            [
+                'user_id'            => 1,
+                'fecha_id'           => $fechaId,
+                'match_id'           => 10,
+                'result'             => '1',
+                'score_home'         => 2,
+                'score_away'         => 0,
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+                'locked_at_snapshot' => '2000-01-01 00:00:00',
+            ]
+        );
+        $this->insertScore( 1, $fechaId, 10, 3, 'exact_score' );
+
+        $predRepo   = new PredictionRepository( $wpdb );
+        $controller = $this->makeController( [], $predRepo );
+        $request    = new \WP_REST_Request( 'GET', '' );
+        $request->set_param( 'id', $fechaId );
+        $request->set_param( '_prode_user', [ 'id' => 1, 'session_version' => 1 ] );
+
+        $body        = $controller->getFechaById( $request )->get_data();
+        $predictions = $body['user_predictions'];
+
+        $this->assertCount( 1, $predictions );
+        $this->assertSame( 3, $predictions[0]['points'] );
+        $this->assertSame( 'exact_score', $predictions[0]['evaluation_method'] );
+    }
+
+    public function test_fecha_list_null_points_for_active_fecha(): void {
+        // Active / open fecha: no prode_scores rows → points and evaluation_method must be null.
+        $fechaId = $this->seedOpenFecha( 359, '2099-12-31 23:59:00', [ 10 ] );
+
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_predictions',
+            [
+                'user_id'            => 1,
+                'fecha_id'           => $fechaId,
+                'match_id'           => 10,
+                'result'             => 'X',
+                'score_home'         => 1,
+                'score_away'         => 1,
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+                'locked_at_snapshot' => '2099-12-31 23:59:00',
+            ]
+        );
+        // No score row.
+
+        $predRepo   = new PredictionRepository( $wpdb );
+        $controller = $this->makeController( [], $predRepo );
+        $request    = new \WP_REST_Request( 'GET', '' );
+        $request->set_param( 'id', $fechaId );
+        $request->set_param( '_prode_user', [ 'id' => 1, 'session_version' => 1 ] );
+
+        $body        = $controller->getFechaById( $request )->get_data();
+        $predictions = $body['user_predictions'];
+
+        $this->assertCount( 1, $predictions );
+        $this->assertNull( $predictions[0]['points'] );
+        $this->assertNull( $predictions[0]['evaluation_method'] );
     }
 }

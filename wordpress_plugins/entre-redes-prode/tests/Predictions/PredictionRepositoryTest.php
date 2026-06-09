@@ -30,6 +30,7 @@ class PredictionRepositoryTest extends TestCase {
 
         global $wpdb;
         // Clear prediction-related rows for test isolation.
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_predictions" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
@@ -39,6 +40,7 @@ class PredictionRepositoryTest extends TestCase {
 
     protected function tearDown(): void {
         global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_predictions" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
@@ -406,5 +408,88 @@ class PredictionRepositoryTest extends TestCase {
 
         $this->assertArrayHasKey( 5, $result );
         $this->assertArrayNotHasKey( 9, $result );
+    }
+
+    // -------------------------------------------------------------------------
+    // T-06 — findByUserAndFecha: LEFT JOIN prode_scores for points + method
+    // -------------------------------------------------------------------------
+
+    /**
+     * Helper: insert a prode_scores row for a given (user, match).
+     */
+    private function insertScore( int $userId, int $fechaId, int $matchId, int $points, string $method ): void {
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_scores',
+            [
+                'user_id'           => $userId,
+                'fecha_id'          => $fechaId,
+                'match_id'          => $matchId,
+                'prediction_id'     => null,
+                'points'            => $points,
+                'evaluation_method' => $method,
+                'evaluated_at'      => '2026-06-01 00:00:00',
+            ]
+        );
+    }
+
+    public function test_findByUserAndFecha_returns_points_when_scored(): void {
+        // Seed a prediction + a matching prode_scores row → assert points and method present.
+        $this->repo->upsert( 1, 10, 5, 2, 0, '2026-06-01 10:00:00' );
+        $this->insertScore( 1, 10, 5, 3, 'exact_score' );
+
+        $results = $this->repo->findByUserAndFecha( 10, 1 );
+
+        $this->assertCount( 1, $results );
+        $this->assertSame( 5, (int) $results[0]['match_id'] );
+        $this->assertSame( 3, (int) $results[0]['points'] );
+        $this->assertSame( 'exact_score', $results[0]['evaluation_method'] );
+    }
+
+    public function test_findByUserAndFecha_returns_null_points_when_not_scored(): void {
+        // Prediction exists but no prode_scores row → points and method must be null.
+        $this->repo->upsert( 1, 10, 5, 1, 1, '2026-06-01 10:00:00' );
+        // No insertScore call.
+
+        $results = $this->repo->findByUserAndFecha( 10, 1 );
+
+        $this->assertCount( 1, $results );
+        $this->assertNull( $results[0]['points'] );
+        $this->assertNull( $results[0]['evaluation_method'] );
+    }
+
+    public function test_findByUserAndFecha_backward_compat_pre_change_evaluated(): void {
+        // prode_scores row exists (evaluated) but real_score_* columns are NULL on
+        // prode_fecha_matches — points must still be returned correctly.
+        // The LEFT JOIN is on prode_scores only, independent of real_score columns.
+        $this->repo->upsert( 1, 10, 5, 1, 0, '2026-06-01 10:00:00' );
+        $this->insertScore( 1, 10, 5, 1, 'result_only' );
+
+        $results = $this->repo->findByUserAndFecha( 10, 1 );
+
+        $this->assertCount( 1, $results );
+        $this->assertSame( 1, (int) $results[0]['points'] );
+        $this->assertSame( 'result_only', $results[0]['evaluation_method'] );
+    }
+
+    public function test_findByUserAndFecha_mixed_scored_and_unscored_predictions(): void {
+        // match 5 scored, match 6 not scored → correct nulls on each.
+        $this->repo->upsert( 1, 10, 5, 2, 0, '2026-06-01 10:00:00' );
+        $this->repo->upsert( 1, 10, 6, 1, 1, '2026-06-01 10:00:00' );
+        $this->insertScore( 1, 10, 5, 3, 'exact_score' );
+        // match 6 has no score row.
+
+        $results = $this->repo->findByUserAndFecha( 10, 1 );
+        $this->assertCount( 2, $results );
+
+        $byMatchId = [];
+        foreach ( $results as $row ) {
+            $byMatchId[ (int) $row['match_id'] ] = $row;
+        }
+
+        $this->assertSame( 3, (int) $byMatchId[5]['points'] );
+        $this->assertSame( 'exact_score', $byMatchId[5]['evaluation_method'] );
+        $this->assertNull( $byMatchId[6]['points'] );
+        $this->assertNull( $byMatchId[6]['evaluation_method'] );
     }
 }

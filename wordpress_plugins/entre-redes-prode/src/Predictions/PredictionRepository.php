@@ -190,14 +190,24 @@ class PredictionRepository {
     }
 
     /**
-     * Return all predictions submitted by a user for a given fecha.
+     * Return all predictions submitted by a user for a given fecha, with
+     * points and evaluation_method from prode_scores when available.
      *
-     * Used by FechaController to back-populate user_predictions in the GET
-     * /prode/fecha-activa response (WU-A2).
+     * Extends the previous SELECT with a LEFT JOIN on prode_scores so that
+     * evaluated predictions carry `points` (int|null) and `evaluation_method`
+     * (string|null). Rows without a matching prode_scores entry return null
+     * for both columns (pre-evaluation or never-evaluated predictions).
+     *
+     * Design constraints:
+     *   - LEFT JOIN on s.user_id + s.match_id (no window functions — SQLite shim compatible).
+     *   - No wp_users JOIN.
+     *   - The ON clause joins on column references (s.user_id = p.user_id AND
+     *     s.match_id = p.match_id), not a literal user_id bind, so a user's score
+     *     rows match their own predictions only. user_id is filtered once in WHERE.
      *
      * @param int $fechaId The prode_fechas.id to filter by.
      * @param int $userId  The prode_users.id whose predictions to return.
-     * @return array<int, array{match_id: int, score_home: int, score_away: int}>
+     * @return array<int, array{match_id: int, score_home: int, score_away: int, points: int|null, evaluation_method: string|null}>
      */
     public function findByUserAndFecha( int $fechaId, int $userId ): array {
         $wpdb = $this->wpdb;
@@ -205,9 +215,13 @@ class PredictionRepository {
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT match_id, score_home, score_away
-                   FROM {$p}prode_predictions
-                  WHERE fecha_id = %d AND user_id = %d",
+                "SELECT p.match_id, p.score_home, p.score_away,
+                        s.points, s.evaluation_method
+                   FROM {$p}prode_predictions p
+                   LEFT JOIN {$p}prode_scores s
+                          ON s.user_id = p.user_id
+                         AND s.match_id = p.match_id
+                  WHERE p.fecha_id = %d AND p.user_id = %d",
                 $fechaId,
                 $userId
             ),

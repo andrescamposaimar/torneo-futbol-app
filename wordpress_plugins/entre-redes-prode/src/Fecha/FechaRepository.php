@@ -332,6 +332,51 @@ class FechaRepository {
     }
 
     /**
+     * Persist the real match score onto the prode_fecha_matches row identified by
+     * (fecha_id, match_id). Operation is idempotent: if the row exists it is
+     * updated; otherwise this is a no-op (the row was never seeded).
+     *
+     * Uses a SELECT-then-UPDATE pattern — no ON DUPLICATE KEY UPDATE — to remain
+     * compatible with the SQLite test shim (ADR-G0-3 / SQLite shim constraint).
+     *
+     * @param int      $fechaId   prode_fechas.id that owns the match row.
+     * @param int      $matchId   Match identifier (prode_fecha_matches.match_id).
+     * @param int|null $home      Real home score (null when match is not yet final).
+     * @param int|null $away      Real away score (null when match is not yet final).
+     * @param bool     $isFinal   Whether the match result is confirmed final.
+     */
+    public function snapshotResult( int $fechaId, int $matchId, ?int $home, ?int $away, bool $isFinal ): void {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        // SELECT-then-UPDATE: check if the row exists first.
+        $rowId = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT id FROM {$p}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d
+                  LIMIT 1",
+                $fechaId,
+                $matchId
+            )
+        );
+
+        if ( null === $rowId ) {
+            // Row does not exist — nothing to snapshot (fecha_match was not seeded).
+            return;
+        }
+
+        $wpdb->update(
+            $p . 'prode_fecha_matches',
+            [
+                'real_score_home' => $home,
+                'real_score_away' => $away,
+                'is_final'        => $isFinal ? 1 : 0,
+            ],
+            [ 'id' => (int) $rowId ]
+        );
+    }
+
+    /**
      * Return the MAX season_id present across all fechas for the given tenant.
      * Returns null when no fechas exist.
      */

@@ -495,6 +495,117 @@ class FechaEvaluatorTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // T-03: evaluateFecha snapshots real scores via fechaRepo::snapshotResult
+    // -------------------------------------------------------------------------
+
+    public function test_evaluateFecha_snapshots_real_scores_for_final_matches(): void {
+        // After evaluation, prode_fecha_matches rows for final matches must have
+        // real_score_home/away set and is_final=1.
+        $fechaId = $this->seedLockedFecha( [ 101, 102 ] );
+        $this->seedUser( 1 );
+        $this->seedPrediction( 1, 101, 2, 1 );
+        $this->seedPrediction( 1, 102, 0, 1 );
+
+        $items = [
+            $this->makeMatchItem( 101, 2, 1 ),
+            $this->makeMatchItem( 102, 0, 1 ),
+        ];
+        $evaluator = $this->buildEvaluator( $this->stubDispatcher( $items ) );
+        $evaluator->evaluateFecha( $fechaId );
+
+        global $wpdb;
+        $row101 = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT real_score_home, real_score_away, is_final
+                   FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                101
+            ),
+            ARRAY_A
+        );
+        $row102 = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT real_score_home, real_score_away, is_final
+                   FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                102
+            ),
+            ARRAY_A
+        );
+
+        $this->assertSame( 2, (int) $row101['real_score_home'] );
+        $this->assertSame( 1, (int) $row101['real_score_away'] );
+        $this->assertSame( 1, (int) $row101['is_final'] );
+
+        $this->assertSame( 0, (int) $row102['real_score_home'] );
+        $this->assertSame( 1, (int) $row102['real_score_away'] );
+        $this->assertSame( 1, (int) $row102['is_final'] );
+    }
+
+    public function test_evaluateFecha_snapshots_null_for_non_final_matches(): void {
+        // Non-final matches must result in NULL real scores and is_final=0.
+        $fechaId = $this->seedLockedFecha( [ 101 ] );
+        $this->seedUser( 1 );
+        $this->seedPrediction( 1, 101, 2, 1 );
+
+        $items     = [ $this->makeMatchItem( 101, null, null ) ];
+        $evaluator = $this->buildEvaluator( $this->stubDispatcher( $items ) );
+        $evaluator->evaluateFecha( $fechaId );
+
+        global $wpdb;
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT real_score_home, real_score_away, is_final
+                   FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                101
+            ),
+            ARRAY_A
+        );
+
+        $this->assertNull( $row['real_score_home'] );
+        $this->assertNull( $row['real_score_away'] );
+        $this->assertSame( 0, (int) $row['is_final'] );
+    }
+
+    public function test_evaluateFecha_snapshot_idempotent_on_re_evaluation(): void {
+        // Running evaluateFecha twice must not duplicate rows; final scores persist.
+        $fechaId = $this->seedLockedFecha( [ 101 ] );
+        $this->seedUser( 1 );
+        $this->seedPrediction( 1, 101, 2, 1 );
+
+        $items     = [ $this->makeMatchItem( 101, 2, 1 ) ];
+        $evaluator = $this->buildEvaluator( $this->stubDispatcher( $items ) );
+        $evaluator->evaluateFecha( $fechaId );
+        $evaluator->evaluateFecha( $fechaId );
+
+        global $wpdb;
+        $count = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d",
+                $fechaId,
+                101
+            )
+        );
+        $this->assertSame( 1, $count );
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT is_final FROM {$wpdb->prefix}prode_fecha_matches
+                  WHERE fecha_id = %d AND match_id = %d LIMIT 1",
+                $fechaId,
+                101
+            ),
+            ARRAY_A
+        );
+        $this->assertSame( 1, (int) $row['is_final'] );
+    }
+
+    // -------------------------------------------------------------------------
     // Idempotent re-evaluation (SR-3 integration)
     // -------------------------------------------------------------------------
 

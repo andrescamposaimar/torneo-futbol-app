@@ -136,9 +136,11 @@ class FechaController {
             $rawPredictions  = $this->predRepo->findByUserAndFecha( (int) $fecha['id'], $userId );
             $userPredictions = array_map( static function ( array $row ): array {
                 return [
-                    'match_id'   => (int) $row['match_id'],
-                    'score_home' => (int) $row['score_home'],
-                    'score_away' => (int) $row['score_away'],
+                    'match_id'          => (int) $row['match_id'],
+                    'score_home'        => (int) $row['score_home'],
+                    'score_away'        => (int) $row['score_away'],
+                    'points'            => isset( $row['points'] ) ? (int) $row['points'] : null,
+                    'evaluation_method' => isset( $row['evaluation_method'] ) ? (string) $row['evaluation_method'] : null,
                 ];
             }, $rawPredictions );
         }
