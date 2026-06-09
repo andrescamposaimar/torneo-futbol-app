@@ -162,11 +162,14 @@ final class Plugin {
                 };
                 $repairService    = new Admin\RepairDisplayNamesService( $wpdb, $playerNameByIdFn );
 
+                $predRepo        = new Predictions\PredictionRepository( $wpdb );
+                $predictionsPage = new Admin\PredictionsPage( $predRepo, $registryRepo );
+
                 $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService );
                 $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
                 $auditLogPage = new Admin\AuditLogPage( $auditLogRepo );
 
-                $adminMenu = new Admin\AdminMenu( $settingsPage, $registryPage, $auditLogPage );
+                $adminMenu = new Admin\AdminMenu( $settingsPage, $registryPage, $auditLogPage, $predictionsPage );
                 $adminMenu->register();
             } );
         }

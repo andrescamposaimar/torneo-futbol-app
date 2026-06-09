@@ -730,6 +730,37 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // ─── WP admin menu / hook stubs ───────────────────────────────────────────────
 
+if ( ! function_exists( 'is_admin' ) ) {
+    function is_admin(): bool {
+        return false;
+    }
+}
+
+if ( ! function_exists( 'wp_next_scheduled' ) ) {
+    // Return a future timestamp so Plugin::boot() does NOT call scheduleCrons(),
+    // which would require wp_schedule_event() and other cron functions not
+    // needed for admin wiring tests.
+    function wp_next_scheduled( string $hook, array $args = [] ): int|false {
+        return time() + 3600;
+    }
+}
+
+if ( ! function_exists( 'load_plugin_textdomain' ) ) {
+    function load_plugin_textdomain( string $domain, mixed $deprecated = false, mixed $plugin_rel_path = false ): bool {
+        return true;
+    }
+}
+
+if ( ! function_exists( 'plugin_basename' ) ) {
+    function plugin_basename( string $file ): string {
+        return basename( $file );
+    }
+}
+
+if ( ! defined( 'WP_CLI' ) ) {
+    define( 'WP_CLI', false );
+}
+
 if ( ! function_exists( 'add_menu_page' ) ) {
     function add_menu_page( string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, string $icon_url = '', ?int $position = null ): string {
         return $menu_slug;
