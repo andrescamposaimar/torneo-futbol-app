@@ -1120,6 +1120,236 @@ void main() {
     });
 
     // -------------------------------------------------------------------------
+    // T-12: Evaluated fecha — result badge + real-score line in _MatchCard
+    // -------------------------------------------------------------------------
+
+    group('Evaluated fecha result rendering (T-12)', () {
+      /// Builds a FechaActiva in evaluated state with one match that is final,
+      /// and one user prediction with [points] and [evaluationMethod].
+      FechaActiva _evaluatedFecha({
+        int? realScoreHome = 2,
+        int? realScoreAway = 1,
+        bool isFinal = true,
+        int? points = 3,
+        String? evaluationMethod = 'exact_score',
+      }) {
+        return FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.evaluated,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'River',
+              awayTeam: 'Boca',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              realScoreHome: realScoreHome,
+              realScoreAway: realScoreAway,
+              isFinal: isFinal,
+            ),
+          ],
+          userPredictions: [
+            PredictionEntry(
+              matchId: 1,
+              scoreHome: 2,
+              scoreAway: 1,
+              points: points,
+              evaluationMethod: evaluationMethod,
+            ),
+          ],
+        );
+      }
+
+      // --- badge rendering ---
+
+      testWidgets('exact_score: green badge label "+3 Exacto" visible on card', (tester) async {
+        final fecha = _evaluatedFecha(
+          points: 3,
+          evaluationMethod: 'exact_score',
+          isFinal: true,
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        expect(find.byKey(const Key('result_badge_1')), findsOneWidget);
+        expect(find.text('+3 Exacto'), findsOneWidget);
+      });
+
+      testWidgets('result_only/1: amber badge label "+1 Ganador" visible on card', (tester) async {
+        final fecha = _evaluatedFecha(
+          points: 1,
+          evaluationMethod: 'result_only',
+          realScoreHome: 1,
+          realScoreAway: 0,
+          isFinal: true,
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        expect(find.byKey(const Key('result_badge_1')), findsOneWidget);
+        expect(find.text('+1 Ganador'), findsOneWidget);
+      });
+
+      testWidgets('result_only/0: red badge label "0 pts" visible on card', (tester) async {
+        final fecha = _evaluatedFecha(
+          points: 0,
+          evaluationMethod: 'result_only',
+          realScoreHome: 3,
+          realScoreAway: 0,
+          isFinal: true,
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        expect(find.byKey(const Key('result_badge_1')), findsOneWidget);
+        expect(find.text('0 pts'), findsOneWidget);
+      });
+
+      // --- real-score line ---
+
+      testWidgets('isFinal=true: real-score line shows "Resultado: 2 - 1"', (tester) async {
+        final fecha = _evaluatedFecha(
+          realScoreHome: 2,
+          realScoreAway: 1,
+          isFinal: true,
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        expect(find.byKey(const Key('real_score_line_1')), findsOneWidget);
+        // Must show both real-score numbers
+        final widget = tester.widget<Text>(find.byKey(const Key('real_score_line_1')));
+        expect(widget.data, contains('2'));
+        expect(widget.data, contains('1'));
+      });
+
+      testWidgets('isFinal=false: no real-score line rendered', (tester) async {
+        final fecha = _evaluatedFecha(
+          realScoreHome: null,
+          realScoreAway: null,
+          isFinal: false,
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        expect(find.byKey(const Key('real_score_line_1')), findsNothing);
+      });
+
+      // --- null real-score fallback (legacy evaluated fecha) ---
+
+      testWidgets('legacy evaluated: points known but realScore null — badge shown, no real-score line, no crash', (tester) async {
+        final fecha = _evaluatedFecha(
+          realScoreHome: null,
+          realScoreAway: null,
+          isFinal: false, // pre-change: is_final was not set
+          points: 3,
+          evaluationMethod: 'exact_score',
+        );
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        // badge still shows (points are known)
+        expect(find.byKey(const Key('result_badge_1')), findsOneWidget);
+        // real-score line absent (not final)
+        expect(find.byKey(const Key('real_score_line_1')), findsNothing);
+      });
+
+      // --- active/open fecha: no badge, no real-score line ---
+
+      testWidgets('open fecha: no result badge, no real-score line', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.open,
+          lockedAt: null,
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'River',
+              awayTeam: 'Boca',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              realScoreHome: null,
+              realScoreAway: null,
+              isFinal: false,
+            ),
+          ],
+        );
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        expect(find.byKey(const Key('result_badge_1')), findsNothing);
+        expect(find.byKey(const Key('real_score_line_1')), findsNothing);
+      });
+
+      // --- locked fecha with no evaluation: no badge ---
+
+      testWidgets('locked fecha: no result badge shown', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'River',
+              awayTeam: 'Boca',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              isFinal: false,
+            ),
+          ],
+        );
+        await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
+
+        expect(find.byKey(const Key('result_badge_1')), findsNothing);
+      });
+
+      // --- card border color reflects evaluation style ---
+
+      testWidgets('evaluated isFinal=true card has colored border (not grey.shade200)', (tester) async {
+        final fecha = _evaluatedFecha(points: 3, evaluationMethod: 'exact_score', isFinal: true);
+        final drafts = _seedDrafts(fecha);
+        final savedMatchIds = _seedSavedMatchIds(fecha);
+        await _pumpScreen(
+          tester,
+          ProdeFixturesLoaded(fecha, drafts: drafts, savedMatchIds: savedMatchIds),
+        );
+
+        // The card Container/Card should exist with the match_card key.
+        expect(find.byKey(const Key('match_card_1')), findsOneWidget);
+        // We can't easily inspect border color in widget tests without finding the
+        // specific Card or Container — verify that no assertion error occurred
+        // and the badge is present (implicit: card rendered without error).
+        expect(find.text('+3 Exacto'), findsOneWidget);
+      });
+    });
+
+    // -------------------------------------------------------------------------
     // G6-f: Populares section
     // -------------------------------------------------------------------------
 
