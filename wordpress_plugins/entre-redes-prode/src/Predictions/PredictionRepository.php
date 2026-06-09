@@ -190,6 +190,80 @@ class PredictionRepository {
     }
 
     /**
+     * Return all predictions across all fechas for a given user, joined with
+     * match metadata and evaluation results.
+     *
+     * Used by the admin Predictions page (capability B — PR-3).
+     *
+     * JOIN strategy:
+     *   - LEFT JOIN prode_fecha_matches on (fecha_id + match_id) for home_team,
+     *     away_team, real_score_home/away, is_final.
+     *   - LEFT JOIN prode_scores on (user_id + match_id) for points and
+     *     evaluation_method.
+     *
+     * No wp_users JOIN (design constraint).
+     * ORDER BY fecha_id ASC, match_id ASC (spec: per-user detail sort order).
+     *
+     * @param int $userId The prode_users.id to query.
+     * @return array<int, array<string, mixed>>
+     */
+    public function findAllByUser( int $userId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT p.fecha_id,
+                        p.match_id,
+                        fm.home_team,
+                        fm.away_team,
+                        p.score_home,
+                        p.score_away,
+                        fm.real_score_home,
+                        fm.real_score_away,
+                        fm.is_final,
+                        s.points,
+                        s.evaluation_method
+                   FROM {$p}prode_predictions p
+                   LEFT JOIN {$p}prode_fecha_matches fm
+                          ON fm.fecha_id = p.fecha_id
+                         AND fm.match_id = p.match_id
+                   LEFT JOIN {$p}prode_scores s
+                          ON s.user_id = p.user_id
+                         AND s.match_id = p.match_id
+                  WHERE p.user_id = %d
+                  ORDER BY p.fecha_id ASC, p.match_id ASC",
+                $userId
+            ),
+            ARRAY_A
+        );
+
+        return $rows ?: [];
+    }
+
+    /**
+     * Return the total number of predictions for a given user across all fechas.
+     *
+     * Used for pagination in the admin Predictions page (capability B — PR-3).
+     *
+     * @param int $userId The prode_users.id to count.
+     * @return int
+     */
+    public function countByUser( int $userId ): int {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $count = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$p}prode_predictions WHERE user_id = %d",
+                $userId
+            )
+        );
+
+        return (int) $count;
+    }
+
+    /**
      * Return all predictions submitted by a user for a given fecha, with
      * points and evaluation_method from prode_scores when available.
      *
