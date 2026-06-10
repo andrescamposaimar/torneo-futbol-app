@@ -270,12 +270,62 @@ class _LoadedViewState extends ConsumerState<_LoadedView>
       vsync: this,
       initialIndex: hasOpen ? 0 : 1,
     );
+    _tabController.addListener(_onTabChanged);
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
+  }
+
+  /// Called on every animation tick and on settled tab changes.
+  ///
+  /// Guards with [TabController.indexIsChanging]: fires once when the tab
+  /// animation has settled so we don't trigger multiple selectFecha calls
+  /// during the swipe animation.
+  ///
+  /// When the newly-active tab's filtered fecha list does NOT contain the
+  /// controller's current [selectedFechaId], auto-selects the tab's default
+  /// fecha:
+  ///   - "A Jugarse" (index 0): first open fecha.
+  ///   - "Finalizados" (index 1): last locked|evaluated fecha (most recent,
+  ///     because the list is ordered locked_at ASC from the backend).
+  void _onTabChanged() {
+    if (_tabController.indexIsChanging) return;
+    if (!mounted) return;
+
+    // Read current widget props inside the callback so we always see the
+    // latest values (widget is rebuilt with new props on state changes).
+    final fechas = widget.fechas;
+    final selectedFechaId = widget.selectedFechaId;
+
+    final aJugarse =
+        fechas.where((f) => f.state == ProdeFechaState.open).toList();
+    final finalizados = fechas
+        .where((f) =>
+            f.state == ProdeFechaState.locked ||
+            f.state == ProdeFechaState.evaluated)
+        .toList();
+
+    final tabFechas = _tabController.index == 0 ? aJugarse : finalizados;
+
+    // If the tab's list is empty, nothing to select.
+    if (tabFechas.isEmpty) return;
+
+    // If the current selection already belongs to this tab, no work needed.
+    final alreadyInTab = tabFechas.any((f) => f.fechaId == selectedFechaId);
+    if (alreadyInTab) return;
+
+    // Auto-select the tab's default:
+    //   "A Jugarse"  → first open fecha (earliest upcoming).
+    //   "Finalizados"→ last finished fecha (most recent, ordered locked_at ASC).
+    final defaultId = _tabController.index == 0
+        ? tabFechas.first.fechaId
+        : tabFechas.last.fechaId;
+
+    ref.read(prodeFixturesControllerProvider.notifier).selectFecha(defaultId);
   }
 
   @override
