@@ -169,7 +169,7 @@ final class Plugin {
                 $backfillService  = new Fecha\BackfillMatchMetaService( $wpdb, Cron\BackfillMatchMetaCron::defaultDispatcher() );
 
                 $predRepo        = new Predictions\PredictionRepository( $wpdb );
-                $predictionsPage = new Admin\PredictionsPage( $predRepo, $registryRepo );
+                $predictionsPage = new Admin\PredictionsPage( $predRepo, $registryRepo, new Fecha\FechaResolver() );
 
                 $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService, $backfillService );
                 $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
