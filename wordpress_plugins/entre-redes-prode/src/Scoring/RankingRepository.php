@@ -250,6 +250,43 @@ class RankingRepository {
     }
 
     // -------------------------------------------------------------------------
+    // Roster linkage lookup
+    // -------------------------------------------------------------------------
+
+    /**
+     * Resolve the active player_id for each user in a list.
+     *
+     * Returns a map of user_id → player_id using a single IN(...) query on
+     * prode_associations WHERE deleted_at IS NULL (active association predicate),
+     * mirroring resolveDisplayNames pattern (ADR-G4-9).
+     *
+     * Returns empty array when $userIds is empty.
+     *
+     * @param array<int> $userIds
+     * @return array<int, int>  keyed by user_id
+     */
+    public function resolvePlayerIds( array $userIds ): array {
+        if ( empty( $userIds ) ) {
+            return [];
+        }
+
+        $placeholders = implode( ', ', array_fill( 0, count( $userIds ), '%d' ) );
+        $sql          = $this->wpdb->prepare(
+            "SELECT user_id, player_id FROM {$this->table('prode_associations')}
+              WHERE user_id IN ({$placeholders})
+                AND deleted_at IS NULL",
+            $userIds
+        );
+        $rows = $this->wpdb->get_results( $sql, ARRAY_A );
+
+        $map = [];
+        foreach ( $rows ?: [] as $row ) {
+            $map[ (int) $row['user_id'] ] = (int) $row['player_id'];
+        }
+        return $map;
+    }
+
+    // -------------------------------------------------------------------------
     // Fecha discovery
     // -------------------------------------------------------------------------
 

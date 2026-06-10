@@ -83,11 +83,13 @@ final class Plugin {
             // G4: ranking endpoint (PR-G4-C).
             $ranking_repo       = new Scoring\RankingRepository( $wpdb );
             $ranking_computer   = new Scoring\RankingComputer();
+            $roster_resolver    = new Scoring\WpRosterResolver( $ranking_repo );
             $ranking_controller = new Rest\RankingController(
                 $ranking_repo,
                 $ranking_computer,
                 new Fecha\Settings( $wpdb ),
-                $middleware
+                $middleware,
+                $roster_resolver
             );
 
             // G6-b: multi-fecha navigation endpoints (PR-G6-B).
