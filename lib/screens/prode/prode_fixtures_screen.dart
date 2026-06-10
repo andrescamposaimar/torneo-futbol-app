@@ -220,12 +220,13 @@ class _ErrorView extends StatelessWidget {
 
 /// Shown when a fecha is loaded successfully.
 ///
-/// G6-e: renders [_FechaSelectorRow] above the progress header when the
-/// fechas list is non-empty. A scoped loader ([fecha_load_spinner]) or inline
-/// error ([fecha_load_retry]) replaces the card list while the selection is
-/// in flight or has failed. The prediction modal lock gate is now driven by
-/// the selected [FechaSummary.state] rather than only the client-side lockedAt.
-class _LoadedView extends ConsumerWidget {
+/// T-13: renders a two-tab layout ("A Jugarse" / "Finalizados") with
+/// per-tab fecha filtering. "A Jugarse" shows only open fechas; "Finalizados"
+/// shows locked + evaluated fechas.
+///
+/// G6-e: each tab's [_FechaSelectorRow] operates on its own filtered list so
+/// the picker never shows cross-tab entries.
+class _LoadedView extends ConsumerStatefulWidget {
   final FechaActiva fecha;
   final Map<int, PredictionDraft> drafts;
   final Set<int> savedMatchIds;
@@ -251,15 +252,92 @@ class _LoadedView extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LoadedView> createState() => _LoadedViewState();
+}
+
+class _LoadedViewState extends ConsumerState<_LoadedView>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    // Default tab: "A Jugarse" (index 0) when open fechas exist, else
+    // "Finalizados" (index 1). Computed once on first build.
+    final hasOpen = widget.fechas.any((f) => f.state == ProdeFechaState.open);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: hasOpen ? 0 : 1,
+    );
+    _tabController.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  /// Called on every animation tick and on settled tab changes.
+  ///
+  /// Guards with [TabController.indexIsChanging]: fires once when the tab
+  /// animation has settled so we don't trigger multiple selectFecha calls
+  /// during the swipe animation.
+  ///
+  /// When the newly-active tab's filtered fecha list does NOT contain the
+  /// controller's current [selectedFechaId], auto-selects the tab's default
+  /// fecha:
+  ///   - "A Jugarse" (index 0): first open fecha.
+  ///   - "Finalizados" (index 1): last locked|evaluated fecha (most recent,
+  ///     because the list is ordered locked_at ASC from the backend).
+  void _onTabChanged() {
+    if (_tabController.indexIsChanging) return;
+    if (!mounted) return;
+
+    // Read current widget props inside the callback so we always see the
+    // latest values (widget is rebuilt with new props on state changes).
+    final fechas = widget.fechas;
+    final selectedFechaId = widget.selectedFechaId;
+
+    final aJugarse =
+        fechas.where((f) => f.state == ProdeFechaState.open).toList();
+    final finalizados = fechas
+        .where((f) =>
+            f.state == ProdeFechaState.locked ||
+            f.state == ProdeFechaState.evaluated)
+        .toList();
+
+    final tabFechas = _tabController.index == 0 ? aJugarse : finalizados;
+
+    // If the tab's list is empty, nothing to select.
+    if (tabFechas.isEmpty) return;
+
+    // If the current selection already belongs to this tab, no work needed.
+    final alreadyInTab = tabFechas.any((f) => f.fechaId == selectedFechaId);
+    if (alreadyInTab) return;
+
+    // Auto-select the tab's default:
+    //   "A Jugarse"  → first open fecha (earliest upcoming).
+    //   "Finalizados"→ last finished fecha (most recent, ordered locked_at ASC).
+    final defaultId = _tabController.index == 0
+        ? tabFechas.first.fechaId
+        : tabFechas.last.fechaId;
+
+    ref.read(prodeFixturesControllerProvider.notifier).selectFecha(defaultId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final controller = ref.read(prodeFixturesControllerProvider.notifier);
 
     // G6-e: lock gate derives from the selected FechaSummary.state when
     // available, falling back to the legacy client-side lockedAt check.
-    final selectedSummary = fechas.isEmpty
+    final selectedSummary = widget.fechas.isEmpty
         ? null
-        : fechas.cast<FechaSummary?>().firstWhere(
-              (f) => f!.fechaId == selectedFechaId,
+        : widget.fechas.cast<FechaSummary?>().firstWhere(
+              (f) => f!.fechaId == widget.selectedFechaId,
               orElse: () => null,
             );
 
@@ -270,37 +348,317 @@ class _LoadedView extends ConsumerWidget {
     // Legacy UX-only lock check (pre-G6-e). The summary-state check above
     // takes precedence; this is kept as belt-and-suspenders for the
     // "open but lockedAt in past" edge case.
-    final isLockedByTime =
-        fecha.lockedAt != null && !DateTime.now().isBefore(fecha.lockedAt!);
+    final isLockedByTime = widget.fecha.lockedAt != null &&
+        !DateTime.now().isBefore(widget.fecha.lockedAt!);
 
     final isLocked = isLockedByState || isLockedByTime;
 
-    final totalCount = fecha.matches.length;
-    final predictedCount =
-        fecha.matches.where((m) => savedMatchIds.contains(m.matchId)).length;
+    final totalCount = widget.fecha.matches.length;
+    final predictedCount = widget.fecha.matches
+        .where((m) => widget.savedMatchIds.contains(m.matchId))
+        .length;
 
-    // Current 0-based index of the selected fecha in the list.
-    final selectedIndex = fechas.indexWhere((f) => f.fechaId == selectedFechaId);
+    // T-13: split fechas into two buckets — client-side, no backend calls.
+    // Only applies when fechas list is non-empty; otherwise fall back to
+    // the single-view layout (no tabs, no selector) for compatibility with
+    // states that don't carry a full summary list.
+    final hasFechaList = widget.fechas.isNotEmpty;
+    final aJugarse = widget.fechas
+        .where((f) => f.state == ProdeFechaState.open)
+        .toList();
+    final finalizados = widget.fechas
+        .where((f) =>
+            f.state == ProdeFechaState.locked ||
+            f.state == ProdeFechaState.evaluated)
+        .toList();
+
+    // Progress header data — passed into each tab content and single-view so it
+    // renders below the selector row (W-1: selector must appear above progress).
+    final showProgress =
+        totalCount > 0 && !widget.isFechaLoading && widget.fechaLoadError == null;
+
+    if (!hasFechaList) {
+      // --- Single-view (no fecha summary list): pre-tabs behavior ---
+      return Column(
+        children: [
+          if (widget.stale) const _StaleBanner(),
+          _FechaBadge(state: widget.fecha.state),
+          if (showProgress)
+            _ProgressHeader(
+              predictedCount: predictedCount,
+              totalCount: totalCount,
+            ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: widget.onRefresh,
+              child: _buildLegacyCardArea(context, controller, isLocked),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // --- Two-tab layout (fechas summary list present) ---
+    return Column(
+      children: [
+        if (widget.stale) const _StaleBanner(),
+        _FechaBadge(state: widget.fecha.state),
+        // T-13: TabBar with the two tabs.
+        TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'A Jugarse'),
+            Tab(text: 'Finalizados'),
+          ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              // Tab 0: A Jugarse — open fechas only
+              _TabContent(
+                tabFechas: aJugarse,
+                fecha: widget.fecha,
+                drafts: widget.drafts,
+                savedMatchIds: widget.savedMatchIds,
+                selectedFechaId: widget.selectedFechaId,
+                isFechaLoading: widget.isFechaLoading,
+                fechaLoadError: widget.fechaLoadError,
+                isLocked: isLocked,
+                onLogout: widget.onLogout,
+                onRefresh: widget.onRefresh,
+                controller: controller,
+                emptyMessage: 'No hay fechas para jugar por ahora.',
+                predictedCount: predictedCount,
+                totalCount: totalCount,
+                showProgress: showProgress,
+              ),
+              // Tab 1: Finalizados — locked + evaluated fechas only
+              _TabContent(
+                tabFechas: finalizados,
+                fecha: widget.fecha,
+                drafts: widget.drafts,
+                savedMatchIds: widget.savedMatchIds,
+                selectedFechaId: widget.selectedFechaId,
+                isFechaLoading: widget.isFechaLoading,
+                fechaLoadError: widget.fechaLoadError,
+                isLocked: isLocked,
+                onLogout: widget.onLogout,
+                onRefresh: widget.onRefresh,
+                controller: controller,
+                emptyMessage: 'Todavía no hay fechas finalizadas.',
+                predictedCount: predictedCount,
+                totalCount: totalCount,
+                showProgress: showProgress,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Legacy single-view card area — used when no fechas summary list is
+  /// available. Equivalent to the pre-T-13 [_buildCardArea] logic.
+  Widget _buildLegacyCardArea(
+    BuildContext context,
+    ProdeFixturesController controller,
+    bool isLocked,
+  ) {
+    if (widget.isFechaLoading) {
+      return const Center(
+        child: CircularProgressIndicator(key: Key('fecha_load_spinner')),
+      );
+    }
+
+    if (widget.fechaLoadError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('No pudimos cargar esta fecha.'),
+              const SizedBox(height: 12),
+              TextButton(
+                key: const Key('fecha_load_retry'),
+                onPressed: () =>
+                    controller.selectFecha(widget.fechaLoadError!.fechaId),
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final sectionTitle = isLocked ? 'PARTIDOS JUGADOS' : 'PRÓXIMOS PARTIDOS';
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(
+            sectionTitle,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        if (widget.fecha.matches.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: Text('Sin partidos en esta fecha.')),
+          )
+        else
+          ...widget.fecha.matches.map((m) {
+            final PredictionEntry? predEntry =
+                widget.fecha.userPredictions.cast<PredictionEntry?>().firstWhere(
+                      (p) => p!.matchId == m.matchId,
+                      orElse: () => null,
+                    );
+            return _MatchCard(
+              match: m,
+              draft: widget.drafts[m.matchId] ?? const PredictionDraft(),
+              isSaved: widget.savedMatchIds.contains(m.matchId),
+              isLocked: isLocked,
+              isEvaluated: widget.fecha.state == ProdeFechaState.evaluated,
+              predictionEntry: predEntry,
+              onTap: () => _openLegacySheet(
+                context,
+                match: m,
+                draft: widget.drafts[m.matchId] ?? const PredictionDraft(),
+                isLocked: isLocked,
+                controller: controller,
+              ),
+            );
+          }),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            onPressed: widget.onLogout,
+            icon: const Icon(Icons.logout),
+            label: const Text('Cerrar sesión'),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  void _openLegacySheet(
+    BuildContext context, {
+    required FechaMatch match,
+    required PredictionDraft draft,
+    required bool isLocked,
+    required ProdeFixturesController controller,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _PredictionSheet(
+        match: match,
+        initialDraft: draft,
+        isLocked: isLocked,
+        controller: controller,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-tab content widget
+// ---------------------------------------------------------------------------
+
+/// Renders the content for one tab of the two-tab split.
+///
+/// [tabFechas] is the tab-filtered subset of all fechas (open only, or
+/// locked+evaluated only). When empty, shows [emptyMessage] instead of
+/// the card list.
+///
+/// Layout order (W-1): selector row → progress header → card area.
+class _TabContent extends StatelessWidget {
+  /// Fechas visible in this tab (filtered by state).
+  final List<FechaSummary> tabFechas;
+
+  final FechaActiva fecha;
+  final Map<int, PredictionDraft> drafts;
+  final Set<int> savedMatchIds;
+  final int selectedFechaId;
+  final bool isFechaLoading;
+  final ProdeFixturesFechaError? fechaLoadError;
+  final bool isLocked;
+  final VoidCallback onLogout;
+  final Future<void> Function() onRefresh;
+  final ProdeFixturesController controller;
+  final String emptyMessage;
+
+  /// Progress header data — rendered between selector and card area (W-1).
+  final int predictedCount;
+  final int totalCount;
+  final bool showProgress;
+
+  const _TabContent({
+    required this.tabFechas,
+    required this.fecha,
+    required this.drafts,
+    required this.savedMatchIds,
+    required this.selectedFechaId,
+    required this.isFechaLoading,
+    required this.fechaLoadError,
+    required this.isLocked,
+    required this.onLogout,
+    required this.onRefresh,
+    required this.controller,
+    required this.emptyMessage,
+    this.predictedCount = 0,
+    this.totalCount = 0,
+    this.showProgress = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // If this tab has no fechas at all, show the empty state.
+    if (tabFechas.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            emptyMessage,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    // Compute selectedIndex within the tab-filtered list.
+    final selectedIndex =
+        tabFechas.indexWhere((f) => f.fechaId == selectedFechaId);
 
     return Column(
       children: [
-        if (stale) const _StaleBanner(),
-        _FechaBadge(state: fecha.state),
-        // G6-e: selector row above progress header, only when list is non-empty.
-        if (fechas.isNotEmpty)
-          _FechaSelectorRow(
-            fechas: fechas,
-            selectedIndex: selectedIndex,
-            onPrev: selectedIndex > 0
-                ? () => controller.selectFecha(fechas[selectedIndex - 1].fechaId)
-                : null,
-            onNext: selectedIndex < fechas.length - 1
-                ? () => controller.selectFecha(fechas[selectedIndex + 1].fechaId)
-                : null,
-            onSelect: (id) => controller.selectFecha(id),
-          ),
-        // Progress header
-        if (totalCount > 0 && !isFechaLoading && fechaLoadError == null)
+        // G6-e: selector row above the progress header (W-1).
+        _FechaSelectorRow(
+          fechas: tabFechas,
+          selectedIndex: selectedIndex,
+          onPrev: selectedIndex > 0
+              ? () =>
+                  controller.selectFecha(tabFechas[selectedIndex - 1].fechaId)
+              : null,
+          onNext: selectedIndex < tabFechas.length - 1
+              ? () =>
+                  controller.selectFecha(tabFechas[selectedIndex + 1].fechaId)
+              : null,
+          onSelect: (id) => controller.selectFecha(id),
+        ),
+        // Progress header below the selector (W-1).
+        if (showProgress)
           _ProgressHeader(
             predictedCount: predictedCount,
             totalCount: totalCount,
@@ -308,18 +666,14 @@ class _LoadedView extends ConsumerWidget {
         Expanded(
           child: RefreshIndicator(
             onRefresh: onRefresh,
-            child: _buildCardArea(context, controller, isLocked),
+            child: _buildCardArea(context),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildCardArea(
-    BuildContext context,
-    ProdeFixturesController controller,
-    bool isLocked,
-  ) {
+  Widget _buildCardArea(BuildContext context) {
     // G6-e: scoped loading indicator.
     if (isFechaLoading) {
       return const Center(

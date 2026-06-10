@@ -45,6 +45,9 @@ class _StubController extends ProdeFixturesController {
 
   @override
   Future<void> refresh() async {}
+
+  @override
+  Future<void> selectFecha(int fechaId) async {}
 }
 
 /// Stub controller that invokes callbacks on load()/refresh() — for
@@ -70,6 +73,9 @@ class _StubControllerWithCallback extends ProdeFixturesController {
   Future<void> refresh() async {
     onRefresh?.call();
   }
+
+  @override
+  Future<void> selectFecha(int fechaId) async {}
 }
 
 /// Stub controller that records draft updates and submit calls for assertion.
@@ -90,6 +96,9 @@ class _StubControllerWithDraftTracking extends ProdeFixturesController {
 
   @override
   Future<void> refresh() async {}
+
+  @override
+  Future<void> selectFecha(int fechaId) async {}
 
   @override
   void updateDraft(int matchId, {int? scoreHome, int? scoreAway}) {
@@ -1641,6 +1650,463 @@ void main() {
           RegExp('Información sobre pronósticos populares'),
         );
         expect(semanticsWidget, findsAtLeastNWidgets(1));
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // T-13: Two-tab split — "A Jugarse" / "Finalizados"
+    // -------------------------------------------------------------------------
+
+    group('Two-tab split (T-13)', () {
+      // Helper: builds a ProdeFixturesLoaded with a mix of fechas across states.
+      ProdeFixturesLoaded _loadedWithMixedFechas({
+        int openCount = 2,
+        int lockedCount = 1,
+        int evaluatedCount = 1,
+        int? selectedFechaId,
+      }) {
+        final summaries = <FechaSummary>[];
+        int nextId = 1;
+
+        for (var i = 0; i < openCount; i++) {
+          summaries.add(FechaSummary(
+            fechaId: nextId++,
+            seasonId: 10,
+            state: ProdeFechaState.open,
+            lockedAt: null,
+            matchCount: 2,
+          ));
+        }
+        for (var i = 0; i < lockedCount; i++) {
+          summaries.add(FechaSummary(
+            fechaId: nextId++,
+            seasonId: 10,
+            state: ProdeFechaState.locked,
+            lockedAt: DateTime(2020, 1, 1),
+            matchCount: 2,
+          ));
+        }
+        for (var i = 0; i < evaluatedCount; i++) {
+          summaries.add(FechaSummary(
+            fechaId: nextId++,
+            seasonId: 10,
+            state: ProdeFechaState.evaluated,
+            lockedAt: DateTime(2020, 1, 1),
+            matchCount: 2,
+          ));
+        }
+
+        final resolvedSelectedId = selectedFechaId ?? summaries.first.fechaId;
+        final selectedSummary = summaries.firstWhere(
+          (s) => s.fechaId == resolvedSelectedId,
+        );
+        final fecha = _makeFecha(state: selectedSummary.state);
+
+        return ProdeFixturesLoaded(
+          fecha,
+          fechas: summaries,
+          selectedFechaId: resolvedSelectedId,
+        );
+      }
+
+      // TAB-1: Two tabs render with correct labels
+      testWidgets('TAB-1: two tabs "A Jugarse" and "Finalizados" visible when fechas loaded', (tester) async {
+        await _pumpScreen(
+          tester,
+          _loadedWithMixedFechas(openCount: 2, lockedCount: 1, evaluatedCount: 1),
+        );
+        expect(find.text('A Jugarse'), findsOneWidget);
+        expect(find.text('Finalizados'), findsOneWidget);
+      });
+
+      // TAB-2: Default tab is "A Jugarse" when open fechas exist
+      testWidgets('TAB-2: default tab is "A Jugarse" when open fechas exist', (tester) async {
+        await _pumpScreen(
+          tester,
+          _loadedWithMixedFechas(openCount: 1, lockedCount: 1, evaluatedCount: 1),
+        );
+        // Prediction save affordance (GUARDAR) is accessible from open tab
+        // Without tapping a card we confirm the tab label is selected/visible
+        expect(find.text('A Jugarse'), findsOneWidget);
+        // The progress header and PRÓXIMOS PARTIDOS section title belong to open fechas
+        expect(find.text('PRÓXIMOS PARTIDOS'), findsOneWidget);
+      });
+
+      // TAB-3: "A Jugarse" tab only shows fechas with state == open in its selector
+      testWidgets('TAB-3: "A Jugarse" selector only contains open fechas', (tester) async {
+        // 2 open (ids 1,2), 1 locked (id 3), 1 evaluated (id 4)
+        final state = _loadedWithMixedFechas(
+          openCount: 2, lockedCount: 1, evaluatedCount: 1,
+          selectedFechaId: 1, // open fecha selected
+        );
+        await _pumpScreen(tester, state);
+
+        // Open the picker on the "A Jugarse" tab
+        await tester.tap(find.byKey(const Key('fecha_selector_label')));
+        await tester.pumpAndSettle();
+
+        // Picker should show Fecha 1 and Fecha 2 (open), but NOT locked/evaluated ones
+        expect(find.byKey(const Key('fecha_picker_entry_1')), findsOneWidget);
+        expect(find.byKey(const Key('fecha_picker_entry_2')), findsOneWidget);
+        // entries 3 and 4 (locked/evaluated) must NOT appear in A Jugarse picker
+        expect(find.byKey(const Key('fecha_picker_entry_3')), findsNothing);
+        expect(find.byKey(const Key('fecha_picker_entry_4')), findsNothing);
+      });
+
+      // TAB-4: "Finalizados" selector contains locked + evaluated fechas
+      testWidgets('TAB-4: switching to "Finalizados" shows locked+evaluated fechas in selector', (tester) async {
+        // 2 open (ids 1,2), 1 locked (id 3), 1 evaluated (id 4)
+        final state = _loadedWithMixedFechas(
+          openCount: 2, lockedCount: 1, evaluatedCount: 1,
+          selectedFechaId: 1,
+        );
+        await _pumpScreen(tester, state);
+
+        // Switch to Finalizados tab
+        await tester.tap(find.text('Finalizados'));
+        await tester.pumpAndSettle();
+
+        // Open picker
+        await tester.tap(find.byKey(const Key('fecha_selector_label')));
+        await tester.pumpAndSettle();
+
+        // Should show locked (3) and evaluated (4), NOT open ones (1, 2)
+        expect(find.byKey(const Key('fecha_picker_entry_3')), findsOneWidget);
+        expect(find.byKey(const Key('fecha_picker_entry_4')), findsOneWidget);
+        expect(find.byKey(const Key('fecha_picker_entry_1')), findsNothing);
+        expect(find.byKey(const Key('fecha_picker_entry_2')), findsNothing);
+      });
+
+      // TAB-5: Empty state when no open fechas in "A Jugarse"
+      testWidgets('TAB-5: "A Jugarse" shows empty message when no open fechas', (tester) async {
+        // Only locked + evaluated, no open fechas
+        final state = _loadedWithMixedFechas(openCount: 0, lockedCount: 1, evaluatedCount: 1);
+        await _pumpScreen(tester, state);
+
+        // "A Jugarse" should show an empty message (no dates to play)
+        // Default tab is "Finalizados" in this case since no open fechas exist,
+        // but explicitly tap "A Jugarse" to check its empty state
+        await tester.tap(find.text('A Jugarse'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('No hay fechas para jugar por ahora.'), findsOneWidget);
+      });
+
+      // TAB-6: Empty state when no finalized fechas in "Finalizados"
+      testWidgets('TAB-6: "Finalizados" shows empty message when no locked/evaluated fechas', (tester) async {
+        // Only open fechas
+        final state = _loadedWithMixedFechas(openCount: 2, lockedCount: 0, evaluatedCount: 0);
+        await _pumpScreen(tester, state);
+
+        // Switch to Finalizados tab
+        await tester.tap(find.text('Finalizados'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Todavía no hay fechas finalizadas.'), findsOneWidget);
+      });
+
+      // TAB-7: Default tab is "Finalizados" when no open fechas exist
+      testWidgets('TAB-7: default tab is "Finalizados" when no open fechas', (tester) async {
+        // No open fechas — only locked + evaluated
+        final state = _loadedWithMixedFechas(openCount: 0, lockedCount: 1, evaluatedCount: 1);
+        await _pumpScreen(tester, state);
+
+        // Should see PARTIDOS JUGADOS section title (finalizados tab content)
+        expect(find.text('PARTIDOS JUGADOS'), findsOneWidget);
+        expect(find.text('PRÓXIMOS PARTIDOS'), findsNothing);
+      });
+
+      // TAB-8: "A Jugarse" tab shows prediction affordance (prediction badge/controls available)
+      testWidgets('TAB-8: open tab card is tappable and opens prediction sheet with enabled GUARDAR', (tester) async {
+        final state = _loadedWithMixedFechas(openCount: 1, lockedCount: 1, evaluatedCount: 0, selectedFechaId: 1);
+        await _pumpScreen(tester, state);
+
+        // We should be on "A Jugarse" tab with an open fecha selected
+        await tester.tap(find.byKey(const Key('match_card_1')));
+        await tester.pumpAndSettle();
+
+        final guardar = find.byKey(const Key('guardar_1'));
+        expect(guardar, findsOneWidget);
+        final btn = tester.widget<ElevatedButton>(guardar);
+        expect(btn.onPressed, isNotNull);
+      });
+
+      // TAB-9: "Finalizados" tab shows evaluation badge for evaluated fecha
+      testWidgets('TAB-9: "Finalizados" tab shows result badge for evaluated fecha', (tester) async {
+        // Build a state where selectedFechaId is an evaluated fecha
+        final summaries = [
+          FechaSummary(
+            fechaId: 1,
+            seasonId: 10,
+            state: ProdeFechaState.open,
+            lockedAt: null,
+            matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 2,
+            seasonId: 10,
+            state: ProdeFechaState.evaluated,
+            lockedAt: DateTime(2020, 1, 1),
+            matchCount: 1,
+          ),
+        ];
+        final evaluatedFecha = FechaActiva(
+          fechaId: 2,
+          seasonId: 10,
+          state: ProdeFechaState.evaluated,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 10,
+              homeTeam: 'River',
+              awayTeam: 'Boca',
+              kickoff: DateTime(2026, 6, 1, 14, 0),
+              realScoreHome: 2,
+              realScoreAway: 1,
+              isFinal: true,
+            ),
+          ],
+          userPredictions: [
+            PredictionEntry(
+              matchId: 10,
+              scoreHome: 2,
+              scoreAway: 1,
+              points: 3,
+              evaluationMethod: 'exact_score',
+            ),
+          ],
+        );
+        final loadedState = ProdeFixturesLoaded(
+          evaluatedFecha,
+          fechas: summaries,
+          selectedFechaId: 2,
+          drafts: {10: const PredictionDraft(scoreHome: 2, scoreAway: 1)},
+          savedMatchIds: {10},
+        );
+
+        await _pumpScreen(tester, loadedState);
+
+        // Switch to Finalizados tab — evaluated fecha is the current selection
+        await tester.tap(find.text('Finalizados'));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('result_badge_10')), findsOneWidget);
+        expect(find.text('+3 Exacto'), findsOneWidget);
+      });
+
+      // ---------------------------------------------------------------------------
+      // T-13 TAB-AUTO: Per-tab auto-select on tab switch
+      // ---------------------------------------------------------------------------
+
+      // TAB-AUTO-1: switching to "Finalizados" while an open fecha is selected
+      // must call selectFecha with the most-recent finalized fecha id (last in list).
+      testWidgets(
+          'TAB-AUTO-1: switching to Finalizados auto-selects most-recent finalized fecha',
+          (tester) async {
+        // fechas: open(1), open(2), locked(3), evaluated(4)
+        // selectedFechaId=1 (open) → switching to Finalizados must call selectFecha(4)
+        final summaries = [
+          FechaSummary(
+            fechaId: 1, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 2, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 3, seasonId: 10, state: ProdeFechaState.locked,
+            lockedAt: DateTime(2020, 1, 1), matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 4, seasonId: 10, state: ProdeFechaState.evaluated,
+            lockedAt: DateTime(2020, 1, 2), matchCount: 2,
+          ),
+        ];
+        final fecha = _makeFecha(state: ProdeFechaState.open);
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: summaries,
+          selectedFechaId: 1,
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Switch to Finalizados tab — selectedFechaId=1 is NOT in finalizados list
+        await tester.tap(find.text('Finalizados'));
+        await tester.pumpAndSettle();
+
+        // Must auto-select the last finalized fecha (id=4, most recent)
+        expect(stub.selectFechaCalls, contains(4));
+      });
+
+      // TAB-AUTO-2: switching back to "A Jugarse" while a finalized fecha is
+      // selected must call selectFecha with the first open fecha id.
+      testWidgets(
+          'TAB-AUTO-2: switching back to A Jugarse auto-selects first open fecha',
+          (tester) async {
+        // fechas: open(1), open(2), locked(3), evaluated(4)
+        // Start with selectedFechaId=3 (locked) → switching to A Jugarse must call selectFecha(1)
+        final summaries = [
+          FechaSummary(
+            fechaId: 1, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 2, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 3, seasonId: 10, state: ProdeFechaState.locked,
+            lockedAt: DateTime(2020, 1, 1), matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 4, seasonId: 10, state: ProdeFechaState.evaluated,
+            lockedAt: DateTime(2020, 1, 2), matchCount: 2,
+          ),
+        ];
+        // Selected fecha is locked → no open fechas exist in "A Jugarse" initial tab:
+        // default tab is "A Jugarse" when open fechas exist, so we start on "Finalizados"
+        // by seeding a locked fecha as selected and open fechas exist.
+        final fecha = _makeFecha(state: ProdeFechaState.locked);
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: summaries,
+          selectedFechaId: 3, // locked fecha selected
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Default tab is "A Jugarse" (open fechas exist). selectedFechaId=3 (locked)
+        // is NOT in aJugarse list → auto-select must fire immediately on initial tab.
+        // But to test the switch direction explicitly: manually switch to Finalizados
+        // first, then switch back.
+
+        // First switch to Finalizados (selectedFechaId=3 IS in finalizados → no auto-select)
+        await tester.tap(find.text('Finalizados'));
+        await tester.pumpAndSettle();
+
+        // Clear selectFecha calls so we can isolate the next switch
+        stub.selectFechaCalls.clear();
+
+        // Switch back to A Jugarse — selectedFechaId=3 is NOT in aJugarse list
+        await tester.tap(find.text('A Jugarse'));
+        await tester.pumpAndSettle();
+
+        // Must auto-select the first open fecha (id=1)
+        expect(stub.selectFechaCalls, contains(1));
+      });
+
+      // TAB-AUTO-3: no redundant selectFecha when selected fecha already belongs
+      // to the tapped tab.
+      testWidgets(
+          'TAB-AUTO-3: no redundant selectFecha call when selected fecha already in target tab',
+          (tester) async {
+        // fechas: open(1), open(2), locked(3), evaluated(4)
+        // selectedFechaId=1 (open) → tap "A Jugarse" (already correct tab) → no call
+        final summaries = [
+          FechaSummary(
+            fechaId: 1, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 2, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 3, seasonId: 10, state: ProdeFechaState.locked,
+            lockedAt: DateTime(2020, 1, 1), matchCount: 2,
+          ),
+          FechaSummary(
+            fechaId: 4, seasonId: 10, state: ProdeFechaState.evaluated,
+            lockedAt: DateTime(2020, 1, 2), matchCount: 2,
+          ),
+        ];
+        final fecha = _makeFecha(state: ProdeFechaState.open);
+        final initialState = ProdeFixturesLoaded(
+          fecha,
+          fechas: summaries,
+          selectedFechaId: 1, // already in "A Jugarse"
+        );
+
+        final stub = _StubControllerWithFechaTracking(initialState);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Switch to Finalizados then back — on the way back, selectedFechaId=1 is
+        // open, but after switching to Finalizados the controller would have selected
+        // a finalized one. For this test we care about the simpler case: switching
+        // to Finalizados when selectedFechaId=4 (evaluated) already belongs to Finalizados.
+
+        // Re-seed with an evaluated fecha selected
+        final stub2 = _StubControllerWithFechaTracking(
+          ProdeFixturesLoaded(
+            _makeFecha(state: ProdeFechaState.evaluated),
+            fechas: summaries,
+            selectedFechaId: 4, // already in "Finalizados"
+          ),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              prodeFixturesControllerProvider.overrideWith((ref) => stub2),
+            ],
+            child: const MaterialApp(
+              home: Scaffold(
+                body: ProdeFixturesScreen(stale: false, onLogout: _noOp),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Tap Finalizados tab — selectedFechaId=4 already belongs to it, no call expected
+        await tester.tap(find.text('Finalizados'));
+        await tester.pumpAndSettle();
+
+        // No auto-select call — id=4 is already in finalizados
+        expect(stub2.selectFechaCalls, isEmpty);
       });
     });
   });
