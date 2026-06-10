@@ -12,6 +12,8 @@ Map<String, dynamic> _entryJson({
   int rank = 1,
   int exactCount = 2,
   bool isMe = false,
+  String? avatarUrl,
+  String? teamName,
 }) {
   return {
     'user_id': userId,
@@ -20,6 +22,8 @@ Map<String, dynamic> _entryJson({
     'rank': rank,
     'exact_count': exactCount,
     'is_me': isMe,
+    if (avatarUrl != null) 'avatar_url': avatarUrl,
+    if (teamName != null) 'team_name': teamName,
   };
 }
 
@@ -92,6 +96,51 @@ void main() {
     test('toString contains userId', () {
       final entry = RankingEntry.fromJson(_entryJson(userId: 99));
       expect(entry.toString(), contains('99'));
+    });
+
+    test('avatar_url and team_name parsed when present', () {
+      final json = _entryJson(
+        avatarUrl: 'https://example.com/avatar.jpg',
+        teamName: 'Club Atlético',
+      );
+      final entry = RankingEntry.fromJson(json);
+      expect(entry.avatarUrl, 'https://example.com/avatar.jpg');
+      expect(entry.teamName, 'Club Atlético');
+    });
+
+    test('avatar_url absent → avatarUrl is null', () {
+      final entry = RankingEntry.fromJson(_entryJson());
+      expect(entry.avatarUrl, isNull);
+    });
+
+    test('team_name absent → teamName is null', () {
+      final entry = RankingEntry.fromJson(_entryJson());
+      expect(entry.teamName, isNull);
+    });
+
+    test('avatar_url null value → avatarUrl is null', () {
+      final json = Map<String, dynamic>.from(_entryJson());
+      json['avatar_url'] = null;
+      final entry = RankingEntry.fromJson(json);
+      expect(entry.avatarUrl, isNull);
+    });
+
+    test('team_name null value → teamName is null', () {
+      final json = Map<String, dynamic>.from(_entryJson());
+      json['team_name'] = null;
+      final entry = RankingEntry.fromJson(json);
+      expect(entry.teamName, isNull);
+    });
+
+    test('== considers avatarUrl and teamName', () {
+      final e1 = RankingEntry.fromJson(
+          _entryJson(avatarUrl: 'https://x.com/a.jpg', teamName: 'Boca'));
+      final e2 = RankingEntry.fromJson(
+          _entryJson(avatarUrl: 'https://x.com/a.jpg', teamName: 'Boca'));
+      final e3 = RankingEntry.fromJson(
+          _entryJson(avatarUrl: 'https://x.com/b.jpg', teamName: 'Boca'));
+      expect(e1, e2);
+      expect(e1 == e3, false);
     });
   });
 
