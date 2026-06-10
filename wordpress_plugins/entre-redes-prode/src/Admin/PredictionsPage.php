@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Prode\Admin;
 
+use EntreRedes\Prode\Fecha\FechaResolver;
 use EntreRedes\Prode\Predictions\PredictionRepository;
 
 /**
@@ -20,6 +21,13 @@ use EntreRedes\Prode\Predictions\PredictionRepository;
  *
  * WP_List_Table guard (design D2): WP_List_Table is required only at render
  * time via class_exists() guard so this file is loadable in headless tests.
+ *
+ * Team-name resolution (v0.5.7 — ADR-G0-2 / ADR-P008 parity):
+ *   renderDetail() passes the paginated row slice through
+ *   FechaResolver::enrichMatches() so unplayed matches whose home_team/away_team
+ *   snapshot is still empty get their names resolved from the live
+ *   /partidos-programados endpoint. Played matches with non-empty snapshots keep
+ *   their persisted names unchanged — same semantics as FechaController.
  */
 class PredictionsPage {
 
@@ -27,7 +35,8 @@ class PredictionsPage {
 
     public function __construct(
         private PredictionRepository $predictionRepo,
-        private RegistryRepository   $registryRepo
+        private RegistryRepository   $registryRepo,
+        private FechaResolver        $resolver
     ) {}
 
     // -------------------------------------------------------------------------
@@ -117,7 +126,10 @@ class PredictionsPage {
         $offset   = ( $currentPage - 1 ) * self::PER_PAGE;
         $allItems = $this->predictionRepo->findAllByUser( $userId );
         // Manual slice for pagination (repository returns all rows; slice in PHP).
-        $items    = array_slice( $allItems, $offset, self::PER_PAGE );
+        $rawItems = array_slice( $allItems, $offset, self::PER_PAGE );
+        // Resolve home_team/away_team for unplayed matches (snapshot-first / live-fallback).
+        // Played matches with a non-empty snapshot keep their persisted names.
+        $items    = $this->resolver->enrichMatches( $rawItems );
         $pages    = (int) ceil( $total / self::PER_PAGE );
         $adminUrl = admin_url( 'admin.php?page=prode-predictions&user_id=' . $userId );
         $backUrl  = admin_url( 'admin.php?page=prode-predictions' );

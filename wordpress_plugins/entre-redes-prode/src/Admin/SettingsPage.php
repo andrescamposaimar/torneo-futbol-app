@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Prode\Admin;
 
+use EntreRedes\Prode\Fecha\BackfillMatchMetaService;
 use EntreRedes\Prode\Fecha\SeedFechaService;
 
 /**
@@ -26,8 +27,10 @@ class SettingsPage {
     private const NONCE_FIELD     = 'prode_settings_nonce';
     private const NONCE_SEED      = 'prode_seed_fecha';
     private const NONCE_SEED_FIELD = 'prode_seed_nonce';
-    private const NONCE_REPAIR       = 'prode_repair_names';
-    private const NONCE_REPAIR_FIELD = 'prode_repair_nonce';
+    private const NONCE_REPAIR         = 'prode_repair_names';
+    private const NONCE_REPAIR_FIELD   = 'prode_repair_nonce';
+    private const NONCE_BACKFILL       = 'prode_backfill_match_meta';
+    private const NONCE_BACKFILL_FIELD = 'prode_backfill_nonce';
 
     private const CRON_HOOKS = [
         'prode_create_new_fecha_cron',
@@ -47,7 +50,8 @@ class SettingsPage {
     public function __construct(
         private SettingsRepository $settingsRepo,
         private SeedFechaService $seedService,
-        private RepairDisplayNamesService $repairService
+        private RepairDisplayNamesService $repairService,
+        private BackfillMatchMetaService $backfillService
     ) {}
 
     // -------------------------------------------------------------------------
@@ -67,6 +71,8 @@ class SettingsPage {
             $this->handleSeedFecha();
         } elseif ( $action === 'repair_names' ) {
             $this->handleRepairNames();
+        } elseif ( $action === 'backfill_match_meta' ) {
+            $this->handleBackfillMatchMeta();
         }
     }
 
@@ -181,6 +187,33 @@ class SettingsPage {
             }
         }
 
+        // Backfill match meta notices.
+        $backfillNotice     = '';
+        $backfillNoticeType = 'info';
+        // phpcs:ignore WordPress.Security.NonceVerification
+        if ( isset( $_GET['prode_backfill_notice'] ) ) {
+            // phpcs:ignore WordPress.Security.NonceVerification
+            $backfillKey = sanitize_text_field( (string) $_GET['prode_backfill_notice'] );
+            if ( $backfillKey === 'done' ) {
+                // phpcs:ignore WordPress.Security.NonceVerification
+                $backfillCount = (int) ( $_GET['backfilled'] ?? 0 );
+                if ( $backfillCount > 0 ) {
+                    $backfillNotice = sprintf(
+                        /* translators: number of match rows backfilled */
+                        __( 'Se actualizaron %d filas de partidos con nombres de equipos.', 'entre-redes-prode' ),
+                        $backfillCount
+                    );
+                    $backfillNoticeType = 'success';
+                } else {
+                    $backfillNotice     = __( 'Todas las filas ya tenían nombres de equipos. No se realizaron cambios.', 'entre-redes-prode' );
+                    $backfillNoticeType = 'info';
+                }
+            } elseif ( $backfillKey === 'error' ) {
+                $backfillNotice     = __( 'Error al actualizar los nombres de equipos. Revisá los logs del servidor.', 'entre-redes-prode' );
+                $backfillNoticeType = 'error';
+            }
+        }
+
         $adminUrl = admin_url( 'admin.php?page=prode-settings' );
 
         ?>
@@ -211,6 +244,12 @@ class SettingsPage {
             <?php if ( $repairNotice ) : ?>
             <div class="notice notice-<?php echo esc_attr( $repairNoticeType ); ?> is-dismissible">
                 <p><?php echo esc_html( $repairNotice ); ?></p>
+            </div>
+            <?php endif; ?>
+
+            <?php if ( $backfillNotice ) : ?>
+            <div class="notice notice-<?php echo esc_attr( $backfillNoticeType ); ?> is-dismissible">
+                <p><?php echo esc_html( $backfillNotice ); ?></p>
             </div>
             <?php endif; ?>
 
@@ -363,6 +402,13 @@ class SettingsPage {
                 <?php submit_button( __( 'Reparar nombres', 'entre-redes-prode' ), 'secondary', 'submit', false ); ?>
             </form>
 
+            <form method="post" action="<?php echo esc_url( $adminUrl ); ?>" style="margin-top:1.5em;">
+                <?php wp_nonce_field( self::NONCE_BACKFILL, self::NONCE_BACKFILL_FIELD ); ?>
+                <input type="hidden" name="prode_action" value="backfill_match_meta">
+                <p><?php esc_html_e( 'Rellena los nombres de equipos (home_team / away_team) en los partidos del prode que todavía muestran "—" en la página de predicciones del administrador. Útil para fechas antiguas que se crearon antes de la versión 0.5.2.', 'entre-redes-prode' ); ?></p>
+                <?php submit_button( __( 'Rellenar nombres de equipos', 'entre-redes-prode' ), 'secondary', 'submit', false ); ?>
+            </form>
+
         </div>
         <?php
     }
@@ -492,6 +538,34 @@ class SettingsPage {
                     'prode_repair_notice' => 'done',
                     'repaired'            => $result['repaired'],
                     'scanned'             => $result['scanned'],
+                ],
+                $redirectBase
+            )
+        );
+        exit;
+    }
+
+    private function handleBackfillMatchMeta(): void {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'No tenés permiso para realizar esta acción.', 'entre-redes-prode' ) );
+        }
+
+        check_admin_referer( self::NONCE_BACKFILL, self::NONCE_BACKFILL_FIELD );
+
+        $redirectBase = admin_url( 'admin.php?page=prode-settings' );
+
+        try {
+            $backfilled = $this->backfillService->run();
+        } catch ( \Throwable $e ) {
+            wp_safe_redirect( add_query_arg( 'prode_backfill_notice', 'error', $redirectBase ) );
+            exit;
+        }
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'prode_backfill_notice' => 'done',
+                    'backfilled'            => $backfilled,
                 ],
                 $redirectBase
             )

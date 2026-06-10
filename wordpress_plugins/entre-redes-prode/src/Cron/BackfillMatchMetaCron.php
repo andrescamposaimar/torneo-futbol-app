@@ -53,9 +53,13 @@ class BackfillMatchMetaCron {
      * /partidos lists PLAYED matches (with full team meta + escudos), which is
      * exactly the data missing for already-locked fechas.
      *
+     * Public so Plugin.php can reuse it when constructing the manual admin
+     * trigger (BackfillMatchMetaService instance for the SettingsPage button)
+     * with the same live resolver as the daily cron.
+     *
      * @return callable(string):array<int, array<string, mixed>>
      */
-    private static function defaultDispatcher(): callable {
+    public static function defaultDispatcher(): callable {
         return static function ( string $date ): array {
             $request = new \WP_REST_Request( 'GET', '/entre-redes/v1/partidos' );
             $request->set_param( 'fecha', $date );
