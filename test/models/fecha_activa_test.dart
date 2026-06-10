@@ -355,27 +355,29 @@ void main() {
       expect(match.homeEscudo, isNull);
     });
 
-    test('populares parsed — keys 1, X, 2 → home/draw/away doubles', () {
+    test('populares parsed — keys 1, X, 2 → home/draw/away doubles (percentage contract)', () {
+      // Backend sends percentages: 50.0 = 50%, 30.0 = 30%, 20.0 = 20%
       final match = FechaMatch.fromJson(
         _matchJsonG6d(
           includePopulares: true,
-          populares: {'1': 0.5, 'X': 0.3, '2': 0.2},
+          populares: {'1': 50.0, 'X': 30.0, '2': 20.0},
         ),
       );
       expect(match.populares, isNotNull);
-      expect(match.populares!.home, closeTo(0.5, 0.001));
-      expect(match.populares!.draw, closeTo(0.3, 0.001));
-      expect(match.populares!.away, closeTo(0.2, 0.001));
+      expect(match.populares!.home, closeTo(50.0, 0.001));
+      expect(match.populares!.draw, closeTo(30.0, 0.001));
+      expect(match.populares!.away, closeTo(20.0, 0.001));
     });
 
-    test('populares as int values → parsed as doubles', () {
+    test('populares as int values → parsed as doubles (zero-vote outcomes)', () {
+      // Backend may return integers when there are zero votes for an outcome
       final match = FechaMatch.fromJson(
         _matchJsonG6d(
           includePopulares: true,
-          populares: {'1': 1, 'X': 0, '2': 0},
+          populares: {'1': 100, 'X': 0, '2': 0},
         ),
       );
-      expect(match.populares!.home, equals(1.0));
+      expect(match.populares!.home, equals(100.0));
     });
 
     test('populares null value → populares is null', () {
@@ -403,19 +405,36 @@ void main() {
 
   // -------------------------------------------------------------------------
   // G6-d: Populares model
+  // Backend sends percentage values [0.0, 100.0] — e.g. 60.0 means 60%, not 0.6.
   // -------------------------------------------------------------------------
   group('Populares', () {
-    test('fromJson parses keys 1, X, 2 correctly', () {
-      final p = Populares.fromJson({'1': 0.6, 'X': 0.25, '2': 0.15});
-      expect(p.home, closeTo(0.6, 0.001));
-      expect(p.draw, closeTo(0.25, 0.001));
-      expect(p.away, closeTo(0.15, 0.001));
+    test('fromJson parses percentage keys 1, X, 2 correctly', () {
+      // Backend sends percentage values: 60.0 = 60%, 25.0 = 25%, 15.0 = 15%
+      final p = Populares.fromJson({'1': 60.0, 'X': 25.0, '2': 15.0});
+      expect(p.home, closeTo(60.0, 0.001));
+      expect(p.draw, closeTo(25.0, 0.001));
+      expect(p.away, closeTo(15.0, 0.001));
     });
 
     test('fromJson converts int values to double', () {
-      final p = Populares.fromJson({'1': 1, 'X': 0, '2': 0});
+      // Backend may send integers for 0-vote outcomes
+      final p = Populares.fromJson({'1': 100, 'X': 0, '2': 0});
       expect(p.home, isA<double>());
-      expect(p.home, equals(1.0));
+      expect(p.home, equals(100.0));
+    });
+
+    test('fromJson parses 100.0/0.0/0.0 (all votes on home) correctly', () {
+      final p = Populares.fromJson({'1': 100.0, 'X': 0.0, '2': 0.0});
+      expect(p.home, equals(100.0));
+      expect(p.draw, equals(0.0));
+      expect(p.away, equals(0.0));
+    });
+
+    test('fromJson parses realistic decimal percentages (e.g. 33.3)', () {
+      final p = Populares.fromJson({'1': 33.3, 'X': 33.3, '2': 33.4});
+      expect(p.home, closeTo(33.3, 0.001));
+      expect(p.draw, closeTo(33.3, 0.001));
+      expect(p.away, closeTo(33.4, 0.001));
     });
   });
 
@@ -541,7 +560,8 @@ void main() {
         'zona': 'Zona A',
         'home_escudo': 'https://cdn.test/r.png',
         'away_escudo': 'https://cdn.test/b.png',
-        'populares': {'1': 0.5, 'X': 0.3, '2': 0.2},
+        // Backend sends percentages: 50.0 = 50%, 30.0 = 30%, 20.0 = 20%
+        'populares': {'1': 50.0, 'X': 30.0, '2': 20.0},
         'real_score_home': 2,
         'real_score_away': 1,
         'is_final': true,

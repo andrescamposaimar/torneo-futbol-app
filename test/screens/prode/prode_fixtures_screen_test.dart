@@ -1387,7 +1387,8 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .45, draw: .30, away: .25),
+              // Backend sends percentages [0,100] — 45.0 means 45%, not 0.45
+              populares: const Populares(home: 45.0, draw: 30.0, away: 25.0),
             ),
           ],
         );
@@ -1400,6 +1401,7 @@ void main() {
       });
 
       // POP-2-a: chips show correct percentages when locked + populares non-null.
+      // Backend contract: values are already percentages [0,100].
       testWidgets('POP-2-a: chips show 45%, 30%, 25% when locked + populares set', (tester) async {
         final fecha = FechaActiva(
           fechaId: 1,
@@ -1412,7 +1414,8 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .45, draw: .30, away: .25),
+              // Wire values are percentages: 45.0 → "45%", 30.0 → "30%", 25.0 → "25%"
+              populares: const Populares(home: 45.0, draw: 30.0, away: 25.0),
             ),
           ],
         );
@@ -1436,7 +1439,8 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .70, draw: .30, away: 0.0),
+              // Wire values are percentages: 70.0 → "70%", 30.0 → "30%", 0.0 → "0%"
+              populares: const Populares(home: 70.0, draw: 30.0, away: 0.0),
             ),
           ],
         );
@@ -1460,8 +1464,8 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              // .334 * 100 → 33, .333 * 100 → 33, .333 * 100 → 33 (sum = 99)
-              populares: Populares(home: .334, draw: .333, away: .333),
+              // Wire percentages: 33.4 → 33, 33.3 → 33, 33.3 → 33 (sum = 99)
+              populares: const Populares(home: 33.4, draw: 33.3, away: 33.3),
             ),
           ],
         );
@@ -1484,7 +1488,8 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: 1.0, draw: 0.0, away: 0.0),
+              // Wire values are percentages: 100.0 → "100%", 0.0 → "0%"
+              populares: const Populares(home: 100.0, draw: 0.0, away: 0.0),
             ),
           ],
         );
@@ -1492,6 +1497,55 @@ void main() {
 
         expect(find.text('100%'), findsOneWidget);
         expect(find.text('0%'), findsNWidgets(2));
+      });
+
+      // POP-2-e: wire percentage contract — backend sends percentages [0,100].
+      // Populares values are already percentages (e.g. 100.0 means 100%, not 1).
+      // The screen must NOT multiply by 100 again.
+      testWidgets('POP-2-e: wire value 100.0 renders as "100%", not "10000%" (percentage contract)', (tester) async {
+        // Backend sends percentages: 100.0, 0.0, 0.0
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: const Populares(home: 100.0, draw: 0.0, away: 0.0),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.text('100%'), findsOneWidget);
+        expect(find.text('10000%'), findsNothing); // must never appear
+        expect(find.text('0%'), findsNWidgets(2));
+      });
+
+      // POP-2-f: realistic mixed case — backend sends 33.3 / 33.3 / 33.4.
+      testWidgets('POP-2-f: wire values 33.3/33.3/33.4 render as "33%"/"33%"/"33%" (percentage contract)', (tester) async {
+        final fecha = FechaActiva(
+          fechaId: 1,
+          seasonId: 10,
+          state: ProdeFechaState.locked,
+          lockedAt: DateTime(2020, 1, 1),
+          matches: [
+            FechaMatch(
+              matchId: 1,
+              homeTeam: 'Team A',
+              awayTeam: 'Team B',
+              kickoff: DateTime(2026, 6, 7, 14, 0),
+              populares: const Populares(home: 33.3, draw: 33.3, away: 33.4),
+            ),
+          ],
+        );
+        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+
+        expect(find.text('33%'), findsNWidgets(3));
       });
 
       // POP-3-a: open fecha + populares null → locked hint visible, no % anywhere.
@@ -1553,7 +1607,7 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .45, draw: .30, away: .25),
+              populares: const Populares(home: 45.0, draw: 30.0, away: 25.0),
             ),
           ],
         );
@@ -1576,7 +1630,7 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .45, draw: .30, away: .25),
+              populares: const Populares(home: 45.0, draw: 30.0, away: 25.0),
             ),
           ],
         );
@@ -1599,7 +1653,7 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .45, draw: .30, away: .25),
+              populares: const Populares(home: 45.0, draw: 30.0, away: 25.0),
             ),
             FechaMatch(
               matchId: 2,
@@ -1640,7 +1694,7 @@ void main() {
               homeTeam: 'Team A',
               awayTeam: 'Team B',
               kickoff: DateTime(2026, 6, 7, 14, 0),
-              populares: Populares(home: .45, draw: .30, away: .25),
+              populares: const Populares(home: 45.0, draw: 30.0, away: 25.0),
             ),
           ],
         );

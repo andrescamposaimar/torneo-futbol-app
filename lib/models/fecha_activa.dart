@@ -8,16 +8,18 @@ import 'package:flutter/foundation.dart';
 ///
 /// Parsed from the `populares` key in the match wire object when non-null.
 /// Keys from the backend: '1' (home), 'X' (draw), '2' (away).
-/// All values are doubles in [0.0, 1.0] representing fractions of voters.
+/// All values are doubles in [0.0, 100.0] representing percentages of voters,
+/// rounded to one decimal by the backend (e.g. 33.3, 100.0). Do NOT multiply
+/// by 100 before displaying — the wire value is already a percentage.
 @immutable
 class Populares {
-  /// Fraction of voters that predicted a home win ('1').
+  /// Percentage of voters that predicted a home win ('1'). Range: [0.0, 100.0].
   final double home;
 
-  /// Fraction of voters that predicted a draw ('X').
+  /// Percentage of voters that predicted a draw ('X'). Range: [0.0, 100.0].
   final double draw;
 
-  /// Fraction of voters that predicted an away win ('2').
+  /// Percentage of voters that predicted an away win ('2'). Range: [0.0, 100.0].
   final double away;
 
   const Populares({

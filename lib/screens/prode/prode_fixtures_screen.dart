@@ -1691,9 +1691,9 @@ class _PopularesSection extends StatelessWidget {
     int? drawPercent;
     int? awayPercent;
     if (reveal) {
-      homePercent = (populares!.home * 100).round();
-      drawPercent = (populares!.draw * 100).round();
-      awayPercent = (populares!.away * 100).round();
+      homePercent = populares!.home.round();
+      drawPercent = populares!.draw.round();
+      awayPercent = populares!.away.round();
     }
 
     return Container(
