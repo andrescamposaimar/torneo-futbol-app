@@ -14,26 +14,27 @@ namespace EntreRedes\Prode\Scoring;
  *   2. For each player_id:
  *      - Photo: get_the_post_thumbnail_url( $playerId, 'thumbnail' ) — returns
  *        the featured-image URL of the sp_player post, or false/'' when none.
- *      - Team: get_post_meta( $playerId, 'sp_team', false ) returns an array of
- *        sp_team post IDs (SportsPress stores multi-value meta as repeating rows);
- *        take the first entry and resolve its title via get_the_title(). Falls
- *        back to '' when no meta or empty array.
+ *      - Team: get_post_meta( $playerId, 'sp_current_team', true ) returns the
+ *        current club's sp_team post ID (single value); resolve its title via
+ *        get_the_title(). Falls back to null when missing or '0' (unassigned).
  *
- * sp_team meta key notes (verified against SportsPress data model):
- *   SportsPress stores a player's squad assignment as wp_postmeta rows with
- *   meta_key = 'sp_team'. When a player belongs to one team this is a single
- *   row; when they are on multiple rosters there are multiple rows. Using
- *   get_post_meta( $id, 'sp_team', false ) (fourth arg = false → return all
- *   values as array) reliably handles both cases. We take element [0].
- *
- *   If 'sp_team' returns empty and a production verification reveals a different
- *   key (e.g. 'sp_current_team'), swap the meta key constant here — nothing
- *   else needs to change.
+ * Meta key (verified against this install's seed/association scripts in
+ * wordpress_sql/): the current club is 'sp_current_team' = <sp_team post ID>.
+ * The DB prefix is resolved dynamically by $wpdb (production uses 'wp_').
  */
 class WpRosterResolver implements RosterResolverInterface {
 
-    /** SportsPress post-meta key for a player's team assignment. */
-    private const SP_TEAM_META_KEY = 'sp_team';
+    /**
+     * SportsPress post-meta key for a player's CURRENT team assignment.
+     *
+     * Verified against this install's data (wordpress_sql/asociar_jugadores_clubes_temporada_2026.sql):
+     * the active club is stored as a single wp_postmeta row with
+     * meta_key = 'sp_current_team', meta_value = <sp_team post ID>. The
+     * 'sp_team' key holds the (possibly multi-row) team history; we want the
+     * current club, so we read 'sp_current_team'. Players with no club carry
+     * '0' (seeded by alta_jugadores.py) → resolves to null → "Sin Equipo".
+     */
+    private const SP_TEAM_META_KEY = 'sp_current_team';
 
     public function __construct( private RankingRepository $repo ) {}
 
@@ -79,11 +80,8 @@ class WpRosterResolver implements RosterResolverInterface {
      * @return string|null  Team name, or null when none.
      */
     private function resolveTeam( int $playerId ): ?string {
-        $teams = get_post_meta( $playerId, self::SP_TEAM_META_KEY, false );
-        if ( ! is_array( $teams ) || empty( $teams ) ) {
-            return null;
-        }
-        $teamId = (int) $teams[0];
+        // sp_current_team is a single-value meta: the current club's post ID.
+        $teamId = (int) get_post_meta( $playerId, self::SP_TEAM_META_KEY, true );
         if ( $teamId <= 0 ) {
             return null;
         }
