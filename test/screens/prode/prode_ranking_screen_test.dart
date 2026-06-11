@@ -141,6 +141,8 @@ RankingEntry _makeEntry({
   int rank = 1,
   int exactCount = 1,
   bool isMe = false,
+  String? avatarUrl,
+  String? teamName,
 }) =>
     RankingEntry(
       userId: userId,
@@ -149,6 +151,8 @@ RankingEntry _makeEntry({
       rank: rank,
       exactCount: exactCount,
       isMe: isMe,
+      avatarUrl: avatarUrl,
+      teamName: teamName,
     );
 
 /// Builds a [ProdeRankingLoaded] state with the given entries.
@@ -338,6 +342,102 @@ void main() {
       await tester.pump();
       // No RenderFlex overflow exception thrown
       expect(tester.takeException(), isNull);
+    });
+
+    // ------------------------------------------------------------------
+    // New row layout tests (photo + team subtitle)
+    // ------------------------------------------------------------------
+
+    testWidgets('row with teamName shows team name and no "exactos" text',
+        (tester) async {
+      final entry = _makeEntry(
+        userId: 10,
+        displayName: 'Lionel',
+        rank: 1,
+        exactCount: 3,
+        teamName: 'Club Atlético',
+      );
+      await _pumpScreen(tester, _makeLoaded([entry]));
+      expect(find.text('Club Atlético'), findsOneWidget);
+      expect(find.textContaining('exactos'), findsNothing);
+    });
+
+    testWidgets('row with null teamName shows "Sin Equipo"', (tester) async {
+      final entry = _makeEntry(
+        userId: 11,
+        displayName: 'Carlos',
+        rank: 1,
+        teamName: null,
+      );
+      await _pumpScreen(tester, _makeLoaded([entry]));
+      expect(find.text('Sin Equipo'), findsOneWidget);
+    });
+
+    testWidgets('row with empty teamName shows "Sin Equipo"', (tester) async {
+      final entry = _makeEntry(
+        userId: 12,
+        displayName: 'Maria',
+        rank: 1,
+        teamName: '',
+      );
+      await _pumpScreen(tester, _makeLoaded([entry]));
+      expect(find.text('Sin Equipo'), findsOneWidget);
+    });
+
+    testWidgets('row without avatarUrl renders CircleAvatar with initials',
+        (tester) async {
+      final entry = _makeEntry(
+        userId: 13,
+        displayName: 'Fernando',
+        rank: 1,
+        avatarUrl: null,
+      );
+      await _pumpScreen(tester, _makeLoaded([entry]));
+      // Initials avatar present (key uses 'initials')
+      expect(
+        find.byKey(const ValueKey('ranking_avatar_initials_13')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('row with non-empty avatarUrl renders network-image CircleAvatar',
+        (tester) async {
+      final entry = _makeEntry(
+        userId: 14,
+        displayName: 'Gonzalo',
+        rank: 1,
+        avatarUrl: 'https://example.com/photo.jpg',
+      );
+      await _pumpScreen(tester, _makeLoaded([entry]));
+      // Photo avatar present (key uses 'photo')
+      expect(
+        find.byKey(const ValueKey('ranking_avatar_photo_14')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('user photo CircleAvatar is positioned to the left of displayName',
+        (tester) async {
+      final entry = _makeEntry(
+        userId: 15,
+        displayName: 'Roberto',
+        rank: 1,
+        avatarUrl: null,
+      );
+      await _pumpScreen(tester, _makeLoaded([entry]));
+
+      // Both the avatar and the display name text should be rendered.
+      final avatarFinder =
+          find.byKey(const ValueKey('ranking_avatar_initials_15'));
+      final nameFinder = find.text('Roberto');
+      expect(avatarFinder, findsOneWidget);
+      expect(nameFinder, findsOneWidget);
+
+      // Avatar's left edge < name text's left edge (avatar is to the left).
+      final avatarBox =
+          tester.getRect(avatarFinder);
+      final nameBox = tester.getRect(nameFinder);
+      expect(avatarBox.left, lessThan(nameBox.left));
     });
   });
 

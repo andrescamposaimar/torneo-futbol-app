@@ -183,14 +183,28 @@ class _ErrorView extends StatelessWidget {
 // Row widget
 // ---------------------------------------------------------------------------
 
-/// A single leaderboard row showing rank badge, player name, exact count,
-/// and total points.
+/// A single leaderboard row showing rank badge, user photo, player name,
+/// team/club, and total points.
+///
+/// Layout (left → right):
+///   [rank badge] [user photo] [name / team column] ... [pts]
+///
+/// The user photo is a [CircleAvatar] using [NetworkImage] when [entry.avatarUrl]
+/// is non-empty, falling back to the first letter of [entry.displayName] as
+/// initials on missing URL or image-load error — mirroring the pattern in
+/// `ProdeIdentityCard._buildAuthenticatedTile`.
+///
+/// The subtitle line shows [entry.teamName] when non-empty, or the literal
+/// `'Sin Equipo'` otherwise. The old "N exactos" subtitle has been removed.
 ///
 /// The `is_me` row is visually distinguished via a tinted Container background
 /// and bold display name (ADR-G5-8 — no auto-scroll).
 ///
 /// The outermost widget carries `Key('ranking_row_${entry.userId}')` so
-/// widget tests can locate rows by user id.
+/// widget tests can locate rows by user id. The avatar carries
+/// `ValueKey('ranking_avatar_photo_${entry.userId}')` or
+/// `ValueKey('ranking_avatar_initials_${entry.userId}')` so tests can assert
+/// which variant is rendered.
 class _RankingRow extends StatelessWidget {
   final RankingEntry entry;
 
@@ -202,6 +216,38 @@ class _RankingRow extends StatelessWidget {
     final isMeColor = entry.isMe
         ? theme.colorScheme.primary.withValues(alpha: 0.12)
         : null;
+
+    final hasPhoto =
+        entry.avatarUrl != null && entry.avatarUrl!.isNotEmpty;
+
+    // Initials child — always present; shown when photo is absent or fails.
+    final initialsChild = Text(
+      entry.displayName.isNotEmpty
+          ? entry.displayName[0].toUpperCase()
+          : '?',
+      style: TextStyle(
+        color: theme.colorScheme.primary,
+        fontWeight: FontWeight.bold,
+        fontSize: 13,
+      ),
+    );
+
+    final Widget userAvatar = CircleAvatar(
+      key: hasPhoto
+          ? ValueKey('ranking_avatar_photo_${entry.userId}')
+          : ValueKey('ranking_avatar_initials_${entry.userId}'),
+      radius: 18,
+      foregroundImage: hasPhoto ? NetworkImage(entry.avatarUrl!) : null,
+      // Swallow load errors — initials remain visible underneath.
+      onForegroundImageError: hasPhoto ? (_, __) {} : null,
+      backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.15),
+      child: initialsChild,
+    );
+
+    final teamLabel =
+        (entry.teamName != null && entry.teamName!.isNotEmpty)
+            ? entry.teamName!
+            : 'Sin Equipo';
 
     return Container(
       key: Key('ranking_row_${entry.userId}'),
@@ -225,8 +271,11 @@ class _RankingRow extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          // Name + exact count
+          const SizedBox(width: 8),
+          // User photo
+          userAvatar,
+          const SizedBox(width: 10),
+          // Name + team
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,7 +290,9 @@ class _RankingRow extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${entry.exactCount} exactos',
+                  teamLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),

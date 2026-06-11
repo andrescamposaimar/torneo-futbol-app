@@ -25,6 +25,14 @@ class RankingEntry {
   /// `FechaActiva.fromJson` for optional boolean fields.
   final bool isMe;
 
+  /// The player photo URL for this user. Null when the backend returns null
+  /// or omits the `avatar_url` key.
+  final String? avatarUrl;
+
+  /// The team/club name associated with this user. Null when the backend
+  /// returns null or omits the `team_name` key.
+  final String? teamName;
+
   const RankingEntry({
     required this.userId,
     required this.displayName,
@@ -32,6 +40,8 @@ class RankingEntry {
     required this.rank,
     required this.exactCount,
     this.isMe = false,
+    this.avatarUrl,
+    this.teamName,
   });
 
   /// Parses a single leaderboard entry from its wire representation.
@@ -47,6 +57,8 @@ class RankingEntry {
       rank: json['rank'] as int,
       exactCount: json['exact_count'] as int,
       isMe: (json['is_me'] as bool?) ?? false,
+      avatarUrl: json['avatar_url'] as String?,
+      teamName: json['team_name'] as String?,
     );
   }
 
@@ -60,17 +72,27 @@ class RankingEntry {
           totalPoints == other.totalPoints &&
           rank == other.rank &&
           exactCount == other.exactCount &&
-          isMe == other.isMe;
+          isMe == other.isMe &&
+          avatarUrl == other.avatarUrl &&
+          teamName == other.teamName;
 
   @override
-  int get hashCode =>
-      Object.hash(userId, displayName, totalPoints, rank, exactCount, isMe);
+  int get hashCode => Object.hash(
+        userId,
+        displayName,
+        totalPoints,
+        rank,
+        exactCount,
+        isMe,
+        avatarUrl,
+        teamName,
+      );
 
   @override
   String toString() =>
       'RankingEntry(userId: $userId, displayName: $displayName, '
       'totalPoints: $totalPoints, rank: $rank, exactCount: $exactCount, '
-      'isMe: $isMe)';
+      'isMe: $isMe, avatarUrl: $avatarUrl, teamName: $teamName)';
 }
 
 // ---------------------------------------------------------------------------
