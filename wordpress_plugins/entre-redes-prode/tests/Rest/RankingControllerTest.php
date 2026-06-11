@@ -9,6 +9,7 @@ use EntreRedes\Prode\Migrations\InitialSchema;
 use EntreRedes\Prode\Rest\RankingController;
 use EntreRedes\Prode\Scoring\RankingComputer;
 use EntreRedes\Prode\Scoring\RankingRepository;
+use EntreRedes\Prode\Scoring\RosterResolverInterface;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -31,6 +32,9 @@ class RankingControllerTest extends TestCase {
     private RankingController  $controller;
     private RankingRepository  $repo;
 
+    /** @var RosterResolverInterface */
+    private RosterResolverInterface $fakeResolver;
+
     protected function setUp(): void {
         InitialSchema::up();
 
@@ -39,12 +43,25 @@ class RankingControllerTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_associations" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_users" );
 
-        $this->repo       = new RankingRepository( $wpdb );
-        $computer         = new RankingComputer();
-        $settings         = new Settings( $wpdb );
-        $this->controller = new RankingController( $this->repo, $computer, $settings );
+        $this->repo     = new RankingRepository( $wpdb );
+        $computer       = new RankingComputer();
+        $settings       = new Settings( $wpdb );
+
+        // Fake roster resolver: returns empty data by default (no photo/team).
+        $this->fakeResolver = new class implements RosterResolverInterface {
+            /** @var array<int, array{avatar_url: ?string, team_name: ?string}> */
+            public array $data = [];
+
+            /** @param array<int> $userIds */
+            public function resolve( array $userIds ): array {
+                return $this->data;
+            }
+        };
+
+        $this->controller = new RankingController( $this->repo, $computer, $settings, null, $this->fakeResolver );
     }
 
     protected function tearDown(): void {
@@ -53,6 +70,7 @@ class RankingControllerTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_associations" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_users" );
     }
 
@@ -483,5 +501,128 @@ class RankingControllerTest extends TestCase {
     public function test_non_numeric_fecha_id_returns_400(): void {
         $response = $this->controller->getRanking( $this->makeRequest( [ 'fecha_id' => 'foo' ] ) );
         $this->assertSame( 400, $response->get_status() );
+    }
+
+    // -------------------------------------------------------------------------
+    // Row shape now includes avatar_url + team_name
+    // -------------------------------------------------------------------------
+
+    public function test_row_shape_has_avatar_url_and_team_name_fields(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1, 'Alice' );
+        $this->seedScore( $fechaId, 1, 101, 3, 'exact_score' );
+
+        $response = $this->controller->getRanking( $this->makeRequest() );
+        $data     = $response->get_data();
+
+        $this->assertNotEmpty( $data['items'] );
+        $item = $data['items'][0];
+
+        $this->assertArrayHasKey( 'avatar_url', $item );
+        $this->assertArrayHasKey( 'team_name', $item );
+    }
+
+    // -------------------------------------------------------------------------
+    // User with player photo + team → fields populated
+    // -------------------------------------------------------------------------
+
+    public function test_user_with_player_photo_and_team_populated(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1, 'Alice' );
+        $this->seedScore( $fechaId, 1, 101, 5, 'result_only' );
+
+        // Inject canned roster data for user 1.
+        $this->fakeResolver->data[1] = [
+            'avatar_url' => 'https://example.com/alice.jpg',
+            'team_name'  => 'Club Atlético',
+        ];
+
+        $response = $this->controller->getRanking( $this->makeRequest() );
+        $data     = $response->get_data();
+
+        $byUser = [];
+        foreach ( $data['items'] as $item ) {
+            $byUser[ (int) $item['user_id'] ] = $item;
+        }
+
+        $this->assertSame( 'https://example.com/alice.jpg', $byUser[1]['avatar_url'] );
+        $this->assertSame( 'Club Atlético', $byUser[1]['team_name'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // User with player but no team → team_name null
+    // -------------------------------------------------------------------------
+
+    public function test_user_with_player_but_no_team_has_null_team_name(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1, 'Bob' );
+        $this->seedScore( $fechaId, 1, 101, 3, 'result_only' );
+
+        $this->fakeResolver->data[1] = [
+            'avatar_url' => 'https://example.com/bob.jpg',
+            'team_name'  => null,
+        ];
+
+        $response = $this->controller->getRanking( $this->makeRequest() );
+        $data     = $response->get_data();
+
+        $byUser = [];
+        foreach ( $data['items'] as $item ) {
+            $byUser[ (int) $item['user_id'] ] = $item;
+        }
+
+        $this->assertNull( $byUser[1]['team_name'] );
+        $this->assertSame( 'https://example.com/bob.jpg', $byUser[1]['avatar_url'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // User with no association → avatar_url and team_name null
+    // -------------------------------------------------------------------------
+
+    public function test_user_with_no_association_has_null_avatar_and_team(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1, 'Charlie' );
+        $this->seedScore( $fechaId, 1, 101, 2, 'result_only' );
+
+        // fakeResolver returns no data for user 1 (simulates no association).
+        $this->fakeResolver->data = [];
+
+        $response = $this->controller->getRanking( $this->makeRequest() );
+        $data     = $response->get_data();
+
+        $byUser = [];
+        foreach ( $data['items'] as $item ) {
+            $byUser[ (int) $item['user_id'] ] = $item;
+        }
+
+        $this->assertNull( $byUser[1]['avatar_url'] );
+        $this->assertNull( $byUser[1]['team_name'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // Existing 6-field shape test updated: now 8 fields
+    // -------------------------------------------------------------------------
+
+    public function test_updated_row_shape_has_all_eight_required_fields(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1, 'Alice' );
+        $this->seedScore( $fechaId, 1, 101, 3, 'exact_score' );
+
+        $response = $this->controller->getRanking( $this->makeRequest() );
+        $data     = $response->get_data();
+
+        $this->assertNotEmpty( $data['items'] );
+        $item = $data['items'][0];
+
+        // Original 6 fields.
+        $this->assertArrayHasKey( 'user_id', $item );
+        $this->assertArrayHasKey( 'display_name', $item );
+        $this->assertArrayHasKey( 'total_points', $item );
+        $this->assertArrayHasKey( 'rank', $item );
+        $this->assertArrayHasKey( 'exact_count', $item );
+        $this->assertArrayHasKey( 'is_me', $item );
+        // New 2 fields.
+        $this->assertArrayHasKey( 'avatar_url', $item );
+        $this->assertArrayHasKey( 'team_name', $item );
     }
 }

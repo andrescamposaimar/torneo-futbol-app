@@ -34,6 +34,7 @@ class RankingRepositoryTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_associations" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_users" );
 
         $this->repo = new RankingRepository( $wpdb );
@@ -45,6 +46,7 @@ class RankingRepositoryTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_scores" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fecha_matches" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_fechas" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_associations" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}prode_users" );
     }
 
@@ -291,6 +293,65 @@ class RankingRepositoryTest extends TestCase {
     public function test_resolve_display_names_empty_input_returns_empty(): void {
         $result = $this->repo->resolveDisplayNames( [] );
         $this->assertSame( [], $result );
+    }
+
+    // -------------------------------------------------------------------------
+    // resolvePlayerIds
+    // -------------------------------------------------------------------------
+
+    private function seedAssociation( int $userId, int $playerId, bool $deleted = false ): void {
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_associations',
+            [
+                'user_id'    => $userId,
+                'provider'   => 'google',
+                'provider_id' => "gid_{$userId}",
+                'dni'        => "dni_{$userId}",
+                'player_id'  => $playerId,
+                'created_at' => '2026-01-01 00:00:00',
+                'deleted_at' => $deleted ? '2026-01-02 00:00:00' : null,
+            ]
+        );
+    }
+
+    public function test_resolve_player_ids_returns_active_association(): void {
+        $this->seedUser( 1 );
+        $this->seedAssociation( 1, 42 );
+
+        $map = $this->repo->resolvePlayerIds( [ 1 ] );
+
+        $this->assertArrayHasKey( 1, $map );
+        $this->assertSame( 42, $map[1] );
+    }
+
+    public function test_resolve_player_ids_ignores_deleted_association(): void {
+        $this->seedUser( 1 );
+        $this->seedAssociation( 1, 42, true ); // deleted
+
+        $map = $this->repo->resolvePlayerIds( [ 1 ] );
+
+        $this->assertArrayNotHasKey( 1, $map );
+    }
+
+    public function test_resolve_player_ids_empty_input_returns_empty(): void {
+        $result = $this->repo->resolvePlayerIds( [] );
+        $this->assertSame( [], $result );
+    }
+
+    public function test_resolve_player_ids_mixed_users(): void {
+        $this->seedUser( 1 );
+        $this->seedUser( 2 );
+        $this->seedUser( 3 );
+        $this->seedAssociation( 1, 10 );
+        $this->seedAssociation( 2, 20 );
+        // user 3 has no association
+
+        $map = $this->repo->resolvePlayerIds( [ 1, 2, 3 ] );
+
+        $this->assertSame( 10, $map[1] );
+        $this->assertSame( 20, $map[2] );
+        $this->assertArrayNotHasKey( 3, $map );
     }
 
     // -------------------------------------------------------------------------

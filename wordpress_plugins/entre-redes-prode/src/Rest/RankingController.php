@@ -8,6 +8,7 @@ use EntreRedes\Prode\Auth\AuthMiddleware;
 use EntreRedes\Prode\Fecha\Settings;
 use EntreRedes\Prode\Scoring\RankingComputer;
 use EntreRedes\Prode\Scoring\RankingRepository;
+use EntreRedes\Prode\Scoring\RosterResolverInterface;
 
 /**
  * REST controller for GET /prode/ranking.
@@ -26,7 +27,7 @@ use EntreRedes\Prode\Scoring\RankingRepository;
  * Season view:  aggregateBySeason → RankingComputer.assignRanks → paginate.
  * Per-fecha view: findFechaCache (stored ranks) + aggregateByFecha (for exact_count) → paginate.
  *
- * Row shape: { user_id:int, display_name:string, total_points:int, rank:int, exact_count:int, is_me:bool }.
+ * Row shape: { user_id:int, display_name:string, total_points:int, rank:int, exact_count:int, is_me:bool, avatar_url:string|null, team_name:string|null }.
  * Envelope: { items:[...], total:int, page:int, per_page:int }.
  *
  * Mirrors FechaController structure and PredictionController/EvaluationController constructor pattern.
@@ -37,10 +38,11 @@ class RankingController {
     private const MAX_PER_PAGE = 100;
 
     public function __construct(
-        private RankingRepository $repo,
-        private RankingComputer   $computer,
-        private Settings          $settings,
-        private ?AuthMiddleware   $middleware = null
+        private RankingRepository        $repo,
+        private RankingComputer          $computer,
+        private Settings                 $settings,
+        private ?AuthMiddleware          $middleware = null,
+        private ?RosterResolverInterface $rosterResolver = null
     ) {}
 
     /**
@@ -160,6 +162,12 @@ class RankingController {
         $userIds = array_map( static fn( array $r ): int => (int) $r['user_id'], $slice );
         $names   = $this->repo->resolveDisplayNames( $userIds );
 
+        // ── Roster resolution (avatar + team) ────────────────────────────────
+
+        $rosterData = null !== $this->rosterResolver
+            ? $this->rosterResolver->resolve( $userIds )
+            : [];
+
         // ── is_me resolution ─────────────────────────────────────────────────
 
         $prodeUser = $request->get_param( '_prode_user' );
@@ -167,8 +175,9 @@ class RankingController {
 
         // ── Shape items ─────────────────────────────────────────────────────
 
-        $items = array_map( static function ( array $row ) use ( $names, $meId ): array {
-            $uid = (int) $row['user_id'];
+        $items = array_map( static function ( array $row ) use ( $names, $meId, $rosterData ): array {
+            $uid    = (int) $row['user_id'];
+            $roster = $rosterData[ $uid ] ?? null;
             return [
                 'user_id'      => $uid,
                 'display_name' => $names[ $uid ] ?? '',
@@ -176,6 +185,8 @@ class RankingController {
                 'rank'         => (int) $row['rank'],
                 'exact_count'  => (int) $row['exact_count'],
                 'is_me'        => $meId !== null && $uid === $meId,
+                'avatar_url'   => $roster['avatar_url'] ?? null,
+                'team_name'    => $roster['team_name'] ?? null,
             ];
         }, $slice );
 

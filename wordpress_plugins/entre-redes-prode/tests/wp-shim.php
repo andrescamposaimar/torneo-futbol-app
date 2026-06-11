@@ -640,6 +640,28 @@ if ( ! function_exists( 'add_query_arg' ) ) {
     }
 }
 
+// ─── SportsPress / WP post-meta stubs ─────────────────────────────────────────
+// These are no-ops in test context. The WpRosterResolver is tested indirectly
+// through the RosterResolverInterface seam (fake resolver injected in tests).
+
+if ( ! function_exists( 'get_the_post_thumbnail_url' ) ) {
+    function get_the_post_thumbnail_url( int|string $post = 0, mixed $size = 'post-thumbnail' ): string|false {
+        return false;
+    }
+}
+
+if ( ! function_exists( 'get_post_meta' ) ) {
+    function get_post_meta( int $post_id, string $key = '', bool $single = false ): mixed {
+        return $single ? '' : [];
+    }
+}
+
+if ( ! function_exists( 'get_the_title' ) ) {
+    function get_the_title( int|string $post = 0 ): string {
+        return '';
+    }
+}
+
 // ─── Misc WP functions ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'version_compare' ) ) {
