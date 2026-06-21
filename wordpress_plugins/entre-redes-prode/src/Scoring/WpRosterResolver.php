@@ -32,7 +32,9 @@ class WpRosterResolver implements RosterResolverInterface {
      * meta_key = 'sp_current_team', meta_value = <sp_team post ID>. The
      * 'sp_team' key holds the (possibly multi-row) team history; we want the
      * current club, so we read 'sp_current_team'. Players with no club carry
-     * '0' (seeded by alta_jugadores.py) → resolves to null → "Sin Equipo".
+     * no row (or a legacy '0') → resolves to null → "Sin Equipo". The import
+     * scripts no longer seed '0' and the association script deletes any '0'
+     * sentinel, so a stale row can never win over the real club ID.
      */
     private const SP_TEAM_META_KEY = 'sp_current_team';
 
