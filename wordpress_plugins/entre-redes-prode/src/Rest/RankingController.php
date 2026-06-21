@@ -28,7 +28,10 @@ use EntreRedes\Prode\Scoring\RosterResolverInterface;
  * Per-fecha view: findFechaCache (stored ranks) + aggregateByFecha (for exact_count) → paginate.
  *
  * Row shape: { user_id:int, display_name:string, total_points:int, rank:int, exact_count:int, is_me:bool, avatar_url:string|null, team_name:string|null }.
- * Envelope: { items:[...], total:int, page:int, per_page:int }.
+ * Envelope: { items:[...], total:int, page:int, per_page:int, me:{user_id,rank,total_points,exact_count}|null }.
+ *   `me` is the caller's own row resolved from the full ranked set (pre-pagination),
+ *   so it is correct regardless of which page the caller falls on. null when anonymous
+ *   or when the caller has no ranked row in this view.
  *
  * Mirrors FechaController structure and PredictionController/EvaluationController constructor pattern.
  */
@@ -190,12 +193,36 @@ class RankingController {
             ];
         }, $slice );
 
+        // ── "me" summary ─────────────────────────────────────────────────────
+        //
+        // The authenticated caller's own rank + points, resolved from the FULL
+        // ranked set ($rows, pre-pagination) so the summary is correct no matter
+        // which page the caller falls on. null when anonymous or when the caller
+        // has no ranked row in this view (e.g. no points yet). Used by the app's
+        // Prode summary card (Ranking de la Fecha / Ranking general).
+
+        $me = null;
+        if ( null !== $meId ) {
+            foreach ( $rows as $row ) {
+                if ( (int) $row['user_id'] === $meId ) {
+                    $me = [
+                        'user_id'      => $meId,
+                        'rank'         => (int) $row['rank'],
+                        'total_points' => (int) $row['total_points'],
+                        'exact_count'  => (int) ( $row['exact_count'] ?? 0 ),
+                    ];
+                    break;
+                }
+            }
+        }
+
         return new \WP_REST_Response(
             [
                 'items'    => $items,
                 'total'    => $total,
                 'page'     => $page,
                 'per_page' => $perPage,
+                'me'       => $me,
             ],
             200
         );

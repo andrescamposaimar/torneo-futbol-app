@@ -188,5 +188,40 @@ void main() {
       expect(p1.hashCode, p2.hashCode);
       expect(p1 == p3, false);
     });
+
+    test('me absent → page.me is null', () {
+      final page = RankingPage.fromJson(_pageJson(items: []));
+      expect(page.me, isNull);
+    });
+
+    test('me null → page.me is null', () {
+      final json = _pageJson(items: []);
+      json['me'] = null;
+      final page = RankingPage.fromJson(json);
+      expect(page.me, isNull);
+    });
+
+    test('me present → parsed into RankingMe with rank/points/exact', () {
+      final json = _pageJson(items: []);
+      json['me'] = {
+        'user_id': 7,
+        'rank': 25,
+        'total_points': 33,
+        'exact_count': 4,
+      };
+      final page = RankingPage.fromJson(json);
+      expect(page.me, isNotNull);
+      expect(page.me!.userId, 7);
+      expect(page.me!.rank, 25);
+      expect(page.me!.totalPoints, 33);
+      expect(page.me!.exactCount, 4);
+    });
+
+    test('me without exact_count → defaults to 0', () {
+      final json = _pageJson(items: []);
+      json['me'] = {'user_id': 7, 'rank': 1, 'total_points': 6};
+      final page = RankingPage.fromJson(json);
+      expect(page.me!.exactCount, 0);
+    });
   });
 }

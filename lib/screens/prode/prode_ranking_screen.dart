@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/prode_ranking.dart';
 import '../../providers/prode_providers.dart';
 import '../../services/prode_ranking_controller.dart';
+import '../../widgets/prode_segmented_toggle.dart';
 
 // ---------------------------------------------------------------------------
 // Container
@@ -23,10 +24,21 @@ import '../../services/prode_ranking_controller.dart';
 /// does NOT clobber the existing state.
 ///
 /// Owns its own Scaffold + AppBar (unlike ProdeFixturesScreen which nests
-/// inside ProdeAuthGate's Scaffold) because this screen is pushed standalone
-/// from MoreScreen via Navigator.push.
+/// inside ProdeAuthGate's Scaffold) because this screen is pushed standalone.
+///
+/// Two tabs via [ProdeSegmentedToggle]:
+///   - "Fecha Actual" — ranking counting only the last evaluated fecha's points
+///     ([prodeFechaRankingControllerProvider]).
+///   - "General"      — season-cumulative ranking
+///     ([prodeRankingControllerProvider]).
+///
+/// [initialTab] lets the caller deep-link to a specific tab (e.g. the Prode
+/// summary card opens "Fecha Actual" or "General" depending on which half the
+/// user tapped). 0 = Fecha Actual, 1 = General.
 class ProdeRankingScreen extends ConsumerStatefulWidget {
-  const ProdeRankingScreen({super.key});
+  final int initialTab;
+
+  const ProdeRankingScreen({super.key, this.initialTab = 0});
 
   @override
   ConsumerState<ProdeRankingScreen> createState() =>
@@ -34,31 +46,64 @@ class ProdeRankingScreen extends ConsumerStatefulWidget {
 }
 
 class _ProdeRankingScreenState extends ConsumerState<ProdeRankingScreen> {
+  late int _tab = widget.initialTab;
+
   @override
   void initState() {
     super.initState();
-    // Only trigger load from the initial Loading state. Re-entry while
-    // Loaded/Empty/Error must NOT clobber that state with a fresh fetch.
-    if (ref.read(prodeRankingControllerProvider) is ProdeRankingLoading) {
-      Future.microtask(() {
-        if (mounted) {
-          ref.read(prodeRankingControllerProvider.notifier).load();
-        }
-      });
-    }
+    // Trigger each controller's load only from its initial Loading state so
+    // re-entry does not clobber an already-loaded tab.
+    Future.microtask(() {
+      if (!mounted) return;
+      if (ref.read(prodeFechaRankingControllerProvider)
+          is ProdeRankingLoading) {
+        ref.read(prodeFechaRankingControllerProvider.notifier).load();
+      }
+      if (ref.read(prodeRankingControllerProvider) is ProdeRankingLoading) {
+        ref.read(prodeRankingControllerProvider.notifier).load();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(prodeRankingControllerProvider);
-    final notifier = ref.read(prodeRankingControllerProvider.notifier);
+    final fechaState = ref.watch(prodeFechaRankingControllerProvider);
+    final generalState = ref.watch(prodeRankingControllerProvider);
+    final fechaNotifier = ref.read(prodeFechaRankingControllerProvider.notifier);
+    final generalNotifier = ref.read(prodeRankingControllerProvider.notifier);
+
+    final showingFecha = _tab == 0;
+    final state = showingFecha ? fechaState : generalState;
+    // Both tear-offs share the Future<void> Function() signature, so the
+    // ternary resolves cleanly even though the notifiers are different types.
+    final Future<void> Function() onRefresh =
+        showingFecha ? fechaNotifier.refresh : generalNotifier.refresh;
+    final VoidCallback onRetry =
+        showingFecha ? fechaNotifier.load : generalNotifier.load;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Ranking')),
-      body: ProdeRankingView(
-        state: state,
-        onRetry: notifier.load,
-        onRefresh: notifier.refresh,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: ProdeSegmentedToggle(
+              labels: const ['Fecha Actual', 'General'],
+              selectedIndex: _tab,
+              onChanged: (i) => setState(() => _tab = i),
+            ),
+          ),
+          Expanded(
+            child: ProdeRankingView(
+              // Key forces a subtree swap so the RefreshIndicator/list state of
+              // one tab never bleeds into the other.
+              key: ValueKey(showingFecha ? 'ranking_fecha' : 'ranking_general'),
+              state: state,
+              onRetry: onRetry,
+              onRefresh: onRefresh,
+            ),
+          ),
+        ],
       ),
     );
   }

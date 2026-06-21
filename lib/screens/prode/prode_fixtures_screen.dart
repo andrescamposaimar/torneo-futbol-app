@@ -4,9 +4,15 @@ import 'package:intl/intl.dart';
 
 import '../../models/fecha_activa.dart';
 import '../../models/fecha_summary.dart';
+import '../../models/prediction_history.dart';
+import '../../models/prode_ranking.dart';
 import '../../providers/prode_providers.dart';
 import '../../services/prode_fixtures_controller.dart';
+import '../../services/prode_history_controller.dart';
+import '../../services/prode_ranking_controller.dart';
+import '../../widgets/prode_segmented_toggle.dart';
 import 'prediction_result_style.dart';
+import 'prode_ranking_screen.dart';
 
 /// Container for the Prode Fixtures screen.
 ///
@@ -25,10 +31,18 @@ class ProdeFixturesScreen extends ConsumerStatefulWidget {
   final bool stale;
   final VoidCallback onLogout;
 
+  /// When true, renders ONLY the open-fecha ("A Jugarse") content with no
+  /// internal "A Jugarse / Finalizados" TabBar. Used when embedded inside
+  /// [ProdeChamiScreen], whose own segmented control owns the
+  /// Anteriores/A-Jugarse switch. Defaults to false → the standalone two-tab
+  /// layout (unchanged behavior for existing callers/tests).
+  final bool openOnly;
+
   const ProdeFixturesScreen({
     super.key,
     required this.stale,
     required this.onLogout,
+    this.openOnly = false,
   });
 
   @override
@@ -62,6 +76,7 @@ class _ProdeFixturesScreenState extends ConsumerState<ProdeFixturesScreen> {
       onLogout: widget.onLogout,
       onRetry: notifier.load,
       onRefresh: notifier.refresh,
+      openOnly: widget.openOnly,
     );
   }
 }
@@ -82,6 +97,9 @@ class ProdeFixturesView extends StatelessWidget {
   final VoidCallback onRetry;
   final Future<void> Function() onRefresh;
 
+  /// See [ProdeFixturesScreen.openOnly].
+  final bool openOnly;
+
   const ProdeFixturesView({
     super.key,
     required this.state,
@@ -89,6 +107,7 @@ class ProdeFixturesView extends StatelessWidget {
     required this.onLogout,
     required this.onRetry,
     required this.onRefresh,
+    this.openOnly = false,
   });
 
   @override
@@ -122,6 +141,7 @@ class ProdeFixturesView extends StatelessWidget {
           stale: stale,
           onLogout: onLogout,
           onRefresh: onRefresh,
+          openOnly: openOnly,
         ),
     };
   }
@@ -237,6 +257,7 @@ class _LoadedView extends ConsumerStatefulWidget {
   final bool stale;
   final VoidCallback onLogout;
   final Future<void> Function() onRefresh;
+  final bool openOnly;
 
   const _LoadedView({
     required this.fecha,
@@ -249,6 +270,7 @@ class _LoadedView extends ConsumerStatefulWidget {
     required this.stale,
     required this.onLogout,
     required this.onRefresh,
+    this.openOnly = false,
   });
 
   @override
@@ -376,6 +398,53 @@ class _LoadedViewState extends ConsumerState<_LoadedView>
     // renders below the selector row (W-1: selector must appear above progress).
     final showProgress =
         totalCount > 0 && !widget.isFechaLoading && widget.fechaLoadError == null;
+
+    // --- openOnly: embedded "A Jugarse" content for ProdeChamiScreen ---
+    // Renders only the open-fecha editable list; no internal TabBar, stale
+    // banner, or fecha badge (the Chami screen owns those).
+    if (widget.openOnly) {
+      if (!hasFechaList) {
+        return RefreshIndicator(
+          onRefresh: widget.onRefresh,
+          child: _buildLegacyCardArea(context, controller, isLocked),
+        );
+      }
+
+      // Safety net: the controller normally selects the active (open) fecha,
+      // but if it landed on an evaluated/locked one while open fechas exist,
+      // switch to the first open fecha so "A Jugarse" shows playable matches.
+      if (aJugarse.isNotEmpty &&
+          !aJugarse.any((f) => f.fechaId == widget.selectedFechaId) &&
+          !widget.isFechaLoading &&
+          widget.fechaLoadError == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ref
+                .read(prodeFixturesControllerProvider.notifier)
+                .selectFecha(aJugarse.first.fechaId);
+          }
+        });
+      }
+
+      return _TabContent(
+        tabFechas: aJugarse,
+        fecha: widget.fecha,
+        drafts: widget.drafts,
+        savedMatchIds: widget.savedMatchIds,
+        selectedFechaId: widget.selectedFechaId,
+        isFechaLoading: widget.isFechaLoading,
+        fechaLoadError: widget.fechaLoadError,
+        isLocked: isLocked,
+        onLogout: widget.onLogout,
+        onRefresh: widget.onRefresh,
+        controller: controller,
+        emptyMessage: 'No hay fechas para jugar por ahora.',
+        predictedCount: predictedCount,
+        totalCount: totalCount,
+        showProgress: showProgress,
+        showSelector: aJugarse.length > 1,
+      );
+    }
 
     if (!hasFechaList) {
       // --- Single-view (no fecha summary list): pre-tabs behavior ---
@@ -604,6 +673,10 @@ class _TabContent extends StatelessWidget {
   final int totalCount;
   final bool showProgress;
 
+  /// Whether to render the "< Fecha N >" selector row. Defaults to true.
+  /// Set false to hide it (e.g. a single open fecha in [ProdeChamiScreen]).
+  final bool showSelector;
+
   const _TabContent({
     required this.tabFechas,
     required this.fecha,
@@ -620,6 +693,7 @@ class _TabContent extends StatelessWidget {
     this.predictedCount = 0,
     this.totalCount = 0,
     this.showProgress = false,
+    this.showSelector = true,
   });
 
   @override
@@ -644,19 +718,20 @@ class _TabContent extends StatelessWidget {
     return Column(
       children: [
         // G6-e: selector row above the progress header (W-1).
-        _FechaSelectorRow(
-          fechas: tabFechas,
-          selectedIndex: selectedIndex,
-          onPrev: selectedIndex > 0
-              ? () =>
-                  controller.selectFecha(tabFechas[selectedIndex - 1].fechaId)
-              : null,
-          onNext: selectedIndex < tabFechas.length - 1
-              ? () =>
-                  controller.selectFecha(tabFechas[selectedIndex + 1].fechaId)
-              : null,
-          onSelect: (id) => controller.selectFecha(id),
-        ),
+        if (showSelector)
+          _FechaSelectorRow(
+            fechas: tabFechas,
+            selectedIndex: selectedIndex,
+            onPrev: selectedIndex > 0
+                ? () =>
+                    controller.selectFecha(tabFechas[selectedIndex - 1].fechaId)
+                : null,
+            onNext: selectedIndex < tabFechas.length - 1
+                ? () =>
+                    controller.selectFecha(tabFechas[selectedIndex + 1].fechaId)
+                : null,
+            onSelect: (id) => controller.selectFecha(id),
+          ),
         // Progress header below the selector (W-1).
         if (showProgress)
           _ProgressHeader(
@@ -1019,16 +1094,23 @@ class _MatchCard extends StatelessWidget {
   /// predicted this match or the fecha is not yet evaluated.
   final PredictionEntry? predictionEntry;
 
-  final VoidCallback onTap;
+  /// Tap handler. Null makes the card non-interactive (read-only), used by the
+  /// "Anteriores" history list.
+  final VoidCallback? onTap;
+
+  /// Whether to render the top-right status icon (saved / locked / pending).
+  /// False for read-only history cards. Defaults to true.
+  final bool showStatusIcon;
 
   const _MatchCard({
     required this.match,
     required this.draft,
     required this.isSaved,
     required this.isLocked,
-    required this.onTap,
+    this.onTap,
     this.isEvaluated = false,
     this.predictionEntry,
+    this.showStatusIcon = true,
   });
 
   @override
@@ -1101,28 +1183,29 @@ class _MatchCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Status icon
-                    if (isSaved)
-                      Icon(
-                        key: Key('status_icon_saved_${match.matchId}'),
-                        Icons.check_box_outlined,
-                        color: primary,
-                        size: 20,
-                      )
-                    else if (isLocked)
-                      Icon(
-                        key: Key('status_icon_locked_${match.matchId}'),
-                        Icons.lock_outline,
-                        color: Colors.grey.shade400,
-                        size: 20,
-                      )
-                    else
-                      Icon(
-                        key: Key('status_icon_pending_${match.matchId}'),
-                        Icons.indeterminate_check_box_outlined,
-                        color: Colors.grey.shade400,
-                        size: 20,
-                      ),
+                    // Status icon (hidden for read-only history cards)
+                    if (showStatusIcon)
+                      if (isSaved)
+                        Icon(
+                          key: Key('status_icon_saved_${match.matchId}'),
+                          Icons.check_box_outlined,
+                          color: primary,
+                          size: 20,
+                        )
+                      else if (isLocked)
+                        Icon(
+                          key: Key('status_icon_locked_${match.matchId}'),
+                          Icons.lock_outline,
+                          color: Colors.grey.shade400,
+                          size: 20,
+                        )
+                      else
+                        Icon(
+                          key: Key('status_icon_pending_${match.matchId}'),
+                          Icons.indeterminate_check_box_outlined,
+                          color: Colors.grey.shade400,
+                          size: 20,
+                        ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1912,6 +1995,519 @@ class _ScoreStepper extends StatelessWidget {
           constraints: const BoxConstraints(),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prode Chami screen (summary card + Anteriores/A Jugarse)
+// ---------------------------------------------------------------------------
+
+/// The authenticated Prode landing ("Prode Chami").
+///
+/// Composition (top → bottom):
+///   1. Stale banner (when bootstrapped with stale tokens).
+///   2. Ranking summary card — the caller's position in the last fecha and the
+///      general ranking; tapping a half opens [ProdeRankingScreen] on that tab.
+///   3. "Pronósticos" heading + a [ProdeSegmentedToggle] (Anteriores / A Jugarse).
+///   4. The selected segment's body:
+///        - Anteriores → [ProdeHistoryList] (paginated past predictions).
+///        - A Jugarse  → [ProdeFixturesScreen] in openOnly mode (the existing
+///          editable open-fecha flow, reused verbatim).
+///
+/// Rendered by [ProdeAuthView] in the Authenticated state, inside
+/// [ProdeAuthGate]'s Scaffold — so this widget returns a [Column], not a
+/// Scaffold. [stale]/[onLogout] are forwarded from that arm.
+class ProdeChamiScreen extends ConsumerStatefulWidget {
+  final bool stale;
+  final VoidCallback onLogout;
+
+  const ProdeChamiScreen({
+    super.key,
+    required this.stale,
+    required this.onLogout,
+  });
+
+  @override
+  ConsumerState<ProdeChamiScreen> createState() => _ProdeChamiScreenState();
+}
+
+class _ProdeChamiScreenState extends ConsumerState<ProdeChamiScreen> {
+  // 0 = Anteriores, 1 = A Jugarse. Defaults to Anteriores (past predictions).
+  int _segment = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Kick off the ranking loads that feed the summary card. Each controller
+    // guards re-entry, so this is a no-op when already loaded. The history list
+    // and the embedded fixtures screen self-bootstrap in their own initState.
+    Future.microtask(() {
+      if (!mounted) return;
+      if (ref.read(prodeFechaRankingControllerProvider)
+          is ProdeRankingLoading) {
+        ref.read(prodeFechaRankingControllerProvider.notifier).load();
+      }
+      if (ref.read(prodeRankingControllerProvider) is ProdeRankingLoading) {
+        ref.read(prodeRankingControllerProvider.notifier).load();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      children: [
+        if (widget.stale) const _StaleBanner(),
+        const _ProdeRankingSummaryCard(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Pronósticos',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: ProdeSegmentedToggle(
+            labels: const ['Anteriores', 'A Jugarse'],
+            selectedIndex: _segment,
+            onChanged: (i) => setState(() => _segment = i),
+          ),
+        ),
+        Expanded(
+          child: _segment == 0
+              ? ProdeHistoryList(onLogout: widget.onLogout)
+              : ProdeFixturesScreen(
+                  // Stale banner is owned by this screen; logout reused as-is.
+                  stale: false,
+                  onLogout: widget.onLogout,
+                  openOnly: true,
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ranking summary card
+// ---------------------------------------------------------------------------
+
+/// The clickable two-up ranking summary at the top of [ProdeChamiScreen].
+///
+/// Left half = "Ranking de la Fecha" (last evaluated fecha), right half =
+/// "Ranking general". Each shows the caller's puesto (rank) and puntos from the
+/// `me` object of the respective ranking controller. Tapping a half opens
+/// [ProdeRankingScreen] on the matching tab. Shows "—" until data loads (or
+/// when the caller is unranked / anonymous).
+class _ProdeRankingSummaryCard extends ConsumerWidget {
+  const _ProdeRankingSummaryCard();
+
+  RankingMe? _meOf(ProdeRankingState state) =>
+      state is ProdeRankingLoaded ? state.page.me : null;
+
+  void _openRanking(BuildContext context, int tab) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProdeRankingScreen(initialTab: tab),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    final fechaMe = _meOf(ref.watch(prodeFechaRankingControllerProvider));
+    final generalMe = _meOf(ref.watch(prodeRankingControllerProvider));
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: primary.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: primary.withValues(alpha: 0.20)),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  key: const Key('summary_half_fecha'),
+                  onTap: () => _openRanking(context, 0),
+                  borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(12),
+                  ),
+                  child: _SummaryHalf(
+                    title: 'Ranking de la Fecha',
+                    me: fechaMe,
+                  ),
+                ),
+              ),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: primary.withValues(alpha: 0.20),
+              ),
+              Expanded(
+                child: InkWell(
+                  key: const Key('summary_half_general'),
+                  onTap: () => _openRanking(context, 1),
+                  child: _SummaryHalf(
+                    title: 'Ranking general',
+                    me: generalMe,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(Icons.chevron_right, color: primary),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One half of the [_ProdeRankingSummaryCard]: a title plus puesto/puntos.
+class _SummaryHalf extends StatelessWidget {
+  final String title;
+  final RankingMe? me;
+
+  const _SummaryHalf({required this.title, required this.me});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+
+    final rankLabel = me != null ? '#${me!.rank}' : '—';
+    final pointsLabel = me != null ? '${me!.totalPoints}' : '—';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: primary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SummaryStat(value: rankLabel, label: 'Puesto'),
+              _SummaryStat(value: pointsLabel, label: 'Puntos'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A big value over a small grey caption (e.g. "#1" / "Puesto").
+class _SummaryStat extends StatelessWidget {
+  final String value;
+  final String label;
+
+  const _SummaryStat({required this.value, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: Colors.black87,
+          ),
+        ),
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: Colors.grey.shade600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Anteriores — paginated history list
+// ---------------------------------------------------------------------------
+
+/// The "Anteriores" tab: an infinite-scroll list of the caller's past
+/// predictions (15 per page), driven by [prodeHistoryControllerProvider].
+///
+/// Reuses [_MatchCard] (read-only: no status icon, no tap) via [_HistoryCard]
+/// so finished-prediction cards look identical to the fixtures cards.
+class ProdeHistoryList extends ConsumerStatefulWidget {
+  final VoidCallback onLogout;
+
+  const ProdeHistoryList({super.key, required this.onLogout});
+
+  @override
+  ConsumerState<ProdeHistoryList> createState() => _ProdeHistoryListState();
+}
+
+class _ProdeHistoryListState extends ConsumerState<ProdeHistoryList> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    Future.microtask(() {
+      if (mounted) {
+        ref.read(prodeHistoryControllerProvider.notifier).load();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    // Trigger the next page when within 400px of the bottom.
+    if (pos.pixels >= pos.maxScrollExtent - 400) {
+      ref.read(prodeHistoryControllerProvider.notifier).loadMore();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(prodeHistoryControllerProvider);
+    final notifier = ref.read(prodeHistoryControllerProvider.notifier);
+
+    if (state.phase == ProdeHistoryPhase.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (state.phase == ProdeHistoryPhase.error) {
+      return _HistoryMessage(
+        icon: Icons.error_outline,
+        title: 'Algo salió mal',
+        message:
+            'No pudimos cargar tus pronósticos. Revisá tu conexión y reintentá.',
+        actionLabel: 'Reintentar',
+        onAction: notifier.load,
+      );
+    }
+
+    if (state.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: notifier.refresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 80),
+            _HistoryEmpty(),
+          ],
+        ),
+      );
+    }
+
+    // Loaded with items: list + a trailing footer slot (spinner / retry).
+    return RefreshIndicator(
+      onRefresh: notifier.refresh,
+      child: ListView.builder(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: state.items.length + 1,
+        itemBuilder: (context, i) {
+          if (i < state.items.length) {
+            return _HistoryCard(entry: state.items[i]);
+          }
+          return _HistoryFooter(
+            state: state,
+            onRetry: notifier.loadMore,
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Footer below the history list: a spinner while paging, an inline retry when
+/// the last page failed, or empty space when there is nothing more to load.
+class _HistoryFooter extends StatelessWidget {
+  final ProdeHistoryState state;
+  final VoidCallback onRetry;
+
+  const _HistoryFooter({required this.state, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.isLoadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    if (state.loadMoreFailed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: TextButton(
+            onPressed: onRetry,
+            child: const Text('Cargar más'),
+          ),
+        ),
+      );
+    }
+    return const SizedBox(height: 24);
+  }
+}
+
+/// Read-only finished-prediction card. Adapts a [PredictionHistoryEntry] to the
+/// shared [_MatchCard] so it renders identically to fixtures cards (score boxes,
+/// evaluation badge, "Resultado: X - Y" line) without a status icon or tap.
+class _HistoryCard extends StatelessWidget {
+  final PredictionHistoryEntry entry;
+
+  const _HistoryCard({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final match = FechaMatch(
+      matchId: entry.matchId,
+      homeTeam: entry.homeTeam,
+      awayTeam: entry.awayTeam,
+      kickoff: entry.kickoff,
+      zona: entry.zona,
+      homeEscudo: entry.homeEscudo,
+      awayEscudo: entry.awayEscudo,
+      realScoreHome: entry.realScoreHome,
+      realScoreAway: entry.realScoreAway,
+      isFinal: entry.isFinal,
+    );
+
+    return _MatchCard(
+      match: match,
+      draft: PredictionDraft(
+        scoreHome: entry.scoreHome,
+        scoreAway: entry.scoreAway,
+      ),
+      isSaved: false,
+      isLocked: false,
+      showStatusIcon: false,
+      // Show the evaluation badge once points have been awarded.
+      isEvaluated: entry.points != null,
+      predictionEntry: PredictionEntry(
+        matchId: entry.matchId,
+        scoreHome: entry.scoreHome,
+        scoreAway: entry.scoreAway,
+        points: entry.points,
+        evaluationMethod: entry.evaluationMethod,
+      ),
+    );
+  }
+}
+
+/// Empty state for the "Anteriores" list (no past predictions yet).
+class _HistoryEmpty extends StatelessWidget {
+  const _HistoryEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history, size: 64, color: theme.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(
+              'Todavía no tenés pronósticos anteriores',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Cuando se jueguen las fechas que pronosticaste vas a verlas acá.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Icon + title + message + retry button for the history error state.
+class _HistoryMessage extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String message;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  const _HistoryMessage({
+    required this.icon,
+    required this.title,
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 64, color: theme.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text(title, style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            ElevatedButton(onPressed: onAction, child: Text(actionLabel)),
+          ],
+        ),
+      ),
     );
   }
 }

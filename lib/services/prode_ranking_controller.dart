@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/fecha_activa.dart' show ProdeFechaState;
 import '../models/prode_ranking.dart';
 import 'prode_api_service.dart';
 
@@ -175,6 +176,76 @@ class ProdeRankingController
     } catch (e) {
       state = ProdeRankingError(
         code: 'ranking_error',
+        message: e.toString(),
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-fecha ranking controller ("Fecha Actual" tab)
+// ---------------------------------------------------------------------------
+
+/// State machine for the per-fecha ("Fecha Actual") leaderboard — the ranking
+/// counting ONLY the last played (evaluated) fecha's points.
+///
+/// Reuses [ProdeRankingState] so the same [ProdeRankingView] renders it. The
+/// only difference from [ProdeRankingController] is the load path: it first
+/// resolves the last evaluated fecha via [ProdeApiService.fetchFechas] (the
+/// season list is ordered locked_at ASC, so the last evaluated one is the most
+/// recent), then fetches that fecha's ranking via `fetchRanking(fechaId: ...)`.
+///
+/// Emits [ProdeRankingEmpty] when no fecha has been evaluated yet (nothing to
+/// rank), mirroring the empty-but-not-error semantics of the season controller.
+class ProdeFechaRankingController extends StateNotifier<ProdeRankingState> {
+  final ProdeApiService _service;
+
+  ProdeFechaRankingController(this._service)
+      : super(const ProdeRankingLoading());
+
+  /// Guarded initial load — no-op unless currently [ProdeRankingLoading].
+  Future<void> load() async {
+    if (state is! ProdeRankingLoading) return;
+    await _fetch(keepCurrentOnStart: false);
+  }
+
+  /// Re-fetch, keeping the current list visible when already Loaded.
+  Future<void> refresh() async {
+    await _fetch(keepCurrentOnStart: state is ProdeRankingLoaded);
+  }
+
+  Future<void> _fetch({required bool keepCurrentOnStart}) async {
+    if (!keepCurrentOnStart) {
+      state = const ProdeRankingLoading();
+    }
+    try {
+      final fechas = await _service.fetchFechas();
+      final evaluated = fechas
+          .where((f) => f.state == ProdeFechaState.evaluated)
+          .toList();
+
+      if (evaluated.isEmpty) {
+        // No fecha has been played/evaluated yet — nothing to rank.
+        state = const ProdeRankingEmpty();
+        return;
+      }
+
+      // List is ordered locked_at ASC → the last evaluated entry is the most
+      // recently played fecha.
+      final lastEvaluated = evaluated.last;
+      final page = await _service.fetchRanking(fechaId: lastEvaluated.fechaId);
+
+      state = page.items.isEmpty
+          ? const ProdeRankingEmpty()
+          : ProdeRankingLoaded(page);
+    } on ProdeApiException catch (e) {
+      state = ProdeRankingError(
+        code: 'ranking_fecha_${e.statusCode}',
+        message: e.toString(),
+      );
+    } catch (e) {
+      state = ProdeRankingError(
+        code: 'ranking_fecha_error',
         message: e.toString(),
       );
     }

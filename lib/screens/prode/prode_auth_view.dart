@@ -53,7 +53,7 @@ class ProdeAuthView extends StatelessWidget {
       ProdeAuthAuthenticating() =>
         const _Centered(child: CircularProgressIndicator()),
       ProdeAuthAuthenticated(:final stale) =>
-        ProdeFixturesScreen(stale: stale, onLogout: onLogout),
+        ProdeChamiScreen(stale: stale, onLogout: onLogout),
       ProdeAuthUnauthenticated() => _SignInView(
           onGoogleSignIn: onGoogleSignIn,
           onAppleSignIn: onAppleSignIn,

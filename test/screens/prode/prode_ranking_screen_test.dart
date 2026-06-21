@@ -10,6 +10,7 @@ import 'package:torneo_futbol_app/models/prode_ranking.dart';
 import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/prode/prode_ranking_screen.dart';
+import 'package:torneo_futbol_app/screens/prode/prode_auth_gate.dart';
 import 'package:torneo_futbol_app/screens/more_screen.dart';
 import 'package:torneo_futbol_app/services/notification_service.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
@@ -34,10 +35,28 @@ class _FakeApiService extends ProdeApiService {
   @override
   Future<RankingPage> fetchRanking({
     int? temporada,
+    int? fechaId,
     int page = 1,
     int perPage = 50,
   }) =>
       Future.error('not used in tests');
+}
+
+/// Fake auth repository that returns no tokens — neutralises secure storage so
+/// pushing [ProdeAuthGate] (whose bootstrap reads tokens) does not touch a
+/// platform channel during widget tests.
+class _FakeAuthRepository extends ProdeAuthRepository {
+  @override
+  Future<TokenSnapshot> readAll() async => const TokenSnapshot();
+
+  @override
+  Future<String?> readAccessToken() async => null;
+
+  @override
+  Future<String?> readRefreshToken() async => null;
+
+  @override
+  Future<void> clear() async {}
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +67,22 @@ class _FakeApiService extends ProdeApiService {
 /// no-op load/refresh so no network call is made during widget tests.
 class _StubController extends ProdeRankingController {
   _StubController(ProdeRankingState initialState) : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+
+  @override
+  Future<void> refresh() async {}
+}
+
+/// Stub [ProdeFechaRankingController] for the "Fecha Actual" tab — no-op
+/// load/refresh, fixed initial state. The General-tab tests pump with
+/// initialTab=1 so this stub's state is irrelevant (kept Loading).
+class _StubFechaController extends ProdeFechaRankingController {
+  _StubFechaController(ProdeRankingState initialState)
+      : super(_FakeApiService()) {
     state = initialState;
   }
 
@@ -176,8 +211,12 @@ Future<void> _pumpScreen(
       overrides: [
         prodeRankingControllerProvider
             .overrideWith((ref) => _StubController(initialState)),
+        prodeFechaRankingControllerProvider
+            .overrideWith((ref) => _StubFechaController(initialState)),
       ],
-      child: const MaterialApp(home: ProdeRankingScreen()),
+      // initialTab=1 → the "General" tab (backed by prodeRankingControllerProvider)
+      // is the visible one these tests assert against.
+      child: const MaterialApp(home: ProdeRankingScreen(initialTab: 1)),
     ),
   );
   await tester.pump(); // settle microtask
@@ -198,10 +237,11 @@ Future<void> _pumpMoreScreen(
             .overrideWithValue(_FakeNotificationService()),
         prodeRankingControllerProvider
             .overrideWith((ref) => _StubController(rankingState)),
+        prodeAuthRepositoryProvider.overrideWithValue(_FakeAuthRepository()),
         prodeApiServiceProvider.overrideWithValue(
           ProdeApiService(
             config: _prodeAuthConfig,
-            authRepo: ProdeAuthRepository(),
+            authRepo: _FakeAuthRepository(),
           ),
         ),
       ],
@@ -303,8 +343,11 @@ void main() {
                 onRefresh: () => refreshCount++,
               ),
             ),
+            prodeFechaRankingControllerProvider.overrideWith(
+              (ref) => _StubFechaController(const ProdeRankingLoading()),
+            ),
           ],
-          child: const MaterialApp(home: ProdeRankingScreen()),
+          child: const MaterialApp(home: ProdeRankingScreen(initialTab: 1)),
         ),
       );
       await tester.pump();
@@ -328,12 +371,16 @@ void main() {
           overrides: [
             prodeRankingControllerProvider
                 .overrideWith((ref) => _StubController(_makeLoaded([entry]))),
+            prodeFechaRankingControllerProvider
+                .overrideWith((ref) => _StubFechaController(
+                      const ProdeRankingLoading(),
+                    )),
           ],
-          child: MaterialApp(
+          child: const MaterialApp(
             home: Scaffold(
               body: SizedBox(
                 width: 300,
-                child: ProdeRankingScreen(),
+                child: ProdeRankingScreen(initialTab: 1),
               ),
             ),
           ),
@@ -446,25 +493,25 @@ void main() {
       await _setUpFirebase();
     });
 
-    testWidgets('prode enabled → Ranking tile found', (tester) async {
+    testWidgets('prode enabled → Prode Chami tile found', (tester) async {
       await _pumpMoreScreen(tester, prode: true);
-      expect(find.text('Ranking'), findsOneWidget);
+      expect(find.text('Prode Chami'), findsOneWidget);
     });
 
-    testWidgets('tapping tile pushes ProdeRankingScreen', (tester) async {
+    testWidgets('tapping Prode Chami tile pushes ProdeAuthGate', (tester) async {
       await _pumpMoreScreen(tester, prode: true);
-      await tester.tap(find.text('Ranking'));
+      await tester.tap(find.text('Prode Chami'));
       // Use pump with duration to advance the navigator animation without
       // waiting for pumpAndSettle (which can time out if there are pending
       // microtasks from the pushed screen's initState).
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.byType(ProdeRankingScreen), findsOneWidget);
+      expect(find.byType(ProdeAuthGate), findsOneWidget);
     });
 
-    testWidgets('prode disabled → no Ranking tile', (tester) async {
+    testWidgets('prode disabled → no Prode Chami tile', (tester) async {
       await _pumpMoreScreen(tester, prode: false);
-      expect(find.text('Ranking'), findsNothing);
+      expect(find.text('Prode Chami'), findsNothing);
     });
   });
 }

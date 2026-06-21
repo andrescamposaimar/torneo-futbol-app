@@ -181,9 +181,9 @@ void main() {
       // ProdeIdentityCard widget is in the tree
       expect(find.byType(ProdeIdentityCard), findsOneWidget);
 
-      // Prode section tiles (AC-25)
-      expect(find.text('Mis pronósticos'), findsOneWidget);
-      expect(find.text('Ranking'), findsOneWidget);
+      // Prode section: a single "Prode Chami" tile (summary + predictions live
+      // inside; ranking is reached from the summary card within).
+      expect(find.text('Prode Chami'), findsOneWidget);
     });
 
     // AC-52b / AC-07, AC-48: prode=false → no identity card, no prode tiles, no crash
@@ -211,8 +211,7 @@ void main() {
       expect(tester.takeException(), isNull);
 
       // No prode UI
-      expect(find.text('Mis pronósticos'), findsNothing);
-      expect(find.text('Ranking'), findsNothing);
+      expect(find.text('Prode Chami'), findsNothing);
     });
 
     // AC-52c / AC-33: anuarios non-empty → single "Anuarios" tile present;
@@ -318,7 +317,7 @@ void main() {
       double dyOf(String text) =>
           tester.getTopLeft(find.text(text).first).dy;
 
-      final prode = dyOf('Mis pronósticos');
+      final prode = dyOf('Prode Chami');
       final stats = dyOf('Goleadores');
       final gestion = dyOf('Lista de Espera');
       final informacion = dyOf('Reglamento');

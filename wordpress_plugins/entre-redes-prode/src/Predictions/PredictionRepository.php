@@ -264,6 +264,110 @@ class PredictionRepository {
     }
 
     /**
+     * Return a paginated slice of a user's predictions for FINISHED matches,
+     * ordered most-recent-first, joined with match snapshot metadata and
+     * evaluation results.
+     *
+     * "Finished" means the match has a final result recorded
+     * (prode_fecha_matches.is_final = 1). This powers the app's "Anteriores"
+     * (past predictions) infinite-scroll list. Upcoming/open matches are served
+     * by the per-fecha fixtures endpoints, not here.
+     *
+     * JOIN strategy:
+     *   - LEFT JOIN prode_fecha_matches for the snapshot (kickoff, teams, zona,
+     *     escudos, real scores, is_final). The is_final = 1 filter in WHERE makes
+     *     this effectively an inner join — predictions without a final match row
+     *     are excluded.
+     *   - JOIN prode_fechas for season_id (used by the client to render the
+     *     "{season} - {zona}" header line).
+     *   - LEFT JOIN prode_scores for points + evaluation_method (null when the
+     *     fecha is final but not yet evaluated).
+     *
+     * Ordering: match_kickoff DESC, match_id DESC (most recent first; match_id is
+     * a stable tiebreak for matches sharing a kickoff time).
+     *
+     * No wp_users JOIN. No window functions. SQLite-shim compatible.
+     *
+     * @param int $userId The prode_users.id to query.
+     * @param int $limit  Page size (LIMIT).
+     * @param int $offset Row offset (OFFSET).
+     * @return array<int, array<string, mixed>>
+     */
+    public function findFinishedByUserPaginated( int $userId, int $limit, int $offset ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT p.fecha_id,
+                        p.match_id,
+                        f.season_id,
+                        fm.match_kickoff,
+                        fm.home_team,
+                        fm.away_team,
+                        fm.zona,
+                        fm.home_escudo,
+                        fm.away_escudo,
+                        p.score_home,
+                        p.score_away,
+                        fm.real_score_home,
+                        fm.real_score_away,
+                        fm.is_final,
+                        s.points,
+                        s.evaluation_method
+                   FROM {$p}prode_predictions p
+                   LEFT JOIN {$p}prode_fecha_matches fm
+                          ON fm.fecha_id = p.fecha_id
+                         AND fm.match_id = p.match_id
+                   LEFT JOIN {$p}prode_fechas f
+                          ON f.id = p.fecha_id
+                   LEFT JOIN {$p}prode_scores s
+                          ON s.user_id = p.user_id
+                         AND s.match_id = p.match_id
+                  WHERE p.user_id = %d
+                    AND fm.is_final = 1
+                  ORDER BY fm.match_kickoff DESC, fm.match_id DESC
+                  LIMIT %d OFFSET %d",
+                $userId,
+                $limit,
+                $offset
+            ),
+            ARRAY_A
+        );
+
+        return $rows ?: [];
+    }
+
+    /**
+     * Count a user's predictions for FINISHED matches (is_final = 1).
+     *
+     * Used for pagination of the "Anteriores" history list. Mirrors the WHERE
+     * clause of findFinishedByUserPaginated so totals and pages stay consistent.
+     *
+     * @param int $userId The prode_users.id to count.
+     * @return int
+     */
+    public function countFinishedByUser( int $userId ): int {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $count = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*)
+                   FROM {$p}prode_predictions p
+                   LEFT JOIN {$p}prode_fecha_matches fm
+                          ON fm.fecha_id = p.fecha_id
+                         AND fm.match_id = p.match_id
+                  WHERE p.user_id = %d
+                    AND fm.is_final = 1",
+                $userId
+            )
+        );
+
+        return (int) $count;
+    }
+
+    /**
      * Return all predictions submitted by a user for a given fecha, with
      * points and evaluation_method from prode_scores when available.
      *

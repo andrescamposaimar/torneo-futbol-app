@@ -24,6 +24,7 @@ class RestController {
     private ?\EntreRedes\Prode\Rest\PredictionController  $prediction_controller;
     private ?\EntreRedes\Prode\Rest\EvaluationController  $evaluation_controller;
     private ?\EntreRedes\Prode\Rest\RankingController     $ranking_controller;
+    private ?\EntreRedes\Prode\Rest\PredictionHistoryController $prediction_history_controller;
 
     public function __construct(
         ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null,
@@ -32,7 +33,8 @@ class RestController {
         ?\EntreRedes\Prode\Rest\PredictionController $prediction_controller = null,
         ?\EntreRedes\Prode\Rest\EvaluationController $evaluation_controller = null,
         ?\EntreRedes\Prode\Rest\RankingController $ranking_controller = null,
-        ?\EntreRedes\Prode\Rest\FechaListController $fecha_list_controller = null
+        ?\EntreRedes\Prode\Rest\FechaListController $fecha_list_controller = null,
+        ?\EntreRedes\Prode\Rest\PredictionHistoryController $prediction_history_controller = null
     ) {
         $this->auth_endpoints        = $auth_endpoints;
         $this->account_controller    = $account_controller;
@@ -41,6 +43,7 @@ class RestController {
         $this->prediction_controller = $prediction_controller;
         $this->evaluation_controller = $evaluation_controller;
         $this->ranking_controller    = $ranking_controller;
+        $this->prediction_history_controller = $prediction_history_controller;
     }
 
     public function register_routes(): void {
@@ -100,6 +103,11 @@ class RestController {
         // Fecha list endpoints (PR-G6-B): GET /prode/fechas, GET /prode/fecha/{id}.
         if ( null !== $this->fecha_list_controller ) {
             $this->fecha_list_controller->register_routes();
+        }
+
+        // Prediction history endpoint: GET /prode/predicciones (paginated past predictions).
+        if ( null !== $this->prediction_history_controller ) {
+            $this->prediction_history_controller->register_routes();
         }
     }
 

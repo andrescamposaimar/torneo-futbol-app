@@ -13,7 +13,6 @@ import '../widgets/prode_identity_card.dart';
 import 'anuarios_screen.dart';
 import 'listas_screen.dart';
 import 'prode/prode_auth_gate.dart';
-import 'prode/prode_ranking_screen.dart';
 import 'scorers_screen.dart';
 import 'imbatibles_screen.dart';
 import 'solicitud_cambio_webview.dart';
@@ -174,23 +173,12 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
               children: [
                 _tile(
                   context,
-                  'Mis pronósticos',
+                  'Prode Chami',
                   Icons.scoreboard,
                   () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => const ProdeAuthGate(),
-                    ),
-                  ),
-                ),
-                _tile(
-                  context,
-                  'Ranking',
-                  Icons.military_tech,
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ProdeRankingScreen(),
                     ),
                   ),
                 ),

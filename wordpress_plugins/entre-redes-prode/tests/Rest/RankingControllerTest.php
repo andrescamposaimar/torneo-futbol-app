@@ -495,6 +495,75 @@ class RankingControllerTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // "me" summary — caller's own rank/points regardless of page
+    // -------------------------------------------------------------------------
+
+    public function test_me_is_null_for_anonymous(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1 );
+        $this->seedScore( $fechaId, 1, 101, 5, 'result_only' );
+
+        $response = $this->controller->getRanking( $this->makeRequest() );
+        $data     = $response->get_data();
+
+        $this->assertArrayHasKey( 'me', $data );
+        $this->assertNull( $data['me'] );
+    }
+
+    public function test_me_carries_callers_rank_even_outside_page(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        // 5 users with descending points; caller (user 5) is last → rank 5.
+        for ( $i = 1; $i <= 5; $i++ ) {
+            $this->seedUser( $i );
+            $this->seedScore( $fechaId, $i, 100 + $i, 6 - $i, 'result_only' ); // 5,4,3,2,1
+        }
+
+        // Page 1 with per_page 2 does NOT contain the caller's row.
+        $response = $this->controller->getRanking( $this->makeAuthedRequest( 5, [ 'page' => 1, 'per_page' => 2 ] ) );
+        $data     = $response->get_data();
+
+        $this->assertCount( 2, $data['items'] );
+        $this->assertNotNull( $data['me'] );
+        $this->assertSame( 5, $data['me']['user_id'] );
+        $this->assertSame( 5, $data['me']['rank'] );
+        $this->assertSame( 1, $data['me']['total_points'] );
+    }
+
+    public function test_me_null_when_caller_has_no_ranked_row(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1 );
+        $this->seedScore( $fechaId, 1, 101, 5, 'result_only' );
+
+        // Caller user 99 has no scores → no ranked row.
+        $response = $this->controller->getRanking( $this->makeAuthedRequest( 99 ) );
+        $data     = $response->get_data();
+
+        $this->assertNull( $data['me'] );
+    }
+
+    public function test_me_works_in_per_fecha_view(): void {
+        $fechaId = $this->seedFecha( 'evaluated', 359 );
+        $this->seedUser( 1 );
+        $this->seedUser( 2 );
+        $this->seedScore( $fechaId, 1, 101, 3, 'exact_score' );
+        $this->seedScore( $fechaId, 2, 102, 1, 'result_only' );
+
+        $ranked = [
+            [ 'user_id' => 1, 'total_points' => 3, 'rank' => 1, 'exact_count' => 1 ],
+            [ 'user_id' => 2, 'total_points' => 1, 'rank' => 2, 'exact_count' => 0 ],
+        ];
+        $this->repo->upsertFechaCache( $fechaId, $ranked, '2026-06-01 00:00:00' );
+
+        $response = $this->controller->getRanking( $this->makeAuthedRequest( 2, [ 'fecha_id' => $fechaId ] ) );
+        $data     = $response->get_data();
+
+        $this->assertNotNull( $data['me'] );
+        $this->assertSame( 2, $data['me']['user_id'] );
+        $this->assertSame( 2, $data['me']['rank'] );
+        $this->assertSame( 1, $data['me']['total_points'] );
+    }
+
+    // -------------------------------------------------------------------------
     // Non-numeric fecha_id → 400
     // -------------------------------------------------------------------------
 

@@ -96,6 +96,61 @@ class RankingEntry {
 }
 
 // ---------------------------------------------------------------------------
+// RankingMe DTO (caller summary)
+// ---------------------------------------------------------------------------
+
+/// The authenticated caller's own position in a ranking view, resolved by the
+/// backend from the full ranked set (not just the returned page) so it is
+/// correct regardless of pagination.
+///
+/// Present in the `GET /prode/ranking` envelope as `me`. Null when the caller
+/// is anonymous or has no ranked row in the requested view (e.g. no points yet).
+/// Powers the Prode summary card (Ranking de la Fecha / Ranking general).
+@immutable
+class RankingMe {
+  final int userId;
+  final int rank;
+  final int totalPoints;
+  final int exactCount;
+
+  const RankingMe({
+    required this.userId,
+    required this.rank,
+    required this.totalPoints,
+    required this.exactCount,
+  });
+
+  /// Parses the `me` object. Tolerates absent `exact_count` (→ 0); the other
+  /// fields use strict `as` casts so a malformed payload fails loudly.
+  factory RankingMe.fromJson(Map<String, dynamic> json) {
+    return RankingMe(
+      userId: json['user_id'] as int,
+      rank: json['rank'] as int,
+      totalPoints: json['total_points'] as int,
+      exactCount: (json['exact_count'] as int?) ?? 0,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RankingMe &&
+          runtimeType == other.runtimeType &&
+          userId == other.userId &&
+          rank == other.rank &&
+          totalPoints == other.totalPoints &&
+          exactCount == other.exactCount;
+
+  @override
+  int get hashCode => Object.hash(userId, rank, totalPoints, exactCount);
+
+  @override
+  String toString() =>
+      'RankingMe(userId: $userId, rank: $rank, '
+      'totalPoints: $totalPoints, exactCount: $exactCount)';
+}
+
+// ---------------------------------------------------------------------------
 // RankingPage DTO (envelope)
 // ---------------------------------------------------------------------------
 
@@ -121,11 +176,15 @@ class RankingPage {
   /// Number of items per page used for this response.
   final int perPage;
 
+  /// The caller's own position summary, or null when anonymous / unranked.
+  final RankingMe? me;
+
   const RankingPage({
     required this.items,
     required this.total,
     required this.page,
     required this.perPage,
+    this.me,
   });
 
   /// Parses the `GET /prode/ranking` envelope.
@@ -140,11 +199,17 @@ class RankingPage {
             .toList(growable: false)
         : const <RankingEntry>[];
 
+    final rawMe = json['me'];
+    final me = rawMe is Map<String, dynamic>
+        ? RankingMe.fromJson(rawMe)
+        : null;
+
     return RankingPage(
       items: items,
       total: (json['total'] as int?) ?? 0,
       page: (json['page'] as int?) ?? 1,
       perPage: (json['per_page'] as int?) ?? 50,
+      me: me,
     );
   }
 
@@ -156,7 +221,8 @@ class RankingPage {
           listEquals(items, other.items) &&
           total == other.total &&
           page == other.page &&
-          perPage == other.perPage;
+          perPage == other.perPage &&
+          me == other.me;
 
   @override
   int get hashCode => Object.hash(
@@ -164,10 +230,11 @@ class RankingPage {
         total,
         page,
         perPage,
+        me,
       );
 
   @override
   String toString() =>
       'RankingPage(items: ${items.length}, total: $total, '
-      'page: $page, perPage: $perPage)';
+      'page: $page, perPage: $perPage, me: $me)';
 }

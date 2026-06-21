@@ -11,6 +11,7 @@ import '../services/prode_auth_repository.dart';
 import '../services/prode_api_service.dart';
 import '../services/prode_auth_state.dart';
 import '../services/prode_fixtures_controller.dart';
+import '../services/prode_history_controller.dart';
 import '../services/prode_ranking_controller.dart';
 
 /// Drives the native Google Sign-In sheet and returns a Google id_token whose
@@ -172,4 +173,22 @@ final prodeFixturesControllerProvider =
 final prodeRankingControllerProvider =
     StateNotifierProvider<ProdeRankingController, ProdeRankingState>((ref) {
   return ProdeRankingController(ref.watch(prodeApiServiceProvider));
+});
+
+/// Provides the [ProdeFechaRankingController] for the "Fecha Actual" tab — the
+/// leaderboard counting only the last evaluated fecha's points.
+///
+/// Shares [ProdeRankingState] with [prodeRankingControllerProvider] so the same
+/// view renders both. NOT autoDispose, same session-persistence rationale.
+final prodeFechaRankingControllerProvider =
+    StateNotifierProvider<ProdeFechaRankingController, ProdeRankingState>((ref) {
+  return ProdeFechaRankingController(ref.watch(prodeApiServiceProvider));
+});
+
+/// Provides the [ProdeHistoryController] for the "Anteriores" (past
+/// predictions) infinite-scroll list. NOT autoDispose, same session-persistence
+/// rationale as the other Prode controllers.
+final prodeHistoryControllerProvider =
+    StateNotifierProvider<ProdeHistoryController, ProdeHistoryState>((ref) {
+  return ProdeHistoryController(ref.watch(prodeApiServiceProvider));
 });

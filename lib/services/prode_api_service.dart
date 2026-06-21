@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import '../models/fecha_activa.dart';
 import '../models/fecha_summary.dart';
+import '../models/prediction_history.dart';
 import '../models/prode_ranking.dart';
 import 'prode_auth_repository.dart';
 import 'prode_auth_state.dart';
@@ -369,6 +370,7 @@ class ProdeApiService {
   /// Timeout: 15 s (mirrors [fetchFechaActiva]).
   Future<RankingPage> fetchRanking({
     int? temporada,
+    int? fechaId,
     int page = 1,
     int perPage = 50,
   }) async {
@@ -376,6 +378,9 @@ class ProdeApiService {
       'page': '$page',
       'per_page': '$perPage',
       if (temporada != null) 'temporada': '$temporada',
+      // When present, switches the backend to the per-fecha leaderboard
+      // (only this fecha's points). Absent → season-cumulative ranking.
+      if (fechaId != null) 'fecha_id': '$fechaId',
     };
     final uri = Uri.parse('${_config.prodeApiBaseUrl}/ranking')
         .replace(queryParameters: query);
@@ -460,6 +465,48 @@ class ProdeApiService {
     throw ProdeApiException(
       statusCode: response.statusCode,
       code: extractErrorCode(body),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Prediction history endpoint
+  // ---------------------------------------------------------------------------
+
+  /// Fetches a page of the caller's past predictions (finished matches only),
+  /// newest first, for the "Anteriores" infinite-scroll list.
+  ///
+  /// Authenticated endpoint — routes through [request] (attaches the Bearer
+  /// token, handles 401/refresh). Unlike [fetchRanking] this is per-user data,
+  /// so it intentionally fails fast with [ProdeAuthRequired] when no session
+  /// exists rather than degrading to anonymous.
+  ///
+  /// Outcomes:
+  /// - **200** — returns a parsed [PredictionHistoryPage].
+  /// - **401 surviving refresh** — throws [ProdeAuthRequired].
+  /// - **any other non-200** — throws [ProdeApiException] with the status code.
+  ///
+  /// Timeout: 15 s.
+  Future<PredictionHistoryPage> fetchPredictionHistory({
+    int page = 1,
+    int perPage = 15,
+  }) async {
+    final uri = Uri.parse('${_config.prodeApiBaseUrl}/predicciones').replace(
+      queryParameters: <String, String>{
+        'page': '$page',
+        'per_page': '$perPage',
+      },
+    );
+    final req = http.Request('GET', uri)..headers['Accept'] = 'application/json';
+
+    final response = await request(req).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode == 200) {
+      return PredictionHistoryPage.fromJson(_decodeBody(response));
+    }
+
+    throw ProdeApiException(
+      statusCode: response.statusCode,
+      code: extractErrorCode(_decodeBody(response)),
     );
   }
 

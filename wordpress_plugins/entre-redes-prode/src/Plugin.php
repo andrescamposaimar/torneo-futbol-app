@@ -102,6 +102,12 @@ final class Plugin {
                 $pred_repo
             );
 
+            // Prediction history endpoint: GET /prode/predicciones (paginated "Anteriores" list).
+            $prediction_history_controller = new Rest\PredictionHistoryController(
+                $pred_repo,
+                $middleware
+            );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
@@ -109,7 +115,8 @@ final class Plugin {
                 $prediction_controller,
                 $evaluation_controller,
                 $ranking_controller,
-                $fecha_list_controller
+                $fecha_list_controller,
+                $prediction_history_controller
             );
             $controller->register_routes();
         } );
