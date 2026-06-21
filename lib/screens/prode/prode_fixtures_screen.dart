@@ -2195,6 +2195,16 @@ class _SummaryHalf extends StatelessWidget {
 
     final rankLabel = me != null ? '#${me!.rank}' : '—';
     final pointsLabel = me != null ? '${me!.totalPoints}' : '—';
+    // Black by default; green only when the user is first (rank == 1) in THIS
+    // ranking; grey for the "—" placeholder (loading / unranked).
+    final Color statColor;
+    if (me == null) {
+      statColor = Colors.grey.shade400;
+    } else if (me!.rank == 1) {
+      statColor = Colors.green.shade700;
+    } else {
+      statColor = Colors.black87;
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -2216,8 +2226,10 @@ class _SummaryHalf extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _SummaryStat(value: rankLabel, label: 'Puesto'),
-              _SummaryStat(value: pointsLabel, label: 'Puntos'),
+              _SummaryStat(
+                  value: rankLabel, label: 'Puesto', valueColor: statColor),
+              _SummaryStat(
+                  value: pointsLabel, label: 'Puntos', valueColor: statColor),
             ],
           ),
         ],
@@ -2230,8 +2242,13 @@ class _SummaryHalf extends StatelessWidget {
 class _SummaryStat extends StatelessWidget {
   final String value;
   final String label;
+  final Color valueColor;
 
-  const _SummaryStat({required this.value, required this.label});
+  const _SummaryStat({
+    required this.value,
+    required this.label,
+    required this.valueColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2243,7 +2260,7 @@ class _SummaryStat extends StatelessWidget {
           value,
           style: theme.textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
-            color: Colors.black87,
+            color: valueColor,
           ),
         ),
         Text(
