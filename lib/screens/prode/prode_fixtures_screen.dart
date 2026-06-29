@@ -24,25 +24,14 @@ import 'prode_ranking_screen.dart';
 /// on [ProdeFixturesLoading] so re-entry while already Loaded/Empty/Error
 /// does NOT clobber the existing state.
 ///
-/// [stale] and [onLogout] are forwarded from the [ProdeAuthAuthenticated]
-/// arm in [ProdeAuthView] so the stale banner and logout affordance remain
-/// accessible from within the fixtures screen.
+/// [onLogout] is forwarded from [ProdeChamiScreen] so the logout affordance
+/// remains accessible from within the fixtures screen.
 class ProdeFixturesScreen extends ConsumerStatefulWidget {
-  final bool stale;
   final VoidCallback onLogout;
-
-  /// When true, renders ONLY the open-fecha ("A Jugarse") content with no
-  /// internal "A Jugarse / Finalizados" TabBar. Used when embedded inside
-  /// [ProdeChamiScreen], whose own segmented control owns the
-  /// Anteriores/A-Jugarse switch. Defaults to false → the standalone two-tab
-  /// layout (unchanged behavior for existing callers/tests).
-  final bool openOnly;
 
   const ProdeFixturesScreen({
     super.key,
-    required this.stale,
     required this.onLogout,
-    this.openOnly = false,
   });
 
   @override
@@ -72,11 +61,9 @@ class _ProdeFixturesScreenState extends ConsumerState<ProdeFixturesScreen> {
 
     return ProdeFixturesView(
       state: state,
-      stale: widget.stale,
       onLogout: widget.onLogout,
       onRetry: notifier.load,
       onRefresh: notifier.refresh,
-      openOnly: widget.openOnly,
     );
   }
 }
@@ -92,22 +79,16 @@ class _ProdeFixturesScreenState extends ConsumerState<ProdeFixturesScreen> {
 /// with a concrete [ProdeFixturesState] and callbacks.
 class ProdeFixturesView extends StatelessWidget {
   final ProdeFixturesState state;
-  final bool stale;
   final VoidCallback onLogout;
   final VoidCallback onRetry;
   final Future<void> Function() onRefresh;
 
-  /// See [ProdeFixturesScreen.openOnly].
-  final bool openOnly;
-
   const ProdeFixturesView({
     super.key,
     required this.state,
-    required this.stale,
     required this.onLogout,
     required this.onRetry,
     required this.onRefresh,
-    this.openOnly = false,
   });
 
   @override
@@ -138,10 +119,8 @@ class ProdeFixturesView extends StatelessWidget {
           selectedFechaId: selectedFechaId,
           isFechaLoading: isFechaLoading,
           fechaLoadError: fechaLoadError,
-          stale: stale,
           onLogout: onLogout,
           onRefresh: onRefresh,
-          openOnly: openOnly,
         ),
     };
   }
@@ -254,10 +233,8 @@ class _LoadedView extends ConsumerStatefulWidget {
   final int selectedFechaId;
   final bool isFechaLoading;
   final ProdeFixturesFechaError? fechaLoadError;
-  final bool stale;
   final VoidCallback onLogout;
   final Future<void> Function() onRefresh;
-  final bool openOnly;
 
   const _LoadedView({
     required this.fecha,
@@ -267,89 +244,15 @@ class _LoadedView extends ConsumerStatefulWidget {
     required this.selectedFechaId,
     required this.isFechaLoading,
     required this.fechaLoadError,
-    required this.stale,
     required this.onLogout,
     required this.onRefresh,
-    this.openOnly = false,
   });
 
   @override
   ConsumerState<_LoadedView> createState() => _LoadedViewState();
 }
 
-class _LoadedViewState extends ConsumerState<_LoadedView>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    // Default tab: "A Jugarse" (index 0) when open fechas exist, else
-    // "Finalizados" (index 1). Computed once on first build.
-    final hasOpen = widget.fechas.any((f) => f.state == ProdeFechaState.open);
-    _tabController = TabController(
-      length: 2,
-      vsync: this,
-      initialIndex: hasOpen ? 0 : 1,
-    );
-    _tabController.addListener(_onTabChanged);
-  }
-
-  @override
-  void dispose() {
-    _tabController.removeListener(_onTabChanged);
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  /// Called on every animation tick and on settled tab changes.
-  ///
-  /// Guards with [TabController.indexIsChanging]: fires once when the tab
-  /// animation has settled so we don't trigger multiple selectFecha calls
-  /// during the swipe animation.
-  ///
-  /// When the newly-active tab's filtered fecha list does NOT contain the
-  /// controller's current [selectedFechaId], auto-selects the tab's default
-  /// fecha:
-  ///   - "A Jugarse" (index 0): first open fecha.
-  ///   - "Finalizados" (index 1): last locked|evaluated fecha (most recent,
-  ///     because the list is ordered locked_at ASC from the backend).
-  void _onTabChanged() {
-    if (_tabController.indexIsChanging) return;
-    if (!mounted) return;
-
-    // Read current widget props inside the callback so we always see the
-    // latest values (widget is rebuilt with new props on state changes).
-    final fechas = widget.fechas;
-    final selectedFechaId = widget.selectedFechaId;
-
-    final aJugarse =
-        fechas.where((f) => f.state == ProdeFechaState.open).toList();
-    final finalizados = fechas
-        .where((f) =>
-            f.state == ProdeFechaState.locked ||
-            f.state == ProdeFechaState.evaluated)
-        .toList();
-
-    final tabFechas = _tabController.index == 0 ? aJugarse : finalizados;
-
-    // If the tab's list is empty, nothing to select.
-    if (tabFechas.isEmpty) return;
-
-    // If the current selection already belongs to this tab, no work needed.
-    final alreadyInTab = tabFechas.any((f) => f.fechaId == selectedFechaId);
-    if (alreadyInTab) return;
-
-    // Auto-select the tab's default:
-    //   "A Jugarse"  → first open fecha (earliest upcoming).
-    //   "Finalizados"→ last finished fecha (most recent, ordered locked_at ASC).
-    final defaultId = _tabController.index == 0
-        ? tabFechas.first.fechaId
-        : tabFechas.last.fechaId;
-
-    ref.read(prodeFixturesControllerProvider.notifier).selectFecha(defaultId);
-  }
-
+class _LoadedViewState extends ConsumerState<_LoadedView> {
   @override
   Widget build(BuildContext context) {
     final controller = ref.read(prodeFixturesControllerProvider.notifier);
@@ -380,166 +283,70 @@ class _LoadedViewState extends ConsumerState<_LoadedView>
         .where((m) => widget.savedMatchIds.contains(m.matchId))
         .length;
 
-    // T-13: split fechas into two buckets — client-side, no backend calls.
-    // Only applies when fechas list is non-empty; otherwise fall back to
-    // the single-view layout (no tabs, no selector) for compatibility with
-    // states that don't carry a full summary list.
-    final hasFechaList = widget.fechas.isNotEmpty;
-    final aJugarse = widget.fechas
-        .where((f) => f.state == ProdeFechaState.open)
-        .toList();
-    final finalizados = widget.fechas
-        .where((f) =>
-            f.state == ProdeFechaState.locked ||
-            f.state == ProdeFechaState.evaluated)
-        .toList();
-    // openOnly ("A Jugarse" inside Prode Chami) surfaces both predictable and
+    // "A Jugarse" (embedded in ProdeChamiScreen) surfaces both predictable and
     // in-play fechas: open (still bettable) and locked (window closed, not yet
     // evaluated). The locked ones reveal the populares percentages and tag each
-    // match with an "En Juego" label. Evaluated fechas stay out (they belong to
-    // the history list). This is intentionally separate from [aJugarse], which
-    // still drives the legacy two-tab layout.
+    // match with an "En Juego" label. Evaluated fechas stay out — they belong
+    // to the history list ("Anteriores"), which ProdeChamiScreen owns.
+    final hasFechaList = widget.fechas.isNotEmpty;
     final playableFechas = widget.fechas
         .where((f) =>
             f.state == ProdeFechaState.open ||
             f.state == ProdeFechaState.locked)
         .toList();
 
-    // Progress header data — passed into each tab content and single-view so it
-    // renders below the selector row (W-1: selector must appear above progress).
+    // Progress header data — passed into the tab content so it renders below
+    // the selector row (W-1: selector must appear above progress).
     final showProgress =
         totalCount > 0 && !widget.isFechaLoading && widget.fechaLoadError == null;
 
-    // --- openOnly: embedded "A Jugarse" content for ProdeChamiScreen ---
-    // Renders only the open-fecha editable list; no internal TabBar, stale
-    // banner, or fecha badge (the Chami screen owns those).
-    if (widget.openOnly) {
-      if (!hasFechaList) {
-        return RefreshIndicator(
-          onRefresh: widget.onRefresh,
-          child: _buildLegacyCardArea(context, controller, isLocked),
-        );
-      }
-
-      // Safety net: the controller normally selects the active fecha, but if it
-      // landed on an evaluated one (which is excluded from "A Jugarse"), switch
-      // to a playable fecha. Prefer an open (still-bettable) one; fall back to
-      // the first in-play locked fecha so the tab never lands on evaluated.
-      if (playableFechas.isNotEmpty &&
-          !playableFechas.any((f) => f.fechaId == widget.selectedFechaId) &&
-          !widget.isFechaLoading &&
-          widget.fechaLoadError == null) {
-        final defaultPlayable = playableFechas.firstWhere(
-          (f) => f.state == ProdeFechaState.open,
-          orElse: () => playableFechas.first,
-        );
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            ref
-                .read(prodeFixturesControllerProvider.notifier)
-                .selectFecha(defaultPlayable.fechaId);
-          }
-        });
-      }
-
-      return _TabContent(
-        tabFechas: playableFechas,
-        fecha: widget.fecha,
-        drafts: widget.drafts,
-        savedMatchIds: widget.savedMatchIds,
-        selectedFechaId: widget.selectedFechaId,
-        isFechaLoading: widget.isFechaLoading,
-        fechaLoadError: widget.fechaLoadError,
-        isLocked: isLocked,
-        onLogout: widget.onLogout,
-        onRefresh: widget.onRefresh,
-        controller: controller,
-        emptyMessage: 'No hay fechas para jugar por ahora.',
-        predictedCount: predictedCount,
-        totalCount: totalCount,
-        showProgress: showProgress,
-        showSelector: playableFechas.length > 1,
-      );
-    }
-
+    // No fecha summary list yet: fall back to the single-fecha card area
+    // (no selector). The Chami screen owns the stale banner and fecha badge.
     if (!hasFechaList) {
-      // --- Single-view (no fecha summary list): pre-tabs behavior ---
-      return Column(
-        children: [
-          if (widget.stale) const _StaleBanner(),
-          _FechaBadge(state: widget.fecha.state),
-          if (showProgress)
-            _ProgressHeader(
-              predictedCount: predictedCount,
-              totalCount: totalCount,
-            ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: widget.onRefresh,
-              child: _buildLegacyCardArea(context, controller, isLocked),
-            ),
-          ),
-        ],
+      return RefreshIndicator(
+        onRefresh: widget.onRefresh,
+        child: _buildLegacyCardArea(context, controller, isLocked),
       );
     }
 
-    // --- Two-tab layout (fechas summary list present) ---
-    return Column(
-      children: [
-        if (widget.stale) const _StaleBanner(),
-        _FechaBadge(state: widget.fecha.state),
-        // T-13: TabBar with the two tabs.
-        TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'A Jugarse'),
-            Tab(text: 'Finalizados'),
-          ],
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _tabController,
-            children: [
-              // Tab 0: A Jugarse — open fechas only
-              _TabContent(
-                tabFechas: aJugarse,
-                fecha: widget.fecha,
-                drafts: widget.drafts,
-                savedMatchIds: widget.savedMatchIds,
-                selectedFechaId: widget.selectedFechaId,
-                isFechaLoading: widget.isFechaLoading,
-                fechaLoadError: widget.fechaLoadError,
-                isLocked: isLocked,
-                onLogout: widget.onLogout,
-                onRefresh: widget.onRefresh,
-                controller: controller,
-                emptyMessage: 'No hay fechas para jugar por ahora.',
-                predictedCount: predictedCount,
-                totalCount: totalCount,
-                showProgress: showProgress,
-              ),
-              // Tab 1: Finalizados — locked + evaluated fechas only
-              _TabContent(
-                tabFechas: finalizados,
-                fecha: widget.fecha,
-                drafts: widget.drafts,
-                savedMatchIds: widget.savedMatchIds,
-                selectedFechaId: widget.selectedFechaId,
-                isFechaLoading: widget.isFechaLoading,
-                fechaLoadError: widget.fechaLoadError,
-                isLocked: isLocked,
-                onLogout: widget.onLogout,
-                onRefresh: widget.onRefresh,
-                controller: controller,
-                emptyMessage: 'Todavía no hay fechas finalizadas.',
-                predictedCount: predictedCount,
-                totalCount: totalCount,
-                showProgress: showProgress,
-              ),
-            ],
-          ),
-        ),
-      ],
+    // Safety net: the controller normally selects the active fecha, but if it
+    // landed on an evaluated one (which is excluded from "A Jugarse"), switch
+    // to a playable fecha. Prefer an open (still-bettable) one; fall back to
+    // the first in-play locked fecha so the tab never lands on evaluated.
+    if (playableFechas.isNotEmpty &&
+        !playableFechas.any((f) => f.fechaId == widget.selectedFechaId) &&
+        !widget.isFechaLoading &&
+        widget.fechaLoadError == null) {
+      final defaultPlayable = playableFechas.firstWhere(
+        (f) => f.state == ProdeFechaState.open,
+        orElse: () => playableFechas.first,
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref
+              .read(prodeFixturesControllerProvider.notifier)
+              .selectFecha(defaultPlayable.fechaId);
+        }
+      });
+    }
+
+    return _TabContent(
+      tabFechas: playableFechas,
+      fecha: widget.fecha,
+      drafts: widget.drafts,
+      savedMatchIds: widget.savedMatchIds,
+      selectedFechaId: widget.selectedFechaId,
+      isFechaLoading: widget.isFechaLoading,
+      fechaLoadError: widget.fechaLoadError,
+      isLocked: isLocked,
+      onLogout: widget.onLogout,
+      onRefresh: widget.onRefresh,
+      controller: controller,
+      emptyMessage: 'No hay fechas para jugar por ahora.',
+      predictedCount: predictedCount,
+      totalCount: totalCount,
+      showProgress: showProgress,
+      showSelector: playableFechas.length > 1,
     );
   }
 
@@ -1508,60 +1315,6 @@ class _StaleBanner extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Fecha badge
-// ---------------------------------------------------------------------------
-
-/// Optional badge shown near the top of the list when the fecha is not open.
-///
-/// - [ProdeFechaState.locked]    → amber "Fecha Cerrada" chip
-/// - [ProdeFechaState.evaluated] → secondary "Finalizada" chip
-/// - [ProdeFechaState.open] / [ProdeFechaState.unknown] → nothing
-class _FechaBadge extends StatelessWidget {
-  final ProdeFechaState state;
-
-  const _FechaBadge({required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    String? label;
-    Color? background;
-    Color? foreground;
-
-    switch (state) {
-      case ProdeFechaState.locked:
-        label = 'Fecha Cerrada';
-        background = Colors.amber.shade100;
-        foreground = Colors.orange.shade800;
-      case ProdeFechaState.evaluated:
-        label = 'Finalizada';
-        background = theme.colorScheme.secondaryContainer;
-        foreground = theme.colorScheme.onSecondaryContainer;
-      case ProdeFechaState.open:
-      case ProdeFechaState.unknown:
-        return const SizedBox.shrink();
-    }
-
-    final baseStyle = theme.textTheme.labelMedium;
-
-    return Container(
-      width: double.infinity,
-      color: background,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Text(
-        label,
-        textAlign: TextAlign.center,
-        style: baseStyle?.copyWith(
-          color: foreground,
-          fontSize: (baseStyle.fontSize ?? 12) + 1,
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Prediction sheet (modal bottom sheet)
 // ---------------------------------------------------------------------------
 
@@ -2062,8 +1815,8 @@ class _ScoreStepper extends StatelessWidget {
 ///   3. "Pronósticos" heading + a [ProdeSegmentedToggle] (Anteriores / A Jugarse).
 ///   4. The selected segment's body:
 ///        - Anteriores → [ProdeHistoryList] (paginated past predictions).
-///        - A Jugarse  → [ProdeFixturesScreen] in openOnly mode (the existing
-///          editable open-fecha flow, reused verbatim).
+///        - A Jugarse  → [ProdeFixturesScreen] (the editable open/locked-fecha
+///          flow with per-match "En Juego" labels and populares reveal).
 ///
 /// Rendered by [ProdeAuthView] in the Authenticated state, inside
 /// [ProdeAuthGate]'s Scaffold — so this widget returns a [Column], not a
@@ -2137,9 +1890,7 @@ class _ProdeChamiScreenState extends ConsumerState<ProdeChamiScreen> {
               ? ProdeHistoryList(onLogout: widget.onLogout)
               : ProdeFixturesScreen(
                   // Stale banner is owned by this screen; logout reused as-is.
-                  stale: false,
                   onLogout: widget.onLogout,
-                  openOnly: true,
                 ),
         ),
       ],
