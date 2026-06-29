@@ -209,6 +209,7 @@ Future<void> _pumpScreen(
   ProdeFixturesState initialState, {
   bool stale = false,
   VoidCallback? onLogout,
+  bool openOnly = false,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -221,6 +222,7 @@ Future<void> _pumpScreen(
           body: ProdeFixturesScreen(
             stale: stale,
             onLogout: onLogout ?? () {},
+            openOnly: openOnly,
           ),
         ),
       ),
@@ -1061,11 +1063,14 @@ void main() {
         expect(minus.onPressed, isNull);
       });
 
-      testWidgets('locked fecha: unsaved card shows lock icon instead of pending', (tester) async {
+      testWidgets('locked fecha: unsaved card shows "En Juego" label instead of pending', (tester) async {
         final fecha = _makeFecha(lockedAt: DateTime(2020, 1, 1));
         await _pumpScreen(tester, ProdeFixturesLoaded(fecha));
 
-        expect(find.byKey(const Key('status_icon_locked_1')), findsOneWidget);
+        // A locked, not-yet-evaluated match is tagged "En Juego" (betting
+        // over, about to be played) rather than the bare lock/pending icon.
+        expect(find.byKey(const Key('en_juego_label_1')), findsOneWidget);
+        expect(find.byKey(const Key('status_icon_locked_1')), findsNothing);
         expect(find.byKey(const Key('status_icon_pending_1')), findsNothing);
       });
 
@@ -2161,6 +2166,77 @@ void main() {
 
         // No auto-select call — id=4 is already in finalizados
         expect(stub2.selectFechaCalls, isEmpty);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // openOnly "A Jugarse" (Prode Chami): include locked fechas + "En Juego"
+    // -------------------------------------------------------------------------
+
+    group('openOnly: locked fechas surface in "A Jugarse"', () {
+      // OO-1: a locked fecha is now shown in openOnly mode, with each match
+      // tagged "En Juego" (window closed, about to be played).
+      testWidgets('OO-1: openOnly shows locked fecha cards with "En Juego" labels',
+          (tester) async {
+        final summaries = [
+          FechaSummary(
+            fechaId: 1, seasonId: 10, state: ProdeFechaState.locked,
+            lockedAt: DateTime(2020, 1, 1), matchCount: 2,
+          ),
+        ];
+        final state = ProdeFixturesLoaded(
+          _makeFecha(state: ProdeFechaState.locked),
+          fechas: summaries,
+          selectedFechaId: 1,
+        );
+        await _pumpScreen(tester, state, openOnly: true);
+
+        // Match cards render (not the empty state)...
+        expect(find.text('Team A'), findsOneWidget);
+        // ...and every match carries the "En Juego" label.
+        expect(find.byKey(const Key('en_juego_label_1')), findsOneWidget);
+        expect(find.byKey(const Key('en_juego_label_2')), findsOneWidget);
+        expect(find.text('En Juego'), findsNWidgets(2));
+      });
+
+      // OO-2: evaluated fechas stay out of "A Jugarse" (they belong to history);
+      // with no open/locked fecha, the empty state shows.
+      testWidgets('OO-2: openOnly with only evaluated fechas shows empty message',
+          (tester) async {
+        final summaries = [
+          FechaSummary(
+            fechaId: 1, seasonId: 10, state: ProdeFechaState.evaluated,
+            lockedAt: DateTime(2020, 1, 1), matchCount: 2,
+          ),
+        ];
+        final state = ProdeFixturesLoaded(
+          _makeFecha(state: ProdeFechaState.evaluated),
+          fechas: summaries,
+          selectedFechaId: 1,
+        );
+        await _pumpScreen(tester, state, openOnly: true);
+
+        expect(find.text('No hay fechas para jugar por ahora.'), findsOneWidget);
+      });
+
+      // OO-3: an open (still-bettable) fecha shows no "En Juego" label.
+      testWidgets('OO-3: openOnly open fecha shows no "En Juego" label',
+          (tester) async {
+        final summaries = [
+          FechaSummary(
+            fechaId: 1, seasonId: 10, state: ProdeFechaState.open,
+            lockedAt: null, matchCount: 2,
+          ),
+        ];
+        final state = ProdeFixturesLoaded(
+          _makeFecha(state: ProdeFechaState.open),
+          fechas: summaries,
+          selectedFechaId: 1,
+        );
+        await _pumpScreen(tester, state, openOnly: true);
+
+        expect(find.text('Team A'), findsOneWidget);
+        expect(find.text('En Juego'), findsNothing);
       });
     });
   });

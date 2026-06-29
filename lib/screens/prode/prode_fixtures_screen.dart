@@ -393,6 +393,17 @@ class _LoadedViewState extends ConsumerState<_LoadedView>
             f.state == ProdeFechaState.locked ||
             f.state == ProdeFechaState.evaluated)
         .toList();
+    // openOnly ("A Jugarse" inside Prode Chami) surfaces both predictable and
+    // in-play fechas: open (still bettable) and locked (window closed, not yet
+    // evaluated). The locked ones reveal the populares percentages and tag each
+    // match with an "En Juego" label. Evaluated fechas stay out (they belong to
+    // the history list). This is intentionally separate from [aJugarse], which
+    // still drives the legacy two-tab layout.
+    final playableFechas = widget.fechas
+        .where((f) =>
+            f.state == ProdeFechaState.open ||
+            f.state == ProdeFechaState.locked)
+        .toList();
 
     // Progress header data — passed into each tab content and single-view so it
     // renders below the selector row (W-1: selector must appear above progress).
@@ -410,24 +421,29 @@ class _LoadedViewState extends ConsumerState<_LoadedView>
         );
       }
 
-      // Safety net: the controller normally selects the active (open) fecha,
-      // but if it landed on an evaluated/locked one while open fechas exist,
-      // switch to the first open fecha so "A Jugarse" shows playable matches.
-      if (aJugarse.isNotEmpty &&
-          !aJugarse.any((f) => f.fechaId == widget.selectedFechaId) &&
+      // Safety net: the controller normally selects the active fecha, but if it
+      // landed on an evaluated one (which is excluded from "A Jugarse"), switch
+      // to a playable fecha. Prefer an open (still-bettable) one; fall back to
+      // the first in-play locked fecha so the tab never lands on evaluated.
+      if (playableFechas.isNotEmpty &&
+          !playableFechas.any((f) => f.fechaId == widget.selectedFechaId) &&
           !widget.isFechaLoading &&
           widget.fechaLoadError == null) {
+        final defaultPlayable = playableFechas.firstWhere(
+          (f) => f.state == ProdeFechaState.open,
+          orElse: () => playableFechas.first,
+        );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             ref
                 .read(prodeFixturesControllerProvider.notifier)
-                .selectFecha(aJugarse.first.fechaId);
+                .selectFecha(defaultPlayable.fechaId);
           }
         });
       }
 
       return _TabContent(
-        tabFechas: aJugarse,
+        tabFechas: playableFechas,
         fecha: widget.fecha,
         drafts: widget.drafts,
         savedMatchIds: widget.savedMatchIds,
@@ -442,7 +458,7 @@ class _LoadedViewState extends ConsumerState<_LoadedView>
         predictedCount: predictedCount,
         totalCount: totalCount,
         showProgress: showProgress,
-        showSelector: aJugarse.length > 1,
+        showSelector: playableFechas.length > 1,
       );
     }
 
@@ -1183,9 +1199,43 @@ class _MatchCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Status icon (hidden for read-only history cards)
+                    // Status indicator (hidden for read-only history cards).
+                    // A locked, not-yet-evaluated match shows an "En Juego"
+                    // label: its fecha is closed, betting is over, and it is
+                    // about to be (or being) played.
                     if (showStatusIcon)
-                      if (isSaved)
+                      if (isLocked && !isEvaluated)
+                        Container(
+                          key: Key('en_juego_label_${match.matchId}'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.sports_soccer,
+                                size: 12,
+                                color: Colors.orange.shade800,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'En Juego',
+                                style: TextStyle(
+                                  color: Colors.orange.shade800,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (isSaved)
                         Icon(
                           key: Key('status_icon_saved_${match.matchId}'),
                           Icons.check_box_outlined,
