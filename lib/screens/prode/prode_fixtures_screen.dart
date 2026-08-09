@@ -7,6 +7,7 @@ import '../../models/fecha_summary.dart';
 import '../../models/prediction_history.dart';
 import '../../models/prode_ranking.dart';
 import '../../providers/prode_providers.dart';
+import '../../services/prode_api_service.dart';
 import '../../services/prode_fixtures_controller.dart';
 import '../../services/prode_history_controller.dart';
 import '../../services/prode_ranking_controller.dart';
@@ -1562,11 +1563,18 @@ class _PopularesSection extends StatelessWidget {
   final int matchId;
   final Color primaryColor;
 
+  /// Text shown (as the inline hint and the info tooltip) when percentages are
+  /// not revealed. Defaults to the open-fecha wording. The history sheet passes
+  /// a different message because "cuando cierra la fecha" makes no sense for a
+  /// match that has already been played.
+  final String lockedHint;
+
   const _PopularesSection({
     required this.populares,
     required this.isLocked,
     required this.matchId,
     required this.primaryColor,
+    this.lockedHint = 'Se revelan cuando cierra la fecha',
   });
 
   @override
@@ -1606,7 +1614,7 @@ class _PopularesSection extends StatelessWidget {
               Semantics(
                 label: 'Información sobre pronósticos populares',
                 child: Tooltip(
-                  message: 'Se revelan cuando cierra la fecha',
+                  message: lockedHint,
                   child: IconButton(
                     icon: const Icon(Icons.info_outline, size: 18),
                     color: Colors.grey.shade500,
@@ -1649,7 +1657,7 @@ class _PopularesSection extends StatelessWidget {
             Center(
               child: Text(
                 key: const Key('populares_locked_hint'),
-                'Se revelan cuando cierra la fecha',
+                lockedHint,
                 style: TextStyle(
                   fontSize: 11,
                   color: Colors.grey.shade500,
@@ -2082,8 +2090,9 @@ class _SummaryStat extends StatelessWidget {
 /// The "Anteriores" tab: an infinite-scroll list of the caller's past
 /// predictions (15 per page), driven by [prodeHistoryControllerProvider].
 ///
-/// Reuses [_MatchCard] (read-only: no status icon, no tap) via [_HistoryCard]
-/// so finished-prediction cards look identical to the fixtures cards.
+/// Reuses [_MatchCard] (no status icon) via [_HistoryCard] so
+/// finished-prediction cards look identical to the fixtures cards. Tapping a
+/// card opens the read-only [_HistorySheet].
 class ProdeHistoryList extends ConsumerStatefulWidget {
   final VoidCallback onLogout;
 
@@ -2214,16 +2223,19 @@ class _HistoryFooter extends StatelessWidget {
   }
 }
 
-/// Read-only finished-prediction card. Adapts a [PredictionHistoryEntry] to the
-/// shared [_MatchCard] so it renders identically to fixtures cards (score boxes,
-/// evaluation badge, "Resultado: X - Y" line) without a status icon or tap.
-class _HistoryCard extends StatelessWidget {
+/// Finished-prediction card. Adapts a [PredictionHistoryEntry] to the shared
+/// [_MatchCard] so it renders identically to fixtures cards (score boxes,
+/// evaluation badge, "Resultado: X - Y" line) without a status icon.
+///
+/// Tapping opens the read-only [_HistorySheet], which adds the "Pronósticos
+/// populares" distribution for the played match.
+class _HistoryCard extends ConsumerWidget {
   final PredictionHistoryEntry entry;
 
   const _HistoryCard({required this.entry});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final match = FechaMatch(
       matchId: entry.matchId,
       homeTeam: entry.homeTeam,
@@ -2255,6 +2267,303 @@ class _HistoryCard extends StatelessWidget {
         points: entry.points,
         evaluationMethod: entry.evaluationMethod,
       ),
+      onTap: () => _openHistorySheet(context, ref),
+    );
+  }
+
+  void _openHistorySheet(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _HistorySheet(
+        entry: entry,
+        api: ref.read(prodeApiServiceProvider),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// History detail sheet (read-only)
+// ---------------------------------------------------------------------------
+
+/// Read-only detail sheet for a finished prediction, opened from [_HistoryCard].
+///
+/// Deliberately NOT [_PredictionSheet]: a played match has nothing to edit, so
+/// there are no steppers and no GUARDAR button, and the sheet needs no
+/// [ProdeFixturesController] (the "Anteriores" tab is driven by
+/// [prodeHistoryControllerProvider]).
+///
+/// `GET /prode/predicciones` does not carry `populares`, so they are fetched on
+/// open from `GET /prode/fecha/{fechaId}` and matched by `match_id`. A failed
+/// fetch degrades to an inline retry — the prediction, result and points come
+/// from [entry] and render regardless.
+class _HistorySheet extends StatefulWidget {
+  final PredictionHistoryEntry entry;
+  final ProdeApiService api;
+
+  const _HistorySheet({required this.entry, required this.api});
+
+  @override
+  State<_HistorySheet> createState() => _HistorySheetState();
+}
+
+class _HistorySheetState extends State<_HistorySheet> {
+  Populares? _populares;
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPopulares();
+  }
+
+  Future<void> _loadPopulares() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+
+    try {
+      final fecha = await widget.api.fetchFechaById(widget.entry.fechaId);
+
+      // The payload carries every match of the round; pick ours by id. A match
+      // that is no longer in the fecha yields null populares, not an error.
+      Populares? found;
+      for (final m in fecha.matches) {
+        if (m.matchId == widget.entry.matchId) {
+          found = m.populares;
+          break;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _populares = found;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final entry = widget.entry;
+
+    final PredictionResultStyle? evalStyle = entry.points != null
+        ? resolvePredictionStyle(
+            method: entry.evaluationMethod,
+            points: entry.points,
+          )
+        : null;
+
+    return SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          _buildPopulares(primary),
+
+          // Teams + the user's prediction (read-only)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      _EscudoImage(url: entry.homeEscudo, size: 48),
+                      const SizedBox(height: 4),
+                      Text(
+                        entry.homeTeam,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      _ScoreDisplayBox(
+                        value: entry.scoreHome,
+                        primaryColor: primary,
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          '-',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      _ScoreDisplayBox(
+                        value: entry.scoreAway,
+                        primaryColor: primary,
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _EscudoImage(url: entry.awayEscudo, size: 48),
+                      const SizedBox(height: 4),
+                      Text(
+                        entry.awayTeam,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Tu pronóstico',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.grey.shade600,
+            ),
+          ),
+
+          // Official result
+          if (entry.realScoreHome != null && entry.realScoreAway != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              key: Key('history_real_score_${entry.matchId}'),
+              'Resultado: ${entry.realScoreHome} - ${entry.realScoreAway}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+
+          // Points badge
+          if (evalStyle != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              key: Key('history_result_badge_${entry.matchId}'),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: evalStyle.color.withAlpha(30),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: evalStyle.color.withAlpha(180),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(evalStyle.icon, size: 14, color: evalStyle.color),
+                  const SizedBox(width: 4),
+                  Text(
+                    evalStyle.label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: evalStyle.color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                key: Key('history_cerrar_${entry.matchId}'),
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('CERRAR'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Populares slot: spinner while fetching, inline retry on failure, otherwise
+  /// the shared section with `isLocked: true` so percentages are revealed.
+  Widget _buildPopulares(Color primary) {
+    if (_loading) {
+      return const Padding(
+        key: Key('history_populares_loading'),
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
+    if (_failed) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+        child: Column(
+          children: [
+            Text(
+              'No pudimos cargar los pronósticos populares.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            TextButton(
+              key: const Key('history_populares_retry'),
+              onPressed: _loadPopulares,
+              child: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _PopularesSection(
+      populares: _populares,
+      isLocked: true,
+      matchId: widget.entry.matchId,
+      primaryColor: primary,
+      lockedHint: 'No hay datos de pronósticos para este partido',
     );
   }
 }
