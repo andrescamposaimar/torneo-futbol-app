@@ -2,13 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/service_providers.dart';
 import '../utils/date_utils.dart';
-import '../utils/puntaje_utils.dart';
 import '../utils/text_utils.dart';
 import '../widgets/zocalo_publicitario.dart';
 import '../widgets/full_field_painter.dart';
 import '../widgets/player_pod.dart';
 import 'player_detail_screen.dart';
 
+
+/// A single comparable stat: its label and both teams' values.
+class _Estadistica {
+  final String titulo;
+  final int local;
+  final int visitante;
+
+  const _Estadistica(this.titulo, this.local, this.visitante);
+}
 
 class MatchDetailScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> partido;
@@ -175,95 +183,150 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     );
   }
 
-  Widget _buildScoreboard() {
+  /// The match hero: crests, score and, when provided, the scorers of each
+  /// side inside the very same block.
+  Widget _buildScoreboard({
+    List<String> goleadoresLocal = const [],
+    List<String> goleadoresVisitante = const [],
+  }) {
     final p = widget.partido;
+    final primary = Theme.of(context).colorScheme.primary;
 
     final local = decodeHtmlEntities(p['equipo_local']?.toString());
     final visitante = decodeHtmlEntities(p['equipo_visitante']?.toString());
     final golesLocal = int.tryParse(p['goles_local']?.toString() ?? '');
     final golesVisitante = int.tryParse(p['goles_visitante']?.toString() ?? '');
 
+    final hayGoleadores =
+        goleadoresLocal.isNotEmpty || goleadoresVisitante.isNotEmpty;
+
     Widget marcador(int? goles) {
       return Text(
         goles?.toString() ?? '-',
         style: const TextStyle(
-          fontSize: 40,
-          fontWeight: FontWeight.bold,
-          color: Colors.black,
+          fontSize: 44,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          height: 1,
         ),
       );
     }
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [primary, Color.lerp(primary, Colors.black, 0.45)!],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: primary.withValues(alpha: 0.3),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        padding: const EdgeInsets.fromLTRB(12, 22, 12, 18),
+        child: Column(
           children: [
-            Expanded(
-              child: _buildEquipoColumna(local, p['escudo_local']?.toString()),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  marcador(golesLocal),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text(
-                      '-',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w300,
-                        color: Colors.grey[400],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: _buildEquipoColumna(local, p['escudo_local']?.toString()),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      marcador(golesLocal),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          '-',
+                          style: TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w300,
+                            color: Colors.white.withValues(alpha: 0.5),
+                          ),
+                        ),
                       ),
-                    ),
+                      marcador(golesVisitante),
+                    ],
                   ),
-                  marcador(golesVisitante),
-                ],
-              ),
+                ),
+                Expanded(
+                  child: _buildEquipoColumna(
+                    visitante,
+                    p['escudo_visitante']?.toString(),
+                  ),
+                ),
+              ],
             ),
-            Expanded(
-              child: _buildEquipoColumna(
-                visitante,
-                p['escudo_visitante']?.toString(),
+            if (hayGoleadores) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: Colors.white.withValues(alpha: 0.18),
+                ),
               ),
-            ),
+              _buildGoleadores(goleadoresLocal, goleadoresVisitante),
+            ],
           ],
         ),
       ),
     );
   }
 
+  /// A crest over a light disc so any logo reads against the dark hero,
+  /// with the team name underneath.
   Widget _buildEquipoColumna(String nombre, String? escudoUrl) {
+    final placeholder =
+        Icon(Icons.shield_outlined, size: 34, color: Colors.grey.shade400);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          height: 56,
-          width: 56,
+        Container(
+          height: 62,
+          width: 62,
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
           child: escudoUrl != null && escudoUrl.isNotEmpty
               ? Image.network(
                   escudoUrl,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) =>
-                      Icon(Icons.shield_outlined, size: 40, color: Colors.grey[400]),
+                  errorBuilder: (_, __, ___) => placeholder,
                 )
-              : Icon(Icons.shield_outlined, size: 40, color: Colors.grey[400]),
+              : placeholder,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           nombre,
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: Colors.black87,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+            letterSpacing: 0.3,
           ),
         ),
       ],
@@ -326,11 +389,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     final localStats = goleadores?['equipo_local']['goleadores'] as List<dynamic>? ?? [];
     final visitanteStats = goleadores?['equipo_visitante']['goleadores'] as List<dynamic>? ?? [];
 
-    final equipoLocal = widget.partido['equipo_local'] ?? '';
-    final equipoVisitante = widget.partido['equipo_visitante'] ?? '';
-    final escudoLocal = widget.partido['escudo_local'];
-    final escudoVisitante = widget.partido['escudo_visitante'];
-
     int sum(String key, List<dynamic> jugadores) {
       return jugadores.fold(0, (total, jugador) {
         final raw = jugador[key];
@@ -345,23 +403,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
       });
     }
 
-    Widget statRow(String title, int localVal, int visitanteVal) {
-      return Card(
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('$localVal', style: const TextStyle(fontSize: 16)),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              Text('$visitanteVal', style: const TextStyle(fontSize: 16)),
-            ],
-          ),
-        ),
-      );
-    }
-
     final allPlayers = [...localStats, ...visitanteStats];
     final figura = allPlayers.cast<Map<String, dynamic>>().firstWhere(
       (j) => j['figura'] == true,
@@ -371,40 +412,125 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(child: _buildTeamHeader(equipoLocal, escudoLocal)),
-            const SizedBox(width: 16),
-            Expanded(child: _buildTeamHeader(equipoVisitante, escudoVisitante)),
-          ],
+        _buildScoreboard(
+          goleadoresLocal: _goleadoresDe(localStats),
+          goleadoresVisitante: _goleadoresDe(visitanteStats),
         ),
-        const SizedBox(height: 12),
-        statRow('Goles', sum('goles', localStats), sum('goles', visitanteStats)),
-        statRow('Amarillas', sum('tarjeta_amarilla', localStats), sum('tarjeta_amarilla', visitanteStats)),
-        statRow('Rojas', sum('tarjeta_roja', localStats), sum('tarjeta_roja', visitanteStats)),
+        const SizedBox(height: 20),
+        // Goals are already the headline of the scoreboard above.
+        _buildBloqueEstadisticas([
+          _Estadistica('Amarillas', sum('tarjeta_amarilla', localStats),
+              sum('tarjeta_amarilla', visitanteStats)),
+          _Estadistica('Rojas', sum('tarjeta_roja', localStats),
+              sum('tarjeta_roja', visitanteStats)),
+        ]),
         if (figura.isNotEmpty) _buildFiguraCard(figura),
       ],
     );
   }
 
-  Widget _buildTeamHeader(String nombre, String? escudoUrl) {
-    return Column(
+  /// Surnames of the players who scored, with the goal count when a player
+  /// scored more than once. The API has no minute data, so none is shown.
+  List<String> _goleadoresDe(List<dynamic> jugadores) {
+    final resultado = <String>[];
+    for (final j in jugadores.whereType<Map<String, dynamic>>()) {
+      final goles = int.tryParse(j['goles']?.toString() ?? '') ?? 0;
+      if (goles <= 0) continue;
+      final apellido = (j['nombre']?.toString() ?? '').split(',').first.trim();
+      if (apellido.isEmpty) continue;
+      resultado.add(goles > 1 ? '$apellido ($goles)' : apellido);
+    }
+    return resultado;
+  }
+
+  /// Scorers of each team, split by a ball icon so the column reads as goals.
+  /// Rendered over the hero gradient, hence the light text.
+  Widget _buildGoleadores(List<String> local, List<String> visitante) {
+    Widget columna(List<String> nombres, CrossAxisAlignment alineacion) {
+      return Column(
+        crossAxisAlignment: alineacion,
+        children: nombres
+            .map((n) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    n,
+                    textAlign: alineacion == CrossAxisAlignment.end
+                        ? TextAlign.right
+                        : TextAlign.left,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withValues(alpha: 0.92),
+                    ),
+                  ),
+                ))
+            .toList(),
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (escudoUrl != null && escudoUrl.isNotEmpty)
-          Image.network(escudoUrl, height: 40),
-        const SizedBox(height: 4),
-        SizedBox(
-          width: double.infinity,
-          child: Text(
-            nombre,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 2,
+        Expanded(child: columna(local, CrossAxisAlignment.end)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Icon(
+            Icons.sports_soccer,
+            size: 17,
+            color: Colors.white.withValues(alpha: 0.9),
           ),
         ),
+        Expanded(child: columna(visitante, CrossAxisAlignment.start)),
       ],
+    );
+  }
+
+  /// All match stats in a single card.
+  ///
+  /// Both sides share the same colour and type weight, so the bars only convey
+  /// proportion — neither team is singled out as the better one.
+  Widget _buildBloqueEstadisticas(List<_Estadistica> estadisticas) {
+    Widget valor(int v) => Text(
+          '$v',
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            color: Colors.black87,
+          ),
+        );
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+        child: Column(
+          children: [
+            for (var i = 0; i < estadisticas.length; i++) ...[
+              if (i > 0) Divider(height: 1, color: Colors.grey.withValues(alpha: 0.2)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    valor(estadisticas[i].local),
+                    Text(
+                      estadisticas[i].titulo.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.8,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    valor(estadisticas[i].visitante),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -451,42 +577,156 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     }
   }
 
+  /// The man of the match, given its own gold identity so it stands apart from
+  /// the blue scoreboard above it.
   Widget _buildFiguraCard(Map<String, dynamic> figura) {
-    final nombre = figura['nombre'] ?? 'Jugador';
-    final equipo = figura['equipo'] ?? '';
-    final puntaje = formatearPuntaje(figura['puntaje']);
+    final nombre = decodeHtmlEntities(figura['nombre']?.toString()).isEmpty
+        ? 'Jugador'
+        : decodeHtmlEntities(figura['nombre']?.toString());
     final foto = (figura['foto'] is String && figura['foto'].toString().isNotEmpty)
-        ? figura['foto']
+        ? figura['foto'].toString()
         : null;
 
-    return Card(
-      margin: const EdgeInsets.only(top: 16),
-      child: InkWell(
-        onTap: () => _abrirDetalleJugador(figura['id']),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Figura del partido', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 8),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: foto != null
-                    ? CircleAvatar(backgroundImage: NetworkImage(foto))
-                    : const Icon(Icons.person),
-                title: Text(nombre),
-                subtitle: Text('Equipo: $equipo'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.star, color: Colors.amber),
-                    const SizedBox(width: 4),
-                    Text(puntaje),
-                  ],
-                ),
+    // `equipo` on the player is the side marker set while enriching the
+    // scorers ('local' / 'visitante'), not a club name, so resolve the real
+    // name and crest from the match itself.
+    final esLocal = figura['equipo'] == 'local';
+    final equipo = decodeHtmlEntities((esLocal
+            ? widget.partido['equipo_local']
+            : widget.partido['equipo_visitante'])
+        ?.toString());
+    final escudoEquipo = (esLocal
+            ? widget.partido['escudo_local']
+            : widget.partido['escudo_visitante'])
+        ?.toString();
+
+    const oro = Color(0xFFB8860B);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Material(
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFF5A623), oro],
+            ),
+          ),
+          child: InkWell(
+            onTap: () => _abrirDetalleJugador(figura['id']),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2.5),
+                          image: foto != null
+                              ? DecorationImage(
+                                  image: NetworkImage(foto), fit: BoxFit.cover)
+                              : null,
+                          color: Colors.white24,
+                        ),
+                        child: foto == null
+                            ? const Icon(Icons.person, color: Colors.white, size: 34)
+                            : null,
+                      ),
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.star, size: 16, color: oro),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'FIGURA DEL PARTIDO',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          nombre,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                        if (equipo.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                if (escudoEquipo != null && escudoEquipo.isNotEmpty) ...[
+                                  Container(
+                                    width: 22,
+                                    height: 22,
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Image.network(
+                                      escudoEquipo,
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 7),
+                                ],
+                                Flexible(
+                                  child: Text(
+                                    equipo,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.white.withValues(alpha: 0.9),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right,
+                    color: Colors.white.withValues(alpha: 0.8),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
