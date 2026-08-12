@@ -409,6 +409,49 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     );
   }
 
+  /// Opens the player detail screen for [jugadorId].
+  ///
+  /// The match endpoints return a reduced player shape (goals, cards, rating),
+  /// so the full record has to be fetched by id before pushing the screen.
+  Future<void> _abrirDetalleJugador(dynamic jugadorId) async {
+    if (jugadorId == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final jugadorCompleto =
+          await ref.read(apiServiceProvider).getJugadorPorId(jugadorId);
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Quitar loader
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PlayerDetailScreen(player: jugadorCompleto),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Error'),
+          content: const Text('No se pudo cargar la información del jugador.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   Widget _buildFiguraCard(Map<String, dynamic> figura) {
     final nombre = figura['nombre'] ?? 'Jugador';
     final equipo = figura['equipo'] ?? '';
@@ -420,9 +463,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     return Card(
       margin: const EdgeInsets.only(top: 16),
       child: InkWell(
-        onTap: () {
-          Navigator.pushNamed(context, '/player_detail', arguments: figura);
-        },
+        onTap: () => _abrirDetalleJugador(figura['id']),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -515,42 +556,7 @@ Widget _buildAlineaciones() {
       runSpacing: 12,
       children: filaJugadores.map((j) =>
         GestureDetector(
-          onTap: () async {
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (context) => const Center(child: CircularProgressIndicator()),
-            );
-            try {
-              final jugadorCompleto = await ref.read(apiServiceProvider).getJugadorPorId(j['id']);
-              if (context.mounted) {
-                Navigator.of(context).pop(); // Quitar loader
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PlayerDetailScreen(player: jugadorCompleto),
-                  ),
-                );
-              }
-            } catch (e) {
-              if (context.mounted) {
-                Navigator.of(context).pop();
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Error'),
-                    content: Text('No se pudo cargar la información del jugador.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
-                );
-              }
-            }
-          },
+          onTap: () => _abrirDetalleJugador(j['id']),
           child: AnimatedOpacity(
             opacity: 1,
             duration: const Duration(milliseconds: 500),
