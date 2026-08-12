@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../config/tenant_provider.dart';
+import '../models/match_populares.dart';
+import '../providers/prode_providers.dart';
 import '../providers/service_providers.dart';
 import '../utils/date_utils.dart';
 import '../utils/text_utils.dart';
@@ -36,6 +39,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   String? estadisticasAdUrl;
   String? alineacionesAdUrl;
 
+  MatchPopulares? populares;
+  bool cargandoPopulares = false;
+
+  /// True when the populares request failed. Kept apart from a null result so
+  /// a network error is never reported as "there were no predictions".
+  bool fallaPopulares = false;
+
   bool get _esFuturo => widget.partido['status'] == 'future';
 
   @override
@@ -55,6 +65,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     // Solo cargar goleadores si el partido ya se disputó
     if (!_esFuturo) {
       _loadGoleadores();
+      _loadPopulares();
     } else {
       // Marcar como no cargando para evitar indicadores infinitos
       isLoading = false;
@@ -124,6 +135,37 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     }
   }
 
+  /// Loads the Prode prediction split for this match.
+  ///
+  /// Guarded by the tenant flag: `prodeApiServiceProvider` throws by design
+  /// when a tenant has Prode disabled, so it must never be read blindly.
+  /// Failures are swallowed — this block is supplementary and must not turn a
+  /// working match detail into an error screen.
+  Future<void> _loadPopulares() async {
+    if (!ref.read(tenantConfigProvider).features.prode) return;
+
+    final matchId = int.tryParse(widget.partido['id']?.toString() ?? '');
+    if (matchId == null || matchId < 1) return;
+
+    setState(() => cargandoPopulares = true);
+
+    try {
+      final resultado =
+          await ref.read(prodeApiServiceProvider).fetchPopulares(matchId);
+      if (!mounted) return;
+      setState(() {
+        populares = resultado;
+        cargandoPopulares = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        fallaPopulares = true;
+        cargandoPopulares = false;
+      });
+    }
+  }
+
   /// Devuelve el valor como texto listo para mostrar, o null si no hay dato.
   String? _valorOpcional(dynamic raw) {
     final texto = decodeHtmlEntities(raw?.toString());
@@ -180,7 +222,109 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
             ),
           ),
         ),
+        if (ref.watch(tenantConfigProvider).features.prode) _buildPredicciones(),
       ],
+    );
+  }
+
+  /// How the Prode crowd called this match.
+  ///
+  /// Renders nothing while loading so the tab does not flash a placeholder,
+  /// and states plainly when a match drew no predictions — silence would read
+  /// as a bug. A failed request hides the block instead: claiming there were
+  /// no predictions when we simply could not ask would be a lie.
+  Widget _buildPredicciones() {
+    if (cargandoPopulares || fallaPopulares) return const SizedBox.shrink();
+
+    final datos = populares;
+    final primary = Theme.of(context).colorScheme.primary;
+
+    Widget encabezado() => Container(
+          width: double.infinity,
+          color: Colors.grey.shade50,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+          child: Row(
+            children: [
+              Icon(Icons.insights, size: 16, color: primary.withValues(alpha: 0.8)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'PREDICCIONES',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ),
+              if (datos != null && datos.hayDatos)
+                Text(
+                  datos.total == 1 ? '1 pronóstico' : '${datos.total} pronósticos',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+            ],
+          ),
+        );
+
+    Widget columna(String etiqueta, double porcentaje) => Expanded(
+          child: Column(
+            children: [
+              Text(
+                '${porcentaje.toStringAsFixed(porcentaje == porcentaje.roundToDouble() ? 0 : 1)}%',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                etiqueta,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            encabezado(),
+            Divider(height: 1, color: Colors.grey.shade200),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              child: datos != null && datos.hayDatos
+                  ? Row(
+                      children: [
+                        columna('Local', datos.local!),
+                        columna('Empate', datos.empate!),
+                        columna('Visitante', datos.visitante!),
+                      ],
+                    )
+                  : Text(
+                      'No hubo predicciones para este partido.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -821,16 +965,19 @@ Widget _buildAlineaciones() {
                   Icon(Icons.person_off_outlined,
                       size: 16, color: Colors.grey.shade600),
                   const SizedBox(width: 8),
-                  Text(
-                    'BAJAS',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.8,
-                      color: Colors.grey.shade700,
+                  Expanded(
+                    child: Text(
+                      'BAJAS',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: Colors.grey.shade700,
+                      ),
                     ),
                   ),
-                  const Spacer(),
                   Text(
                     bajas.length == 1 ? '1 jugador' : '${bajas.length} jugadores',
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade600),

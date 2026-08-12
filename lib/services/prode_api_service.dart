@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../config/prode_auth_config.dart';
 import '../models/fecha_activa.dart';
 import '../models/fecha_summary.dart';
+import '../models/match_populares.dart';
 import '../models/prediction_history.dart';
 import '../models/prode_ranking.dart';
 import 'prode_auth_repository.dart';
@@ -502,6 +503,41 @@ class ProdeApiService {
 
     if (response.statusCode == 200) {
       return PredictionHistoryPage.fromJson(_decodeBody(response));
+    }
+
+    throw ProdeApiException(
+      statusCode: response.statusCode,
+      code: extractErrorCode(_decodeBody(response)),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Populares endpoint
+  // ---------------------------------------------------------------------------
+
+  /// Fetches how the crowd predicted [matchId].
+  ///
+  /// Unauthenticated on purpose: the payload is aggregate and anonymous, and
+  /// the match detail screen is reachable without a Prode session.
+  ///
+  /// Outcomes:
+  /// - **200** — returns a parsed [MatchPopulares]. Note the server withholds
+  ///   the split while the round is open, so a 200 does not guarantee data;
+  ///   check [MatchPopulares.hayDatos].
+  /// - **any other status** — throws [ProdeApiException].
+  ///
+  /// Timeout: 10 s. This block is supplementary information: it must never
+  /// hold the screen hostage.
+  Future<MatchPopulares> fetchPopulares(int matchId) async {
+    final uri = Uri.parse('${_config.prodeApiBaseUrl}/populares')
+        .replace(queryParameters: <String, String>{'match_id': '$matchId'});
+
+    final response = await _httpClient
+        .get(uri, headers: {'Accept': 'application/json'})
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      return MatchPopulares.fromJson(_decodeBody(response));
     }
 
     throw ProdeApiException(
