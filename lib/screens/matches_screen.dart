@@ -9,6 +9,7 @@ import 'dart:async';
 import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/partidos_cache_provider.dart';
+import '../utils/date_utils.dart';
 import '../utils/liga_utils.dart';
 
 class MatchesScreen extends ConsumerStatefulWidget {
@@ -283,122 +284,217 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
     final cancha = _decodeHtmlEntities(partido['cancha']?.toString() ?? '-');
     final mesa = (selectedTab != 0) ? (partido['mesa']?.toString() ?? '') : '';
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      // Clip the ripple to the card's rounded corners.
+    final esJugado = selectedTab == 0;
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        // A hairline instead of a drop shadow: the list stays calm when many
+        // cards are stacked.
+        border: Border.all(color: Colors.grey.shade200),
+      ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        // Only "Jugados" opens the detail — the same tab that shows the link.
-        onTap: selectedTab == 0 ? () => _abrirDetalle(partido) : null,
-        child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(liga, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 15)),
-            const Divider(height: 16, thickness: 1, color: Color(0xFFE0E0E0)),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Column(
-                    children: [
-                      _teamRow(local, escudoLocal, selectedTab == 0 ? _parseGoles(partido['goles_local']) : ''),
-                      const SizedBox(height: 6),
-                      _teamRow(visitante, escudoVisitante, selectedTab == 0 ? _parseGoles(partido['goles_visitante']) : ''),
-                    ],
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          // Only "Jugados" opens the detail.
+          onTap: esJugado ? () => _abrirDetalle(partido) : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // A tinted strip carries the league and breaks the flat white.
+              Container(
+                width: double.infinity,
+                color: primary.withValues(alpha: 0.05),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                child: Text(
+                  liga.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: primary.withValues(alpha: 0.85),
                   ),
                 ),
-                if (selectedTab == 1 || selectedTab == 2)
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.calendar_today, size: 16, color: Colors.green),
-                            const SizedBox(width: 4),
-                            Text(_formatearFecha(fecha), style: const TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.access_time, size: 16, color: Colors.green),
-                            const SizedBox(width: 4),
-                            Text(hora, style: const TextStyle(fontSize: 12)),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.location_on, size: 16, color: Colors.green),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                cancha.isNotEmpty ? cancha : '-',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (mesa.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.groups, size: 16, color: Colors.green),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  'Mesa: $mesa',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ),
-                            ],
-                          ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      flex: 3,
+                      child: Column(
+                        children: [
+                          _teamRow(local, escudoLocal,
+                              esJugado ? _parseGoles(partido['goles_local']) : ''),
+                          const SizedBox(height: 10),
+                          _teamRow(visitante, escudoVisitante,
+                              esJugado ? _parseGoles(partido['goles_visitante']) : ''),
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                if (selectedTab == 0)
-                  TextButton(
-                    onPressed: () => _abrirDetalle(partido),
-                    child: const Text('Ver detalle'),
-                  ),
-              ],
-            ),
-          ],
-        ),
+                    if (!esJugado)
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            _metaRow(Icons.calendar_today, _formatearFecha(fecha)),
+                            _metaRow(Icons.access_time, hora),
+                            _metaRow(Icons.location_on,
+                                cancha.isNotEmpty ? cancha : '-'),
+                            if (mesa.isNotEmpty) _metaRow(Icons.groups, 'Mesa: $mesa'),
+                          ],
+                        ),
+                      ),
+                    if (esJugado) ...[
+                      const SizedBox(width: 14),
+                      // A tinted disc reads as an affordance; a bare chevron
+                      // did not make the card feel tappable.
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: primary.withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.chevron_right,
+                            size: 20, color: primary.withValues(alpha: 0.8)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  /// Separator between date groups.
+  ///
+  /// A plain bold line used to dissolve into the list while scrolling, so the
+  /// header spans the full width over a neutral band — distinct from the
+  /// tinted strip the cards carry — and states how many matches follow.
+  Widget _buildFechaHeader(String fechaRaw, int cantidad) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final titulo = formatFechaLarga(fechaRaw) ?? _formatearFechaLarga(fechaRaw);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade200),
+          bottom: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.calendar_month, size: 16, color: primary.withValues(alpha: 0.8)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              titulo,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+          Text(
+            cantidad == 1 ? '1 partido' : '$cantidad partidos',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Secondary match data — date, kickoff, venue. Muted on purpose so it never
+  /// competes with the teams.
+  Widget _metaRow(IconData icono, String texto) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icono, size: 14, color: Colors.grey.shade500),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              texto,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _teamRow(String nombre, String? escudoUrl, String goles) {
+    final placeholder = Icon(Icons.shield, size: 20, color: Colors.grey.shade400);
+
     return Row(
       children: [
-        if (escudoUrl != null && escudoUrl.isNotEmpty && Uri.tryParse(escudoUrl)?.hasScheme == true)
-          Image.network(
-            escudoUrl,
-            width: 24,
-            height: 24,
-            errorBuilder: (context, error, stackTrace) => const Icon(Icons.shield, size: 20, color: Colors.grey),
-          )
-        else
-          const Icon(Icons.shield, size: 20, color: Colors.grey),
-        const SizedBox(width: 8),
-        Expanded(child: Text(nombre, style: const TextStyle(fontSize: 16))),
-        Text(goles, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        SizedBox(
+          width: 26,
+          height: 26,
+          child: escudoUrl != null &&
+                  escudoUrl.isNotEmpty &&
+                  Uri.tryParse(escudoUrl)?.hasScheme == true
+              ? Image.network(
+                  escudoUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) => placeholder,
+                )
+              : placeholder,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            nombre,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+          ),
+        ),
+        if (goles.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(left: 10),
+            width: 28,
+            height: 26,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Text(
+              goles,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -573,10 +669,7 @@ Widget _buildListaPorFecha() {
       });
 
     return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
-        child: Text(fecha, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-      ),
+      _buildFechaHeader(fecha, partidos.length),
       ...partidos.map((p) => _buildMatchCard(p)).toList(),
     ];
   }).toList();
@@ -1206,13 +1299,7 @@ Widget _buildListaPorFecha() {
 
     final children = fechasOrdenadas.expand((fecha) {
       return <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
-          child: Text(
-            _formatearFechaLarga(fecha),
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ),
+        _buildFechaHeader(fecha, grupos[fecha]!.length),
         ...grupos[fecha]!.map((p) => _buildMatchCard(p)),
       ];
     }).toList();
