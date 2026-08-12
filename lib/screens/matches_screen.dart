@@ -263,6 +263,15 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
   }
 
 
+  void _abrirDetalle(dynamic partido) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MatchDetailScreen(partido: partido),
+      ),
+    );
+  }
+
   Widget _buildMatchCard(dynamic partido) {
     final liga = _decodeHtmlEntities(partido['liga']?.toString());
     final local = _decodeHtmlEntities(partido['equipo_local']?.toString());
@@ -278,7 +287,12 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 2,
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-      child: Padding(
+      // Clip the ripple to the card's rounded corners.
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        // Only "Jugados" opens the detail — the same tab that shows the link.
+        onTap: selectedTab == 0 ? () => _abrirDetalle(partido) : null,
+        child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -358,19 +372,13 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
                   ),
                 if (selectedTab == 0)
                   TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => MatchDetailScreen(partido: partido),
-                        ),
-                      );
-                    },
+                    onPressed: () => _abrirDetalle(partido),
                     child: const Text('Ver detalle'),
                   ),
               ],
             ),
           ],
+        ),
         ),
       ),
     );
