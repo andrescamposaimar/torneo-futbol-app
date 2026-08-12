@@ -284,7 +284,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
               Text(
                 etiqueta,
                 textAlign: TextAlign.center,
-                maxLines: 1,
+                // Two lines: team names are longer than "Local" ever was.
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
@@ -310,10 +311,19 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
               child: datos != null && datos.hayDatos
                   ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        columna('Local', datos.local!),
+                        columna(
+                          decodeHtmlEntities(
+                              widget.partido['equipo_local']?.toString()),
+                          datos.local!,
+                        ),
                         columna('Empate', datos.empate!),
-                        columna('Visitante', datos.visitante!),
+                        columna(
+                          decodeHtmlEntities(
+                              widget.partido['equipo_visitante']?.toString()),
+                          datos.visitante!,
+                        ),
                       ],
                     )
                   : Text(
