@@ -193,6 +193,57 @@ class JwtServiceTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // Signing self-test (healthcheck safety net)
+    // -------------------------------------------------------------------------
+
+    public function test_self_test_passes_with_provisioned_keys(): void {
+        $this->service->selfTest();
+
+        // selfTest() signals failure by throwing; reaching here is the assertion.
+        $this->assertTrue( true );
+    }
+
+    public function test_self_test_throws_when_private_key_missing(): void {
+        // The exact production failure this guards: the key cannot be read, so
+        // no token can be signed and every login would fatal.
+        update_option( 'prode_rsa_private_key', '' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( 'keys_not_provisioned' );
+
+        $this->service->selfTest();
+    }
+
+    public function test_self_test_throws_when_private_key_undecodable(): void {
+        // Mirrors a rotated wp_salt('auth') or a corrupted option: the stored
+        // value decodes but de-obfuscates into something that is not a PEM.
+        update_option( 'prode_rsa_private_key', base64_encode( 'not-a-pem' ) );
+
+        $this->expectException( \Throwable::class );
+
+        $this->service->selfTest();
+    }
+
+    public function test_self_test_token_type_is_not_usable_as_a_credential(): void {
+        // A self-test must never be able to mint something an endpoint accepts.
+        $this->service->selfTest();
+
+        $sign = ( new \ReflectionClass( $this->service ) )->getMethod( 'sign' );
+
+        $now   = time();
+        $token = $sign->invoke( $this->service, [
+            'iss' => 'x',
+            'aud' => 'x',
+            'typ' => 'prode_selftest',
+            'iat' => $now,
+            'exp' => $now + 60,
+        ] );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->service->verifyAccessToken( $token );
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

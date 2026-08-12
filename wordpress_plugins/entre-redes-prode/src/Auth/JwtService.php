@@ -46,9 +46,10 @@ class JwtService {
 
     private const ACCESS_TTL  = 900;          // 15 minutes in seconds
     private const INTENT_TTL  = 300;          // 5 minutes in seconds
-    private const ALG         = 'RS256';
-    private const TYPE_ACCESS = 'prode_access';
-    private const TYPE_INTENT = 'prode_intent';
+    private const ALG           = 'RS256';
+    private const TYPE_ACCESS   = 'prode_access';
+    private const TYPE_INTENT   = 'prode_intent';
+    private const TYPE_SELFTEST = 'prode_selftest';
 
     // -------------------------------------------------------------------------
     // Token issuance
@@ -156,6 +157,38 @@ class JwtService {
         }
 
         return $decoded;
+    }
+
+    /**
+     * Signs and verifies a throwaway token to prove the signing chain is intact.
+     *
+     * Exercises every link a real login depends on: the JWT library being
+     * autoloadable, the private key de-obfuscating into a usable PEM, and the
+     * public key verifying what the private key just signed. The healthcheck
+     * calls this so a broken deployment is visible immediately instead of
+     * surfacing as a fatal the first time a user tries to sign in.
+     *
+     * The payload carries a `typ` that no endpoint accepts, and the token is
+     * never returned, so a self-test can never hand out a usable credential.
+     *
+     * @throws \Throwable If any link in the signing chain is broken.
+     */
+    public function selfTest(): void {
+        $now = time();
+
+        $token = $this->sign( [
+            'iss' => $this->issuer(),
+            'aud' => $this->audience(),
+            'typ' => self::TYPE_SELFTEST,
+            'iat' => $now,
+            'exp' => $now + 60,
+        ] );
+
+        $decoded = $this->decode( $token );
+
+        if ( ( $decoded->typ ?? '' ) !== self::TYPE_SELFTEST ) {
+            throw new \RuntimeException( 'selftest_roundtrip_mismatch' );
+        }
     }
 
     // -------------------------------------------------------------------------

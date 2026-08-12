@@ -61,7 +61,7 @@ class AuthEndpoints {
             '/prode/auth/google',
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
-                'callback'            => [ $this, 'handleGoogle' ],
+                'callback'            => $this->guarded( 'handleGoogle' ),
                 'permission_callback' => '__return_true',
                 'args'                => [
                     'id_token' => [
@@ -77,7 +77,7 @@ class AuthEndpoints {
             '/prode/auth/apple',
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
-                'callback'            => [ $this, 'handleApple' ],
+                'callback'            => $this->guarded( 'handleApple' ),
                 'permission_callback' => '__return_true',
                 'args'                => [
                     'identity_token' => [
@@ -106,7 +106,7 @@ class AuthEndpoints {
             '/prode/auth/dni',
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
-                'callback'            => [ $this, 'handleDni' ],
+                'callback'            => $this->guarded( 'handleDni' ),
                 'permission_callback' => '__return_true',
                 'args'                => [
                     'intent_token' => [
@@ -126,7 +126,7 @@ class AuthEndpoints {
             '/prode/auth/refresh',
             [
                 'methods'             => \WP_REST_Server::CREATABLE,
-                'callback'            => [ $this, 'handleRefresh' ],
+                'callback'            => $this->guarded( 'handleRefresh' ),
                 'permission_callback' => '__return_true',
                 'args'                => [
                     'refresh_token' => [
@@ -462,6 +462,47 @@ class AuthEndpoints {
     private function extractDeviceLabel( \WP_REST_Request $request ): string {
         $ua = (string) ( $request->get_header( 'user-agent' ) ?? '' );
         return substr( $ua, 0, 120 );
+    }
+
+    /**
+     * Wraps a handler so an unexpected internal failure answers with JSON
+     * instead of becoming a WordPress fatal.
+     *
+     * The token-issuing calls in these handlers ([JwtService::issueAccessToken],
+     * [issueIntentToken], [SessionManager::issueRefreshToken]) throw when the
+     * signing chain is broken — a missing JWT library, an unprovisioned or
+     * undecodable private key. Uncaught, WordPress renders its "critical error"
+     * HTML page; the mobile app receives markup where it expects JSON and can
+     * only tell the user "something went wrong", with the real cause reaching
+     * nobody. Clients get a machine-readable `server_error` instead, and the
+     * class, message, file, and line go to the PHP error log for the operator.
+     *
+     * @param string $method Handler method name on this class.
+     * @return callable(\WP_REST_Request): \WP_REST_Response
+     */
+    private function guarded( string $method ): callable {
+        return function ( \WP_REST_Request $request ) use ( $method ): \WP_REST_Response {
+            try {
+                return $this->{$method}( $request );
+            } catch ( \Throwable $e ) {
+                error_log( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                    sprintf(
+                        '[entre-redes-prode] %s failed: %s: %s in %s:%d',
+                        $method,
+                        get_class( $e ),
+                        $e->getMessage(),
+                        $e->getFile(),
+                        $e->getLine()
+                    )
+                );
+
+                return $this->errorResponse(
+                    'server_error',
+                    'The server could not complete the request.',
+                    500
+                );
+            }
+        };
     }
 
     /**

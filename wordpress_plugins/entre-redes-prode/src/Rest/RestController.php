@@ -74,7 +74,14 @@ class RestController {
         );
 
         // Auth endpoints (PR-02): google, apple, dni, refresh.
-        if ( null !== $this->auth_endpoints ) {
+        // Skipped when the Composer dependencies are absent: every route here
+        // issues a signed token, so without firebase/php-jwt and ramsey/uuid
+        // they can only fail. A 404 the operator can see beats a fatal the user
+        // sees. (Undefined — e.g. in unit tests, which load classes directly
+        // rather than through the plugin bootstrap — counts as available.)
+        $deps_ok = ! defined( 'ENTRE_REDES_PRODE_DEPS_OK' ) || ENTRE_REDES_PRODE_DEPS_OK;
+
+        if ( null !== $this->auth_endpoints && $deps_ok ) {
             $this->auth_endpoints->register_routes();
         }
 
@@ -127,9 +134,36 @@ class RestController {
      * GET /wp-json/entre-redes/v1/prode/healthcheck
      *
      * Returns:
-     *   { status: "ok", plugin: "entre-redes-prode", version: "0.1.0", tenant_id: "..." }
+     *   { status: "ok"|"degraded", plugin: "entre-redes-prode", version: "...",
+     *     tenant_id: "...", deps: "ok"|"missing", signing: "ok"|"fail" }
+     *
+     * `signing` is the load-bearing field: it round-trips a real throwaway JWT
+     * through the private and public keys, which is the exact chain every login
+     * depends on. A healthcheck that only proves "PHP ran and the route exists"
+     * reports ok while sign-in is completely dead — that happened, and it cost a
+     * full afternoon of diagnosis. When signing fails the endpoint answers 503
+     * so uptime monitors treat it as the outage it is (nothing in the mobile app
+     * reads this route, so the status code is free to be honest).
      */
     public function healthcheck( \WP_REST_Request $request ): \WP_REST_Response {
+        $deps_ok = ! defined( 'ENTRE_REDES_PRODE_DEPS_OK' ) || ENTRE_REDES_PRODE_DEPS_OK;
+
+        $signing_ok = false;
+        try {
+            ( new \EntreRedes\Prode\Auth\JwtService() )->selfTest();
+            $signing_ok = true;
+        } catch ( \Throwable $e ) {
+            // Detail goes to the server log only — the reason names internal
+            // key/config state and this endpoint is public and unauthenticated.
+            error_log( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                sprintf(
+                    '[entre-redes-prode] healthcheck signing self-test failed: %s: %s',
+                    get_class( $e ),
+                    $e->getMessage()
+                )
+            );
+        }
+
         $tenant_id = defined( 'PRODE_TENANT_ID' ) ? (string) PRODE_TENANT_ID : '';
 
         // Double-check: also read from settings table in case wp-config was
@@ -144,14 +178,18 @@ class RestController {
             );
         }
 
+        $healthy = $deps_ok && $signing_ok;
+
         return new \WP_REST_Response(
             [
-                'status'    => 'ok',
+                'status'    => $healthy ? 'ok' : 'degraded',
                 'plugin'    => 'entre-redes-prode',
                 'version'   => ENTRE_REDES_PRODE_VERSION,
                 'tenant_id' => $tenant_id,
+                'deps'      => $deps_ok ? 'ok' : 'missing',
+                'signing'   => $signing_ok ? 'ok' : 'fail',
             ],
-            200
+            $healthy ? 200 : 503
         );
     }
 
