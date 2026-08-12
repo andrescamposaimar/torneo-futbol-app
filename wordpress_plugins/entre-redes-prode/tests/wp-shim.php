@@ -652,13 +652,21 @@ if ( ! function_exists( 'get_the_post_thumbnail_url' ) ) {
 
 if ( ! function_exists( 'get_post_meta' ) ) {
     function get_post_meta( int $post_id, string $key = '', bool $single = false ): mixed {
-        return $single ? '' : [];
+        // Data-driven so tests can reproduce real postmeta shapes — notably the
+        // multi-row sp_current_team that WpRosterResolver has to survive. Empty
+        // globals reproduce the previous stub exactly.
+        global $wp_test_postmeta;
+        $rows = $wp_test_postmeta[ $post_id ][ $key ] ?? [];
+
+        return $single ? ( $rows[0] ?? '' ) : $rows;
     }
 }
 
 if ( ! function_exists( 'get_the_title' ) ) {
     function get_the_title( int|string $post = 0 ): string {
-        return '';
+        global $wp_test_post_titles;
+
+        return (string) ( $wp_test_post_titles[ (int) $post ] ?? '' );
     }
 }
 

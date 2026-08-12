@@ -82,12 +82,35 @@ class WpRosterResolver implements RosterResolverInterface {
      * @return string|null  Team name, or null when none.
      */
     private function resolveTeam( int $playerId ): ?string {
-        // sp_current_team is a single-value meta: the current club's post ID.
-        $teamId = (int) get_post_meta( $playerId, self::SP_TEAM_META_KEY, true );
-        if ( $teamId <= 0 ) {
+        // sp_current_team is not reliably single-row. get_post_meta(..., true)
+        // returns the FIRST row by meta_id, and imports keep leaving a '0'
+        // "unassigned" sentinel ahead of the real club — 139 players carried one
+        // in August 2026, every single time as (0, real_club_id) — so a single
+        // read answered "Sin Equipo" for players who plainly had a team. This
+        // was cleaned up in the database once and came back.
+        //
+        // Reading every row and taking the first real club id makes the resolver
+        // immune to the sentinel regardless of what writes it, which is the only
+        // version of this fix that does not need periodic manual SQL. A player
+        // genuinely without a club has no positive row and still resolves to null.
+        $values = get_post_meta( $playerId, self::SP_TEAM_META_KEY, false );
+
+        if ( ! is_array( $values ) ) {
             return null;
         }
-        $name = get_the_title( $teamId );
-        return ( is_string( $name ) && '' !== $name ) ? $name : null;
+
+        foreach ( $values as $value ) {
+            $teamId = (int) $value;
+            if ( $teamId <= 0 ) {
+                continue;
+            }
+
+            $name = get_the_title( $teamId );
+            if ( is_string( $name ) && '' !== $name ) {
+                return $name;
+            }
+        }
+
+        return null;
     }
 }
