@@ -7,6 +7,7 @@ import 'team_detail_screen.dart';
 import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/temporadas_provider.dart';
+import '../utils/text_utils.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/zocalo_publicitario.dart';
 
@@ -173,29 +174,179 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
     }).toList();
   }
 
+  /// A team tile: the crest is the content, the name labels it.
+  ///
+  /// The crest sits on a tinted disc so logos of wildly different shapes,
+  /// aspect ratios and background colours all read as the same kind of object.
   Widget _buildTeamCard(dynamic team) {
-    final nombre = team['nombre'] ?? 'Sin nombre';
+    final primary = Theme.of(context).colorScheme.primary;
+    final nombre = decodeHtmlEntities(team['nombre']?.toString()).isEmpty
+        ? 'Sin nombre'
+        : decodeHtmlEntities(team['nombre']?.toString());
     final avatarRaw = team['imagen'];
     final avatar = (avatarRaw is String && avatarRaw.isNotEmpty) ? avatarRaw : null;
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 2,
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundImage: avatar != null ? NetworkImage(avatar) : null,
-          backgroundColor: Colors.grey[300],
-          child: avatar == null ? const Icon(Icons.shield) : null,
-        ),
-        title: Text(nombre, overflow: TextOverflow.ellipsis),
-        onTap: () {
-          Navigator.push(
+    final placeholder =
+        Icon(Icons.shield_outlined, size: 34, color: Colors.grey.shade400);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => TeamDetailScreen(team: team)),
-          );
-        },
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 78,
+                  height: 78,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: primary.withValues(alpha: 0.05),
+                    shape: BoxShape.circle,
+                  ),
+                  child: avatar != null
+                      ? Image.network(
+                          avatar,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => placeholder,
+                        )
+                      : placeholder,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  nombre,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
+    );
+  }
+
+  /// Tabs drawn as a pill segmented control rather than the default underline,
+  /// matching the team selector used on the lineup pitch.
+  Widget _buildTabSelector() {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: TabBar(
+          controller: _tabController,
+          indicator: BoxDecoration(
+            color: primary,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          indicatorSize: TabBarIndicatorSize.tab,
+          dividerColor: Colors.transparent,
+          splashBorderRadius: BorderRadius.circular(24),
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.black54,
+          labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+          unselectedLabelStyle:
+              const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+          tabs: const [
+            Tab(text: 'Temporada Actual'),
+            Tab(text: 'Histórico'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBuscador() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: TextField(
+        controller: _searchController,
+        onChanged: _onSearchChanged,
+        style: const TextStyle(fontSize: 15),
+        decoration: InputDecoration(
+          hintText: 'Buscar equipo',
+          hintStyle: TextStyle(color: Colors.grey.shade500, fontSize: 15),
+          prefixIcon: Icon(Icons.search, color: Colors.grey.shade500, size: 21),
+          filled: true,
+          fillColor: Colors.grey.shade100,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: Colors.grey.shade200),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The grid every tab renders into.
+  Widget _buildTeamsGrid(List<dynamic> equipos) {
+    if (equipos.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.groups_outlined, size: 56, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              Text(
+                'No se encontraron equipos',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 0.92,
+      ),
+      itemCount: equipos.length,
+      itemBuilder: (context, index) => _buildTeamCard(equipos[index]),
     );
   }
 
@@ -207,16 +358,7 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
         appBar: EntreRedesAppBar(title: 'Equipos', centerTitle: true),
         body: Column(
           children: [
-            TabBar(
-              controller: _tabController,
-              labelColor: Theme.of(context).primaryColor,
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: Theme.of(context).primaryColor,
-              tabs: const [
-                Tab(text: 'Temporada Actual'),
-                Tab(text: 'Histórico'),
-              ],
-            ),
+            _buildTabSelector(),
             Expanded(
               child: TabBarView(
                 controller: _tabController,
@@ -229,38 +371,14 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
                               texto: 'Cargando equipos...',
                               adImageUrl: equiposAdUrl,
                             )
-                          : ListView.builder(
-                              padding: const EdgeInsets.all(8),
-                              itemCount: equiposTemporada.length,
-                              itemBuilder: (context, index) {
-                                return _buildTeamCard(equiposTemporada[index]);
-                              },
-                            ),
+                          : _buildTeamsGrid(equiposTemporada),
 
                   // Histórico
                   Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: TextField(
-                          controller: _searchController,
-                          decoration: const InputDecoration(
-                            labelText: 'Buscar equipo',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.search),
-                          ),
-                          onChanged: _onSearchChanged,
-                        ),
-                      ),
+                      _buildBuscador(),
                       Expanded(
-                        child: ListView.builder(
-                          padding: const EdgeInsets.all(8),
-                          itemCount: _filteredEquipos(equiposHistoricos).length,
-                          itemBuilder: (context, index) {
-                            final filtered = _filteredEquipos(equiposHistoricos);
-                            return _buildTeamCard(filtered[index]);
-                          },
-                        ),
+                        child: _buildTeamsGrid(_filteredEquipos(equiposHistoricos)),
                       ),
                     ],
                   ),
