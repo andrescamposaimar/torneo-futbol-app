@@ -19,8 +19,17 @@ namespace EntreRedes\Prode\Admin;
  */
 class SettingsRepository {
 
-    /** @var array<string> The editable setting_keys (CONF-01). */
-    private const SETTING_KEYS = [
+    /**
+     * The editable setting_keys (CONF-01).
+     *
+     * Public because it is the single source of truth for both reading and
+     * writing these rows. SettingsPage::handleSave used to keep its own copy of
+     * this list, so a setting added everywhere else silently failed to persist:
+     * it validated, entered $clean, and was then skipped by the write loop.
+     *
+     * @var array<string>
+     */
+    public const SETTING_KEYS = [
         'lock_hours_before',
         'lock_warning_hours_before',
         'fecha_window_days',

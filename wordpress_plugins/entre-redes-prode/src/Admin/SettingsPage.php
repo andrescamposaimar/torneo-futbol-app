@@ -443,16 +443,10 @@ class SettingsPage {
 
         $actorWpId = get_current_user_id();
 
-        // Write prode_settings rows (5 fields, upsert for EDGE-06).
-        $settingKeys = [
-            'lock_hours_before',
-            'lock_warning_hours_before',
-            'fecha_window_days',
-            'prode_season_id',
-            'evaluator_cron_interval_minutes',
-        ];
-
-        foreach ( $settingKeys as $key ) {
+        // Write prode_settings rows (upsert for EDGE-06). The key list comes from
+        // SettingsRepository rather than a local copy: when this loop kept its
+        // own array, adding a setting everywhere else still left it unsaved.
+        foreach ( SettingsRepository::SETTING_KEYS as $key ) {
             if ( array_key_exists( $key, $clean ) ) {
                 $this->settingsRepo->upsertSetting( $key, (string) $clean[ $key ], $actorWpId );
             }

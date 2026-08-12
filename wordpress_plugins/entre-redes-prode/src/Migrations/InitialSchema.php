@@ -24,6 +24,25 @@ namespace EntreRedes\Prode\Migrations;
 class InitialSchema {
 
     /**
+     * Values seeded into prode_settings on activation.
+     *
+     * Kept as a constant so the seed list can be asserted against the editable
+     * key list — an unseeded setting renders as a blank admin field on a fresh
+     * install. `tenant_id` is added at runtime from PRODE_TENANT_ID and is not
+     * operator-editable, so it does not belong here.
+     *
+     * @var array<string, string>
+     */
+    public const SEED_DEFAULTS = [
+        'lock_hours_before'                => '24',
+        'lock_warning_hours_before'        => '2',
+        'evaluator_cron_interval_minutes'  => '5',
+        'prode_season_id'                  => '359',
+        'prode_ranking_from_fecha_id'      => '0',
+        'fecha_window_days'                => '1',
+    ];
+
+    /**
      * Run all CREATE TABLE statements.
      *
      * @return string[] Array of dbDelta result messages (for logging).
@@ -348,14 +367,7 @@ class InitialSchema {
     private static function seedSettings( string $p ): void {
         global $wpdb;
 
-        $defaults = [
-            'lock_hours_before'                => '24',
-            'lock_warning_hours_before'        => '2',
-            'evaluator_cron_interval_minutes'  => '5',
-            'prode_season_id'                  => '359',
-            'prode_ranking_from_fecha_id'      => '0',
-            'fecha_window_days'                => '1',
-        ];
+        $defaults = self::SEED_DEFAULTS;
 
         if ( defined( 'PRODE_TENANT_ID' ) ) {
             $defaults['tenant_id'] = (string) PRODE_TENANT_ID;
