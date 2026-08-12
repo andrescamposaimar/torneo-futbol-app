@@ -329,12 +329,21 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
                         itemCount: partidos.length + (isLoadingMore ? 1 : 0),
                         itemBuilder: (context, index) {
                           if (index < partidos.length) {
-                            final p = partidos[index];
+                            final partido =
+                                Map<String, dynamic>.from(partidos[index] as Map);
+                            // A player's history mixes played and scheduled
+                            // matches, so each card reads its own shape from
+                            // whether the match has a score.
+                            final jugado = partido['goles_local'] != null &&
+                                partido['goles_visitante'] != null;
                             return MatchCard(
-                              partido: p,
-                              onVerDetalle: () => Navigator.push(
+                              partido: partido,
+                              mostrarResultado: jugado,
+                              onTap: () => Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => MatchDetailScreen(partido: p)),
+                                MaterialPageRoute(
+                                  builder: (_) => MatchDetailScreen(partido: partido),
+                                ),
                               ),
                             );
                           } else {

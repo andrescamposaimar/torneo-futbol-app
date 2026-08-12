@@ -10,6 +10,7 @@ import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/partidos_cache_provider.dart';
 import '../utils/date_utils.dart';
+import '../widgets/match_card.dart';
 import '../utils/liga_utils.dart';
 
 class MatchesScreen extends ConsumerStatefulWidget {
@@ -274,107 +275,12 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
   }
 
   Widget _buildMatchCard(dynamic partido) {
-    final liga = _decodeHtmlEntities(partido['liga']?.toString());
-    final local = _decodeHtmlEntities(partido['equipo_local']?.toString());
-    final visitante = _decodeHtmlEntities(partido['equipo_visitante']?.toString());
-    final escudoLocal = partido['escudo_local']?.toString();
-    final escudoVisitante = partido['escudo_visitante']?.toString();
-    final fecha = partido['fecha'] ?? '-';
-    final hora = partido['hora'] ?? '-';
-    final cancha = _decodeHtmlEntities(partido['cancha']?.toString() ?? '-');
-    final mesa = (selectedTab != 0) ? (partido['mesa']?.toString() ?? '') : '';
-
     final esJugado = selectedTab == 0;
-    final primary = Theme.of(context).colorScheme.primary;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        // A hairline instead of a drop shadow: the list stays calm when many
-        // cards are stacked.
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          // Only "Jugados" opens the detail.
-          onTap: esJugado ? () => _abrirDetalle(partido) : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // A tinted strip carries the league and breaks the flat white.
-              Container(
-                width: double.infinity,
-                color: primary.withValues(alpha: 0.05),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                child: Text(
-                  liga.toUpperCase(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                    color: primary.withValues(alpha: 0.85),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: Column(
-                        children: [
-                          _teamRow(local, escudoLocal,
-                              esJugado ? _parseGoles(partido['goles_local']) : ''),
-                          const SizedBox(height: 10),
-                          _teamRow(visitante, escudoVisitante,
-                              esJugado ? _parseGoles(partido['goles_visitante']) : ''),
-                        ],
-                      ),
-                    ),
-                    if (!esJugado)
-                      Expanded(
-                        flex: 2,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            _metaRow(Icons.calendar_today, _formatearFecha(fecha)),
-                            _metaRow(Icons.access_time, hora),
-                            _metaRow(Icons.location_on,
-                                cancha.isNotEmpty ? cancha : '-'),
-                            if (mesa.isNotEmpty) _metaRow(Icons.groups, 'Mesa: $mesa'),
-                          ],
-                        ),
-                      ),
-                    if (esJugado) ...[
-                      const SizedBox(width: 14),
-                      // A tinted disc reads as an affordance; a bare chevron
-                      // did not make the card feel tappable.
-                      Container(
-                        width: 30,
-                        height: 30,
-                        decoration: BoxDecoration(
-                          color: primary.withValues(alpha: 0.08),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(Icons.chevron_right,
-                            size: 20, color: primary.withValues(alpha: 0.8)),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return MatchCard(
+      partido: Map<String, dynamic>.from(partido as Map),
+      mostrarResultado: esJugado,
+      // Only "Jugados" opens the detail.
+      onTap: esJugado ? () => _abrirDetalle(partido) : null,
     );
   }
 
@@ -420,82 +326,6 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
           ),
         ],
       ),
-    );
-  }
-
-  /// Secondary match data — date, kickoff, venue. Muted on purpose so it never
-  /// competes with the teams.
-  Widget _metaRow(IconData icono, String texto) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icono, size: 14, color: Colors.grey.shade500),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              texto,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _teamRow(String nombre, String? escudoUrl, String goles) {
-    final placeholder = Icon(Icons.shield, size: 20, color: Colors.grey.shade400);
-
-    return Row(
-      children: [
-        SizedBox(
-          width: 26,
-          height: 26,
-          child: escudoUrl != null &&
-                  escudoUrl.isNotEmpty &&
-                  Uri.tryParse(escudoUrl)?.hasScheme == true
-              ? Image.network(
-                  escudoUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => placeholder,
-                )
-              : placeholder,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            nombre,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
-              color: Colors.black87,
-            ),
-          ),
-        ),
-        if (goles.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(left: 10),
-            width: 28,
-            height: 26,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(7),
-            ),
-            child: Text(
-              goles,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-      ],
     );
   }
 
@@ -594,20 +424,6 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
       ),
     );
   }
-  String _formatearFecha(String fechaOriginal) {
-    try {
-      final partes = fechaOriginal.split('-');
-      if (partes.length == 3) {
-        final yyyy = partes[0];
-        final mm = partes[1];
-        final dd = partes[2];
-        final yy = yyyy.substring(2);
-        return '$dd-$mm-$yy';
-      }
-    } catch (_) {}
-    return fechaOriginal;
-  }
-
   String _decodeHtmlEntities(String? text) {
     if (text == null || text.isEmpty) return '-';
     return text
@@ -617,11 +433,6 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
         .replaceAll('&#8217;', "'")
         .replaceAll('&#038;', '&')
         .replaceAll('&#8216;', "'");
-  }
-
-  String _parseGoles(dynamic valor) {
-    if (valor == null || valor.toString().trim().isEmpty) return '-';
-    return valor.toString();
   }
 
 Widget _buildEmptyJugados() {

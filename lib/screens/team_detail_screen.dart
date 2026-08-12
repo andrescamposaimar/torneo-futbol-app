@@ -252,11 +252,19 @@ void initState() {
         itemCount: partidos.length,
         itemBuilder: (context, index) {
           final p = partidos[index];
+          final partido = Map<String, dynamic>.from(p as Map);
+          // A team's history mixes played and scheduled matches, so each card
+          // decides its own shape from whether the match has a score.
+          final jugado = partido['goles_local'] != null &&
+              partido['goles_visitante'] != null;
           return MatchCard(
-            partido: p,
-            onVerDetalle: () => Navigator.push(
+            partido: partido,
+            mostrarResultado: jugado,
+            onTap: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => MatchDetailScreen(partido: p)),
+              MaterialPageRoute(
+                builder: (_) => MatchDetailScreen(partido: partido),
+              ),
             ),
           );
         },
