@@ -152,10 +152,10 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
       for (var tabla in todasPrev) {
         uniqueTables[tabla['titulo'] ?? ''] = tabla;
       }
+      // Fresh data always wins: the cached copy loaded before this fetch may be
+      // outdated (e.g. teams added to a table after it was cached).
       for (var tabla in nuevasTablas) {
-        if (!uniqueTables.containsKey(tabla['titulo'] ?? '')) {
-          uniqueTables[tabla['titulo'] ?? ''] = tabla;
-        }
+        uniqueTables[tabla['titulo'] ?? ''] = tabla;
       }
 
       final nuevasTodas = uniqueTables.values.toList();
