@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'prode_auth_repository.dart';
@@ -296,12 +297,34 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
           );
       }
     } on ProdeSsoException catch (e) {
+      _logSignInFailure(provider, 'ProdeSsoException', e.code, e.message);
       state = ProdeAuthError(code: e.code, message: e.message);
     } on PlatformException catch (e) {
+      _logSignInFailure(provider, 'PlatformException', e.code, e.message,
+          e.details);
       state = ProdeAuthError(code: e.code, message: e.message ?? e.toString());
-    } catch (e) {
+    } catch (e, stack) {
+      _logSignInFailure(provider, e.runtimeType.toString(),
+          '${provider}_signin_error', e.toString(), stack);
       state = ProdeAuthError(code: '${provider}_signin_error', message: e.toString());
     }
+  }
+
+  /// Emits the swallowed sign-in failure to the debug console.
+  ///
+  /// [ProdeAuthError] is rendered with generic user-facing copy (the code and
+  /// message are intentionally hidden from league users), which leaves field
+  /// reports undiagnosable. This keeps the technical detail reachable when the
+  /// app runs attached to a debug session.
+  void _logSignInFailure(
+    String provider,
+    String type,
+    String code,
+    String? message, [
+    Object? extra,
+  ]) {
+    debugPrint('[prode-auth] $provider sign-in failed — $type '
+        'code=$code message=$message${extra == null ? '' : '\n$extra'}');
   }
 
   /// Confirms the user's DNI after a successful SSO step.
