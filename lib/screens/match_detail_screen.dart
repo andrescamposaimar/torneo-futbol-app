@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/service_providers.dart';
+import '../utils/date_utils.dart';
+import '../utils/text_utils.dart';
 import '../widgets/zocalo_publicitario.dart';
 import '../widgets/full_field_painter.dart';
 import '../widgets/player_pod.dart';
@@ -115,36 +117,57 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     }
   }
 
+  /// Devuelve el valor como texto listo para mostrar, o null si no hay dato.
+  String? _valorOpcional(dynamic raw) {
+    final texto = decodeHtmlEntities(raw?.toString());
+    return texto.isEmpty ? null : texto;
+  }
+
+  /// La API expone `temporada` como id numérico en algunos endpoints, así que
+  /// solo la mostramos cuando el valor es plausible como año.
+  String? _temporadaLegible(dynamic raw) {
+    final anio = int.tryParse(raw?.toString() ?? '');
+    if (anio == null || anio < 2000 || anio > 2100) return null;
+    return '$anio';
+  }
+
   Widget _buildResumen() {
     final p = widget.partido;
 
+    final fechaLarga = formatFechaLarga(p['fecha']?.toString());
+    final hora = _valorOpcional(p['hora']);
+    final temporada = _temporadaLegible(p['temporada']);
+
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '${p['equipo_local']} ${p['goles_local'] ?? '-'} vs ${p['equipo_visitante']} ${p['goles_visitante'] ?? '-'}',
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 12),
+        _buildScoreboard(),
+        const SizedBox(height: 16),
         Card(
-          elevation: 4,
+          elevation: 2,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Información del partido',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                const Padding(
+                  padding: EdgeInsets.only(top: 8, bottom: 4),
+                  child: Text(
+                    'Información del partido',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                 ),
-                const SizedBox(height: 16),
-                _buildInfoRow(Icons.calendar_month, 'Fecha', p['fecha'] ?? ''),
-                _buildInfoRow(Icons.access_time, 'Hora', p['hora'] ?? ''),
-                _buildInfoRow(Icons.emoji_events, 'Liga', p['liga'] ?? ''),
-                _buildInfoRow(Icons.timeline, 'Temporada', p['temporada'] ?? '2025'),
-                _buildInfoRow(Icons.location_on, 'Cancha', p['cancha'] ?? ''),
-                _buildInfoRow(Icons.person, 'Árbitro', p['arbitro'] ?? 'No informado'),
+                _buildInfoRow(
+                  Icons.calendar_month,
+                  'Fecha',
+                  fechaLarga ?? _valorOpcional(p['fecha']),
+                ),
+                _buildInfoRow(Icons.access_time, 'Hora', hora == null ? null : '$hora hs'),
+                _buildInfoRow(Icons.emoji_events, 'Liga', _valorOpcional(p['liga'])),
+                if (temporada != null)
+                  _buildInfoRow(Icons.timeline, 'Temporada', temporada),
+                _buildInfoRow(Icons.location_on, 'Cancha', _valorOpcional(p['cancha'])),
               ],
             ),
           ),
@@ -153,17 +176,138 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value) {
+  Widget _buildScoreboard() {
+    final p = widget.partido;
+
+    final local = decodeHtmlEntities(p['equipo_local']?.toString());
+    final visitante = decodeHtmlEntities(p['equipo_visitante']?.toString());
+    final golesLocal = int.tryParse(p['goles_local']?.toString() ?? '');
+    final golesVisitante = int.tryParse(p['goles_visitante']?.toString() ?? '');
+
+    Widget marcador(int? goles) {
+      return Text(
+        goles?.toString() ?? '-',
+        style: const TextStyle(
+          fontSize: 40,
+          fontWeight: FontWeight.bold,
+          color: Colors.black,
+        ),
+      );
+    }
+
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: _buildEquipoColumna(local, p['escudo_local']?.toString()),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  marcador(golesLocal),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text(
+                      '-',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w300,
+                        color: Colors.grey[400],
+                      ),
+                    ),
+                  ),
+                  marcador(golesVisitante),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _buildEquipoColumna(
+                visitante,
+                p['escudo_visitante']?.toString(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEquipoColumna(String nombre, String? escudoUrl) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 56,
+          width: 56,
+          child: escudoUrl != null && escudoUrl.isNotEmpty
+              ? Image.network(
+                  escudoUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) =>
+                      Icon(Icons.shield_outlined, size: 40, color: Colors.grey[400]),
+                )
+              : Icon(Icons.shield_outlined, size: 40, color: Colors.grey[400]),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          nombre,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String? value) {
+    final sinDato = value == null || value.isEmpty;
+    final primary = Theme.of(context).colorScheme.primary;
+
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, size: 20, color: Colors.green[800]),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 20, color: primary),
+          ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              '$label: $value',
-              style: const TextStyle(fontSize: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  sinDato ? 'No informado' : value,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: sinDato ? FontWeight.normal : FontWeight.w500,
+                    color: sinDato ? Colors.grey[500] : Colors.black87,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
