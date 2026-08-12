@@ -10,6 +10,7 @@ import '../config/tenant_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/partidos_cache_provider.dart';
 import '../utils/date_utils.dart';
+import '../utils/text_utils.dart';
 import '../widgets/match_card.dart';
 import '../utils/liga_utils.dart';
 
@@ -424,17 +425,6 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
       ),
     );
   }
-  String _decodeHtmlEntities(String? text) {
-    if (text == null || text.isEmpty) return '-';
-    return text
-        .replaceAll('&amp;', '&')
-        .replaceAll('&#8211;', '-')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&#8217;', "'")
-        .replaceAll('&#038;', '&')
-        .replaceAll('&#8216;', "'");
-  }
-
 Widget _buildEmptyJugados() {
   return Center(
     child: Column(
@@ -801,12 +791,14 @@ Widget _buildListaPorFecha() {
 
       final Map<String, String?> escudos = {};
       for (final p in todos) {
-        final local = _decodeHtmlEntities(p['equipo_local']?.toString());
-        final visitante = _decodeHtmlEntities(p['equipo_visitante']?.toString());
+        // These names are map keys, not display text: they must be decoded the
+        // same way here and wherever they are looked up.
+        final local = decodeHtmlEntities(p['equipo_local']?.toString());
+        final visitante = decodeHtmlEntities(p['equipo_visitante']?.toString());
         final eLocal = p['escudo_local']?.toString();
         final eVisitante = p['escudo_visitante']?.toString();
-        if (local != '-') escudos.putIfAbsent(local, () => (eLocal?.isNotEmpty == true) ? eLocal : null);
-        if (visitante != '-') escudos.putIfAbsent(visitante, () => (eVisitante?.isNotEmpty == true) ? eVisitante : null);
+        if (local.isNotEmpty) escudos.putIfAbsent(local, () => (eLocal?.isNotEmpty == true) ? eLocal : null);
+        if (visitante.isNotEmpty) escudos.putIfAbsent(visitante, () => (eVisitante?.isNotEmpty == true) ? eVisitante : null);
       }
 
       if (!mounted) return;
@@ -987,8 +979,8 @@ Widget _buildListaPorFecha() {
     final filtrados = selectedFixtureEquipo == null
         ? todosLosPartidosProgramados
         : todosLosPartidosProgramados.where((p) {
-            final local = _decodeHtmlEntities(p['equipo_local']?.toString());
-            final visitante = _decodeHtmlEntities(p['equipo_visitante']?.toString());
+            final local = decodeHtmlEntities(p['equipo_local']?.toString());
+            final visitante = decodeHtmlEntities(p['equipo_visitante']?.toString());
             return local == selectedFixtureEquipo || visitante == selectedFixtureEquipo;
           }).toList();
 
