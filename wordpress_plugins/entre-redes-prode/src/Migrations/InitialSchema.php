@@ -353,6 +353,7 @@ class InitialSchema {
             'lock_warning_hours_before'        => '2',
             'evaluator_cron_interval_minutes'  => '5',
             'prode_season_id'                  => '359',
+            'prode_ranking_from_fecha_id'      => '0',
             'fecha_window_days'                => '1',
         ];
 

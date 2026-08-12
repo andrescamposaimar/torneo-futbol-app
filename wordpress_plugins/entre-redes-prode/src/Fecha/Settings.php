@@ -38,6 +38,22 @@ class Settings {
     }
 
     /**
+     * Lowest fecha id counted by the cumulative (season) leaderboard.
+     *
+     * One SportsPress season carries several tournaments — Apertura and Clausura
+     * both live under season 359 — and each should start with an empty table.
+     * Raising this to the tournament's first fecha resets the standings without
+     * touching a single prediction or score: the rows stay in `prode_scores`, the
+     * per-fecha tables for earlier fechas keep rendering, and lowering it again
+     * brings the combined table back.
+     *
+     * Default: 0 — count every fecha in the season.
+     */
+    public function rankingFromFechaId(): int {
+        return $this->readInt( 'prode_ranking_from_fecha_id', 0 );
+    }
+
+    /**
      * How many calendar days from the next play-date to include in one fecha.
      * Default: 1 (single matchday only).
      */

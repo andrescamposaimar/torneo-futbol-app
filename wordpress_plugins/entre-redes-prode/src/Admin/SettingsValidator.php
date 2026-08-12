@@ -37,6 +37,7 @@ final class SettingsValidator {
         'lock_warning_hours_before'      => 0,
         'fecha_window_days'              => 1,
         'prode_season_id'                => 1,
+        'prode_ranking_from_fecha_id'    => 0,
         'evaluator_cron_interval_minutes' => 1,
     ];
 

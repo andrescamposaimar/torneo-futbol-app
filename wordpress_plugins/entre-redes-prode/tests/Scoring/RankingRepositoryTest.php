@@ -183,6 +183,63 @@ class RankingRepositoryTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // Cumulative-table cutoff (a new tournament inside the same season)
+    // -------------------------------------------------------------------------
+
+    public function test_aggregate_by_season_counts_only_fechas_at_or_above_the_cutoff(): void {
+        $this->seedUser( 1 );
+
+        $earlier = $this->seedFecha( 'evaluated', 10 );
+        $later   = $this->seedFecha( 'evaluated', 10 );
+
+        $this->seedScore( $earlier, 1, 3, 'exact_score' );
+        $this->seedScore( $later, 1, 1, 'result_only' );
+
+        $rows = $this->repo->aggregateBySeason( 10, $later );
+
+        $this->assertCount( 1, $rows );
+        // Only the later fecha counts: the earlier 3pts (and its exact hit) are
+        // excluded from the total while remaining in prode_scores.
+        $this->assertSame( 1, (int) $rows[0]['total_points'] );
+        $this->assertSame( 0, (int) $rows[0]['exact_count'] );
+    }
+
+    public function test_aggregate_by_season_cutoff_does_not_delete_underlying_scores(): void {
+        $this->seedUser( 1 );
+
+        $earlier = $this->seedFecha( 'evaluated', 10 );
+        $later   = $this->seedFecha( 'evaluated', 10 );
+
+        $this->seedScore( $earlier, 1, 3, 'exact_score' );
+        $this->seedScore( $later, 1, 1, 'result_only' );
+
+        // Cutoff hides the earlier fecha from the cumulative table…
+        $this->assertSame( 1, (int) $this->repo->aggregateBySeason( 10, $later )[0]['total_points'] );
+
+        // …but its per-fecha table still resolves, which is the whole point of
+        // moving the boundary instead of deleting rows.
+        $perFecha = $this->repo->aggregateByFecha( $earlier );
+        $this->assertCount( 1, $perFecha );
+        $this->assertSame( 3, (int) $perFecha[0]['total_points'] );
+
+        // And lowering the cutoff restores the combined total.
+        $this->assertSame( 4, (int) $this->repo->aggregateBySeason( 10, 0 )[0]['total_points'] );
+    }
+
+    public function test_aggregate_by_season_defaults_to_the_whole_season(): void {
+        $this->seedUser( 1 );
+
+        $earlier = $this->seedFecha( 'evaluated', 10 );
+        $later   = $this->seedFecha( 'evaluated', 10 );
+
+        $this->seedScore( $earlier, 1, 3, 'exact_score' );
+        $this->seedScore( $later, 1, 1, 'result_only' );
+
+        // Omitting the cutoff must preserve pre-cutoff behaviour.
+        $this->assertSame( 4, (int) $this->repo->aggregateBySeason( 10 )[0]['total_points'] );
+    }
+
+    // -------------------------------------------------------------------------
     // RR-03 — Cache upsert idempotency
     // -------------------------------------------------------------------------
 

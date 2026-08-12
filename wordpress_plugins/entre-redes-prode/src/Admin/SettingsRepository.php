@@ -19,12 +19,13 @@ namespace EntreRedes\Prode\Admin;
  */
 class SettingsRepository {
 
-    /** @var array<string> The five editable setting_keys (CONF-01). */
+    /** @var array<string> The editable setting_keys (CONF-01). */
     private const SETTING_KEYS = [
         'lock_hours_before',
         'lock_warning_hours_before',
         'fecha_window_days',
         'prode_season_id',
+        'prode_ranking_from_fecha_id',
         'evaluator_cron_interval_minutes',
     ];
 
@@ -36,7 +37,7 @@ class SettingsRepository {
 
     /**
      * Returns an associative array of setting_key => setting_value for all
-     * five editable prode_settings rows that are present in the DB.
+     * editable prode_settings rows that are present in the DB.
      *
      * Missing rows are simply absent from the returned array; the caller must
      * fall back to Settings::readInt() defaults (CONF-01, EDGE-06).

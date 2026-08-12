@@ -44,6 +44,7 @@ class SettingsPage {
         'lock_warning_hours_before'       => 'Horas de advertencia antes del cierre',
         'fecha_window_days'               => 'Días de ventana por fecha',
         'prode_season_id'                 => 'ID de temporada activa',
+        'prode_ranking_from_fecha_id'     => 'Ranking general desde la fecha N (0 = toda la temporada)',
         'evaluator_cron_interval_minutes' => 'Intervalo del evaluador (minutos)',
     ];
 

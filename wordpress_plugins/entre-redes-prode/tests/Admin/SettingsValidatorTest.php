@@ -29,6 +29,7 @@ class SettingsValidatorTest extends TestCase {
             'lock_warning_hours_before'      => '2',
             'fecha_window_days'              => '1',
             'prode_season_id'                => '359',
+            'prode_ranking_from_fecha_id'    => '0',
             'evaluator_cron_interval_minutes' => '5',
             'prode_google_client_id'         => 'some-google-client-id',
             'prode_apple_audience'           => 'some-apple-audience',
@@ -47,6 +48,9 @@ class SettingsValidatorTest extends TestCase {
         $this->assertSame( 2, $result['clean']['lock_warning_hours_before'] );
         $this->assertSame( 1, $result['clean']['fecha_window_days'] );
         $this->assertSame( 359, $result['clean']['prode_season_id'] );
+        // Zero is a meaningful value here — "count the whole season" — unlike the
+        // other int fields, whose minimum is 1.
+        $this->assertSame( 0, $result['clean']['prode_ranking_from_fecha_id'] );
         $this->assertSame( 5, $result['clean']['evaluator_cron_interval_minutes'] );
         $this->assertSame( 'some-google-client-id', $result['clean']['prode_google_client_id'] );
         $this->assertSame( 'some-apple-audience', $result['clean']['prode_apple_audience'] );

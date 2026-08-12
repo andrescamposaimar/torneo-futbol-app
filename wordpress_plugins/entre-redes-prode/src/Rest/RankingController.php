@@ -149,8 +149,13 @@ class RankingController {
                 ];
             }, $cacheRows );
         } else {
-            // Season view: aggregate on-read and rank in PHP.
-            $aggRows = $this->repo->aggregateBySeason( $seasonId );
+            // Season view: aggregate on-read and rank in PHP. The cutoff lets a
+            // new tournament inside the same season open with an empty table
+            // while every earlier score stays queryable per fecha.
+            $aggRows = $this->repo->aggregateBySeason(
+                $seasonId,
+                $this->settings->rankingFromFechaId()
+            );
             $rows    = $this->computer->assignRanks( $aggRows );
         }
 

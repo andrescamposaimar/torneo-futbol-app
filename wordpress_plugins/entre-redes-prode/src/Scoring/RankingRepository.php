@@ -74,19 +74,30 @@ class RankingRepository {
      *
      * SQL B (design §Aggregation SQL).
      *
+     * [$fromFechaId] restarts the cumulative table at a fecha boundary without
+     * deleting anything: a season holds several tournaments (Apertura and
+     * Clausura share one SportsPress season id), and each should open with an
+     * empty leaderboard. Scores below the cutoff stay in `prode_scores`, so the
+     * per-fecha tables for earlier tournaments keep working and moving the
+     * cutoff back restores the combined table. Note the season id cannot be used
+     * to separate tournaments instead — [FechaEvaluator] resolves match results
+     * through it, so a synthetic value would leave fechas permanently unscored.
+     *
      * @param int $seasonId
+     * @param int $fromFechaId Lowest fecha id to count; 0 counts the whole season.
      * @return array<int, array<string, mixed>>
      */
-    public function aggregateBySeason( int $seasonId ): array {
+    public function aggregateBySeason( int $seasonId, int $fromFechaId = 0 ): array {
         $sql  = $this->wpdb->prepare(
             "SELECT s.user_id,
                     SUM(s.points) AS total_points,
                     SUM(CASE WHEN s.evaluation_method='exact_score' THEN 1 ELSE 0 END) AS exact_count
                FROM {$this->table('prode_scores')} s
                JOIN {$this->table('prode_fechas')} f ON f.id = s.fecha_id
-              WHERE f.season_id = %d AND f.state = 'evaluated'
+              WHERE f.season_id = %d AND f.state = 'evaluated' AND f.id >= %d
               GROUP BY s.user_id",
-            $seasonId
+            $seasonId,
+            $fromFechaId
         );
         $rows = $this->wpdb->get_results( $sql, ARRAY_A );
 
