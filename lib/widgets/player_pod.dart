@@ -111,10 +111,10 @@ class PlayerPod extends StatelessWidget {
 
   Widget _badgeGoles() {
     return Positioned(
-      top: -4 * scale,
-      right: -4 * scale,
+      top: -5 * scale,
+      right: -5 * scale,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 5 * scale, vertical: 3 * scale),
+        padding: EdgeInsets.symmetric(horizontal: 6 * scale, vertical: 4 * scale),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
@@ -129,13 +129,13 @@ class PlayerPod extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sports_soccer, size: 12 * scale, color: Colors.black87),
+            Icon(Icons.sports_soccer, size: 15 * scale, color: Colors.black87),
             if (goles > 1)
               Padding(
-                padding: EdgeInsets.only(left: 2 * scale),
+                padding: EdgeInsets.only(left: 3 * scale),
                 child: Text(
                   '$goles',
-                  style: TextStyle(fontSize: 10 * scale, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 12 * scale, fontWeight: FontWeight.bold),
                 ),
               ),
           ],
@@ -144,44 +144,53 @@ class PlayerPod extends StatelessWidget {
     );
   }
 
-  /// Stacks [cantidad] cards of [color], so a double booking reads as two
-  /// yellows rather than a single one.
+  /// A booking badge. A double yellow is drawn as two overlapping cards offset
+  /// diagonally — the white outline of each keeps them readable as two.
   Widget _badgeTarjetas(Color color, int cantidad) {
+    final ancho = 12 * scale;
+    final alto = 17 * scale;
+    final desplazamiento = 5 * scale;
+
+    Widget tarjeta() => Container(
+          width: ancho,
+          height: alto,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2.5),
+            border: Border.all(color: Colors.white, width: 1.2),
+          ),
+        );
+
     return Positioned(
-      right: -4 * scale,
-      bottom: 8 * scale,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < cantidad; i++)
-            Padding(
-              padding: EdgeInsets.only(top: i == 0 ? 0 : 2 * scale),
-              child: Container(
-                width: 9 * scale,
-                height: 13 * scale,
-                decoration: BoxDecoration(
-                  color: color,
-                  borderRadius: BorderRadius.circular(2),
-                  border: Border.all(color: Colors.white, width: 1),
-                ),
+      right: -5 * scale,
+      bottom: 6 * scale,
+      child: cantidad == 1
+          ? tarjeta()
+          : SizedBox(
+              width: ancho + desplazamiento,
+              height: alto + desplazamiento,
+              child: Stack(
+                children: [
+                  // The card behind peeks out from the lower left.
+                  Positioned(left: 0, bottom: 0, child: tarjeta()),
+                  Positioned(right: 0, top: 0, child: tarjeta()),
+                ],
               ),
             ),
-        ],
-      ),
     );
   }
 
   Widget _badgeCapitan() {
     return Positioned(
-      top: -4 * scale,
-      left: -4 * scale,
+      top: -5 * scale,
+      left: -5 * scale,
       child: Container(
-        width: 18 * scale,
-        height: 18 * scale,
+        width: 23 * scale,
+        height: 23 * scale,
         decoration: BoxDecoration(
           color: Colors.amber.shade800,
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 1.5),
+          border: Border.all(color: Colors.white, width: 1.8),
         ),
         child: Center(
           child: Text(
@@ -189,7 +198,7 @@ class PlayerPod extends StatelessWidget {
             style: TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.bold,
-              fontSize: 10 * scale,
+              fontSize: 13 * scale,
             ),
           ),
         ),

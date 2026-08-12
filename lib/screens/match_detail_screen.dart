@@ -138,7 +138,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     return '$anio';
   }
 
-  Widget _buildResumen() {
+  Widget _buildInformacion() {
     final p = widget.partido;
 
     final fechaLarga = formatFechaLarga(p['fecha']?.toString());
@@ -148,11 +148,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildScoreboard(),
-        const SizedBox(height: 16),
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Column(
@@ -183,11 +184,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     );
   }
 
-  /// The match hero: crests, score and, when provided, the scorers of each
-  /// side inside the very same block.
+  /// The match hero: crests, score and the scorers of each side, all inside the
+  /// very same block. Empty scorer lists simply drop that half of the panel.
   Widget _buildScoreboard({
-    List<String> goleadoresLocal = const [],
-    List<String> goleadoresVisitante = const [],
+    required List<String> goleadoresLocal,
+    required List<String> goleadoresVisitante,
   }) {
     final p = widget.partido;
     final primary = Theme.of(context).colorScheme.primary;
@@ -206,7 +207,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
         style: const TextStyle(
           fontSize: 44,
           fontWeight: FontWeight.w800,
-          color: Colors.white,
+          color: Colors.black87,
           height: 1,
         ),
       );
@@ -215,18 +216,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [primary, Color.lerp(primary, Colors.black, 0.45)!],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: 0.3),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        // A whisper of brand colour instead of a saturated block: same family
+        // as the strip on the match list cards.
+        color: primary.withValues(alpha: 0.06),
+        border: Border.all(color: primary.withValues(alpha: 0.12)),
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 22, 12, 18),
@@ -251,7 +244,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                           style: TextStyle(
                             fontSize: 30,
                             fontWeight: FontWeight.w300,
-                            color: Colors.white.withValues(alpha: 0.5),
+                            color: Colors.grey.shade400,
                           ),
                         ),
                       ),
@@ -273,7 +266,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                 child: Divider(
                   height: 1,
                   thickness: 1,
-                  color: Colors.white.withValues(alpha: 0.18),
+                  color: primary.withValues(alpha: 0.15),
                 ),
               ),
               _buildGoleadores(goleadoresLocal, goleadoresVisitante),
@@ -284,8 +277,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
     );
   }
 
-  /// A crest over a light disc so any logo reads against the dark hero,
-  /// with the team name underneath.
+  /// A crest framed by a white disc so logos of any colour keep their edge
+  /// against the tinted panel, with the team name underneath.
   Widget _buildEquipoColumna(String nombre, String? escudoUrl) {
     final placeholder =
         Icon(Icons.shield_outlined, size: 34, color: Colors.grey.shade400);
@@ -300,13 +293,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
           decoration: BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
+            border: Border.all(color: Colors.grey.shade200),
           ),
           child: escudoUrl != null && escudoUrl.isNotEmpty
               ? Image.network(
@@ -325,7 +312,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
           style: const TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w700,
-            color: Colors.white,
+            color: Colors.black87,
             letterSpacing: 0.3,
           ),
         ),
@@ -444,7 +431,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   }
 
   /// Scorers of each team, split by a ball icon so the column reads as goals.
-  /// Rendered over the hero gradient, hence the light text.
   Widget _buildGoleadores(List<String> local, List<String> visitante) {
     Widget columna(List<String> nombres, CrossAxisAlignment alineacion) {
       return Column(
@@ -460,7 +446,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w500,
-                      color: Colors.white.withValues(alpha: 0.92),
+                      color: Colors.grey.shade800,
                     ),
                   ),
                 ))
@@ -477,7 +463,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
           child: Icon(
             Icons.sports_soccer,
             size: 17,
-            color: Colors.white.withValues(alpha: 0.9),
+            color: Colors.grey.shade700,
           ),
         ),
         Expanded(child: columna(visitante, CrossAxisAlignment.start)),
@@ -499,9 +485,12 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
           ),
         );
 
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
         child: Column(
@@ -600,7 +589,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
             : widget.partido['escudo_visitante'])
         ?.toString();
 
+    // Gold stays the identity of the man of the match, but as a tint with dark
+    // type — the same restraint applied to the scoreboard panel.
     const oro = Color(0xFFB8860B);
+    const oroTexto = Color(0xFF8A6914);
 
     return Padding(
       padding: const EdgeInsets.only(top: 20),
@@ -610,11 +602,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFF5A623), oro],
-            ),
+            color: oro.withValues(alpha: 0.09),
+            border: Border.all(color: oro.withValues(alpha: 0.28)),
           ),
           child: InkWell(
             onTap: () => _abrirDetalleJugador(figura['id']),
@@ -635,10 +624,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                               ? DecorationImage(
                                   image: NetworkImage(foto), fit: BoxFit.cover)
                               : null,
-                          color: Colors.white24,
+                          color: Colors.grey.shade200,
                         ),
                         child: foto == null
-                            ? const Icon(Icons.person, color: Colors.white, size: 34)
+                            ? Icon(Icons.person, color: Colors.grey.shade500, size: 34)
                             : null,
                       ),
                       Positioned(
@@ -647,10 +636,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                         child: Container(
                           padding: const EdgeInsets.all(4),
                           decoration: const BoxDecoration(
-                            color: Colors.white,
+                            color: oro,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.star, size: 16, color: oro),
+                          child: const Icon(Icons.star, size: 16, color: Colors.white),
                         ),
                       ),
                     ],
@@ -660,13 +649,13 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        const Text(
                           'FIGURA DEL PARTIDO',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 1.2,
-                            color: Colors.white.withValues(alpha: 0.85),
+                            color: oroTexto,
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -677,7 +666,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
-                            color: Colors.white,
+                            color: Colors.black87,
                           ),
                         ),
                         if (equipo.isNotEmpty)
@@ -690,9 +679,10 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                                     width: 22,
                                     height: 22,
                                     padding: const EdgeInsets.all(2),
-                                    decoration: const BoxDecoration(
+                                    decoration: BoxDecoration(
                                       color: Colors.white,
                                       shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.grey.shade200),
                                     ),
                                     child: Image.network(
                                       escudoEquipo,
@@ -710,7 +700,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w500,
-                                      color: Colors.white.withValues(alpha: 0.9),
+                                      color: Colors.grey.shade700,
                                     ),
                                   ),
                                 ),
@@ -722,7 +712,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
                   ),
                   Icon(
                     Icons.chevron_right,
-                    color: Colors.white.withValues(alpha: 0.8),
+                    color: oro.withValues(alpha: 0.8),
                   ),
                 ],
               ),
@@ -752,6 +742,20 @@ Widget _buildAlineaciones() {
 
   final filas = _armarFilas(disponibles);
 
+  // A line holding a single player does not need the same slice of pitch as a
+  // full defence: giving it less weight reclaims the gap above the keeper.
+  final pesos = [for (final fila in filas) fila.length == 1 ? 2 : 3];
+  final pesoTotal = pesos.fold<int>(0, (total, peso) => total + peso);
+
+  var acumulado = 0;
+  final profundidades = <double>[];
+  for (final peso in pesos) {
+    // Depth of the row's centre, measured with the real weights so the
+    // perspective clamp keeps matching where the row actually sits.
+    profundidades.add((acumulado + peso / 2) / pesoTotal);
+    acumulado += peso;
+  }
+
   return Column(
     children: [
       _buildSelectorEquipo(),
@@ -759,7 +763,7 @@ Widget _buildAlineaciones() {
       ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: AspectRatio(
-          aspectRatio: 0.72,
+          aspectRatio: 0.86,
           child: LayoutBuilder(
             builder: (context, constraints) => Stack(
               fit: StackFit.expand,
@@ -769,14 +773,14 @@ Widget _buildAlineaciones() {
                   duration: const Duration(milliseconds: 400),
                   child: Padding(
                     key: ValueKey(equipoSeleccionado),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Column(
                       children: [
                         for (var i = 0; i < filas.length; i++)
                           _buildLineaJugadores(
                             filas[i],
-                            indice: i,
-                            totalFilas: filas.length,
+                            peso: pesos[i],
+                            profundidad: profundidades[i],
                             anchoCancha: constraints.maxWidth,
                           ),
                       ],
@@ -788,17 +792,58 @@ Widget _buildAlineaciones() {
           ),
         ),
       ),
-      if (bajas.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Bajas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 16,
+      if (bajas.isNotEmpty) _buildBajas(bajas),
+    ],
+  );
+}
+
+  /// Players unavailable for the match. Wrapped in the same panel language as
+  /// the rest of the detail so the list does not read as leftovers.
+  Widget _buildBajas(List<Map<String, dynamic>> bajas) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              color: Colors.grey.shade50,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+              child: Row(
+                children: [
+                  Icon(Icons.person_off_outlined,
+                      size: 16, color: Colors.grey.shade600),
+                  const SizedBox(width: 8),
+                  Text(
+                    'BAJAS',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    bajas.length == 1 ? '1 jugador' : '${bajas.length} jugadores',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: Colors.grey.shade200),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
+              child: Wrap(
+                spacing: 14,
+                runSpacing: 18,
                 alignment: WrapAlignment.center,
                 children: bajas
                     .map((j) => GestureDetector(
@@ -807,12 +852,12 @@ Widget _buildAlineaciones() {
                         ))
                     .toList(),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-    ],
-  );
-}
+      ),
+    );
+  }
 
   /// Maximum players drawn on a single line before adding another one.
   static const int _maxPorFila = 4;
@@ -890,18 +935,18 @@ Widget _buildAlineaciones() {
   /// touchline. Crowded lines shrink as a block instead of overflowing.
   Widget _buildLineaJugadores(
     List<Map<String, dynamic>> jugadores, {
-    required int indice,
-    required int totalFilas,
+    required int peso,
+    required double profundidad,
     required double anchoCancha,
   }) {
     if (jugadores.isEmpty) return const SizedBox.shrink();
 
-    final profundidad = (indice + 0.5) / totalFilas;
     final escala = 0.78 + (1.0 - 0.78) * profundidad;
     final anchoDisponible =
         anchoCancha * FullFieldPainter.halfWidthAt(profundidad) * 2 * 0.94;
 
     return Expanded(
+      flex: peso,
       child: Center(
         child: SizedBox(
           width: anchoDisponible,
@@ -935,7 +980,7 @@ Widget _buildAlineaciones() {
           onTap: () => setState(() => equipoSeleccionado = valor),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(vertical: 10),
+            padding: const EdgeInsets.symmetric(vertical: 7),
             decoration: BoxDecoration(
               color: seleccionado ? primary : Colors.transparent,
               borderRadius: BorderRadius.circular(24),
@@ -956,7 +1001,7 @@ Widget _buildAlineaciones() {
     }
 
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: Colors.grey.shade200,
         borderRadius: BorderRadius.circular(24),
@@ -1007,21 +1052,15 @@ Widget _buildAlineaciones() {
             labelColor: Colors.black,
             indicatorColor: Theme.of(context).colorScheme.primary,
             tabs: const [
-              Tab(text: 'Resumen'),
               Tab(text: 'Estadísticas'),
               Tab(text: 'Alineaciones'),
+              Tab(text: 'Información'),
             ],
           ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                _esFuturo
-                    ? _buildPendiente()
-                    : SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: _buildResumen(),
-                      ),
                 _esFuturo
                     ? _buildPendiente()
                     : goleadores == null && isLoading
@@ -1043,6 +1082,12 @@ Widget _buildAlineaciones() {
                             padding: const EdgeInsets.all(16),
                             child: _buildAlineaciones(),
                           ),
+                _esFuturo
+                    ? _buildPendiente()
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: _buildInformacion(),
+                      ),
               ],
             ),
           ),
