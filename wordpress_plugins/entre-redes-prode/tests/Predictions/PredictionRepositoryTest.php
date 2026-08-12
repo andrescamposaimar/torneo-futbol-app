@@ -492,4 +492,87 @@ class PredictionRepositoryTest extends TestCase {
         $this->assertNull( $byMatchId[6]['points'] );
         $this->assertNull( $byMatchId[6]['evaluation_method'] );
     }
+
+    // -------------------------------------------------------------------------
+    // aggregateForMatch — per-match split used by the match detail screen
+    // -------------------------------------------------------------------------
+
+    /**
+     * Helper: seed a fecha row so aggregateForMatch's join has something to hit.
+     */
+    private function insertFecha( int $id, string $state ): void {
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'prode_fechas',
+            [
+                'id'         => $id,
+                'tenant_id'  => 'test_tenant',
+                'season_id'  => 300,
+                'locked_at'  => '2026-01-01 00:00:00',
+                'state'      => $state,
+                'created_at' => '2026-01-01 00:00:00',
+            ]
+        );
+    }
+
+    public function test_aggregate_for_match_returns_zeroes_when_match_has_no_predictions(): void {
+        $result = $this->repo->aggregateForMatch( 999 );
+
+        $this->assertSame( 0, $result['total'] );
+        $this->assertFalse( $result['open'] );
+        $this->assertSame( 0.0, $result['populares']['1'] );
+        $this->assertSame( 0.0, $result['populares']['X'] );
+        $this->assertSame( 0.0, $result['populares']['2'] );
+    }
+
+    public function test_aggregate_for_match_computes_percentages(): void {
+        $this->insertFecha( 40, 'evaluated' );
+        // Match 5: 2x'1', 1x'X', 1x'2' -> 50 / 25 / 25.
+        $this->insertPrediction( 1, 40, 5, '1' );
+        $this->insertPrediction( 2, 40, 5, '1' );
+        $this->insertPrediction( 3, 40, 5, 'X' );
+        $this->insertPrediction( 4, 40, 5, '2' );
+
+        $result = $this->repo->aggregateForMatch( 5 );
+
+        $this->assertSame( 4, $result['total'] );
+        $this->assertFalse( $result['open'] );
+        $this->assertSame( 50.0, $result['populares']['1'] );
+        $this->assertSame( 25.0, $result['populares']['X'] );
+        $this->assertSame( 25.0, $result['populares']['2'] );
+    }
+
+    public function test_aggregate_for_match_always_returns_all_three_keys(): void {
+        $this->insertFecha( 41, 'locked' );
+        $this->insertPrediction( 1, 41, 8, 'X' );
+
+        $result = $this->repo->aggregateForMatch( 8 );
+
+        $this->assertSame( 100.0, $result['populares']['X'] );
+        $this->assertSame( 0.0, $result['populares']['1'] );
+        $this->assertSame( 0.0, $result['populares']['2'] );
+    }
+
+    public function test_aggregate_for_match_flags_open_fecha(): void {
+        // The gate depends on this flag: an open round must not publish a split.
+        $this->insertFecha( 42, 'open' );
+        $this->insertPrediction( 1, 42, 9, '1' );
+
+        $result = $this->repo->aggregateForMatch( 9 );
+
+        $this->assertTrue( $result['open'] );
+        $this->assertSame( 1, $result['total'] );
+    }
+
+    public function test_aggregate_for_match_ignores_other_matches(): void {
+        $this->insertFecha( 43, 'evaluated' );
+        $this->insertPrediction( 1, 43, 30, '1' );
+        $this->insertPrediction( 2, 43, 31, '2' );
+        $this->insertPrediction( 3, 43, 31, '2' );
+
+        $result = $this->repo->aggregateForMatch( 30 );
+
+        $this->assertSame( 1, $result['total'] );
+        $this->assertSame( 100.0, $result['populares']['1'] );
+    }
 }

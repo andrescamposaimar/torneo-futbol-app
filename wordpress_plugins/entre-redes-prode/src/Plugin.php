@@ -108,6 +108,9 @@ final class Plugin {
                 $middleware
             );
 
+            // Populares endpoint: GET /prode/populares (prediction split for one match).
+            $populares_controller = new Rest\PopularesController( $pred_repo );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
@@ -116,7 +119,8 @@ final class Plugin {
                 $evaluation_controller,
                 $ranking_controller,
                 $fecha_list_controller,
-                $prediction_history_controller
+                $prediction_history_controller,
+                $populares_controller
             );
             $controller->register_routes();
         } );

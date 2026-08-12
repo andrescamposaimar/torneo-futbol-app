@@ -190,6 +190,82 @@ class PredictionRepository {
     }
 
     /**
+     * Aggregate popular percentages for a single match.
+     *
+     * Counterpart of aggregatePopulares(), which works per fecha. The match
+     * detail screen knows a match id but not which fecha holds it, so this
+     * reads by match and reports back whether any fecha containing it is still
+     * open.
+     *
+     * Semantics:
+     *   - Percentages are rounded to 1 decimal place.
+     *   - All three result keys ('1', 'X', '2') are always present.
+     *   - A match with no predictions returns total 0 and all keys at 0.0.
+     *   - `open` is true when at least one fecha holding this match is still
+     *     accepting predictions.
+     *
+     * Gate: the caller decides what to do with `open` — this method always runs
+     * the query. Mirrors the contract of aggregatePopulares().
+     *
+     * @param int $matchId The sp_event id predictions were stored against.
+     * @return array{total: int, open: bool, populares: array{'1': float, 'X': float, '2': float}}
+     */
+    public function aggregateForMatch( int $matchId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT p.result AS result, COUNT(*) AS cnt, f.state AS state
+                   FROM {$p}prode_predictions p
+                   INNER JOIN {$p}prode_fechas f ON f.id = p.fecha_id
+                  WHERE p.match_id = %d
+                  GROUP BY p.result, f.state",
+                $matchId
+            ),
+            ARRAY_A
+        );
+
+        $counts = [ '1' => 0, 'X' => 0, '2' => 0 ];
+        $total  = 0;
+        $open   = false;
+
+        foreach ( (array) $rows as $row ) {
+            $result = (string) ( $row['result'] ?? '' );
+            $cnt    = (int) ( $row['cnt'] ?? 0 );
+
+            if ( ! array_key_exists( $result, $counts ) ) {
+                continue;
+            }
+
+            $counts[ $result ] += $cnt;
+            $total             += $cnt;
+
+            if ( 'open' === (string) ( $row['state'] ?? '' ) ) {
+                $open = true;
+            }
+        }
+
+        if ( 0 === $total ) {
+            return [
+                'total'     => 0,
+                'open'      => $open,
+                'populares' => [ '1' => 0.0, 'X' => 0.0, '2' => 0.0 ],
+            ];
+        }
+
+        return [
+            'total'     => $total,
+            'open'      => $open,
+            'populares' => [
+                '1' => round( ( $counts['1'] / $total ) * 100, 1 ),
+                'X' => round( ( $counts['X'] / $total ) * 100, 1 ),
+                '2' => round( ( $counts['2'] / $total ) * 100, 1 ),
+            ],
+        ];
+    }
+
+    /**
      * Return all predictions across all fechas for a given user, joined with
      * match metadata and evaluation results.
      *
