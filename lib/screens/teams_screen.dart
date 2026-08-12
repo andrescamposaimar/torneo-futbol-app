@@ -186,8 +186,9 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
     final avatarRaw = team['imagen'];
     final avatar = (avatarRaw is String && avatarRaw.isNotEmpty) ? avatarRaw : null;
 
+    // Sized to the larger disc so a team without a crest does not look empty.
     final placeholder =
-        Icon(Icons.shield_outlined, size: 34, color: Colors.grey.shade400);
+        Icon(Icons.shield_outlined, size: 46, color: Colors.grey.shade400);
 
     return Container(
       decoration: BoxDecoration(
@@ -204,37 +205,53 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
             MaterialPageRoute(builder: (_) => TeamDetailScreen(team: team)),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 78,
-                  height: 78,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: primary.withValues(alpha: 0.05),
-                    shape: BoxShape.circle,
+                // The disc takes the slack the tile used to waste as padding:
+                // it expands to whatever height is left once the name is laid
+                // out, and stays a circle by matching its own width.
+                Expanded(
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.05),
+                        shape: BoxShape.circle,
+                      ),
+                      child: avatar != null
+                          ? Image.network(
+                              avatar,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => placeholder,
+                            )
+                          : placeholder,
+                    ),
                   ),
-                  child: avatar != null
-                      ? Image.network(
-                          avatar,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => placeholder,
-                        )
-                      : placeholder,
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  nombre,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87,
-                    letterSpacing: 0.2,
+                const SizedBox(height: 10),
+                // Fixed height for two lines whether the name needs them or
+                // not: otherwise a one-word team leaves its disc larger than
+                // its neighbour's, and the grid reads as a mistake.
+                SizedBox(
+                  height: 34,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: Text(
+                      nombre,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.25,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
                   ),
                 ),
               ],
