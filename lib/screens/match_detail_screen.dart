@@ -28,8 +28,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   String? estadisticasAdUrl;
   String? alineacionesAdUrl;
 
-  bool _goleadoresCargados = false;
-
   bool get _esFuturo => widget.partido['status'] == 'future';
 
   @override
