@@ -502,16 +502,9 @@ class _MatchesScreenState extends ConsumerState<MatchesScreen> with TickerProvid
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: EntreRedesAppBar(
+      appBar: const EntreRedesAppBar(
         title: 'Partidos',
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Actualizar caché de partidos',
-            onPressed: _mostrarDialogYActualizarCache,
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -972,30 +965,6 @@ Widget _buildListaPorFecha() {
     return null;
   }
 
-  Future<void> _mostrarDialogYActualizarCache() async {
-    showDialog(
-      context: context,
-      barrierDismissible: false, // 🔒 impide tocar fuera del modal
-      builder: (BuildContext context) {
-        return AlertDialog(
-          content: Row(
-            children: const [
-              CircularProgressIndicator(),
-              SizedBox(width: 20),
-              Expanded(child: Text('Actualizando cache de partidos...')),
-            ],
-          ),
-        );
-      },
-    );
-
-    await _forzarActualizacionCacheJugados(); // Llama a la función original
-
-    if (mounted) {
-      Navigator.of(context).pop(); // Cierra el modal
-    }
-  }
-
   // ─── FIXTURE ──────────────────────────────────────────────────────────────
 
   Future<void> _loadFixture() async {
@@ -1337,33 +1306,4 @@ Widget _buildListaPorFecha() {
     return fechaRaw;
   }
 
-  // ──────────────────────────────────────────────────────────────────────────
-
-  Future<void> _forzarActualizacionCacheJugados() async {
-    try {
-      final res = await ref.read(apiServiceProvider).getPartidos(page: 1, perPage: 16, temporada: widget.temporadaId);
-      final nuevos = res['items'] ?? [];
-
-      if (nuevos.isNotEmpty) {
-        await _guardarCache('jugados', nuevos);
-        if (mounted) {
-          setState(() {
-            partidosJugados = nuevos;
-            currentPageJugados = 2;
-            hasMoreJugados = nuevos.length >= 16;
-            selectedZonaNombre = null;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Caché actualizada correctamente')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al actualizar caché: $e')),
-        );
-      }
-    }
-  }
 }
