@@ -1,9 +1,23 @@
 import 'package:flutter/material.dart';
 
+/// A player marker rendered on the lineup pitch.
+///
+/// [scale] shrinks the whole marker so rows further up the pitch read as
+/// being further away, matching the perspective of the field behind it.
+///
+/// Set [onField] to false when the marker is placed outside the pitch, so the
+/// name renders in dark text instead of the white used over the grass.
 class PlayerPod extends StatelessWidget {
   final Map<String, dynamic> jugador;
+  final double scale;
+  final bool onField;
 
-  const PlayerPod({super.key, required this.jugador});
+  const PlayerPod({
+    super.key,
+    required this.jugador,
+    this.scale = 1.0,
+    this.onField = true,
+  });
 
   String get apellido {
     final nombreCompleto = jugador['nombre']?.toString() ?? '';
@@ -12,129 +26,174 @@ class PlayerPod extends StatelessWidget {
   }
 
   bool get esFigura => jugador['figura'] == true;
-  int get goles => (jugador['goles'] ?? 0) is int ? jugador['goles'] : int.tryParse(jugador['goles'].toString()) ?? 0;
-  int get amarillas => (jugador['tarjeta_amarilla'] ?? 0) is int ? jugador['tarjeta_amarilla'] : int.tryParse(jugador['tarjeta_amarilla'].toString()) ?? 0;
-  int get rojas => (jugador['tarjeta_roja'] ?? 0) is int ? jugador['tarjeta_roja'] : int.tryParse(jugador['tarjeta_roja'].toString()) ?? 0;
-  String get puntajeStr => _formatearPuntaje(jugador['puntaje']);
 
-  String _formatearPuntaje(dynamic valor) {
-    if (valor == null || valor is bool) return '-';
-    if (valor is num) {
-      return valor.toStringAsFixed(valor.truncateToDouble() == valor ? 0 : 1);
-    }
-    if (valor is String) {
-      final normalizado = valor.replaceAll(',', '.');
-      final numParsed = double.tryParse(normalizado);
-      if (numParsed != null) {
-        return numParsed.toStringAsFixed(numParsed.truncateToDouble() == numParsed ? 0 : 1);
-      }
-    }
-    return '-';
+  int _entero(dynamic valor) {
+    if (valor is int) return valor;
+    if (valor is num) return valor.toInt();
+    return int.tryParse(valor?.toString() ?? '') ?? 0;
   }
+
+  int get goles => _entero(jugador['goles']);
+  int get amarillas => _entero(jugador['tarjeta_amarilla']);
+  int get rojas => _entero(jugador['tarjeta_roja']);
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = esFigura ? Colors.blue : Colors.white;
+    final avatarRadius = 26.0 * scale;
+    final ringColor = esFigura ? const Color(0xFFFFC107) : Colors.white;
 
-    return Column(
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: borderColor, width: 3),
-              ),
-              child: CircleAvatar(
-                radius: 32,
-                backgroundImage: jugador['foto'] != null && jugador['foto'].toString().isNotEmpty
-                    ? NetworkImage(jugador['foto'])
-                    : null,
-                backgroundColor: Colors.grey[300],
-                child: jugador['foto'] == null ? const Icon(Icons.person, size: 30) : null,
-              ),
-            ),
-            // Goles arriba derecha
-            if (goles > 0)
-              Positioned(
-                top: -6,
-                right: -6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2)),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.sports_soccer, size: 14, color: Colors.black),
-                      if (goles > 1)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4),
-                          child: Text(
-                            goles.toString(),
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                    ],
-                  ),
+    return SizedBox(
+      width: 78 * scale,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: ringColor, width: 2.5 * scale),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: CircleAvatar(
+                  radius: avatarRadius,
+                  backgroundColor: Colors.grey.shade300,
+                  backgroundImage: _fotoUrl != null ? NetworkImage(_fotoUrl!) : null,
+                  child: _fotoUrl == null
+                      ? Icon(Icons.person, size: avatarRadius, color: Colors.grey.shade600)
+                      : null,
                 ),
               ),
-            // Amarilla o roja derecha media
-            if (rojas > 0)
-              const Positioned(
-                right: -4,
-                top: 24,
-                child: Icon(Icons.square, color: Colors.red, size: 16),
-              )
-            else if (amarillas > 0)
-              const Positioned(
-                right: -4,
-                top: 24,
-                child: Icon(Icons.square, color: Colors.amber, size: 16),
-              ),
-            // Capitán: ícono arriba izquierda
-            if (jugador['capitan'] == true)
-              Positioned(
-                top: -6,
-                left: -6,
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade800,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 3,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Center(
-                    child: Text(
-                      'C',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
+              if (goles > 0) _badgeGoles(),
+              if (rojas > 0)
+                _badgeTarjetas(const Color(0xFFD32F2F), 1)
+              else if (amarillas > 0)
+                // A second yellow means a sending off, so two is the ceiling.
+                _badgeTarjetas(const Color(0xFFFBC02D), amarillas.clamp(1, 2)),
+              if (jugador['capitan'] == true) _badgeCapitan(),
+            ],
+          ),
+          SizedBox(height: 5 * scale),
+          Text(
+            apellido,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12 * scale,
+              fontWeight: FontWeight.w600,
+              color: onField ? Colors.white : Colors.black87,
+              shadows: onField
+                  ? const [
+                      Shadow(color: Colors.black54, blurRadius: 3, offset: Offset(0, 1)),
+                    ]
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String? get _fotoUrl {
+    final foto = jugador['foto'];
+    if (foto is String && foto.isNotEmpty) return foto;
+    return null;
+  }
+
+  Widget _badgeGoles() {
+    return Positioned(
+      top: -4 * scale,
+      right: -4 * scale,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 5 * scale, vertical: 3 * scale),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.sports_soccer, size: 12 * scale, color: Colors.black87),
+            if (goles > 1)
+              Padding(
+                padding: EdgeInsets.only(left: 2 * scale),
+                child: Text(
+                  '$goles',
+                  style: TextStyle(fontSize: 10 * scale, fontWeight: FontWeight.bold),
                 ),
               ),
           ],
         ),
-        const SizedBox(height: 4),
-        Text(apellido, style: const TextStyle(fontSize: 12), textAlign: TextAlign.center),
-      ],
+      ),
+    );
+  }
+
+  /// Stacks [cantidad] cards of [color], so a double booking reads as two
+  /// yellows rather than a single one.
+  Widget _badgeTarjetas(Color color, int cantidad) {
+    return Positioned(
+      right: -4 * scale,
+      bottom: 8 * scale,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < cantidad; i++)
+            Padding(
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 2 * scale),
+              child: Container(
+                width: 9 * scale,
+                height: 13 * scale,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                  border: Border.all(color: Colors.white, width: 1),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _badgeCapitan() {
+    return Positioned(
+      top: -4 * scale,
+      left: -4 * scale,
+      child: Container(
+        width: 18 * scale,
+        height: 18 * scale,
+        decoration: BoxDecoration(
+          color: Colors.amber.shade800,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 1.5),
+        ),
+        child: Center(
+          child: Text(
+            'C',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 10 * scale,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

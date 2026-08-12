@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/service_providers.dart';
 import '../utils/date_utils.dart';
+import '../utils/puntaje_utils.dart';
 import '../utils/text_utils.dart';
 import '../widgets/zocalo_publicitario.dart';
 import '../widgets/full_field_painter.dart';
@@ -455,7 +456,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   Widget _buildFiguraCard(Map<String, dynamic> figura) {
     final nombre = figura['nombre'] ?? 'Jugador';
     final equipo = figura['equipo'] ?? '';
-    final puntaje = PlayerPod(jugador: figura).puntajeStr;
+    final puntaje = formatearPuntaje(figura['puntaje']);
     final foto = (figura['foto'] is String && figura['foto'].toString().isNotEmpty)
         ? figura['foto']
         : null;
@@ -508,126 +509,42 @@ Widget _buildAlineaciones() {
 
   final jugadores = jugadoresRaw.whereType<Map<String, dynamic>>().toList();
 
-  final jugadoresConIncidencia = jugadores.where((j) {
-    final g = j['goles'] ?? 0;
-    final a = j['tarjeta_amarilla'] ?? 0;
-    final r = j['tarjeta_roja'] ?? 0;
-    return (g is int && g > 0) || (a is int && a > 0) || (r is int && r > 0);
-  }).toList();
-
   final bajas = jugadores.where((j) => j['reemplazo_baja'] == true).toList();
   final disponibles = jugadores.where((j) => j['reemplazo_baja'] != true).toList();
 
-  final Map<String, List<Map<String, dynamic>>> porPosicion = {
-    'Arquero': [],
-    'Defensor': [],
-    'Mediocampista': [],
-    'Delantero': [],
-  };
-
-  // 1. Agrupar normalmente
-  for (var j in disponibles) {
-    final pos = (j['posicion'] ?? '').toString();
-    if (porPosicion.containsKey(pos)) {
-      porPosicion[pos]?.add(j);
-    }
-  }
-
-  // 2. Validar si hay al menos 1 arquero disponible
-  final arqueros = porPosicion['Arquero'] ?? [];
-  final hayArquero = arqueros.any((j) => j['reemplazo_baja'] != true);
-
-  if (!hayArquero) {
-    // 3. Buscar un suplente con "Arquero Sup."
-    final arqueroSup = disponibles.firstWhere(
-      (j) => j['posicion'] == 'Arquero Sup.',
-      orElse: () => {},
-    );
-
-    if (arqueroSup.isNotEmpty) {
-      porPosicion['Arquero']?.add(arqueroSup);
-    }
-  }
-
-  Widget wrapFila(List<Map<String, dynamic>> filaJugadores) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 12,
-      runSpacing: 12,
-      children: filaJugadores.map((j) =>
-        GestureDetector(
-          onTap: () => _abrirDetalleJugador(j['id']),
-          child: AnimatedOpacity(
-            opacity: 1,
-            duration: const Duration(milliseconds: 500),
-            child: PlayerPod(jugador: j),
-          ),
-        )
-      ).toList(),
-    );
-  }
-
-  Widget wrapLineas(String key) {
-    final jugadores = porPosicion[key]!;
-    if (jugadores.isEmpty) return const SizedBox.shrink();
-
-    final filas = <List<Map<String, dynamic>>>[];
-    for (var i = 0; i < jugadores.length; i += 3) {
-      filas.add(jugadores.skip(i).take(3).toList());
-    }
-
-    return Column(children: filas.map(wrapFila).toList());
-  }
+  final filas = _armarFilas(disponibles);
 
   return Column(
     children: [
-      Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            child: ChoiceChip(
-              label: Text(
-                widget.partido['equipo_local'],
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-              selected: equipoSeleccionado == 'local',
-              onSelected: (_) => setState(() => equipoSeleccionado = 'local'),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: ChoiceChip(
-              label: Text(
-                widget.partido['equipo_visitante'],
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-              selected: equipoSeleccionado == 'visitante',
-              onSelected: (_) => setState(() => equipoSeleccionado = 'visitante'),
-            ),
-          ),
-        ],
-      ),
+      _buildSelectorEquipo(),
       const SizedBox(height: 16),
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.green[100],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.green.shade800, width: 2),
-        ),
-        child: CustomPaint(
-          painter: FullFieldPainter(),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            child: Column(
-              key: ValueKey(equipoSeleccionado),
+      ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: AspectRatio(
+          aspectRatio: 0.72,
+          child: LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              fit: StackFit.expand,
               children: [
-                wrapLineas('Arquero'),
-                wrapLineas('Defensor'),
-                wrapLineas('Mediocampista'),
-                wrapLineas('Delantero'),
+                const CustomPaint(painter: FullFieldPainter()),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  child: Padding(
+                    key: ValueKey(equipoSeleccionado),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < filas.length; i++)
+                          _buildLineaJugadores(
+                            filas[i],
+                            indice: i,
+                            totalFilas: filas.length,
+                            anchoCancha: constraints.maxWidth,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -635,17 +552,22 @@ Widget _buildAlineaciones() {
       ),
       if (bajas.isNotEmpty)
         Padding(
-          padding: const EdgeInsets.only(top: 16),
+          padding: const EdgeInsets.only(top: 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Bajas:', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
+              const Text('Bajas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 12,
-                runSpacing: 12,
+                runSpacing: 16,
                 alignment: WrapAlignment.center,
-                children: bajas.map((j) => PlayerPod(jugador: j)).toList(),
+                children: bajas
+                    .map((j) => GestureDetector(
+                          onTap: () => _abrirDetalleJugador(j['id']),
+                          child: PlayerPod(jugador: j, scale: 0.85, onField: false),
+                        ))
+                    .toList(),
               ),
             ],
           ),
@@ -653,6 +575,162 @@ Widget _buildAlineaciones() {
     ],
   );
 }
+
+  /// Maximum players drawn on a single line before adding another one.
+  static const int _maxPorFila = 4;
+
+  /// Maximum number of outfield lines, so a large squad packs rows instead of
+  /// producing a column of nearly empty ones.
+  static const int _maxFilasCampo = 4;
+
+  /// Relative weight used to order players down the pitch. Positions are often
+  /// left at their default value in the backend, so this only drives the
+  /// ordering — the number of players per line comes from [_repartirEnFilas].
+  static const Map<String, int> _ordenPosicion = {
+    'Defensor': 0,
+    'Mediocampista': 1,
+    'Delantero': 2,
+  };
+
+  /// Builds the pitch rows, top to bottom: the keeper alone, then everyone
+  /// else spread over balanced lines ordered defence → midfield → attack.
+  ///
+  /// Players are never filtered out by position: an unrecognised or missing
+  /// position sorts with the midfield instead of disappearing from the pitch.
+  List<List<Map<String, dynamic>>> _armarFilas(List<Map<String, dynamic>> disponibles) {
+    final restantes = List<Map<String, dynamic>>.from(disponibles);
+
+    Map<String, dynamic>? arquero;
+    for (final posicion in ['Arquero', 'Arquero Sup.']) {
+      final indice = restantes.indexWhere((j) => j['posicion'] == posicion);
+      if (indice != -1) {
+        arquero = restantes.removeAt(indice);
+        break;
+      }
+    }
+
+    // Decorate with the original index so equal positions keep their incoming
+    // order — List.sort is not stable in Dart.
+    final indexados = restantes.asMap().entries.toList()
+      ..sort((a, b) {
+        final pa = _ordenPosicion[a.value['posicion']?.toString()] ?? 1;
+        final pb = _ordenPosicion[b.value['posicion']?.toString()] ?? 1;
+        return pa != pb ? pa.compareTo(pb) : a.key.compareTo(b.key);
+      });
+
+    return [
+      if (arquero != null) [arquero],
+      ..._repartirEnFilas(indexados.map((e) => e.value).toList()),
+    ];
+  }
+
+  /// Splits [jugadores] into balanced lines, preserving their order. Extra
+  /// players go to the first lines, keeping the defensive side the widest.
+  List<List<Map<String, dynamic>>> _repartirEnFilas(List<Map<String, dynamic>> jugadores) {
+    if (jugadores.isEmpty) return [];
+
+    final cantidadFilas =
+        (jugadores.length / _maxPorFila).ceil().clamp(1, _maxFilasCampo);
+    final base = jugadores.length ~/ cantidadFilas;
+    var resto = jugadores.length % cantidadFilas;
+
+    final filas = <List<Map<String, dynamic>>>[];
+    var desde = 0;
+    for (var i = 0; i < cantidadFilas; i++) {
+      final cantidad = base + (resto > 0 ? 1 : 0);
+      if (resto > 0) resto--;
+      filas.add(jugadores.sublist(desde, desde + cantidad));
+      desde += cantidad;
+    }
+    return filas;
+  }
+
+  /// One line of players on the pitch.
+  ///
+  /// The line is clamped to the pitch width at its own depth, using the same
+  /// perspective as [FullFieldPainter], so markers never spill past the
+  /// touchline. Crowded lines shrink as a block instead of overflowing.
+  Widget _buildLineaJugadores(
+    List<Map<String, dynamic>> jugadores, {
+    required int indice,
+    required int totalFilas,
+    required double anchoCancha,
+  }) {
+    if (jugadores.isEmpty) return const SizedBox.shrink();
+
+    final profundidad = (indice + 0.5) / totalFilas;
+    final escala = 0.78 + (1.0 - 0.78) * profundidad;
+    final anchoDisponible =
+        anchoCancha * FullFieldPainter.halfWidthAt(profundidad) * 2 * 0.94;
+
+    return Expanded(
+      child: Center(
+        child: SizedBox(
+          width: anchoDisponible,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: jugadores
+                  .map((j) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: GestureDetector(
+                          onTap: () => _abrirDetalleJugador(j['id']),
+                          child: PlayerPod(jugador: j, scale: escala),
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectorEquipo() {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    Widget opcion(String valor, String nombre) {
+      final seleccionado = equipoSeleccionado == valor;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => equipoSeleccionado = valor),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: seleccionado ? primary : Colors.transparent,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Text(
+              decodeHtmlEntities(nombre),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: seleccionado ? Colors.white : Colors.black54,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          opcion('local', widget.partido['equipo_local']?.toString() ?? 'Local'),
+          opcion('visitante', widget.partido['equipo_visitante']?.toString() ?? 'Visitante'),
+        ],
+      ),
+    );
+  }
 
   Widget _buildPendiente() {
     return Center(
