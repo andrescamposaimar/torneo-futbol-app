@@ -1,10 +1,45 @@
+class EstadisticasJugador {
+  final int partidosJugados;
+  final int goles;
+  final int temporadas;
+
+  /// Whether the API actually sent the stats block. A player with zero matches
+  /// is a real answer; a backend that does not know how to count them is not,
+  /// and the screen must not render the two as the same thing.
+  final bool disponible;
+
+  const EstadisticasJugador({
+    this.partidosJugados = 0,
+    this.goles = 0,
+    this.temporadas = 0,
+    this.disponible = false,
+  });
+
+  factory EstadisticasJugador.fromJson(Map<String, dynamic> json) {
+    return EstadisticasJugador(
+      partidosJugados: _parseInt(json['partidos_jugados']),
+      goles: _parseInt(json['goles']),
+      temporadas: _parseInt(json['temporadas']),
+      disponible: true,
+    );
+  }
+
+  /// The API returns these as numbers, but WordPress meta occasionally travels
+  /// as a string, so both shapes are accepted.
+  static int _parseInt(dynamic value) {
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+}
+
 class Jugador {
   final int id;
   final String nombre;
   final String? imagen;
   final String posicion;
   final double puntaje;
-  final String caracter;
+  final EstadisticasJugador estadisticas;
   final String equipo;
   final int? equipoId;
   final String escudo;
@@ -21,7 +56,7 @@ class Jugador {
     this.imagen,
     required this.posicion,
     required this.puntaje,
-    required this.caracter,
+    this.estadisticas = const EstadisticasJugador(),
     required this.equipo,
     this.equipoId,
     required this.escudo,
@@ -52,7 +87,10 @@ class Jugador {
       imagen: (imagenRaw is String && imagenRaw.isNotEmpty) ? imagenRaw : null,
       posicion: (json['posicion'] ?? json['position'] ?? '-').toString(),
       puntaje: parsedPuntaje,
-      caracter: metrics['caracter']?.toString() ?? '-',
+      estadisticas: json['estadisticas'] is Map
+          ? EstadisticasJugador.fromJson(
+              Map<String, dynamic>.from(json['estadisticas'] as Map))
+          : const EstadisticasJugador(),
       equipo: json['equipo']?.toString() ?? 'Sin equipo',
       equipoId: json['equipo_id'] != null ? int.tryParse(json['equipo_id'].toString()) : null,
       escudo: json['escudo'] ?? '',

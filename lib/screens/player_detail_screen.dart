@@ -401,7 +401,17 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     );
   }
 
-  Widget _infoRow(IconData icono, String label, String value) {
+  /// Size every glyph in the OTROS DATOS rows shares.
+  static const double _glifoSize = 20;
+
+  /// A Material glyph styled for an [_infoRow].
+  Widget _glifo(IconData icono) => Icon(
+        icono,
+        size: _glifoSize,
+        color: Theme.of(context).colorScheme.primary,
+      );
+
+  Widget _infoRow(Widget glifo, String label, String value) {
     final primary = Theme.of(context).colorScheme.primary;
     final sinDato = value.isEmpty || value == '-';
 
@@ -416,7 +426,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
               color: primary.withValues(alpha: 0.08),
               shape: BoxShape.circle,
             ),
-            child: Icon(icono, size: 20, color: primary),
+            child: Center(child: glifo),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -483,6 +493,69 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     );
   }
 
+  /// Career totals, side by side. They come from the API as a whole block, so
+  /// the panel is only rendered when the backend actually sent it.
+  Widget _buildEstadisticas() {
+    final stats = jugador.estadisticas;
+
+    return _panel(
+      header: _seccionHeader(Icons.query_stats, 'ESTADÍSTICAS DEL JUGADOR'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _statTile(
+                  Icons.directions_run, stats.partidosJugados, 'Partidos jugados'),
+            ),
+            Expanded(
+              child: _statTile(Icons.sports_soccer, stats.goles, 'Goles'),
+            ),
+            Expanded(
+              child: _statTile(
+                  Icons.event_repeat, stats.temporadas, 'Temporadas'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statTile(IconData icono, int valor, String label) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: primary.withValues(alpha: 0.08),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icono, size: 22, color: primary),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$valor',
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: primary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+        ),
+      ],
+    );
+  }
+
   Widget _buildDetalles(BuildContext context) {
     String posicion = jugador.posicion.isNotEmpty ? jugador.posicion : '-';
     if (jugador.reemplazoAlta) posicion += ' - Reemplazo Alta';
@@ -502,16 +575,19 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Column(
               children: [
-                _infoRow(Icons.sports_soccer, 'Posición', posicion),
-                _infoRow(Icons.cake_outlined, 'Fecha de nacimiento',
+                _infoRow(_glifo(Icons.person_pin_circle), 'Posición', posicion),
+                _infoRow(_glifo(Icons.cake_outlined), 'Fecha de nacimiento',
                     formatFechaNacimiento(jugador.fechaNacimiento)),
-                _infoRow(Icons.numbers, 'Edad',
+                _infoRow(_glifo(Icons.numbers), 'Edad',
                     edadVal > 0 ? '$edadVal años' : '-'),
-                _infoRow(Icons.psychology_outlined, 'Carácter', jugador.caracter),
               ],
             ),
           ),
         ),
+        if (jugador.estadisticas.disponible) ...[
+          const SizedBox(height: 16),
+          _buildEstadisticas(),
+        ],
         if (temporadas.isNotEmpty) ...[
           const SizedBox(height: 16),
           _buildTemporadas(),
