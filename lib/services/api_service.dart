@@ -6,6 +6,11 @@ import 'i_api_service.dart';
 class ApiService implements IApiService {
   final String baseUrl;
 
+  /// Timeout applied to every network request. Without it, a request against
+  /// a host that silently drops packets (captive portal, broken router/ISP
+  /// DNS) never resolves, leaving callers awaiting forever.
+  static const Duration _requestTimeout = Duration(seconds: 15);
+
   const ApiService({required this.baseUrl});
 
   void _logRequest(Uri uri, http.Response res) {
@@ -31,7 +36,7 @@ class ApiService implements IApiService {
         'page': page.toString(),
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(_requestTimeout);
       _logRequest(uri, res);
 
       if (res.statusCode != 200) {
@@ -71,7 +76,7 @@ class ApiService implements IApiService {
     if (equipo != null) queryParams['equipo'] = equipo;
 
     final uri = Uri.parse('$baseUrl/partidos').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -92,7 +97,7 @@ class ApiService implements IApiService {
     };
 
     final uri = Uri.parse('$baseUrl/partidos-programados').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -120,7 +125,7 @@ class ApiService implements IApiService {
     if (liga != null) queryParams['liga'] = liga.toString();
 
     final uri = Uri.parse('$baseUrl/zonas').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -147,7 +152,7 @@ class ApiService implements IApiService {
         'per_page': perPage.toString(),
       });
 
-      final res = await http.get(uri);
+      final res = await http.get(uri).timeout(_requestTimeout);
       _logRequest(uri, res);
 
       if (res.statusCode != 200) {
@@ -186,7 +191,7 @@ class ApiService implements IApiService {
     if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
     final uri = Uri.parse('$baseUrl/tablas').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -217,7 +222,7 @@ class ApiService implements IApiService {
     if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
     final uri = Uri.parse('$baseUrl/jugadores').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -262,7 +267,7 @@ class ApiService implements IApiService {
       'per_page': (perPage ?? 16).toString(),
     });
 
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -286,7 +291,7 @@ class ApiService implements IApiService {
       'partido_id': partidoId.toString(),
     });
 
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -318,7 +323,7 @@ class ApiService implements IApiService {
     if (liga != null) queryParams['id_liga'] = liga.toString();
 
     final uri = Uri.parse('$baseUrl/tabla-goleadores').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -345,7 +350,7 @@ class ApiService implements IApiService {
       'equipo': equipo,
     });
 
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -360,7 +365,7 @@ class ApiService implements IApiService {
   @override
   Future<Map<String, dynamic>> getJugadorPorId(int id) async {
     final uri = Uri.parse('$baseUrl/jugadores/$id');
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -388,7 +393,7 @@ class ApiService implements IApiService {
       'equipo_id': equipoId.toString(),
     });
 
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -414,7 +419,7 @@ class ApiService implements IApiService {
     };
 
     final uri = Uri.parse('$baseUrl/tabla-imbatibles').replace(queryParameters: queryParams);
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
@@ -450,7 +455,7 @@ class ApiService implements IApiService {
       '_embed': '',
     });
 
-    final res = await http.get(uri);
+    final res = await http.get(uri).timeout(_requestTimeout);
     _logRequest(uri, res);
 
     if (res.statusCode == 200) {
