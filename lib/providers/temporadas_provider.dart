@@ -9,6 +9,12 @@ final temporadasProvider = FutureProvider<List<dynamic>>((ref) async {
 final temporadaActualProvider = FutureProvider<Temporada>((ref) async {
   final lista = await ref.read(temporadasProvider.future);
   final temporadas = lista.map((t) => Temporada.fromJson(t)).toList();
+  if (temporadas.isEmpty) {
+    throw StateError(
+      'No hay temporadas disponibles: la respuesta de /temporadas '
+      '(o la caché) está vacía.',
+    );
+  }
   return temporadas.firstWhere(
     (t) => t.isCurrent,
     orElse: () => temporadas.first,

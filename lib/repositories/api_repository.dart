@@ -14,9 +14,22 @@ class ApiRepository {
   Future<List<dynamic>> getTemporadas() async {
     final cached = await _cache.getCachedTemporadas();
     if (cached != null && cached.any((t) => t['is_current'] == true)) return cached;
-    final data = await _api.getTemporadas();
-    await _cache.cacheTemporadas(data);
-    return data;
+
+    try {
+      final data = await _api.getTemporadas();
+      // Don't cache an empty response — it would otherwise be treated as
+      // a valid (if stale) fallback later, hiding a real backend issue.
+      if (data.isNotEmpty) await _cache.cacheTemporadas(data);
+      return data;
+    } catch (e) {
+      // Network unreachable (including a request that timed out): fall back
+      // to whatever is cached, even if stale or missing an `is_current`
+      // entry. Only rethrow when there is nothing to fall back to, so the
+      // error UI (see MainNavigation._initScreens) has something to show.
+      final stale = await _cache.getCachedTemporadasIgnoringTtl();
+      if (stale != null && stale.isNotEmpty) return stale;
+      rethrow;
+    }
   }
 
   // --- Goleadores ---
