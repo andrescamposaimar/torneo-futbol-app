@@ -205,6 +205,7 @@
 				9B68A917BEF5D5576BCD48B3 /* [CP] Embed Pods Frameworks */,
 				E2A2B06B82D97F0D4C5545A6 /* [CP] Copy Pods Resources */,
 				F1A2B06B82D97F0D4C5545A7 /* Strip xattrs for codesign */,
+				4BFCE836B9ACE3DC7EF7E1BE /* [Firebase] Crashlytics Upload dSYMs */,
 			);
 			buildRules = (
 			);
@@ -292,6 +293,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
+		};
+		4BFCE836B9ACE3DC7EF7E1BE /* [Firebase] Crashlytics Upload dSYMs */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+				"$(SRCROOT)/$(BUILT_PRODUCTS_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "[Firebase] Crashlytics Upload dSYMs";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Uploads dSYMs to Crashlytics so crash reports arrive symbolicated.\n# Skipped in Debug, where Xcode produces no dSYM at all and the\n# validation step would fail the build.\nif [ \"${DEBUG_INFORMATION_FORMAT}\" = \"dwarf-with-dsym\" ]; then\n  \"${PODS_ROOT}/FirebaseCrashlytics/run\"\nfi\n";
 		};
 		6197DC53113D5974F279CB57 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
