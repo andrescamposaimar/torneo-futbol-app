@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -75,6 +76,12 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
   List<Widget>? _screens;
   String? _maintenanceMessage;
 
+  // Startup-data failure state (e.g. temporadaActualProvider timing out on
+  // a network that silently drops packets). When set, build() renders the
+  // error screen below instead of the endless spinner.
+  Object? _startupError;
+  bool _retrying = false;
+
   @override
   void initState() {
     super.initState();
@@ -83,31 +90,99 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
   }
 
   Future<void> _initScreens() async {
-    final temporada = await ref.read(temporadaActualProvider.future);
-    if (!mounted) return;
+    try {
+      final temporada = await ref.read(temporadaActualProvider.future);
+      if (!mounted) return;
 
-    final config = await ref.read(appConfigProvider.future);
+      final config = await ref.read(appConfigProvider.future);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    final features = ref.read(tenantConfigProvider).features;
+      final features = ref.read(tenantConfigProvider).features;
 
-    setState(() {
-      _screens = [
-        MatchesScreen(temporadaId: temporada.id),
-        const StandingsScreen(),
-        if (features.newsTab) const NoticiasScreen(),
-        const TeamsScreen(),
-        const PlayersScreen(),
-        const MoreScreen(),
-      ];
-      _maintenanceMessage = config?.maintenanceMessage;
-    });
+      setState(() {
+        _screens = [
+          MatchesScreen(temporadaId: temporada.id),
+          const StandingsScreen(),
+          if (features.newsTab) const NoticiasScreen(),
+          const TeamsScreen(),
+          const PlayersScreen(),
+          const MoreScreen(),
+        ];
+        _maintenanceMessage = config?.maintenanceMessage;
+        _startupError = null;
+      });
 
-    if (config != null && mounted) {
-      await _checkMinAppVersion(config.minAppVersion);
-      if (mounted) await _checkSeasonAnnouncement(config.seasonAnnouncement);
+      // Advisory checks: these run once the app is already on screen, so a
+      // failure here must be reported but must NOT set _startupError —
+      // build() renders the error scaffold ahead of _screens, which would
+      // hide an app that loaded perfectly well.
+      if (config != null && mounted) {
+        try {
+          await _checkMinAppVersion(config.minAppVersion);
+          if (mounted) {
+            await _checkSeasonAnnouncement(config.seasonAnnouncement);
+          }
+        } catch (e, st) {
+          await _reportNonFatal(
+            e,
+            st,
+            'MainNavigation advisory startup checks failed',
+          );
+        }
+      }
+    } catch (e, st) {
+      await _reportNonFatal(
+        e,
+        st,
+        'MainNavigation._initScreens failed to load startup data',
+      );
+      if (!mounted) return;
+      setState(() => _startupError = e);
     }
+  }
+
+  /// Reports [error] to Crashlytics without ever throwing.
+  ///
+  /// Crashlytics may be unavailable (Firebase.initializeApp failed during
+  /// bootstrap, or this is a test environment with no Firebase app at all),
+  /// so reporting an error must never raise a new, unhandled one.
+  Future<void> _reportNonFatal(
+    Object error,
+    StackTrace stack,
+    String reason,
+  ) async {
+    try {
+      await FirebaseCrashlytics.instance.recordError(
+        error,
+        stack,
+        reason: reason,
+        fatal: false,
+      );
+    } catch (reportingError) {
+      debugPrint('❌ $reason ($error) — not reported: $reportingError');
+    }
+  }
+
+  /// Retries loading the startup data after a failure.
+  ///
+  /// [temporadasProvider] and [temporadaActualProvider] are plain
+  /// `FutureProvider`s: once resolved (including resolved-with-error) they
+  /// cache that result. Reading `.future` again without invalidating first
+  /// would just replay the same cached error instead of re-fetching, so
+  /// both must be invalidated before `_initScreens` reads
+  /// `temporadaActualProvider.future` again. `appConfigProvider` is
+  /// invalidated too for consistency, even though `ConfigService.fetchConfig`
+  /// swallows its own errors (returns null) and so never leaves this
+  /// provider in an error state.
+  Future<void> _retry() async {
+    setState(() => _retrying = true);
+    ref.invalidate(temporadasProvider);
+    ref.invalidate(temporadaActualProvider);
+    ref.invalidate(appConfigProvider);
+    await _initScreens();
+    if (!mounted) return;
+    setState(() => _retrying = false);
   }
 
   Future<void> _checkMinAppVersion(String? minVersion) async {
@@ -193,6 +268,10 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
     final primary = Theme.of(context).colorScheme.primary;
     final features = ref.watch(tenantConfigProvider).features;
 
+    if (_startupError != null) {
+      return _buildStartupErrorScaffold(primary);
+    }
+
     if (_screens == null) {
       return Scaffold(
         backgroundColor: primary,
@@ -232,6 +311,48 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
         selectedItemColor: Colors.white,
         unselectedItemColor: Colors.white70,
         items: _buildNavItems(features),
+      ),
+    );
+  }
+
+  Widget _buildStartupErrorScaffold(Color primary) {
+    return Scaffold(
+      backgroundColor: primary,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off, color: Colors.white, size: 48),
+              const SizedBox(height: 16),
+              const Text(
+                'Tuvimos un problema de conexión y no pudimos cargar la '
+                'información.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _retrying ? null : _retry,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: primary,
+                ),
+                child: _retrying
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: primary,
+                        ),
+                      )
+                    : const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
