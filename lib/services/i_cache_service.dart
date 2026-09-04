@@ -17,6 +17,11 @@ abstract class ICacheService {
   Future<void> cacheTemporadas(List<dynamic> temporadas);
   Future<List<dynamic>?> getCachedTemporadas();
 
+  /// Same as [getCachedTemporadas] but ignores the TTL, returning the
+  /// cached temporadas even if stale. Used as an offline fallback when
+  /// the network is unreachable and there is no fresh cache.
+  Future<List<dynamic>?> getCachedTemporadasIgnoringTtl();
+
   Future<void> cachePlayers(List<dynamic> players);
   Future<List<dynamic>?> getCachedPlayers();
 

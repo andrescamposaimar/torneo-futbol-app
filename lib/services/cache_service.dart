@@ -18,6 +18,49 @@ class CacheService implements ICacheService {
     return Duration(days: days);
   }
 
+  /// Reads a cached JSON blob under [key], decodes it, and hands the
+  /// decoded map to [extract] to pull out the cached payload.
+  ///
+  /// Guards against corrupt or legacy-shaped cached data: a decode
+  /// failure, a non-map payload, a missing/non-int timestamp, or a bad
+  /// cast inside [extract] is treated as a cache miss (returns `null`)
+  /// and removes the offending key so it does not keep failing on every
+  /// read.
+  ///
+  /// [ttl] controls freshness: `null` means "ignore expiration and
+  /// return the cached value regardless of age" (used for offline
+  /// fallbacks); otherwise entries older than [ttl] are treated as
+  /// expired and return `null` without being removed.
+  Future<List<dynamic>?> _readCachedList(
+    String key, {
+    required Duration? ttl,
+    required List<dynamic> Function(Map<String, dynamic> decoded) extract,
+  }) async {
+    final prefs = await _sharedPrefs;
+    final raw = prefs.getString(key);
+    if (raw == null) return null;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        throw const FormatException('cached entry is not a JSON object');
+      }
+      final timestamp = decoded['timestamp'];
+      if (timestamp is! int) {
+        throw const FormatException('cached entry has no valid timestamp');
+      }
+      if (ttl != null) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if ((now - timestamp) >= ttl.inMilliseconds) return null;
+      }
+      return extract(decoded);
+    } catch (e) {
+      debugPrint('⚠️ Caché corrupta en "$key", se descarta: $e');
+      await prefs.remove(key);
+      return null;
+    }
+  }
+
   // 🔹 Players Cache (General / Temporada / Históricos)
   static const String _playersCacheKey = 'cached_players';
   static const String _playersTemporadaCacheKey = 'cached_players_temporada';
@@ -131,18 +174,23 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedTemporadas() async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_temporadasCacheKey);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['data']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _temporadasCacheKey,
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['data']),
+    );
   }
+
+  /// Same as [getCachedTemporadas] but ignores the TTL — returns the
+  /// cached temporadas even if stale, as an offline fallback when the
+  /// network is unreachable. Returns `null` when there is no cache at
+  /// all (or it is corrupt).
+  @override
+  Future<List<dynamic>?> getCachedTemporadasIgnoringTtl() => _readCachedList(
+        _temporadasCacheKey,
+        ttl: null,
+        extract: (decoded) => List<dynamic>.from(decoded['data']),
+      );
 
   // ─────────────────────────────────────────────────────────────
   // 🔹 Players (General / Temporada / Históricos)
@@ -160,17 +208,11 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedPlayers() async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_playersCacheKey);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['players']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _playersCacheKey,
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['players']),
+    );
   }
 
   @override
@@ -185,17 +227,11 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedPlayersTemporada() async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_playersTemporadaCacheKey);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['players']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _playersTemporadaCacheKey,
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['players']),
+    );
   }
 
   @override
@@ -210,17 +246,11 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedPlayersHistoricos() async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_playersHistoricosCacheKey);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['players']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _playersHistoricosCacheKey,
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['players']),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -260,17 +290,11 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedScorersGeneral() async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_scorersCacheKey);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['scorers']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _scorersCacheKey,
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['scorers']),
+    );
   }
 
   @override
@@ -285,17 +309,11 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedScorersPorTemporada(int temporadaId) async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_scorersTemporadaKey(temporadaId));
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['scorers']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _scorersTemporadaKey(temporadaId),
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['scorers']),
+    );
   }
 
   @override
@@ -326,18 +344,12 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedNoticias() async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_noticiasCacheKey);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      // TTL de 1 hora para noticias (se actualizan más frecuentemente)
-      if ((now - timestamp) < const Duration(hours: 1).inMilliseconds) {
-        return List<dynamic>.from(decoded['noticias']);
-      }
-    }
-    return null;
+    // TTL de 1 hora para noticias (se actualizan más frecuentemente)
+    return _readCachedList(
+      _noticiasCacheKey,
+      ttl: const Duration(hours: 1),
+      extract: (decoded) => List<dynamic>.from(decoded['noticias']),
+    );
   }
 
   @override
@@ -398,17 +410,11 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedImbatiblesPorTemporada(int temporadaId) async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_imbatiblesTemporadaKey(temporadaId));
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['arqueros']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _imbatiblesTemporadaKey(temporadaId),
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['arqueros']),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -432,33 +438,20 @@ class CacheService implements ICacheService {
 
   @override
   Future<List<dynamic>?> getCachedPlayersCurrentSeason(int temporadaId) async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_playersCurrentSeasonKey(temporadaId));
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['players']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _playersCurrentSeasonKey(temporadaId),
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['players']),
+    );
   }
 
   @override
   Future<List<dynamic>?> getCachedPlayersPorEquipo(int equipoId) async {
-    final prefs = await _sharedPrefs;
-    final key = 'cached_players_equipo_$equipoId';
-    final raw = prefs.getString(key);
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < const Duration(days: 3).inMilliseconds) {
-        return List<dynamic>.from(decoded['players']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      'cached_players_equipo_$equipoId',
+      ttl: const Duration(days: 3),
+      extract: (decoded) => List<dynamic>.from(decoded['players']),
+    );
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -533,16 +526,10 @@ class CacheService implements ICacheService {
   @override
   Future<List<dynamic>?> getCachedPartidosJugadosPorTemporada(
       int temporadaId) async {
-    final prefs = await _sharedPrefs;
-    final raw = prefs.getString(_partidosJugadosTemporadaKey(temporadaId));
-    if (raw != null) {
-      final decoded = jsonDecode(raw);
-      final timestamp = decoded['timestamp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch;
-      if ((now - timestamp) < (await _effectiveCacheDuration).inMilliseconds) {
-        return List<dynamic>.from(decoded['partidos']);
-      }
-    }
-    return null;
+    return _readCachedList(
+      _partidosJugadosTemporadaKey(temporadaId),
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['partidos']),
+    );
   }
 }
