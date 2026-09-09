@@ -345,44 +345,27 @@ class ProdeFixturesController
   }
 
   // ---------------------------------------------------------------------------
-  // Draft management
+  // Submit
   // ---------------------------------------------------------------------------
-
-  /// Updates the draft score inputs for [matchId] and emits a new loaded state.
-  void updateDraft(int matchId, {int? scoreHome, int? scoreAway}) {
-    final current = state;
-    if (current is! ProdeFixturesLoaded) return;
-
-    final existing = current.drafts[matchId] ?? const PredictionDraft();
-    final updated = existing.copyWith(
-      scoreHome: scoreHome,
-      scoreAway: scoreAway,
-      clearScoreHome: scoreHome == null,
-      clearScoreAway: scoreAway == null,
-    );
-    final newDrafts = Map<int, PredictionDraft>.from(current.drafts)
-      ..[matchId] = updated;
-    state = current.copyWith(drafts: newDrafts);
-  }
 
   /// Submits the prediction for [matchId].
   ///
-  /// [scoreHome]/[scoreAway] let the caller (the prediction sheet) pass its
-  /// own local, not-yet-committed score directly, instead of writing it into
-  /// the shared draft first. That is deliberate: the shared draft is what the
-  /// match card renders, so writing it BEFORE the POST would paint an
-  /// optimistic value the server hasn't confirmed — and there would be
-  /// nothing to roll back to if the POST failed. When omitted, this falls
-  /// back to whatever is already in the shared draft, so callers that seed
-  /// it via [updateDraft] beforehand keep working unchanged.
+  /// [scoreHome]/[scoreAway] are required: the caller (the prediction sheet)
+  /// passes its own local, not-yet-committed score directly, and the shared
+  /// draft is never written before the server confirms. That is deliberate —
+  /// the shared draft is what the match card renders, so writing it BEFORE
+  /// the POST would paint an optimistic value the server hasn't confirmed,
+  /// with nothing to roll back to if the POST failed.
   ///
-  /// Both [scoreHome] and the score to submit are captured synchronously,
-  /// before the first `await` — this matters because a same-fecha
-  /// [refresh]/[selectFecha] can replace the whole `drafts` map while this
-  /// method is suspended on the network call. Capturing the value up front
-  /// (rather than re-reading `state.drafts[matchId]` once the await
-  /// resolves) is what keeps a concurrent refresh from being able to mark a
-  /// stale, pre-submit value as saved. See [_setDraftStatusAndMarkSaved].
+  /// They are non-nullable so that a prediction with no score picked cannot
+  /// be submitted at all; that used to be a runtime no-op guarded here, and
+  /// is now rejected by the compiler at every call site.
+  ///
+  /// The submitted score is held in a local, so a same-fecha
+  /// [refresh]/[selectFecha] that replaces the whole `drafts` map while this
+  /// method is suspended on the network call cannot make the confirmation
+  /// write a different value than the one that was sent. See
+  /// [_setDraftStatusAndMarkSaved].
   ///
   /// G6-e fence: captures the selected fecha id before the await. After the
   /// network call returns, if the selected fecha id has changed (user switched
@@ -390,17 +373,13 @@ class ProdeFixturesController
   /// mutation, no error shown.
   Future<bool> submitPrediction(
     int matchId, {
-    int? scoreHome,
-    int? scoreAway,
+    required int scoreHome,
+    required int scoreAway,
   }) async {
     final current = state;
     if (current is! ProdeFixturesLoaded) return false;
 
     final existingDraft = current.drafts[matchId] ?? const PredictionDraft();
-    final home = scoreHome ?? existingDraft.scoreHome;
-    final away = scoreAway ?? existingDraft.scoreAway;
-
-    if (home == null || away == null) return false;
     if (existingDraft.status == SubmitStatus.submitting) return false;
 
     // Capture the fecha id the user is submitting against.
@@ -413,8 +392,8 @@ class ProdeFixturesController
       await _service.submitPrediction(
         fechaId: loaded.fecha.fechaId,
         matchId: matchId,
-        scoreHome: home,
-        scoreAway: away,
+        scoreHome: scoreHome,
+        scoreAway: scoreAway,
       );
 
       // Fence: discard if user switched fechas while this was in flight.
@@ -424,7 +403,7 @@ class ProdeFixturesController
         return false;
       }
 
-      _setDraftStatusAndMarkSaved(matchId, scoreHome: home, scoreAway: away);
+      _setDraftStatusAndMarkSaved(matchId, scoreHome: scoreHome, scoreAway: scoreAway);
       return true;
     } catch (_) {
       // Fence check for error path too.
@@ -433,8 +412,8 @@ class ProdeFixturesController
           afterAwait.selectedFechaId != submittingFechaId) {
         return false;
       }
-      // No score rollback needed here: this method never writes `home`/
-      // `away` into the shared draft before the POST succeeds (unlike the
+      // No score rollback needed here: this method never writes the score
+      // into the shared draft before the POST succeeds (unlike the
       // old optimistic-update flow), so the card is still showing whatever
       // was last confirmed by the server.
       _setDraftStatus(matchId, SubmitStatus.error);

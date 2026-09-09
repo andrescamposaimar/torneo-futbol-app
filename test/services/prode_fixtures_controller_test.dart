@@ -545,50 +545,6 @@ void main() {
     });
 
     // -----------------------------------------------------------------------
-    // updateDraft  (B2-2)
-    // -----------------------------------------------------------------------
-    group('updateDraft()', () {
-      test('updateDraft(1, 2, 1) emits new state with correct scores', () async {
-        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
-        final controller = await _makeControllerWithFecha(fecha);
-        await controller.load();
-
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
-        final loaded = controller.state as ProdeFixturesLoaded;
-        expect(loaded.drafts[1]!.scoreHome, equals(2));
-        expect(loaded.drafts[1]!.scoreAway, equals(1));
-      });
-
-      test('score persists across simulated state read (draft in controller, not widget)', () async {
-        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
-        final controller = await _makeControllerWithFecha(fecha);
-        await controller.load();
-
-        controller.updateDraft(1, scoreHome: 3, scoreAway: 0);
-        // Read state from controller (as a widget would after scroll recycle)
-        final state = controller.state as ProdeFixturesLoaded;
-        expect(state.drafts[1]!.scoreHome, equals(3));
-        expect(state.drafts[1]!.scoreAway, equals(0));
-      });
-
-      test('clearing a field (null) clears the draft value, not keeps the stale one',
-          () async {
-        final fecha = _makeFechaActiva(matchCount: 2, userPredictions: []);
-        final controller = await _makeControllerWithFecha(fecha);
-        await controller.load();
-
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-        // User deletes the home field; the tile re-sends both current values.
-        controller.updateDraft(1, scoreHome: null, scoreAway: 1);
-
-        final state = controller.state as ProdeFixturesLoaded;
-        expect(state.drafts[1]!.scoreHome, isNull);
-        expect(state.drafts[1]!.scoreAway, equals(1));
-      });
-    });
-
-    // -----------------------------------------------------------------------
     // submitPrediction (controller method)  (B2-3)
     // -----------------------------------------------------------------------
     group('submitPrediction() — controller method', () {
@@ -604,12 +560,11 @@ void main() {
           },
         );
         await controller.load();
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
 
         final states = <ProdeFixturesState>[];
         controller.addListener((s) => states.add(s), fireImmediately: false);
 
-        await controller.submitPrediction(1);
+        await controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         expect(callCount, equals(1));
         // Final status should be submitted
@@ -638,12 +593,11 @@ void main() {
           },
         );
         await controller.load();
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
         // Start first submit — don't await yet
-        final first = controller.submitPrediction(1);
+        final first =
+            controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
         // Immediately call again while in-flight
-        await controller.submitPrediction(1);
+        await controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         // Complete the first
         completer.complete(http.Response('{"status":"ok"}', 200,
@@ -651,27 +605,6 @@ void main() {
         await first;
 
         expect(callCount, equals(1));
-      });
-
-      test('null scoreHome -> no-op, service not called', () async {
-        var callCount = 0;
-        final fecha = _makeFechaActiva(matchCount: 1, userPredictions: []);
-        final controller = await _makeControllerWithFechaAndSubmit(
-          fecha,
-          submitResponse: () {
-            callCount++;
-            return Future.value(http.Response('{"status":"ok"}', 200,
-                headers: {'content-type': 'application/json'}));
-          },
-        );
-        await controller.load();
-        // No updateDraft call — draft has null scores
-
-        await controller.submitPrediction(1);
-
-        expect(callCount, equals(0));
-        final loaded = controller.state as ProdeFixturesLoaded;
-        expect(loaded.drafts[1]!.status, equals(SubmitStatus.idle));
       });
 
       test('PredeLockedException -> status = error', () async {
@@ -684,9 +617,7 @@ void main() {
               headers: {'content-type': 'application/json'})),
         );
         await controller.load();
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
-        await controller.submitPrediction(1);
+        await controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         final loaded = controller.state as ProdeFixturesLoaded;
         expect(loaded.drafts[1]!.status, equals(SubmitStatus.error));
@@ -702,9 +633,7 @@ void main() {
               headers: {'content-type': 'application/json'})),
         );
         await controller.load();
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
-        await controller.submitPrediction(1);
+        await controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         final loaded = controller.state as ProdeFixturesLoaded;
         expect(loaded.drafts[1]!.status, equals(SubmitStatus.error));
@@ -765,9 +694,7 @@ void main() {
           )),
         );
         await controller.load();
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
-        await controller.submitPrediction(1);
+        await controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         final loaded = controller.state as ProdeFixturesLoaded;
         expect(loaded.savedMatchIds, contains(1));
@@ -785,9 +712,7 @@ void main() {
           )),
         );
         await controller.load();
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
-        await controller.submitPrediction(1);
+        await controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         final loaded = controller.state as ProdeFixturesLoaded;
         expect(loaded.savedMatchIds, isNot(contains(1)));
@@ -1041,11 +966,9 @@ void main() {
 
         await controller.load();
 
-        // Set draft for match 1 in fecha 1
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-
         // Start submit — don't await
-        final submitFuture = controller.submitPrediction(1);
+        final submitFuture =
+            controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         // Switch to fecha 2 while submit in flight
         await controller.selectFecha(2);
@@ -1306,8 +1229,8 @@ void main() {
         await controller.load();
 
         // User enters a prediction and starts submitting it.
-        controller.updateDraft(1, scoreHome: 2, scoreAway: 1);
-        final submitFuture = controller.submitPrediction(1);
+        final submitFuture =
+            controller.submitPrediction(1, scoreHome: 2, scoreAway: 1);
 
         // Before the POST resolves, a pull-to-refresh re-fetches the SAME
         // fecha. The server hasn't processed the submit yet, so the refresh
