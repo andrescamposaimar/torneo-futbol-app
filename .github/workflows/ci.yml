@@ -53,12 +53,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 8.2 is the real floor of the committed lock: brick/math 0.14.8, a
-        # production dependency pulled in by ramsey/uuid, requires ^8.2. The
-        # plugin header still claims `Requires PHP: 8.0` — see the PR notes,
-        # that header is wrong and is not changed here. 8.5 is what the plugin
-        # is developed on; running both catches newer syntax slipping into
-        # code that claims to support older PHP.
+        # 8.2 is the plugin's real floor and what production runs: brick/math
+        # 0.14.8, a production dependency pulled in by ramsey/uuid, requires
+        # ^8.2, and config.platform.php pins resolution there so the lock can
+        # never outrun the host. 8.5 is what the plugin is developed on;
+        # running both is what catches newer syntax slipping into code that
+        # has to execute on 8.2.
         php: ['8.2', '8.5']
 
     steps:

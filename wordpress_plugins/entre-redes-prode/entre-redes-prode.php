@@ -5,7 +5,7 @@
  * Description:       Authenticated predictions game for the Entre Redes football league. Requires the Entre Redes main plugin.
  * Version:           0.9.5
  * Requires at least: 6.2
- * Requires PHP:      8.0
+ * Requires PHP:      8.2
  * Author:            Entre Redes
  * Author URI:        https://entreredespadres.com.ar
  * License:           GPL-2.0-or-later
