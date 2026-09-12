@@ -25,6 +25,10 @@ class SquadRepository {
      * (slice 3) sets it.
      *
      * @return int The new campeones_plantel.id.
+     * @throws WriteFailedException When the INSERT fails at the database
+     *                               level — the previous code discarded
+     *                               wpdb::insert()'s return value entirely
+     *                               and handed the caller a bogus id.
      */
     public function insert(
         int $tituloId,
@@ -39,7 +43,7 @@ class SquadRepository {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $wpdb->insert(
+        $inserted = $wpdb->insert(
             $p . 'campeones_plantel',
             [
                 'titulo_id'           => $tituloId,
@@ -52,6 +56,17 @@ class SquadRepository {
                 'candidatos_json'     => $candidatosJson,
             ]
         );
+
+        if ( false === $inserted ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to insert campeones_plantel (titulo_id=%d, orden=%d, jugador_nombre=%s). DB error: %s',
+                $tituloId,
+                $orden,
+                $jugadorNombre,
+                (string) $wpdb->last_error
+            ) );
+            throw new WriteFailedException( 'Failed to insert campeones_plantel record.' );
+        }
 
         return (int) $wpdb->insert_id;
     }

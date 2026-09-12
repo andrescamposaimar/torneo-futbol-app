@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Tests\Titles;
 
 use EntreRedes\Campeones\Migrations\InitialSchema;
+use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
+use EntreRedes\Campeones\Titles\WriteFailedException;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -123,5 +125,27 @@ class SquadRepositoryTest extends TestCase {
         $rowsA = $this->repository->findByTitle( $tituloA );
         $this->assertCount( 1, $rowsA );
         $this->assertSame( 'BASSO, A.', $rowsA[0]['jugador_nombre'] );
+    }
+
+    public function test_a_failed_insert_throws_instead_of_returning_a_bogus_id(): void {
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingInsertWpdb( 'wp_campeones_plantel' );
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles     = new TitleRepository( $failing );
+            $repository = new SquadRepository( $failing );
+
+            $title = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+            $this->assertNotNull( $title );
+
+            $this->expectException( WriteFailedException::class );
+            $repository->insert( $title->id, 0, 'BASSO, A.' );
+        } finally {
+            $wpdb = $original;
+        }
     }
 }

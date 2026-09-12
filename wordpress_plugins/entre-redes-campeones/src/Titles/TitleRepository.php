@@ -71,6 +71,12 @@ class TitleRepository {
      *                          record already exists for this key — in
      *                          which case the existing record is left
      *                          completely unchanged.
+     * @throws WriteFailedException When the INSERT itself fails at the
+     *                               database level. Deliberately distinct
+     *                               from the null return above: null means
+     *                               "a duplicate already exists" (REC-7), an
+     *                               exception means "the write was lost" —
+     *                               a caller must never confuse the two.
      */
     public function createOrConflict( int $anio, string $zona, string $posicion, string $equipoNombre ): ?TitleRecord {
         $wpdb = $this->wpdb;
@@ -95,7 +101,7 @@ class TitleRepository {
             return null;
         }
 
-        $wpdb->insert(
+        $inserted = $wpdb->insert(
             $p . 'campeones_titulo',
             [
                 'anio'          => $anio,
@@ -106,6 +112,18 @@ class TitleRepository {
                 'updated_at'    => $now,
             ]
         );
+
+        if ( false === $inserted ) {
+            $wpdb->query( 'ROLLBACK' );
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to insert campeones_titulo (anio=%d, zona=%s, posicion=%s). DB error: %s',
+                $anio,
+                $zona,
+                $posicion,
+                (string) $wpdb->last_error
+            ) );
+            throw new WriteFailedException( 'Failed to insert campeones_titulo record.' );
+        }
 
         $newId = (int) $wpdb->insert_id;
 

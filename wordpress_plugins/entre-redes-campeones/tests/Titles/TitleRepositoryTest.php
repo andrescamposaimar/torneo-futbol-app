@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Tests\Titles;
 
 use EntreRedes\Campeones\Migrations\InitialSchema;
+use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
 use EntreRedes\Campeones\Titles\TitleRepository;
+use EntreRedes\Campeones\Titles\WriteFailedException;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -79,6 +81,22 @@ class TitleRepositoryTest extends TestCase {
         $this->assertNotNull( $reread );
         $this->assertSame( 'CHELSEA', $reread->equipoNombre, 'The existing record must be unchanged by a rejected duplicate.' );
         $this->assertSame( $first->id, $reread->id );
+
+        // findByKey() alone (LIMIT 1, no ORDER BY) would pass even if the
+        // rejected duplicate had ALSO been phantom-inserted — it would just
+        // never be the row that LIMIT 1 happens to return. COUNT(*) is the
+        // only assertion that actually proves no phantom row exists.
+        global $wpdb;
+        $count = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}campeones_titulo
+                  WHERE anio = %d AND zona = %s AND posicion = %s",
+                2016,
+                'A',
+                'campeon'
+            )
+        );
+        $this->assertSame( '1', (string) $count, 'A rejected duplicate must never result in more than one row for the key.' );
     }
 
     public function test_different_zone_or_position_is_not_a_conflict(): void {
@@ -100,5 +118,53 @@ class TitleRepositoryTest extends TestCase {
         $this->assertSame( 'INDEPENDIENTE', $found->equipoNombre );
 
         $this->assertNull( $this->repository->find( 999999 ) );
+    }
+
+    public function test_a_failed_insert_throws_instead_of_being_confused_with_a_conflict(): void {
+        // createOrConflict() already uses `null` to mean "duplicate key
+        // found" (REC-7). A write failure must be a DIFFERENT signal, or a
+        // caller can never distinguish lost data from a legitimate conflict.
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingInsertWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $repository = new TitleRepository( $failing );
+
+            $this->expectException( WriteFailedException::class );
+            $repository->createOrConflict( 2099, 'A', 'campeon', 'BOCA' );
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    public function test_a_failed_insert_leaves_no_row_behind(): void {
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingInsertWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $repository = new TitleRepository( $failing );
+
+            try {
+                $repository->createOrConflict( 2099, 'A', 'campeon', 'BOCA' );
+                $this->fail( 'Expected WriteFailedException was not thrown.' );
+            } catch ( WriteFailedException $e ) {
+                // Expected.
+            }
+
+            $count = $failing->get_var(
+                "SELECT COUNT(*) FROM {$failing->prefix}campeones_titulo WHERE anio = 2099"
+            );
+            $this->assertSame( '0', (string) $count, 'A failed insert must not leave a partially-committed row.' );
+        } finally {
+            $wpdb = $original;
+        }
     }
 }
