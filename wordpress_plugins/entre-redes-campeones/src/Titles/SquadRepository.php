@@ -30,39 +30,30 @@ class SquadRepository {
      *                               wpdb::insert()'s return value entirely
      *                               and handed the caller a bogus id.
      */
-    public function insert(
-        int $tituloId,
-        int $orden,
-        string $jugadorNombre,
-        bool $esCapitan = false,
-        string $estadoVinculo = 'sin_candidato',
-        ?int $jugadorId = null,
-        string $jugadorNombreNorm = '',
-        ?string $candidatosJson = null
-    ): int {
+    public function insert( SquadEntry $entry ): int {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
         $inserted = $wpdb->insert(
             $p . 'campeones_plantel',
             [
-                'titulo_id'           => $tituloId,
-                'orden'               => $orden,
-                'jugador_nombre'      => $jugadorNombre,
-                'jugador_nombre_norm' => $jugadorNombreNorm,
-                'jugador_id'          => $jugadorId,
-                'es_capitan'          => $esCapitan ? 1 : 0,
-                'estado_vinculo'      => $estadoVinculo,
-                'candidatos_json'     => $candidatosJson,
+                'titulo_id'           => $entry->tituloId,
+                'orden'               => $entry->orden,
+                'jugador_nombre'      => $entry->jugadorNombre,
+                'jugador_nombre_norm' => $entry->jugadorNombreNorm,
+                'jugador_id'          => $entry->jugadorId,
+                'es_capitan'          => $entry->esCapitan ? 1 : 0,
+                'estado_vinculo'      => $entry->estadoVinculo,
+                'candidatos_json'     => $entry->candidatosJson,
             ]
         );
 
         if ( false === $inserted ) {
             error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
                 'entre-redes-campeones: failed to insert campeones_plantel (titulo_id=%d, orden=%d, jugador_nombre=%s). DB error: %s',
-                $tituloId,
-                $orden,
-                $jugadorNombre,
+                $entry->tituloId,
+                $entry->orden,
+                $entry->jugadorNombre,
                 (string) $wpdb->last_error
             ) );
             throw new WriteFailedException( 'Failed to insert campeones_plantel record.' );
@@ -71,20 +62,19 @@ class SquadRepository {
         return (int) $wpdb->insert_id;
     }
 
-    /**
-     * @return array<string, mixed>|null
-     */
-    public function find( int $id ): ?array {
+    public function find( int $id ): ?SquadEntry {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        return $wpdb->get_row(
+        $row = $wpdb->get_row(
             $wpdb->prepare(
                 "SELECT * FROM {$p}campeones_plantel WHERE id = %d LIMIT 1",
                 $id
             ),
             ARRAY_A
         );
+
+        return null === $row ? null : SquadEntry::fromRow( $row );
     }
 
     /**
@@ -93,7 +83,7 @@ class SquadRepository {
      * with zero linked squad entries is a valid, complete, displayable
      * record.
      *
-     * @return array<int, array<string, mixed>>
+     * @return SquadEntry[]
      */
     public function findByTitle( int $tituloId ): array {
         $wpdb = $this->wpdb;
@@ -109,7 +99,7 @@ class SquadRepository {
             ARRAY_A
         );
 
-        return $rows ?: [];
+        return array_map( [ SquadEntry::class, 'fromRow' ], $rows ?: [] );
     }
 
     /**
@@ -118,7 +108,7 @@ class SquadRepository {
      * bug in resolution logic can never see a human-set row in the first
      * place. RevalidationService (slice 3) is the only consumer.
      *
-     * @return array<int, array<string, mixed>>
+     * @return SquadEntry[]
      */
     public function findResolvableByTitle( int $tituloId ): array {
         $wpdb = $this->wpdb;
@@ -134,7 +124,7 @@ class SquadRepository {
             ARRAY_A
         );
 
-        return $rows ?: [];
+        return array_map( [ SquadEntry::class, 'fromRow' ], $rows ?: [] );
     }
 
     /**

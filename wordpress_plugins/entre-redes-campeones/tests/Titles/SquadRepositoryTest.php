@@ -6,6 +6,7 @@ namespace EntreRedes\Campeones\Tests\Titles;
 
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
+use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
 use EntreRedes\Campeones\Titles\WriteFailedException;
@@ -51,30 +52,30 @@ class SquadRepositoryTest extends TestCase {
 
         // Insert out of order to prove the read, not the insertion order,
         // is what orders the result.
-        $this->repository->insert( $tituloId, 2, 'MAZZARA, M.' );
-        $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
-        $this->repository->insert( $tituloId, 1, 'CALELLO, G.' );
+        $this->repository->insert( new SquadEntry( $tituloId, 2, 'MAZZARA, M.' ) );
+        $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.' ) );
+        $this->repository->insert( new SquadEntry( $tituloId, 1, 'CALELLO, G.' ) );
 
         $rows = $this->repository->findByTitle( $tituloId );
 
         $this->assertCount( 3, $rows );
-        $this->assertSame( 'BASSO, A.', $rows[0]['jugador_nombre'] );
-        $this->assertSame( 'CALELLO, G.', $rows[1]['jugador_nombre'] );
-        $this->assertSame( 'MAZZARA, M.', $rows[2]['jugador_nombre'] );
+        $this->assertSame( 'BASSO, A.', $rows[0]->jugadorNombre );
+        $this->assertSame( 'CALELLO, G.', $rows[1]->jugadorNombre );
+        $this->assertSame( 'MAZZARA, M.', $rows[2]->jugadorNombre );
     }
 
     public function test_find_resolvable_by_title_excludes_manual_rows_at_the_query_level(): void {
         $tituloId = $this->makeTitle();
 
-        $this->repository->insert( $tituloId, 0, 'BASSO, A.', false, 'auto' );
-        $manualId = $this->repository->insert( $tituloId, 1, 'CALELLO, G.', false, 'manual' );
-        $this->repository->insert( $tituloId, 2, 'MAZZARA, M.', false, 'sin_candidato' );
+        $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.', false, 'auto' ) );
+        $manualId = $this->repository->insert( new SquadEntry( $tituloId, 1, 'CALELLO, G.', false, 'manual' ) );
+        $this->repository->insert( new SquadEntry( $tituloId, 2, 'MAZZARA, M.', false, 'sin_candidato' ) );
 
         $resolvable = $this->repository->findResolvableByTitle( $tituloId );
 
         $this->assertCount( 2, $resolvable, 'The manual row must not appear among resolvable rows.' );
 
-        $ids = array_map( static fn( array $row ): int => (int) $row['id'], $resolvable );
+        $ids = array_map( static fn( SquadEntry $entry ): int => $entry->id, $resolvable );
         $this->assertNotContains(
             $manualId,
             $ids,
@@ -87,15 +88,15 @@ class SquadRepositoryTest extends TestCase {
         // entry — not an error and not "incomplete".
         $tituloId = $this->makeTitle();
 
-        $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
-        $this->repository->insert( $tituloId, 1, 'CALELLO, G.' );
+        $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.' ) );
+        $this->repository->insert( new SquadEntry( $tituloId, 1, 'CALELLO, G.' ) );
 
         $rows = $this->repository->findByTitle( $tituloId );
 
         $this->assertCount( 2, $rows );
         foreach ( $rows as $row ) {
-            $this->assertNull( $row['jugador_id'], 'A squad entry may be fully unlinked and still be complete.' );
-            $this->assertSame( 'sin_candidato', $row['estado_vinculo'] );
+            $this->assertNull( $row->jugadorId, 'A squad entry may be fully unlinked and still be complete.' );
+            $this->assertSame( 'sin_candidato', $row->estadoVinculo );
         }
     }
 
@@ -117,30 +118,30 @@ class SquadRepositoryTest extends TestCase {
         // of storage engine or query plan.
         $tituloId = $this->makeTitle();
 
-        $firstId  = $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
-        $secondId = $this->repository->insert( $tituloId, 0, 'CALELLO, G.' );
-        $thirdId  = $this->repository->insert( $tituloId, 0, 'MAZZARA, M.' );
+        $firstId  = $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.' ) );
+        $secondId = $this->repository->insert( new SquadEntry( $tituloId, 0, 'CALELLO, G.' ) );
+        $thirdId  = $this->repository->insert( new SquadEntry( $tituloId, 0, 'MAZZARA, M.' ) );
 
         $rows = $this->repository->findByTitle( $tituloId );
 
         $this->assertCount( 3, $rows );
-        $this->assertSame( [ $firstId, $secondId, $thirdId ], array_map( static fn( array $r ): int => (int) $r['id'], $rows ) );
+        $this->assertSame( [ $firstId, $secondId, $thirdId ], array_map( static fn( SquadEntry $r ): int => $r->id, $rows ) );
 
         $resolvable = $this->repository->findResolvableByTitle( $tituloId );
-        $this->assertSame( [ $firstId, $secondId, $thirdId ], array_map( static fn( array $r ): int => (int) $r['id'], $resolvable ) );
+        $this->assertSame( [ $firstId, $secondId, $thirdId ], array_map( static fn( SquadEntry $r ): int => $r->id, $resolvable ) );
     }
 
     public function test_update_and_delete(): void {
         $tituloId = $this->makeTitle();
-        $id       = $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
+        $id       = $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.' ) );
 
         $this->assertTrue(
             $this->repository->update( $id, [ 'estado_vinculo' => 'manual', 'jugador_id' => 42 ] )
         );
 
         $row = $this->repository->find( $id );
-        $this->assertSame( 'manual', $row['estado_vinculo'] );
-        $this->assertSame( 42, (int) $row['jugador_id'] );
+        $this->assertSame( 'manual', $row->estadoVinculo );
+        $this->assertSame( 42, $row->jugadorId );
 
         $this->assertTrue( $this->repository->delete( $id ) );
         $this->assertNull( $this->repository->find( $id ) );
@@ -150,12 +151,12 @@ class SquadRepositoryTest extends TestCase {
         $tituloA = $this->makeTitle( 2016 );
         $tituloB = $this->makeTitle( 2017 );
 
-        $this->repository->insert( $tituloA, 0, 'BASSO, A.' );
-        $this->repository->insert( $tituloB, 0, 'CALELLO, G.' );
+        $this->repository->insert( new SquadEntry( $tituloA, 0, 'BASSO, A.' ) );
+        $this->repository->insert( new SquadEntry( $tituloB, 0, 'CALELLO, G.' ) );
 
         $rowsA = $this->repository->findByTitle( $tituloA );
         $this->assertCount( 1, $rowsA );
-        $this->assertSame( 'BASSO, A.', $rowsA[0]['jugador_nombre'] );
+        $this->assertSame( 'BASSO, A.', $rowsA[0]->jugadorNombre );
     }
 
     public function test_a_failed_insert_throws_instead_of_returning_a_bogus_id(): void {
@@ -174,7 +175,7 @@ class SquadRepositoryTest extends TestCase {
             $this->assertNotNull( $title );
 
             $this->expectException( WriteFailedException::class );
-            $repository->insert( $title->id, 0, 'BASSO, A.' );
+            $repository->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );
         } finally {
             $wpdb = $original;
         }
