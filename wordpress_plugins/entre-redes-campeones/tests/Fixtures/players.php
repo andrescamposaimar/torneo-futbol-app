@@ -23,7 +23,7 @@ declare(strict_types=1);
 return [
     [ 'id' => 5078, 'title' => 'Basso, Alejandro', 'seasons' => [ '2016' ] ],
     [ 'id' => 2225, 'title' => 'Garcia, Miguel Luis', 'seasons' => [ '2016' ] ],
-    [ 'id' => 2461, 'title' => 'Garcia, Marcelo Daniel', 'seasons' => [ '2019' ] ],
+    [ 'id' => 2461, 'title' => 'Garcia, Marcelo Daniel', 'seasons' => [ '2016' ] ],
     [ 'id' => 2494, 'title' => 'Garcia, Ariel', 'seasons' => [ '2017' ] ],
     [ 'id' => 10422, 'title' => 'Garcia, Antonio', 'seasons' => [ '2017' ] ],
     [ 'id' => 21517, 'title' => 'Garcia, Gaston', 'seasons' => [ '2016' ] ],
