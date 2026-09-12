@@ -82,9 +82,9 @@ class SquadRepositoryTest extends TestCase {
         );
     }
 
-    public function test_zero_link_title_reads_back_complete(): void {
-        // REC-6: a title with zero linked squad entries is a valid,
-        // complete, displayable record — not an error and not "incomplete".
+    public function test_unlinked_squad_entries_read_back_complete(): void {
+        // REC-6: a squad entry with no jugador_id is a valid, complete
+        // entry — not an error and not "incomplete".
         $tituloId = $this->makeTitle();
 
         $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
@@ -97,6 +97,17 @@ class SquadRepositoryTest extends TestCase {
             $this->assertNull( $row['jugador_id'], 'A squad entry may be fully unlinked and still be complete.' );
             $this->assertSame( 'sin_candidato', $row['estado_vinculo'] );
         }
+    }
+
+    public function test_zero_link_title_reads_back_as_a_clean_empty_array(): void {
+        // REC-6: a title with ZERO squad entries at all is a valid, complete,
+        // displayable record — findByTitle() must return a clean [], never
+        // null or an error, for a title nobody has linked squad rows to yet.
+        $tituloId = $this->makeTitle();
+
+        $rows = $this->repository->findByTitle( $tituloId );
+
+        $this->assertSame( [], $rows );
     }
 
     public function test_rows_sharing_the_same_orden_are_ordered_deterministically_by_id(): void {
