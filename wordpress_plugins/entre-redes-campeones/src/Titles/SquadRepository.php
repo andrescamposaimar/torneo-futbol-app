@@ -67,7 +67,8 @@ class SquadRepository {
             $wpdb->prepare(
                 "SELECT * FROM {$p}campeones_plantel WHERE id = %d LIMIT 1",
                 $id
-            )
+            ),
+            ARRAY_A
         );
     }
 
@@ -89,7 +90,8 @@ class SquadRepository {
                   WHERE titulo_id = %d
                   ORDER BY orden ASC",
                 $tituloId
-            )
+            ),
+            ARRAY_A
         );
 
         return $rows ?: [];
@@ -113,7 +115,8 @@ class SquadRepository {
                   WHERE titulo_id = %d AND estado_vinculo <> 'manual'
                   ORDER BY orden ASC",
                 $tituloId
-            )
+            ),
+            ARRAY_A
         );
 
         return $rows ?: [];

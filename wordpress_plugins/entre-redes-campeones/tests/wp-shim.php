@@ -87,17 +87,29 @@ if ( ! class_exists( 'wpdb' ) ) {
         }
 
         /**
-         * Returns all rows as associative arrays.
+         * Returns all rows, honouring $output exactly like real WordPress:
+         * ARRAY_A returns associative arrays, anything else (including the
+         * OBJECT default) returns stdClass rows. Previously this ignored
+         * $output entirely and always returned arrays, which hid TypeError
+         * bugs in callers that forgot to pass ARRAY_A and rely on the real
+         * wpdb::get_row()/get_results() OBJECT default (see
+         * TitleRepository::find()/findByKey()).
          *
-         * @return array<int, array<string, mixed>>
+         * @return array<int, array<string, mixed>|\stdClass>
          */
         public function get_results( string $sql, string $output = OBJECT ): array {
             try {
                 $stmt = $this->pdo->query( $sql );
-                return $stmt->fetchAll( \PDO::FETCH_ASSOC );
+                $rows = $stmt->fetchAll( \PDO::FETCH_ASSOC );
             } catch ( \PDOException $e ) {
                 return [];
             }
+
+            if ( ARRAY_A === $output ) {
+                return $rows;
+            }
+
+            return array_map( static fn( array $row ): \stdClass => (object) $row, $rows );
         }
 
         /**
@@ -123,8 +135,8 @@ if ( ! class_exists( 'wpdb' ) ) {
             );
         }
 
-        public function get_row( string $sql, string $output = OBJECT ): ?array {
-            $rows = $this->get_results( $sql );
+        public function get_row( string $sql, string $output = OBJECT ): object|array|null {
+            $rows = $this->get_results( $sql, $output );
             return $rows[0] ?? null;
         }
 

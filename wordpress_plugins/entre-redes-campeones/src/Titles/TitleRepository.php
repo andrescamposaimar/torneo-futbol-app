@@ -34,7 +34,8 @@ class TitleRepository {
                   WHERE id = %d
                   LIMIT 1",
                 $id
-            )
+            ),
+            ARRAY_A
         );
 
         return null === $row ? null : TitleRecord::fromRow( $row );
@@ -53,7 +54,8 @@ class TitleRepository {
                 $anio,
                 $zona,
                 $posicion
-            )
+            ),
+            ARRAY_A
         );
 
         return null === $row ? null : TitleRecord::fromRow( $row );
