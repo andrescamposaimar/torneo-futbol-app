@@ -1,0 +1,52 @@
+name: Campeones plugin tests
+
+# Distinct file name and workflow name on purpose: entre-redes-prode's CI
+# (added on the unmerged release/bump-build-25 branch, not yet on main) is
+# hardcoded to `working-directory: wordpress_plugins/entre-redes-prode`. Once
+# both plugins are on main, these are worth unifying into a single matrix job
+# instead of two near-identical workflows.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php-plugin:
+    name: Plugin tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: wordpress_plugins/entre-redes-campeones
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # composer.json declares `"php": ">=8.0"`; composer.lock is gitignored
+        # for this plugin, so composer install always resolves fresh against
+        # the floor and the version this plugin is actually developed on.
+        php: ['8.0', '8.5']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # pdo_sqlite backs the in-memory wpdb shim in tests/wp-shim.php;
+          # dom/libxml/json are PHPUnit's.
+          extensions: mbstring, pdo_sqlite, dom, json, libxml
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Test
+        run: composer test
