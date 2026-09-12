@@ -149,6 +149,14 @@ class SquadRepository {
 
         $result = $wpdb->update( $p . 'campeones_plantel', $data, [ 'id' => $id ] );
 
+        if ( false === $result ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to update campeones_plantel (id=%d). DB error: %s',
+                $id,
+                (string) $wpdb->last_error
+            ) );
+        }
+
         return false !== $result;
     }
 
@@ -157,6 +165,14 @@ class SquadRepository {
         $p    = $wpdb->prefix;
 
         $result = $wpdb->delete( $p . 'campeones_plantel', [ 'id' => $id ] );
+
+        if ( false === $result ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to delete campeones_plantel (id=%d). DB error: %s',
+                $id,
+                (string) $wpdb->last_error
+            ) );
+        }
 
         return false !== $result;
     }
