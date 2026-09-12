@@ -54,11 +54,36 @@ class InitialSchemaTest extends TestCase {
         }
     }
 
-    public function test_up_re_run_is_a_noop(): void {
+    public function test_up_re_run_preserves_existing_rows_and_columns(): void {
+        // tests/wp-shim.php rewrites every CREATE TABLE into
+        // CREATE TABLE IF NOT EXISTS unconditionally, so a bare "no error"
+        // assertion here would only prove the shim's own forgiveness, not
+        // that InitialSchema::up() actually leaves existing data intact.
+        // Insert a row, re-run up(), and assert the row and its columns
+        // survive — that is the migration's real contract.
         InitialSchema::up();
-        $results = InitialSchema::up();
 
         global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
+
+        $now = current_time( 'mysql' );
+        $wpdb->query(
+            $wpdb->prepare(
+                "INSERT INTO {$wpdb->prefix}campeones_titulo
+                    (anio, zona, posicion, equipo_nombre, created_at, updated_at)
+                 VALUES (%d, %s, %s, %s, %s, %s)",
+                2016,
+                'A',
+                'campeon',
+                'CHELSEA',
+                $now,
+                $now
+            )
+        );
+
+        $results = InitialSchema::up();
+
         $this->assertNull(
             $wpdb->last_error,
             "Running InitialSchema::up() twice should not produce a DB error. Got: {$wpdb->last_error}"
@@ -69,6 +94,20 @@ class InitialSchemaTest extends TestCase {
             $errors,
             'Second run of InitialSchema::up() should not produce error messages. Got: ' . implode( '; ', $errors )
         );
+
+        $row = $wpdb->get_row(
+            "SELECT * FROM {$wpdb->prefix}campeones_titulo WHERE anio = 2016 AND zona = 'A' AND posicion = 'campeon'",
+            ARRAY_A
+        );
+        $this->assertNotNull( $row, 'A row inserted before the second up() call must survive it.' );
+        $this->assertSame( 'CHELSEA', $row['equipo_nombre'] );
+
+        $pdo     = $wpdb->getPdo();
+        $stmt    = $pdo->query( 'PRAGMA table_info(wp_campeones_titulo)' );
+        $columns = array_column( $stmt->fetchAll( \PDO::FETCH_ASSOC ), 'name' );
+        foreach ( self::expectedTables()['wp_campeones_titulo'] as $col ) {
+            $this->assertContains( $col, $columns, "Column '$col' must still exist in wp_campeones_titulo after re-running up()." );
+        }
     }
 
     public function test_both_create_table_statements_declare_engine_innodb(): void {
