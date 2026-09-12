@@ -29,10 +29,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # composer.json declares `"php": ">=8.0"`; composer.lock is gitignored
-        # for this plugin, so composer install always resolves fresh against
-        # the floor and the version this plugin is actually developed on.
-        php: ['8.0', '8.5']
+        # 8.2 is the floor because that is what the production WordPress host
+        # runs (8.2.33); composer.json and the plugin header declare the same.
+        # 8.5 catches forward-compatibility breakage early.
+        #
+        # 8.0 was tried and removed: phpunit ^10.5 requires PHP >= 8.1, so the
+        # toolchain cannot exercise a floor lower than 8.1 even where the
+        # runtime would allow one. Do not declare a floor the suite cannot test.
+        #
+        # composer.lock is gitignored, so every run resolves dependencies
+        # fresh. The prode plugin commits its lock for reproducibility; do the
+        # same here once that change reaches main.
+        php: ['8.2', '8.5']
 
     steps:
       - uses: actions/checkout@v4

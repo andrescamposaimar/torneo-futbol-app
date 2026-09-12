@@ -5,7 +5,7 @@
  * Description:       Historical championship record (Copa Chaminade) for the Entre Redes football league.
  * Version:           0.1.0
  * Requires at least: 6.2
- * Requires PHP:      8.0
+ * Requires PHP:      8.2
  * Author:            Entre Redes
  * Author URI:        https://entreredespadres.com.ar
  * License:           GPL-2.0-or-later
