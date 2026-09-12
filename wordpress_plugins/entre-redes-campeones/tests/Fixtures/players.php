@@ -37,6 +37,8 @@ return [
     [ 'id' => 4814, 'title' => 'Andres Dos Santos', 'seasons' => [ '2018' ] ],
     [ 'id' => 14674, 'title' => 'ESTEBAN NICOLAS RAMON D´AGOSTINO', 'seasons' => [ '2018' ] ],
     [ 'id' => 4753, 'title' => 'Reynaldo A. Muscari', 'seasons' => [ '2018' ] ],
+    [ 'id' => 4886, 'title' => 'Juan Santos', 'seasons' => [ '2016' ] ],
+    [ 'id' => 2274, 'title' => 'Santostefano, Pablo', 'seasons' => [ '2016' ] ],
     [ 'id' => 2492, 'title' => 'De La Fuente, Javier', 'seasons' => [ '2016' ] ],
     [ 'id' => 14819, 'title' => 'Palou De Comasema, Adrian', 'seasons' => [ '2016' ] ],
     [ 'id' => 2253, 'title' => 'Andres Olalla De Labra', 'seasons' => [ '2016' ] ],
