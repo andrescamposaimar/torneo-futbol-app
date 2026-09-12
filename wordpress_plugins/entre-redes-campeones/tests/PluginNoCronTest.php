@@ -48,14 +48,13 @@ class PluginNoCronTest extends TestCase {
                 "Plugin::boot() must not register any cron-related hook. Found: {$hook}"
             );
         }
-    }
 
-    public function test_wp_schedule_event_is_never_called(): void {
         // wp_schedule_event is deliberately NOT stubbed in tests/wp-shim.php —
-        // this plugin never calls it. If any code path in Plugin::boot()
-        // reached it, this would be a fatal "call to undefined function"
-        // rather than a silent no-op, which is exactly the point: any
-        // regression here is loud, not quiet.
+        // this plugin never calls it. Because Plugin::boot() has already run
+        // above, if any code path inside it reached wp_schedule_event(), this
+        // test would already have fataled with "call to undefined function"
+        // rather than reaching this assertion — a regression here is loud,
+        // not quiet.
         $this->assertFalse(
             function_exists( 'wp_schedule_event' ),
             'wp_schedule_event must not be defined in the test shim — this plugin has no code path that calls it.'
