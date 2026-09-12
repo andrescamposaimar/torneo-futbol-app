@@ -103,7 +103,7 @@ class SquadRepository {
             $wpdb->prepare(
                 "SELECT * FROM {$p}campeones_plantel
                   WHERE titulo_id = %d
-                  ORDER BY orden ASC",
+                  ORDER BY orden ASC, id ASC",
                 $tituloId
             ),
             ARRAY_A
@@ -128,7 +128,7 @@ class SquadRepository {
             $wpdb->prepare(
                 "SELECT * FROM {$p}campeones_plantel
                   WHERE titulo_id = %d AND estado_vinculo <> 'manual'
-                  ORDER BY orden ASC",
+                  ORDER BY orden ASC, id ASC",
                 $tituloId
             ),
             ARRAY_A

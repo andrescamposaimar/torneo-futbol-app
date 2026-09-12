@@ -99,6 +99,26 @@ class SquadRepositoryTest extends TestCase {
         }
     }
 
+    public function test_rows_sharing_the_same_orden_are_ordered_deterministically_by_id(): void {
+        // ORDER BY orden ASC alone leaves ties (rows sharing the same
+        // orden) in implementation-defined order. `, id ASC` pins a
+        // deterministic tiebreaker so the result is reproducible regardless
+        // of storage engine or query plan.
+        $tituloId = $this->makeTitle();
+
+        $firstId  = $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
+        $secondId = $this->repository->insert( $tituloId, 0, 'CALELLO, G.' );
+        $thirdId  = $this->repository->insert( $tituloId, 0, 'MAZZARA, M.' );
+
+        $rows = $this->repository->findByTitle( $tituloId );
+
+        $this->assertCount( 3, $rows );
+        $this->assertSame( [ $firstId, $secondId, $thirdId ], array_map( static fn( array $r ): int => (int) $r['id'], $rows ) );
+
+        $resolvable = $this->repository->findResolvableByTitle( $tituloId );
+        $this->assertSame( [ $firstId, $secondId, $thirdId ], array_map( static fn( array $r ): int => (int) $r['id'], $resolvable ) );
+    }
+
     public function test_update_and_delete(): void {
         $tituloId = $this->makeTitle();
         $id       = $this->repository->insert( $tituloId, 0, 'BASSO, A.' );
