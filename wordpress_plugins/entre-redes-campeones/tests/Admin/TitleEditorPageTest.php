@@ -669,6 +669,94 @@ class TitleEditorPageTest extends TestCase {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Item 1 — no handler verified a squad row belongs to the title being
+    // edited. The per-row nonce is scoped to the ROW (campeones_link_{id}),
+    // not the title, so a request pairing a VALID row nonce with a
+    // different titulo_id must still be rejected before any handler runs.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_editar_fila_rejects_a_row_belonging_to_a_different_title_even_with_a_valid_row_nonce(): void {
+        // Pins the exact shape flagged in review: a nonce that is genuinely
+        // valid for the row it was minted for, submitted alongside a
+        // DIFFERENT titulo_id. The nonce derivation is correct — only a
+        // row-vs-title ownership check stops this.
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $titleX = $this->titles->createOrConflict( 2017, 'A', 'campeon', 'RIVER' );
+        $titleY = $this->titles->createOrConflict( 2018, 'A', 'campeon', 'INDEPENDIENTE' );
+
+        $rowInX = $this->squads->insert(
+            new SquadEntry( $titleX->id, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $titleY->id; // Y, not X.
+        $_POST['plantel_id']              = (string) $rowInX;      // The row belongs to X.
+        $_POST['jugador_nombre']          = 'MAZZARA, M.';
+        $_POST['es_capitan']              = '1';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $rowInX );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'campeones_notice=error_fila_ajena',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A row nonce that is valid for its own row must not authorize acting on it under a different titulo_id.'
+            );
+            $row = $this->squads->find( $rowInX );
+            $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'A cross-title edit must never modify a row belonging to a different title.' );
+            $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
+            $this->assertSame( 5078, $row->jugadorId );
+        }
+    }
+
+    public function test_handle_post_eliminar_fila_rejects_a_row_belonging_to_a_different_title(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $otherTitle      = $this->titles->createOrConflict( 2017, 'A', 'campeon', 'RIVER' );
+        $rowInOtherTitle = $this->squads->insert( new SquadEntry( $otherTitle->id, 0, 'BASSO, A.' ) );
+
+        $_POST['campeones_editor_action'] = 'eliminar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId; // A stale/bookmarked title, not the row's own.
+        $_POST['plantel_id']              = (string) $rowInOtherTitle;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $rowInOtherTitle );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=error_fila_ajena', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $this->assertNotNull( $this->squads->find( $rowInOtherTitle ), 'A cross-title delete must never remove the other title\'s row.' );
+        }
+    }
+
+    public function test_handle_post_vincular_rejects_a_row_belonging_to_a_different_title(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $otherTitle      = $this->titles->createOrConflict( 2017, 'A', 'campeon', 'RIVER' );
+        $rowInOtherTitle = $this->squads->insert( new SquadEntry( $otherTitle->id, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'vincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $rowInOtherTitle;
+        $_POST['jugador_id']              = '5078';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $rowInOtherTitle );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=error_fila_ajena', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $row = $this->squads->find( $rowInOtherTitle );
+            $this->assertNull( $row->jugadorId, 'A cross-title vincular must never set the pointer.' );
+            $this->assertSame( 'sin_candidato', $row->estadoVinculo );
+        }
+    }
+
     public function test_handle_post_crear_titulo_catches_a_write_failed_exception(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 

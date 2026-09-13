@@ -116,8 +116,13 @@ class TitleEditorPage {
                     break;
 
                 case 'editar_fila':
+                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+                        $notice = 'error_fila_ajena';
+                        break;
+                    }
                     $notice = $this->handleEditRow(
-                        absint( $_POST['plantel_id'] ?? 0 ),
+                        $plantelId,
                         sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
                         ! empty( $_POST['es_capitan'] ),
                         absint( $_POST['orden'] ?? 0 )
@@ -125,13 +130,23 @@ class TitleEditorPage {
                     break;
 
                 case 'eliminar_fila':
-                    $notice = $this->handleDeleteRow( absint( $_POST['plantel_id'] ?? 0 ) )
+                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+                        $notice = 'error_fila_ajena';
+                        break;
+                    }
+                    $notice = $this->handleDeleteRow( $plantelId )
                         ? 'fila_eliminada'
                         : 'error_fila';
                     break;
 
                 case 'vincular':
                 case 'cambiar':
+                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+                        $notice = 'error_fila_ajena';
+                        break;
+                    }
                     // A missing/zero jugador_id must be rejected here, before
                     // it ever reaches handleSetLink() — absint(...) ?: null
                     // would otherwise turn it into null, which is exactly the
@@ -142,13 +157,18 @@ class TitleEditorPage {
                         $notice = 'error_id_requerido';
                         break;
                     }
-                    $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), $jugadorId )
+                    $notice = $this->handleSetLink( $plantelId, $jugadorId )
                         ? 'vinculado'
                         : 'error_vincular';
                     break;
 
                 case 'desvincular':
-                    $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), null )
+                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+                        $notice = 'error_fila_ajena';
+                        break;
+                    }
+                    $notice = $this->handleSetLink( $plantelId, null )
                         ? 'desvinculado'
                         : 'error_vincular';
                     break;
@@ -216,6 +236,22 @@ class TitleEditorPage {
         if ( ! wp_verify_nonce( $nonce, 'campeones_link_' . $plantelId ) ) {
             wp_die( esc_html__( 'Verificación de seguridad fallida. Por favor recargá la página e intentá de nuevo.', 'entre-redes-campeones' ) );
         }
+    }
+
+    /**
+     * Guards every row-scoped action (editar_fila, eliminar_fila, vincular,
+     * cambiar, desvincular) against a row that does not belong to the
+     * requested title. The per-row nonce (campeones_link_{plantelId}) is
+     * scoped to the ROW, not the title — a request pairing a genuinely
+     * valid row nonce with a different titulo_id (a stale tab, a
+     * bookmarked URL, a hand-built POST) would otherwise silently edit,
+     * relink, or delete a row belonging to a different year (item 1). This
+     * is an authorization check, not a CSRF one, and it must run before any
+     * handler that mutates the row.
+     */
+    private function rowBelongsToRequestedTitle( int $rowId, int $tituloId ): bool {
+        $entry = $this->squads->find( $rowId );
+        return null !== $entry && $entry->tituloId === $tituloId;
     }
 
     // -------------------------------------------------------------------------
@@ -357,6 +393,7 @@ class TitleEditorPage {
             'desvinculado'     => [ 'message' => __( 'El vínculo fue quitado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_vincular'   => [ 'message' => __( 'Error al modificar el vínculo. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_id_requerido' => [ 'message' => __( 'Ingresá un ID de jugador para vincular.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'error_fila_ajena' => [ 'message' => __( 'Esa fila no pertenece a este título.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_directorio' => [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
             default            => null,
         };
