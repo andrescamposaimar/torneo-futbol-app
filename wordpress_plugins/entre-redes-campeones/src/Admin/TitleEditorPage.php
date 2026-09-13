@@ -202,9 +202,10 @@ class TitleEditorPage {
         // phpcs:ignore WordPress.Security.NonceVerification
         $tituloId = absint( $_GET['titulo_id'] ?? 0 );
         $title    = 0 !== $tituloId ? $this->titles->find( $tituloId ) : null;
+        $notice   = $this->resolveNotice();
 
         if ( null === $title ) {
-            $this->renderCreateForm();
+            $this->renderCreateForm( $notice );
             return;
         }
 
@@ -232,6 +233,12 @@ class TitleEditorPage {
         ?>
         <div class="wrap">
             <h1><?php echo esc_html( sprintf( '%s %s — %s', esc_html( $title->posicion ), (string) $title->anio, esc_html( $title->equipoNombre ) ) ); ?></h1>
+
+            <?php if ( null !== $notice ) : ?>
+            <div class="notice notice-<?php echo esc_attr( $notice['type'] ); ?> is-dismissible">
+                <p><?php echo esc_html( $notice['message'] ); ?></p>
+            </div>
+            <?php endif; ?>
 
             <form method="post" action="<?php echo esc_url( admin_url( 'admin.php?page=campeones-titulo-edit' ) ); ?>">
                 <input type="hidden" name="campeones_editor_action" value="actualizar_titulo">
@@ -265,10 +272,18 @@ class TitleEditorPage {
         <?php
     }
 
-    private function renderCreateForm(): void {
+    /**
+     * @param array{message: string, type: string}|null $notice
+     */
+    private function renderCreateForm( ?array $notice = null ): void {
         ?>
         <div class="wrap">
             <h1><?php echo esc_html__( 'Nuevo título', 'entre-redes-campeones' ); ?></h1>
+            <?php if ( null !== $notice ) : ?>
+            <div class="notice notice-<?php echo esc_attr( $notice['type'] ); ?> is-dismissible">
+                <p><?php echo esc_html( $notice['message'] ); ?></p>
+            </div>
+            <?php endif; ?>
             <form method="post" action="<?php echo esc_url( admin_url( 'admin.php?page=campeones-titulo-edit' ) ); ?>">
                 <input type="hidden" name="campeones_editor_action" value="crear_titulo">
                 <?php wp_nonce_field( 'campeones_crear_titulo', 'campeones_editor_nonce' ); ?>
@@ -280,6 +295,41 @@ class TitleEditorPage {
             </form>
         </div>
         <?php
+    }
+
+    /**
+     * Resolves $_GET['campeones_notice'] (set by handlePost()'s PRG
+     * redirect) into a displayable message + notice type, mirroring
+     * TitlesPage::resolveNotice() / entre-redes-prode's
+     * RegistryPage::render():80-99. Without this, every failed create /
+     * update / row add / row edit / row delete / link change looked exactly
+     * like a successful one.
+     *
+     * @return array{message: string, type: string}|null
+     */
+    private function resolveNotice(): ?array {
+        // phpcs:ignore WordPress.Security.NonceVerification
+        if ( ! isset( $_GET['campeones_notice'] ) ) {
+            return null;
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $key = sanitize_text_field( (string) $_GET['campeones_notice'] );
+
+        return match ( $key ) {
+            'creado'           => [ 'message' => __( 'El título fue creado correctamente.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'conflicto'        => [ 'message' => __( 'Ya existe un título para ese año, zona y posición.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'actualizado'      => [ 'message' => __( 'Los datos del título fueron actualizados.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'error_actualizar' => [ 'message' => __( 'Error al actualizar el título. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'fila_agregada'    => [ 'message' => __( 'El jugador fue agregado al plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'fila_actualizada' => [ 'message' => __( 'La fila fue actualizada.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'fila_eliminada'   => [ 'message' => __( 'La fila fue eliminada del plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'error_fila'       => [ 'message' => __( 'Error al guardar la fila. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'vinculado'        => [ 'message' => __( 'El jugador fue vinculado.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'desvinculado'     => [ 'message' => __( 'El vínculo fue quitado.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'error_vincular'   => [ 'message' => __( 'Error al modificar el vínculo. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            default            => null,
+        };
     }
 
     // -------------------------------------------------------------------------

@@ -54,6 +54,7 @@ class TitlesPageTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         $GLOBALS['_campeones_test_current_user_can'] = false;
+        unset( $_GET['campeones_notice'] );
     }
 
     private function makePage(): TitlesPage {
@@ -162,5 +163,56 @@ class TitlesPageTest extends TestCase {
         $row = $this->squads->find( $id );
         $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
         $this->assertSame( 999999, $row->jugadorId );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 5 — every notice handlePost() computes was thrown away: render()
+    // never read $_GET['campeones_notice'], so a failed destructive action
+    // looked exactly like a successful one.
+    // -------------------------------------------------------------------------
+
+    public function test_render_shows_a_success_notice_for_eliminado(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['campeones_notice'] = 'eliminado';
+
+        ob_start();
+        $this->makePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-success', $html );
+        $this->assertStringContainsString( 'eliminado', mb_strtolower( $html ) );
+    }
+
+    public function test_render_shows_an_error_notice_for_error_eliminar(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['campeones_notice'] = 'error_eliminar';
+
+        ob_start();
+        $this->makePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-error', $html );
+    }
+
+    public function test_render_shows_the_revalidation_count_in_its_notice(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['campeones_notice'] = 'revalidado_7';
+
+        ob_start();
+        $this->makePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-success', $html );
+        $this->assertStringContainsString( '7', $html );
+    }
+
+    public function test_render_shows_no_notice_when_none_is_present_in_the_query(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        ob_start();
+        $this->makePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringNotContainsString( 'class="notice', $html );
     }
 }

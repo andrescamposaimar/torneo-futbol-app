@@ -56,7 +56,7 @@ class TitleEditorPageTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         $GLOBALS['_campeones_test_current_user_can'] = false;
-        unset( $_GET['titulo_id'] );
+        unset( $_GET['titulo_id'], $_GET['campeones_notice'] );
     }
 
     private function makePage(): TitleEditorPage {
@@ -391,5 +391,47 @@ class TitleEditorPageTest extends TestCase {
             $this->assertTrue( $row->esCapitan );
             $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 5 — every notice handlePost() computes was thrown away: render()
+    // never read $_GET['campeones_notice']. Cover both the create form
+    // branch (e.g. 'conflicto') and the title-found branch (e.g. 'vinculado').
+    // -------------------------------------------------------------------------
+
+    public function test_render_shows_an_error_notice_on_the_create_form_for_a_conflict(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        // No titulo_id in $_GET -> renderCreateForm() branch.
+        $_GET['campeones_notice'] = 'conflicto';
+
+        ob_start();
+        $this->makeTestablePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-error', $html );
+    }
+
+    public function test_render_shows_a_success_notice_for_vinculado_on_the_title_found_branch(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['titulo_id']         = (string) $this->tituloId;
+        $_GET['campeones_notice']  = 'vinculado';
+
+        ob_start();
+        $this->makeTestablePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-success', $html );
+    }
+
+    public function test_render_shows_an_error_notice_for_error_vincular(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['titulo_id']        = (string) $this->tituloId;
+        $_GET['campeones_notice'] = 'error_vincular';
+
+        ob_start();
+        $this->makeTestablePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-error', $html );
     }
 }

@@ -95,6 +95,7 @@ class TitlesPage {
         $listTable->prepare_items();
 
         $addUrl = admin_url( 'admin.php?page=campeones-titulo-edit' );
+        $notice = $this->resolveNotice();
 
         ?>
         <div class="wrap">
@@ -103,9 +104,55 @@ class TitlesPage {
                     <?php echo esc_html__( 'Agregar nuevo', 'entre-redes-campeones' ); ?>
                 </a>
             </h1>
+            <?php if ( null !== $notice ) : ?>
+            <div class="notice notice-<?php echo esc_attr( $notice['type'] ); ?> is-dismissible">
+                <p><?php echo esc_html( $notice['message'] ); ?></p>
+            </div>
+            <?php endif; ?>
             <?php $listTable->display(); ?>
         </div>
         <?php
+    }
+
+    /**
+     * Resolves $_GET['campeones_notice'] (set by handlePost()'s PRG
+     * redirect) into a displayable message + notice type, mirroring
+     * entre-redes-prode's RegistryPage::render():80-99. Without this, a
+     * failed eliminar/revalidar looked exactly like a successful one — the
+     * page redirected either way and rendered nothing to tell them apart.
+     *
+     * @return array{message: string, type: string}|null
+     */
+    private function resolveNotice(): ?array {
+        // phpcs:ignore WordPress.Security.NonceVerification
+        if ( ! isset( $_GET['campeones_notice'] ) ) {
+            return null;
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification
+        $key = sanitize_text_field( (string) $_GET['campeones_notice'] );
+
+        if ( 'eliminado' === $key ) {
+            return [ 'message' => __( 'El título y su plantel fueron eliminados correctamente.', 'entre-redes-campeones' ), 'type' => 'success' ];
+        }
+
+        if ( 'error_eliminar' === $key ) {
+            return [ 'message' => __( 'Error al eliminar el título. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ];
+        }
+
+        if ( str_starts_with( $key, 'revalidado_' ) ) {
+            $count = (int) substr( $key, strlen( 'revalidado_' ) );
+            return [
+                'message' => sprintf(
+                    /* translators: %d: number of squad rows re-evaluated */
+                    __( 'Revalidación completa: %d fila(s) del plantel fueron re-evaluadas.', 'entre-redes-campeones' ),
+                    $count
+                ),
+                'type'    => 'success',
+            ];
+        }
+
+        return null;
     }
 
     // -------------------------------------------------------------------------
