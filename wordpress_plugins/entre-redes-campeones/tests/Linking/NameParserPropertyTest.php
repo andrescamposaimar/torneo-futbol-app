@@ -89,7 +89,11 @@ final class NameParserPropertyTest extends TestCase {
     }
 
     public function testNoSurnameIsComposedEntirelyOfParticleTokens(): void {
-        $particles = [ 'DE', 'DEL', 'EL', 'LA', 'LAS', 'LOS', 'VAN', 'VON', 'DA', 'DI', 'DOS' ];
+        // Consumes NameParser::particles() directly rather than hand-copying
+        // the list — this test is the mandatory guard against the bug class
+        // that consumed four review rounds, and it must not validate against
+        // a stale copy of the rule it is supposed to be checking.
+        $particles = NameParser::particles();
         $offenders = [];
 
         foreach ( self::$players as $player ) {

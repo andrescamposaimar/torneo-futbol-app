@@ -30,6 +30,18 @@ final class NameParser {
         'DE', 'DEL', 'EL', 'LA', 'LAS', 'LOS', 'VAN', 'VON', 'DA', 'DI', 'DOS',
     ];
 
+    /**
+     * The single source of truth for the particle list — exposed so that
+     * NameParserPropertyTest (the mandatory guard over the real 1105-title
+     * corpus) consumes the actual rule instead of hand-copying it. A private
+     * constant plus a hand-copied test list can silently drift; this cannot.
+     *
+     * @return string[]
+     */
+    public static function particles(): array {
+        return self::PARTICLES;
+    }
+
     public static function keyFor( string $raw ): ?PlayerKey {
         $commaPos = strpos( $raw, ',' );
 
