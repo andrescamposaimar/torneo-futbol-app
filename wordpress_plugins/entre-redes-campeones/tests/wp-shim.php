@@ -729,7 +729,7 @@ if ( ! function_exists( 'add_menu_page' ) ) {
 }
 
 if ( ! function_exists( 'add_submenu_page' ) ) {
-    function add_submenu_page( string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, ?int $position = null ): string|false {
+    function add_submenu_page( ?string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, ?int $position = null ): string|false {
         return $menu_slug;
     }
 }
