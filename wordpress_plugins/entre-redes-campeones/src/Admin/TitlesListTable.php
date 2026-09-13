@@ -67,33 +67,38 @@ class TitlesListTable extends \WP_List_Table {
     protected function column_acciones( $item ): string {
         $tituloId = (int) $item['id'];
         $editUrl  = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $tituloId );
+        $adminUrl = admin_url( 'admin.php?page=campeones' );
 
-        $revalidarNonce = wp_create_nonce( 'campeones_revalidar_' . $tituloId );
-        $eliminarNonce  = wp_create_nonce( 'campeones_eliminar_titulo_' . $tituloId );
-        $adminUrl       = admin_url( 'admin.php?page=campeones' );
-
-        return sprintf(
-            '<a href="%1$s">%2$s</a> | '
-            . '<form method="post" action="%3$s" style="display:inline;">'
-            . '<input type="hidden" name="campeones_titulo_action" value="revalidar">'
-            . '<input type="hidden" name="titulo_id" value="%4$d">'
-            . '<input type="hidden" name="campeones_titulo_nonce" value="%5$s">'
-            . '<button type="submit" class="button-link">%6$s</button></form> | '
-            . '<form method="post" action="%3$s" style="display:inline;" onsubmit="return confirm(\'%7$s\');">'
-            . '<input type="hidden" name="campeones_titulo_action" value="eliminar">'
-            . '<input type="hidden" name="titulo_id" value="%4$d">'
-            . '<input type="hidden" name="campeones_titulo_nonce" value="%8$s">'
-            . '<button type="submit" class="button-link submitdelete">%9$s</button></form>',
+        $editLink = sprintf(
+            '<a href="%s">%s</a>',
             esc_url( $editUrl ),
-            esc_html__( 'Editar', 'entre-redes-campeones' ),
-            esc_url( $adminUrl ),
-            $tituloId,
-            esc_attr( $revalidarNonce ),
-            esc_html__( 'Revalidar', 'entre-redes-campeones' ),
-            esc_js( __( '¿Eliminar este título y todo su plantel? Esta acción no se puede deshacer.', 'entre-redes-campeones' ) ),
-            esc_attr( $eliminarNonce ),
-            esc_html__( 'Eliminar', 'entre-redes-campeones' )
+            esc_html__( 'Editar', 'entre-redes-campeones' )
         );
+
+        $revalidarForm = ActionForm::render(
+            'campeones_titulo_action',
+            'revalidar',
+            $adminUrl,
+            [ 'titulo_id' => $tituloId ],
+            'campeones_titulo_nonce',
+            wp_create_nonce( 'campeones_revalidar_' . $tituloId ),
+            __( 'Revalidar', 'entre-redes-campeones' )
+        );
+
+        $eliminarForm = ActionForm::render(
+            'campeones_titulo_action',
+            'eliminar',
+            $adminUrl,
+            [ 'titulo_id' => $tituloId ],
+            'campeones_titulo_nonce',
+            wp_create_nonce( 'campeones_eliminar_titulo_' . $tituloId ),
+            __( 'Eliminar', 'entre-redes-campeones' ),
+            '',
+            __( '¿Eliminar este título y todo su plantel? Esta acción no se puede deshacer.', 'entre-redes-campeones' ),
+            'button-link submitdelete'
+        );
+
+        return $editLink . ' | ' . $revalidarForm . ' | ' . $eliminarForm;
     }
 
     /**

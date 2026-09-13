@@ -95,80 +95,74 @@ class SquadListTable extends \WP_List_Table {
      * @param array<string, mixed> $item
      */
     protected function column_acciones( $item ): string {
-        $plantelId = (int) $item['id'];
-        $nonce     = wp_create_nonce( 'campeones_link_' . $plantelId );
-        $adminUrl  = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $this->tituloId );
-        $isLinked  = ! empty( $item['jugador_id'] );
-        $linkLabel = $isLinked ? __( 'Cambiar', 'entre-redes-campeones' ) : __( 'Vincular', 'entre-redes-campeones' );
+        $plantelId  = (int) $item['id'];
+        $nonce      = wp_create_nonce( 'campeones_link_' . $plantelId );
+        $adminUrl   = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $this->tituloId );
+        $isLinked   = ! empty( $item['jugador_id'] );
+        $linkLabel  = $isLinked ? __( 'Cambiar', 'entre-redes-campeones' ) : __( 'Vincular', 'entre-redes-campeones' );
         $linkAction = $isLinked ? 'cambiar' : 'vincular';
+        $hiddenIds  = [ 'titulo_id' => $this->tituloId, 'plantel_id' => $plantelId ];
 
-        $html = sprintf(
-            '<form method="post" action="%1$s" style="display:inline;">'
-            . '<input type="hidden" name="campeones_editor_action" value="editar_fila">'
-            . '<input type="hidden" name="titulo_id" value="%7$d">'
-            . '<input type="hidden" name="plantel_id" value="%2$d">'
-            . '<input type="hidden" name="campeones_link_nonce" value="%3$s">'
-            . '<input type="text" name="jugador_nombre" value="%4$s" style="width:10em;">'
-            . '<label><input type="checkbox" name="es_capitan" value="1"%5$s> %6$s</label>'
-            . '<input type="hidden" name="orden" value="%8$d">'
-            . '<button type="submit" class="button-link">%9$s</button></form> ',
-            esc_url( $adminUrl ),
-            $plantelId,
-            esc_attr( $nonce ),
+        $editarExtra = sprintf(
+            '<input type="text" name="jugador_nombre" value="%s" style="width:10em;">'
+            . '<label><input type="checkbox" name="es_capitan" value="1"%s> %s</label>'
+            . '<input type="hidden" name="orden" value="%d">',
             esc_attr( (string) ( $item['jugador_nombre'] ?? '' ) ),
             ! empty( $item['es_capitan'] ) ? ' checked' : '',
             esc_html__( 'Capitán', 'entre-redes-campeones' ),
-            $this->tituloId,
-            (int) ( $item['orden'] ?? 0 ),
-            esc_html__( 'Guardar', 'entre-redes-campeones' )
+            (int) ( $item['orden'] ?? 0 )
         );
 
-        $html .= sprintf(
-            '<form method="post" action="%1$s" style="display:inline;">'
-            . '<input type="hidden" name="campeones_editor_action" value="%2$s">'
-            . '<input type="hidden" name="titulo_id" value="%7$d">'
-            . '<input type="hidden" name="plantel_id" value="%3$d">'
-            . '<input type="hidden" name="campeones_link_nonce" value="%4$s">'
-            . '<input type="number" name="jugador_id" placeholder="%5$s" style="width:6em;">'
-            . '<button type="submit" class="button-link">%6$s</button></form>',
-            esc_url( $adminUrl ),
-            esc_attr( $linkAction ),
-            $plantelId,
-            esc_attr( $nonce ),
-            esc_attr__( 'ID jugador', 'entre-redes-campeones' ),
-            esc_html( $linkLabel ),
-            $this->tituloId
+        $html = ActionForm::render(
+            'campeones_editor_action',
+            'editar_fila',
+            $adminUrl,
+            $hiddenIds,
+            'campeones_link_nonce',
+            $nonce,
+            __( 'Guardar', 'entre-redes-campeones' ),
+            $editarExtra
+        ) . ' ';
+
+        $linkExtra = sprintf(
+            '<input type="number" name="jugador_id" placeholder="%s" style="width:6em;">',
+            esc_attr__( 'ID jugador', 'entre-redes-campeones' )
+        );
+
+        $html .= ActionForm::render(
+            'campeones_editor_action',
+            $linkAction,
+            $adminUrl,
+            $hiddenIds,
+            'campeones_link_nonce',
+            $nonce,
+            $linkLabel,
+            $linkExtra
         );
 
         if ( $isLinked ) {
-            $html .= sprintf(
-                ' <form method="post" action="%1$s" style="display:inline;">'
-                . '<input type="hidden" name="campeones_editor_action" value="desvincular">'
-                . '<input type="hidden" name="titulo_id" value="%5$d">'
-                . '<input type="hidden" name="plantel_id" value="%2$d">'
-                . '<input type="hidden" name="campeones_link_nonce" value="%3$s">'
-                . '<button type="submit" class="button-link">%4$s</button></form>',
-                esc_url( $adminUrl ),
-                $plantelId,
-                esc_attr( $nonce ),
-                esc_html__( 'Desvincular', 'entre-redes-campeones' ),
-                $this->tituloId
+            $html .= ' ' . ActionForm::render(
+                'campeones_editor_action',
+                'desvincular',
+                $adminUrl,
+                $hiddenIds,
+                'campeones_link_nonce',
+                $nonce,
+                __( 'Desvincular', 'entre-redes-campeones' )
             );
         }
 
-        $html .= sprintf(
-            ' <form method="post" action="%1$s" style="display:inline;" onsubmit="return confirm(\'%2$s\');">'
-            . '<input type="hidden" name="campeones_editor_action" value="eliminar_fila">'
-            . '<input type="hidden" name="titulo_id" value="%6$d">'
-            . '<input type="hidden" name="plantel_id" value="%3$d">'
-            . '<input type="hidden" name="campeones_link_nonce" value="%4$s">'
-            . '<button type="submit" class="button-link submitdelete">%5$s</button></form>',
-            esc_url( $adminUrl ),
-            esc_js( __( '¿Eliminar esta fila del plantel?', 'entre-redes-campeones' ) ),
-            $plantelId,
-            esc_attr( $nonce ),
-            esc_html__( 'Eliminar', 'entre-redes-campeones' ),
-            $this->tituloId
+        $html .= ' ' . ActionForm::render(
+            'campeones_editor_action',
+            'eliminar_fila',
+            $adminUrl,
+            $hiddenIds,
+            'campeones_link_nonce',
+            $nonce,
+            __( 'Eliminar', 'entre-redes-campeones' ),
+            '',
+            __( '¿Eliminar esta fila del plantel?', 'entre-redes-campeones' ),
+            'button-link submitdelete'
         );
 
         return $html;
