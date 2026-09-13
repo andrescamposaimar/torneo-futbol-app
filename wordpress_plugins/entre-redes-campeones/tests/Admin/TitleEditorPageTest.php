@@ -208,10 +208,12 @@ class TitleEditorPageTest extends TestCase {
 
     public function test_handle_add_row_inserts_and_resolves_it(): void {
         // BASSO, A. resolves auto against the fixture directory (id 5078).
-        $newId = $this->invoke( 'handleAddRow', $this->tituloId, 'BASSO, A.', false );
+        $result = $this->invoke( 'handleAddRow', $this->tituloId, 'BASSO, A.', false );
 
-        $this->assertIsInt( $newId );
-        $row = $this->squads->find( $newId );
+        $this->assertTrue( $result->rowSaved );
+        $this->assertTrue( $result->linkResolved );
+        $this->assertIsInt( $result->rowId );
+        $row = $this->squads->find( $result->rowId );
         $this->assertSame( 'BASSO, A.', $row->jugadorNombre );
         $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
         $this->assertSame( 5078, $row->jugadorId );
@@ -219,9 +221,9 @@ class TitleEditorPageTest extends TestCase {
 
     public function test_handle_add_row_appends_at_the_next_orden(): void {
         $this->invoke( 'handleAddRow', $this->tituloId, 'BASSO, A.', false );
-        $secondId = $this->invoke( 'handleAddRow', $this->tituloId, 'CALELLO, G.', true );
+        $second = $this->invoke( 'handleAddRow', $this->tituloId, 'CALELLO, G.', true );
 
-        $row = $this->squads->find( $secondId );
+        $row = $this->squads->find( $second->rowId );
         $this->assertSame( 1, $row->orden );
         $this->assertTrue( $row->esCapitan );
     }
@@ -231,9 +233,10 @@ class TitleEditorPageTest extends TestCase {
         // Insert leaves the row at its SquadRepository::insert() default
         // (sin_candidato) — the editor must re-resolve on a name change.
 
-        $ok = $this->invoke( 'handleEditRow', $id, 'BASSO, A.', false, 0 );
+        $result = $this->invoke( 'handleEditRow', $id, 'BASSO, A.', false, 0 );
 
-        $this->assertTrue( $ok );
+        $this->assertTrue( $result->rowSaved );
+        $this->assertTrue( $result->linkResolved );
         $row = $this->squads->find( $id );
         $this->assertSame( 'BASSO, A.', $row->jugadorNombre );
         $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
@@ -251,9 +254,10 @@ class TitleEditorPageTest extends TestCase {
             new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::SIN_CANDIDATO )
         );
 
-        $ok = $this->invoke( 'handleEditRow', $id, 'BASSO, A.', true, 0 );
+        $result = $this->invoke( 'handleEditRow', $id, 'BASSO, A.', true, 0 );
 
-        $this->assertTrue( $ok );
+        $this->assertTrue( $result->rowSaved );
+        $this->assertTrue( $result->linkResolved );
         $row = $this->squads->find( $id );
         $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
         $this->assertSame( 5078, $row->jugadorId );
@@ -266,9 +270,10 @@ class TitleEditorPageTest extends TestCase {
         );
 
         // Even changing the captain flag must not disturb a manual link.
-        $ok = $this->invoke( 'handleEditRow', $id, 'MAZZARA, M.', true, 0 );
+        $result = $this->invoke( 'handleEditRow', $id, 'MAZZARA, M.', true, 0 );
 
-        $this->assertTrue( $ok );
+        $this->assertTrue( $result->rowSaved );
+        $this->assertTrue( $result->linkResolved );
         $row = $this->squads->find( $id );
         $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
         $this->assertSame( 999999, $row->jugadorId );
@@ -283,13 +288,15 @@ class TitleEditorPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
-    // Item 6 — handleAddRow()/handleEditRow() reported success even when
+    // Item 6 (now item 3's rowSaved/linkResolved split) —
+    // handleAddRow()/handleEditRow() reported success even when
     // applyResolution()'s write failed. Force the resolution write to fail
     // while the row's own insert/update still succeeds, and prove the
-    // reported outcome now reflects that.
+    // reported outcome distinguishes "the row was saved" from "its link was
+    // resolved" instead of collapsing both into one boolean/nullable.
     // -------------------------------------------------------------------------
 
-    public function test_handle_add_row_reports_failure_when_the_resolution_write_fails(): void {
+    public function test_handle_add_row_reports_the_row_as_saved_but_unresolved_when_the_resolution_write_fails(): void {
         global $wpdb;
         $original = $wpdb;
         $failing  = new FailingResolutionApplyWpdb();
@@ -315,13 +322,16 @@ class TitleEditorPageTest extends TestCase {
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleAddRow' );
             $result = $ref->invoke( $page, $title->id, 'BASSO, A.', false );
 
-            $this->assertNull( $result, 'A failed resolution write must not be reported as a successful add.' );
+            $this->assertTrue( $result->rowSaved, 'The row insert itself did not fail — it must still be reported as saved.' );
+            $this->assertFalse( $result->linkResolved, 'A failed resolution write must not be reported as resolved.' );
+            $this->assertIsInt( $result->rowId );
+            $this->assertNotNull( $squads->find( $result->rowId ), 'The row must actually exist in the database.' );
         } finally {
             $wpdb = $original;
         }
     }
 
-    public function test_handle_edit_row_reports_failure_when_the_resolution_write_fails(): void {
+    public function test_handle_edit_row_reports_the_row_as_saved_but_unresolved_when_the_resolution_write_fails(): void {
         global $wpdb;
         $original = $wpdb;
         $failing  = new FailingResolutionApplyWpdb();
@@ -348,7 +358,8 @@ class TitleEditorPageTest extends TestCase {
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleEditRow' );
             $result = $ref->invoke( $page, $id, 'BASSO, A.', false, 0 );
 
-            $this->assertFalse( $result, 'A failed resolution write must not be reported as a successful edit.' );
+            $this->assertTrue( $result->rowSaved, 'The field update itself did not fail — it must still be reported as saved.' );
+            $this->assertFalse( $result->linkResolved, 'A failed resolution write must not be reported as resolved.' );
         } finally {
             $wpdb = $original;
         }
@@ -754,6 +765,103 @@ class TitleEditorPageTest extends TestCase {
             $row = $this->squads->find( $rowInOtherTitle );
             $this->assertNull( $row->jugadorId, 'A cross-title vincular must never set the pointer.' );
             $this->assertSame( 'sin_candidato', $row->estadoVinculo );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 3 — when the row insert/update succeeded but applyResolution()
+    // then failed, handleAddRow()/handleEditRow() returned null/false and
+    // handlePost() reported the SAME generic 'error_fila' ("Error al guardar
+    // la fila. Intentá nuevamente.") it uses for an outright failure. The
+    // row WAS saved; telling the operator to retry produces a duplicate row
+    // (agregar_fila) or re-runs an edit that already landed (editar_fila).
+    // Both paths now get their own notice key and honest copy.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_agregar_fila_reports_a_saved_row_whose_link_could_not_be_resolved(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+
+            $_POST['campeones_editor_action'] = 'agregar_fila';
+            $_POST['titulo_id']               = (string) $title->id;
+            $_POST['jugador_nombre']          = 'BASSO, A.';
+            $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $title->id );
+
+            $this->expectException( RedirectTerminatedException::class );
+            try {
+                $page->handlePost();
+            } finally {
+                $this->assertStringContainsString(
+                    'campeones_notice=fila_agregada_sin_vinculo',
+                    (string) $GLOBALS['_campeones_test_last_redirect'],
+                    'A saved row whose resolution write failed must get its own notice, never the generic "try again" one.'
+                );
+                $savedRows = $squads->findByTitle( $title->id );
+                $this->assertCount( 1, $savedRows, 'The row must exist — telling the operator to retry here would create a duplicate.' );
+            }
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    public function test_handle_post_editar_fila_reports_a_saved_row_whose_link_could_not_be_resolved(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+            $id     = $squads->insert( new SquadEntry( $title->id, 0, 'ZUBIZARRETA, F.' ) );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+
+            $_POST['campeones_editor_action'] = 'editar_fila';
+            $_POST['titulo_id']               = (string) $title->id;
+            $_POST['plantel_id']              = (string) $id;
+            $_POST['jugador_nombre']          = 'BASSO, A.';
+            $_POST['orden']                   = '0';
+            $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+            $this->expectException( RedirectTerminatedException::class );
+            try {
+                $page->handlePost();
+            } finally {
+                $this->assertStringContainsString(
+                    'campeones_notice=fila_actualizada_sin_vinculo',
+                    (string) $GLOBALS['_campeones_test_last_redirect'],
+                    'A saved edit whose re-resolution failed must get its own notice, never the generic "try again" one.'
+                );
+                $row = $squads->find( $id );
+                $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'The field edit must still have landed.' );
+            }
+        } finally {
+            $wpdb = $original;
         }
     }
 

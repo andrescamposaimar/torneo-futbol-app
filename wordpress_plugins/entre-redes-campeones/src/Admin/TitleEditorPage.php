@@ -107,12 +107,16 @@ class TitleEditorPage {
                     break;
 
                 case 'agregar_fila':
-                    $newRowId = $this->handleAddRow(
+                    $addResult = $this->handleAddRow(
                         $tituloId,
                         sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
                         ! empty( $_POST['es_capitan'] )
                     );
-                    $notice = null !== $newRowId ? 'fila_agregada' : 'error_fila';
+                    $notice = match ( true ) {
+                        ! $addResult->rowSaved => 'error_fila',
+                        ! $addResult->linkResolved => 'fila_agregada_sin_vinculo',
+                        default => 'fila_agregada',
+                    };
                     break;
 
                 case 'editar_fila':
@@ -121,12 +125,17 @@ class TitleEditorPage {
                         $notice = 'error_fila_ajena';
                         break;
                     }
-                    $notice = $this->handleEditRow(
+                    $editResult = $this->handleEditRow(
                         $plantelId,
                         sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
                         ! empty( $_POST['es_capitan'] ),
                         absint( $_POST['orden'] ?? 0 )
-                    ) ? 'fila_actualizada' : 'error_fila';
+                    );
+                    $notice = match ( true ) {
+                        ! $editResult->rowSaved => 'error_fila',
+                        ! $editResult->linkResolved => 'fila_actualizada_sin_vinculo',
+                        default => 'fila_actualizada',
+                    };
                     break;
 
                 case 'eliminar_fila':
@@ -386,7 +395,9 @@ class TitleEditorPage {
             'actualizado'      => [ 'message' => __( 'Los datos del título fueron actualizados.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_actualizar' => [ 'message' => __( 'Error al actualizar el título. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'fila_agregada'    => [ 'message' => __( 'El jugador fue agregado al plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'fila_agregada_sin_vinculo' => [ 'message' => __( 'El jugador fue agregado al plantel, pero no se pudo evaluar su vínculo. Usá "Revalidar" o vinculalo manualmente.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_actualizada' => [ 'message' => __( 'La fila fue actualizada.', 'entre-redes-campeones' ), 'type' => 'success' ],
+            'fila_actualizada_sin_vinculo' => [ 'message' => __( 'La fila fue actualizada, pero no se pudo re-evaluar su vínculo. Usá "Revalidar" o vinculalo manualmente.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_eliminada'   => [ 'message' => __( 'La fila fue eliminada del plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_fila'       => [ 'message' => __( 'Error al guardar la fila. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'vinculado'        => [ 'message' => __( 'El jugador fue vinculado.', 'entre-redes-campeones' ), 'type' => 'success' ],
@@ -418,16 +429,19 @@ class TitleEditorPage {
      * Adds a squad row and immediately runs LinkResolver over it (LINK-1) —
      * a manually-added row is resolved exactly like an imported one.
      *
-     * Returns null if applyResolution()'s write fails, even though the row
-     * itself was already inserted — the row is left in the plain
-     * `sin_candidato` state insert() gave it (visible and re-revalidatable
-     * later), but the caller is never told this add fully succeeded when
-     * the resolution it promised silently did not happen (item 6).
+     * Returns a RowSaveResult whose rowSaved/linkResolved are independent
+     * (item 3): rowSaved is true as soon as the insert lands, regardless of
+     * what happens next. If applyResolution()'s write then fails, the row
+     * stays in the plain `sin_candidato` state insert() gave it — visible
+     * and re-revalidatable later — and linkResolved is false so the caller
+     * can tell "the row exists but its link needs attention" apart from
+     * "nothing was saved at all". Telling an operator to retry when the row
+     * already exists would create a duplicate (item 3).
      */
-    private function handleAddRow( int $tituloId, string $jugadorNombre, bool $esCapitan ): ?int {
+    private function handleAddRow( int $tituloId, string $jugadorNombre, bool $esCapitan ): RowSaveResult {
         $title = $this->titles->find( $tituloId );
         if ( null === $title ) {
-            return null;
+            return RowSaveResult::notSaved();
         }
 
         $orden = count( $this->squads->findByTitle( $tituloId ) );
@@ -436,12 +450,10 @@ class TitleEditorPage {
             new SquadEntry( $tituloId, $orden, $jugadorNombre, $esCapitan, 'sin_candidato', null, NameNormalizer::normalize( $jugadorNombre ) )
         );
 
-        $resolution = $this->resolver->resolve( $jugadorNombre, $title->anio );
-        if ( ! $this->linkWriter->applyResolution( $id, $resolution ) ) {
-            return null;
-        }
+        $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );
+        $linkResolved = $this->linkWriter->applyResolution( $id, $resolution );
 
-        return $id;
+        return RowSaveResult::saved( $id, $linkResolved );
     }
 
     /**
@@ -459,14 +471,20 @@ class TitleEditorPage {
      * row is still never touched, regardless of what changed
      * (see test_handle_edit_row_never_re_resolves_a_manual_row and
      * test_handle_edit_row_re_resolves_even_when_only_the_captain_flag_changes).
+     *
+     * Returns a RowSaveResult whose rowSaved/linkResolved are independent
+     * (item 3), for the same reason as handleAddRow(): if the field update
+     * succeeds but the follow-up re-resolution then fails, the edit DID
+     * land — reporting the same generic failure a fully-failed edit gets
+     * would tell the operator to retry an edit that already happened.
      */
-    private function handleEditRow( int $rowId, string $jugadorNombre, bool $esCapitan, int $orden ): bool {
+    private function handleEditRow( int $rowId, string $jugadorNombre, bool $esCapitan, int $orden ): RowSaveResult {
         $entry = $this->squads->find( $rowId );
         if ( null === $entry ) {
-            return false;
+            return RowSaveResult::notSaved();
         }
 
-        $ok = $this->squads->update(
+        $fieldsSaved = $this->squads->update(
             $rowId,
             [
                 'jugador_nombre'      => $jugadorNombre,
@@ -476,18 +494,23 @@ class TitleEditorPage {
             ]
         );
 
-        if ( $ok && LinkState::MANUAL !== $entry->estadoVinculo ) {
-            $title = $this->titles->find( $entry->tituloId );
-            if ( null !== $title ) {
-                $resolution = $this->resolver->resolve( $jugadorNombre, $title->anio );
-                // Fold the resolution write's own result into $ok (item 6) —
-                // the row's name/captain/orden fields did save, but a failed
-                // re-resolution must not be reported as a successful edit.
-                $ok = $this->linkWriter->applyResolution( $rowId, $resolution ) && $ok;
-            }
+        if ( ! $fieldsSaved ) {
+            return RowSaveResult::notSaved();
         }
 
-        return $ok;
+        if ( LinkState::MANUAL === $entry->estadoVinculo ) {
+            return RowSaveResult::saved( $rowId, true );
+        }
+
+        $title = $this->titles->find( $entry->tituloId );
+        if ( null === $title ) {
+            return RowSaveResult::saved( $rowId, true );
+        }
+
+        $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );
+        $linkResolved = $this->linkWriter->applyResolution( $rowId, $resolution );
+
+        return RowSaveResult::saved( $rowId, $linkResolved );
     }
 
     private function handleDeleteRow( int $rowId ): bool {
