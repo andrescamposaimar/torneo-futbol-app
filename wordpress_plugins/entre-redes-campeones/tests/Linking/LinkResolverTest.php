@@ -120,10 +120,31 @@ final class LinkResolverTest extends TestCase {
         $this->assertSame( 4753, $resolution->playerId );
     }
 
-    public function testNoCandidateStaysUnlinkedAndDisplayable(): void {
-        // The curated fixture deliberately has no {MAZZARA, M} candidate
-        // (see tests/Fixtures/players.php's docblock).
+    public function testMazzaraMAutoLinksNowThatTheRealCandidateIsInTheFixture(): void {
+        // Corrected: `MAZZARA, M.` was previously asserted `sin_candidato`
+        // against a fixture that deliberately excluded the one real player
+        // who matches. Id 4739 (Mazzara, Mauro) IS a real, published
+        // `sp_player` row keying {MAZZARA, M} (verified against
+        // wordpress_sql/entrered_wp257.sql — see tests/Fixtures/players.php).
+        // 2011 is pre-2016, so LINK-3 skips season narrowing entirely; the
+        // candidate set is exactly one and the real outcome is `auto`.
         $resolution = $this->resolver->resolve( 'MAZZARA, M.', 2011 );
+
+        $this->assertSame( LinkState::AUTO, $resolution->estado );
+        $this->assertSame( 4739, $resolution->playerId );
+    }
+
+    public function testNoCandidateStaysUnlinkedAndDisplayable(): void {
+        // `ZUBIZARRETA, F.` genuinely has zero candidates in the real
+        // directory — verified two ways: (1) running NameParser::keyFor()
+        // over all 1105 real, published sp_player titles in
+        // tests/Fixtures/player_titles.php produces no {ZUBIZARRETA, F}
+        // (and no {ZUBIZARRETA, *}) key at all; (2) the raw string
+        // "zubizarreta" (case-insensitive) does not appear anywhere in
+        // wordpress_sql/entrered_wp257.sql. Unlike the previous MAZZARA
+        // example, this is a genuine zero-candidate name, not an artifact
+        // of a curated fixture that happens to omit someone.
+        $resolution = $this->resolver->resolve( 'ZUBIZARRETA, F.', 2011 );
 
         $this->assertSame( LinkState::SIN_CANDIDATO, $resolution->estado );
         $this->assertNull( $resolution->playerId );

@@ -11,16 +11,21 @@ declare(strict_types=1);
  * per test scenario, not scraped from wp_terms — LinkResolver only needs
  * season coverage per year, which this file supplies directly.
  *
- * Deliberately excluded: id 4739 ("Mazzara, Mauro", key {MAZZARA, M}).
- * The real directory DOES contain a MAZZARA-M candidate, so a production
- * "MAZZARA, M." entry for 2011 would in fact resolve `auto` to 4739, not
- * `sin_candidato`. The design's LinkResolverTest scenario illustrates the
- * `sin_candidato` outcome against this curated fixture, not against the
- * full real directory — see the apply-progress risk note for this slice.
+ * Corrected: id 4739 ("Mazzara, Mauro", key {MAZZARA, M}) was previously
+ * excluded from this fixture specifically so a "MAZZARA, M." entry would
+ * resolve `sin_candidato` in LinkResolverTest. That was wrong: 4739 is a
+ * real, published `sp_player` row, and omitting a real registered player
+ * to manufacture a desired test outcome is exactly the defect this fixture
+ * must never contain — a fixture is supposed to describe the directory,
+ * not be shaped to fit a claim about it. 4739 is included below with its
+ * real seasons (2016-2019, verified against wordpress_sql/entrered_wp257.sql).
+ * `ZUBIZARRETA, F.` is used as the genuine zero-candidate example instead —
+ * see LinkResolverTest's docblock for how that name was verified.
  *
  * @return array<int, array{id: int, title: string, seasons: string[]}>
  */
 return [
+    [ 'id' => 4739, 'title' => 'Mazzara, Mauro', 'seasons' => [ '2016', '2017', '2018', '2019' ] ],
     [ 'id' => 5078, 'title' => 'Basso, Alejandro', 'seasons' => [ '2016' ] ],
     [ 'id' => 2225, 'title' => 'Garcia, Miguel Luis', 'seasons' => [ '2016' ] ],
     [ 'id' => 2461, 'title' => 'Garcia, Marcelo Daniel', 'seasons' => [ '2016' ] ],
