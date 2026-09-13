@@ -69,10 +69,19 @@ final class NameParser {
             return self::validate( new PlayerKey( $tokens[0], '' ) );
         }
 
+        // A two-token name whose first token is itself a particle (e.g.
+        // "De Something") has no real given name to take an initial from —
+        // reject rather than guess. Together with the absorption loop below,
+        // this is what produces the flagship accepted miss.
         if ( 2 === $count && in_array( $tokens[0], self::PARTICLES, true ) ) {
             return null;
         }
 
+        // Everything before the stopping point is discarded BY DESIGN, not
+        // merely absorbed into the surname — a middle given name is thrown
+        // away entirely once the loop stops. This is the accepted miss:
+        // "Gabriel Garcia Conejero" keys as {CONEJERO, G}, deliberately
+        // discarding "GARCIA" (see AcceptedMissesTest, ADR-C1).
         $i = $count - 1;
         while ( $i > 1 && self::isAbsorbable( $tokens[ $i - 1 ] ) ) {
             $i--;

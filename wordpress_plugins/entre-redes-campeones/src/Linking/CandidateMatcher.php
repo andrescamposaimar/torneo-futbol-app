@@ -18,6 +18,12 @@ final class CandidateMatcher {
             return false;
         }
 
+        // An empty initial is treated as a wildcard on either side. This is
+        // only safe because NameParser::keyFor() guarantees the invariant
+        // stated in its own class docblock: initial === '' if and only if
+        // the name reduces to exactly one token. If NameParser ever starts
+        // emitting '' more liberally, this starts over-matching silently —
+        // nothing here would stop it.
         return '' === $entry->initial
             || '' === $candidate->initial
             || $entry->initial === $candidate->initial;
