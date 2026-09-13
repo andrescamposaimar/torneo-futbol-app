@@ -363,13 +363,17 @@ class TitlesPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
-    // Item 7 — PlayerDirectoryQueryException is caught nowhere in
-    // src/Admin/. handleRevalidate() runs LinkResolver over every
-    // resolvable row in the year; a broken directory read must redirect
-    // with a distinct notice instead of a fatal mid-loop.
+    // Item 6/7 — a PlayerDirectoryQueryException from a resolvable row used
+    // to propagate all the way out of RevalidationService::revalidateYear()
+    // and abort the whole pass; TitlesPage::handlePost() then caught it and
+    // showed a bare error_directorio, with no indication whether 0 rows or
+    // most of them had been processed before the throw. revalidateYear()
+    // now catches per row and continues (item 6), so this must surface as
+    // a revalidado_{succeeded}_{total} notice reflecting the real outcome,
+    // never a fatal mid-loop and never a content-free generic error.
     // -------------------------------------------------------------------------
 
-    public function test_handle_post_revalidar_catches_a_directory_query_exception(): void {
+    public function test_handle_post_revalidar_reports_a_directory_query_failure_without_a_fatal(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
         global $wpdb;
@@ -392,9 +396,9 @@ class TitlesPageTest extends TestCase {
             $page->handlePost();
         } finally {
             $this->assertStringContainsString(
-                'campeones_notice=error_directorio',
+                'campeones_notice=revalidado_0_1',
                 (string) $GLOBALS['_campeones_test_last_redirect'],
-                'A directory query failure must redirect with a distinct notice, not fall through to a fatal.'
+                'A directory query failure for the only resolvable row must be reported as 0 of 1 succeeded, not a bare error_directorio that hides how many rows were attempted.'
             );
         }
     }

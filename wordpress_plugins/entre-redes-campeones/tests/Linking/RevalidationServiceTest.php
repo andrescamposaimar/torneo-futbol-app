@@ -11,6 +11,7 @@ use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Support\FailingResolutionApplyWpdb;
 use EntreRedes\Campeones\Tests\Support\PartialFailureResolutionApplyWpdb;
+use EntreRedes\Campeones\Tests\Support\PartiallyThrowingPlayerDirectory;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -218,5 +219,46 @@ class RevalidationServiceTest extends TestCase {
         } finally {
             $wpdb = $original;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 6 — a mid-loop PlayerDirectoryQueryException used to propagate
+    // straight out of revalidateYear(), aborting the rest of the year. Rows
+    // already written stayed durable, but the operator had no way to tell
+    // whether 0 or 24 of 25 rows had been processed before the throw. It
+    // must be caught per row, continue to the remaining rows, and surface
+    // which row(s) broke.
+    // -------------------------------------------------------------------------
+
+    public function test_a_directory_query_exception_for_one_row_does_not_abort_the_rest_of_the_year(): void {
+        $rows      = require __DIR__ . '/../Fixtures/players.php';
+        $directory = new PartiallyThrowingPlayerDirectory(
+            FakePlayerDirectory::fromFixtureRows( $rows ),
+            'MAZZARA'
+        );
+
+        $service = new RevalidationService(
+            $this->titles,
+            $this->squads,
+            new LinkResolver( $directory ),
+            new LinkWriteService( $this->squads, $directory )
+        );
+
+        $healthyId = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+        $brokenId  = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 1, 'MAZZARA, M.', false, LinkState::SIN_CANDIDATO )
+        );
+
+        $result = $service->revalidateYear( $this->tituloId );
+
+        $this->assertSame( 1, $result->succeeded, 'The row that did not throw must still be resolved.' );
+        $this->assertSame( 2, $result->total );
+        $this->assertSame( [ $brokenId ], $result->directoryErrorRowIds, 'The broken row must be identified, not merely counted as a failure.' );
+
+        $healthyRow = $this->squads->find( $healthyId );
+        $this->assertSame( LinkState::AUTO, $healthyRow->estadoVinculo, 'A directory failure on one row must not stop the rest of the year from being processed.' );
+
+        $brokenRow = $this->squads->find( $brokenId );
+        $this->assertSame( LinkState::SIN_CANDIDATO, $brokenRow->estadoVinculo, 'The broken row must be left exactly as it was.' );
     }
 }

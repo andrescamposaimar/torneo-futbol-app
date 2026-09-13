@@ -49,14 +49,34 @@ final class RevalidationService {
 
         $entries = $this->squads->findResolvableByTitle( $tituloId );
 
-        $succeeded = 0;
+        $succeeded         = 0;
+        $directoryErrorIds = [];
+
         foreach ( $entries as $entry ) {
-            $resolution = $this->resolver->resolve( $entry->jugadorNombre, $title->anio );
+            try {
+                $resolution = $this->resolver->resolve( $entry->jugadorNombre, $title->anio );
+            } catch ( PlayerDirectoryQueryException $e ) {
+                // Item 6: a broken directory read for THIS row must not
+                // abort the rest of the year. Rows already written are
+                // durable, and the remaining rows are independent
+                // reads/writes with nothing to do with the one that just
+                // failed — continue, and surface which row(s) broke instead
+                // of losing visibility mid-loop.
+                error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                    'entre-redes-campeones: revalidation could not query the player directory for plantel_id=%d (titulo_id=%d). %s',
+                    $entry->id,
+                    $tituloId,
+                    $e->getMessage()
+                ) );
+                $directoryErrorIds[] = $entry->id;
+                continue;
+            }
+
             if ( $this->writer->applyResolution( (int) $entry->id, $resolution ) ) {
                 ++$succeeded;
             }
         }
 
-        return new RevalidationResult( $succeeded, count( $entries ) );
+        return new RevalidationResult( $succeeded, count( $entries ), $directoryErrorIds );
     }
 }
