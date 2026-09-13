@@ -26,9 +26,12 @@ use EntreRedes\Campeones\Titles\WriteFailedException;
  * search (PlayerSearch / the autocomplete endpoint) is slice 5's job —
  * building it here would duplicate work and pre-empt that design.
  *
- * Any squad row add/edit that changes the stored name re-runs LinkResolver
- * (LINK-1) unless the row is already `manual` — a human decision is never
- * silently re-evaluated by a routine header/name touch-up.
+ * A squad row add always runs LinkResolver (LINK-1) over it. A row edit
+ * re-runs it too, on EVERY successful edit of a row that is not already
+ * `manual` — not only when the stored name changes, but also on a
+ * captain-flag-only or order-only touch-up (see handleEditRow()'s own
+ * docblock for why). A `manual` row is never silently re-evaluated by any
+ * of this — a human decision stands until a human changes it.
  *
  * Security, identical to TitlesPage / entre-redes-prode's RegistryPage:
  * manage_options re-checked in both render() and handlePost(); PRG after
