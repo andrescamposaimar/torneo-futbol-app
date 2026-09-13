@@ -70,7 +70,7 @@ class TitleEditorPageTest extends TestCase {
             $this->titles,
             $this->squads,
             new LinkResolver( $directory ),
-            new LinkWriteService( $this->squads )
+            new LinkWriteService( $this->squads, $directory )
         );
     }
 
@@ -87,7 +87,7 @@ class TitleEditorPageTest extends TestCase {
             $this->titles,
             $this->squads,
             new LinkResolver( $directory ),
-            new LinkWriteService( $this->squads )
+            new LinkWriteService( $this->squads, $directory )
         );
     }
 
@@ -289,7 +289,7 @@ class TitleEditorPageTest extends TestCase {
                 $titles,
                 $squads,
                 new LinkResolver( $directory ),
-                new LinkWriteService( $squads )
+                new LinkWriteService( $squads, $directory )
             );
 
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleAddRow' );
@@ -322,7 +322,7 @@ class TitleEditorPageTest extends TestCase {
                 $titles,
                 $squads,
                 new LinkResolver( $directory ),
-                new LinkWriteService( $squads )
+                new LinkWriteService( $squads, $directory )
             );
 
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleEditRow' );
@@ -413,6 +413,40 @@ class TitleEditorPageTest extends TestCase {
             $this->assertSame( 'BASSO, A.', $rows[0]->jugadorNombre );
             $this->assertTrue( $rows[0]->esCapitan );
             $this->assertSame( LinkState::AUTO, $rows[0]->estadoVinculo );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 8 — "Vincular" with an empty id silently became "Desvincular":
+    // absint($_POST['jugador_id'] ?? 0) ?: null collapses a missing/zero id
+    // into null, writing the same `manual`-with-no-pointer row as a real
+    // unlink. vincular/cambiar must require a non-zero id instead.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_vincular_rejects_a_missing_jugador_id(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'vincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'campeones_notice=error_id_requerido',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'Vincular with no id must report a distinct error, not silently become Desvincular.'
+            );
+
+            $row = $this->squads->find( $id );
+            $this->assertSame( 'sin_candidato', $row->estadoVinculo, 'A rejected Vincular must never write manual with no pointer.' );
+            $this->assertNull( $row->jugadorId );
         }
     }
 
@@ -521,8 +555,9 @@ class TitleEditorPageTest extends TestCase {
     public function test_handle_post_agregar_fila_catches_a_directory_query_exception(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
-        $throwingResolver = new LinkResolver( new ThrowingPlayerDirectory() );
-        $page             = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads ) );
+        $throwingDirectory = new ThrowingPlayerDirectory();
+        $throwingResolver  = new LinkResolver( $throwingDirectory );
+        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) );
 
         $_POST['campeones_editor_action'] = 'agregar_fila';
         $_POST['titulo_id']               = (string) $this->tituloId;
@@ -564,7 +599,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads ) );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
 
             $_POST['campeones_editor_action'] = 'crear_titulo';
             unset( $_POST['titulo_id'] );

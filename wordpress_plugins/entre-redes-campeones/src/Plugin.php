@@ -53,7 +53,7 @@ final class Plugin {
                 $squads    = new SquadRepository( $wpdb );
                 $directory = new WpPlayerDirectory( $wpdb );
                 $resolver  = new LinkResolver( $directory );
-                $writer    = new LinkWriteService( $squads );
+                $writer    = new LinkWriteService( $squads, $directory );
 
                 $titlesPage = new TitlesPage(
                     $titles,

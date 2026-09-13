@@ -73,7 +73,7 @@ class TitlesPageTest extends TestCase {
                 $this->titles,
                 $this->squads,
                 new LinkResolver( $directory ),
-                new LinkWriteService( $this->squads )
+                new LinkWriteService( $this->squads, $directory )
             )
         );
     }
@@ -232,11 +232,12 @@ class TitlesPageTest extends TestCase {
         global $wpdb;
         $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
 
-        $throwingResolver = new LinkResolver( new ThrowingPlayerDirectory() );
-        $page             = new TestableTitlesPage(
+        $throwingDirectory = new ThrowingPlayerDirectory();
+        $throwingResolver  = new LinkResolver( $throwingDirectory );
+        $page              = new TestableTitlesPage(
             $this->titles,
             new TitleDeletionService( $wpdb, $this->titles, $this->squads ),
-            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads ) )
+            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) )
         );
 
         $_POST['campeones_titulo_action'] = 'revalidar';

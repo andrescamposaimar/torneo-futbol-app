@@ -132,7 +132,17 @@ class TitleEditorPage {
 
                 case 'vincular':
                 case 'cambiar':
-                    $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), absint( $_POST['jugador_id'] ?? 0 ) ?: null )
+                    // A missing/zero jugador_id must be rejected here, before
+                    // it ever reaches handleSetLink() — absint(...) ?: null
+                    // would otherwise turn it into null, which is exactly the
+                    // desvincular write. Two buttons presented as opposites
+                    // must never collapse into the same write (item 8).
+                    $jugadorId = absint( $_POST['jugador_id'] ?? 0 );
+                    if ( 0 === $jugadorId ) {
+                        $notice = 'error_id_requerido';
+                        break;
+                    }
+                    $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), $jugadorId )
                         ? 'vinculado'
                         : 'error_vincular';
                     break;
@@ -346,6 +356,7 @@ class TitleEditorPage {
             'vinculado'        => [ 'message' => __( 'El jugador fue vinculado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'desvinculado'     => [ 'message' => __( 'El vínculo fue quitado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_vincular'   => [ 'message' => __( 'Error al modificar el vínculo. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'error_id_requerido' => [ 'message' => __( 'Ingresá un ID de jugador para vincular.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_directorio' => [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
             default            => null,
         };

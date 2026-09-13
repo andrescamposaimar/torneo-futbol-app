@@ -32,8 +32,11 @@ class LinkWriteServiceTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
 
+        $rows      = require __DIR__ . '/../Fixtures/players.php';
+        $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
         $this->squads  = new SquadRepository( $wpdb );
-        $this->service = new LinkWriteService( $this->squads );
+        $this->service = new LinkWriteService( $this->squads, $directory );
 
         $titles         = new TitleRepository( $wpdb );
         $title          = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
@@ -133,5 +136,18 @@ class LinkWriteServiceTest extends TestCase {
         $row = $this->squads->find( $id );
         $this->assertNull( $row->jugadorId );
         $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
+    }
+
+    public function test_set_manual_link_rejects_a_nonexistent_player_id(): void {
+        // Item 8: setManualLink() accepted any integer with no existence
+        // check, so a fat-fingered id created a dangling reference. 999999
+        // is not in the fixture directory.
+        $id = $this->insertEntry();
+
+        $this->assertFalse( $this->service->setManualLink( $id, 999999 ) );
+
+        $row = $this->squads->find( $id );
+        $this->assertSame( 'sin_candidato', $row->estadoVinculo, 'A rejected id must not become manual.' );
+        $this->assertNull( $row->jugadorId );
     }
 }

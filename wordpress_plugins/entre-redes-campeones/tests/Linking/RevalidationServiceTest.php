@@ -50,7 +50,7 @@ class RevalidationServiceTest extends TestCase {
             $this->titles,
             $this->squads,
             new LinkResolver( $directory ),
-            new LinkWriteService( $this->squads )
+            new LinkWriteService( $this->squads, $directory )
         );
     }
 
@@ -157,7 +157,7 @@ class RevalidationServiceTest extends TestCase {
                 $titles,
                 $squads,
                 new LinkResolver( $directory ),
-                new LinkWriteService( $squads )
+                new LinkWriteService( $squads, $directory )
             );
 
             $id = $squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );

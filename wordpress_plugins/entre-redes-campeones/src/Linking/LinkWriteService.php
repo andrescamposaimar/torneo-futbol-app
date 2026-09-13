@@ -16,7 +16,10 @@ use EntreRedes\Campeones\Titles\SquadRepository;
  */
 final class LinkWriteService {
 
-    public function __construct( private readonly SquadRepository $squads ) {
+    public function __construct(
+        private readonly SquadRepository $squads,
+        private readonly PlayerDirectoryInterface $directory
+    ) {
     }
 
     /**
@@ -42,8 +45,19 @@ final class LinkWriteService {
      * of the three transitions the row to `manual` — including clearing it,
      * which leaves the pointer null but is still `manual`, so re-validation
      * (LINK-9/LINK-10) never touches it again.
+     *
+     * A non-null $playerId is validated against the player directory first
+     * (item 8): TitleEditorPage already requires a non-zero id before
+     * calling this for vincular/cambiar, but that alone does not stop a
+     * fat-fingered, non-existent id from being written — this is the last
+     * line of defence against a dangling reference. $playerId === null
+     * (desvincular) is always accepted without a lookup.
      */
     public function setManualLink( int $squadEntryId, ?int $playerId ): bool {
+        if ( null !== $playerId && ! $this->directory->existsById( $playerId ) ) {
+            return false;
+        }
+
         return $this->squads->update(
             $squadEntryId,
             [
