@@ -64,18 +64,29 @@ class TitlesPage {
                 $result = $this->handleRevalidate( $tituloId );
                 $notice = sprintf( 'revalidado_%d_%d', $result->succeeded, $result->total );
             }
-        } catch ( PlayerDirectoryQueryException | WriteFailedException $e ) {
+        } catch ( PlayerDirectoryQueryException $e ) {
             // Neither exception is caught anywhere else in this class.
             // handleRevalidate() runs LinkResolver over every resolvable row
             // in the year; a broken directory read must not turn into a
             // fatal mid-loop (item 7).
             error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                'entre-redes-campeones: %s failed for titulo_id=%d. %s',
+                'entre-redes-campeones: %s failed for titulo_id=%d querying the player directory. %s',
                 $action,
                 $tituloId,
                 $e->getMessage()
             ) );
             $notice = 'error_directorio';
+        } catch ( WriteFailedException $e ) {
+            // Item 4: a local DB write failure has nothing to do with the
+            // player directory — it must not share error_directorio's copy,
+            // which tells the operator to wait out an external dependency.
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: %s failed for titulo_id=%d writing to the database. %s',
+                $action,
+                $tituloId,
+                $e->getMessage()
+            ) );
+            $notice = 'error_guardado';
         }
 
         wp_safe_redirect( add_query_arg( 'campeones_notice', $notice, admin_url( 'admin.php?page=campeones' ) ) );
@@ -170,6 +181,10 @@ class TitlesPage {
 
         if ( 'error_directorio' === $key ) {
             return [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ];
+        }
+
+        if ( 'error_guardado' === $key ) {
+            return [ 'message' => __( 'Error al guardar los datos. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ];
         }
 
         if ( str_starts_with( $key, 'revalidado_' ) ) {

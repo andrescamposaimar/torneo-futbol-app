@@ -182,20 +182,34 @@ class TitleEditorPage {
                         : 'error_vincular';
                     break;
             }
-        } catch ( PlayerDirectoryQueryException | WriteFailedException $e ) {
+        } catch ( PlayerDirectoryQueryException $e ) {
             // Neither exception is caught anywhere else in this class. In
             // handleAddRow() specifically, the throw can happen AFTER the
             // row's own insert already committed — a fatal here would abort
             // the redirect mid-write and hand the operator WordPress's
             // critical-error screen instead of a notice they can act on.
             error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-                'entre-redes-campeones: %s failed for titulo_id=%d (plantel_id=%d). %s',
+                'entre-redes-campeones: %s failed for titulo_id=%d (plantel_id=%d) querying the player directory. %s',
                 $action,
                 $tituloId,
                 absint( $_POST['plantel_id'] ?? 0 ),
                 $e->getMessage()
             ) );
             $notice = 'error_directorio';
+        } catch ( WriteFailedException $e ) {
+            // Item 4: a local DB write failure has nothing to do with the
+            // player directory. Reporting it with error_directorio's copy
+            // ("Error al consultar el directorio de jugadores... esperá
+            // unos minutos") tells the operator to wait out an external
+            // dependency while their own database is what actually broke.
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: %s failed for titulo_id=%d (plantel_id=%d) writing to the database. %s',
+                $action,
+                $tituloId,
+                absint( $_POST['plantel_id'] ?? 0 ),
+                $e->getMessage()
+            ) );
+            $notice = 'error_guardado';
         }
 
         $redirectUrl = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $redirectTituloId );
@@ -406,6 +420,7 @@ class TitleEditorPage {
             'error_id_requerido' => [ 'message' => __( 'Ingresá un ID de jugador para vincular.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_fila_ajena' => [ 'message' => __( 'Esa fila no pertenece a este título.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_directorio' => [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'error_guardado'   => [ 'message' => __( 'Error al guardar los datos. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
             default            => null,
         };
     }

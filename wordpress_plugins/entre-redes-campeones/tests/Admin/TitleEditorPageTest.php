@@ -866,6 +866,12 @@ class TitleEditorPageTest extends TestCase {
     }
 
     public function test_handle_post_crear_titulo_catches_a_write_failed_exception(): void {
+        // Item 4: a WriteFailedException (a local DB write failure) was
+        // caught in the same block as PlayerDirectoryQueryException and
+        // reported with the SAME 'error_directorio' notice — "Error al
+        // consultar el directorio de jugadores" — which tells the operator
+        // to wait out an external dependency while their database write is
+        // what actually broke. This must get its own notice.
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
         global $wpdb;
@@ -897,9 +903,9 @@ class TitleEditorPageTest extends TestCase {
                 $page->handlePost();
             } finally {
                 $this->assertStringContainsString(
-                    'campeones_notice=error_directorio',
+                    'campeones_notice=error_guardado',
                     (string) $GLOBALS['_campeones_test_last_redirect'],
-                    'A failed insert must redirect with a distinct notice, not fall through to a fatal.'
+                    'A failed database write must never be reported with the player-directory notice.'
                 );
                 $this->assertSame(
                     '0',
