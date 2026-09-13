@@ -64,4 +64,69 @@ final class WpPlayerDirectoryTest extends TestCase {
         $this->expectException( PlayerDirectoryQueryException::class );
         $resolver->resolve( 'BASSO, A.', 2016 );
     }
+
+    public function test_bucketing_groups_players_by_surname_key(): void {
+        $directory = new WpPlayerDirectory( $this->wpdbForBucketingScenario() );
+
+        $basso = $directory->findBySurname( 'BASSO' );
+        $this->assertCount( 1, $basso );
+        $this->assertSame( 100, $basso[0]->id );
+
+        $garcia = $directory->findBySurname( 'GARCIA' );
+        $this->assertSame( [ 200, 300 ], array_map( static fn ( $p ) => $p->id, $garcia ) );
+    }
+
+    public function test_season_query_is_batched_and_seasons_attach_to_the_right_player(): void {
+        $directory = new WpPlayerDirectory( $this->wpdbForBucketingScenario() );
+
+        $basso = $directory->findBySurname( 'BASSO' )[0];
+        $this->assertSame( [ '2016', '2017' ], $basso->seasonNames );
+
+        [ $garciaM, $garciaA ] = $directory->findBySurname( 'GARCIA' );
+        $this->assertSame( [ '2018' ], $garciaM->seasonNames );
+        $this->assertSame( [], $garciaA->seasonNames, 'A player with no season rows must get an empty array, not null.' );
+    }
+
+    public function test_sp_current_team_sentinel_and_absence_both_map_to_null(): void {
+        $directory = new WpPlayerDirectory( $this->wpdbForBucketingScenario() );
+
+        $basso = $directory->findBySurname( 'BASSO' )[0];
+        $this->assertSame( 'River', $basso->currentTeamName );
+
+        [ $garciaM, $garciaA ] = $directory->findBySurname( 'GARCIA' );
+        $this->assertNull( $garciaM->currentTeamName, "The sp_current_team = '0' sentinel (surfaced as a NULL team_name by the LEFT JOIN) must map to null, not a broken team." );
+        $this->assertNull( $garciaA->currentTeamName, 'A player with no sp_current_team row at all must also map to null.' );
+    }
+
+    public function test_a_title_yielding_a_null_key_is_kept_out_of_every_surname_bucket(): void {
+        // 'De' is a single-token title that is itself a particle — NameParser
+        // returns null for it (design §3, ADR-C1). It must never surface
+        // under any surname bucket, including one keyed by its own raw text.
+        $directory = new WpPlayerDirectory( $this->wpdbForBucketingScenario() );
+
+        $this->assertSame( [], $directory->findBySurname( 'DE' ) );
+        $this->assertSame( [], $directory->findBySurname( '' ) );
+    }
+
+    private function wpdbForBucketingScenario(): FakeDirectoryWpdb {
+        return ( new FakeDirectoryWpdb() )
+            ->withPlayerRows( [
+                [ 'ID' => 100, 'post_title' => 'Basso, Alejandro' ],
+                [ 'ID' => 200, 'post_title' => 'Garcia, Miguel' ],
+                [ 'ID' => 300, 'post_title' => 'Garcia, Ana' ],
+                [ 'ID' => 400, 'post_title' => 'De' ],
+            ] )
+            ->withSeasonRows( [
+                [ 'player_id' => 100, 'season_name' => '2016' ],
+                [ 'player_id' => 100, 'season_name' => '2017' ],
+                [ 'player_id' => 200, 'season_name' => '2018' ],
+            ] )
+            ->withTeamRows( [
+                [ 'player_id' => 100, 'team_name' => 'River' ],
+                // sp_current_team = '0' sentinel: the LEFT JOIN yields a row
+                // with a NULL team_name, exactly as it would for a missing
+                // or unpublished team (runbook-prode-sin-equipo).
+                [ 'player_id' => 200, 'team_name' => null ],
+            ] );
+    }
 }

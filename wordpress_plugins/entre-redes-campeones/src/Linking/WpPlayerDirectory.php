@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Linking;
 
 /**
- * The ONLY WordPress-coupled file in the Linking domain (design §4). Not
- * shim-testable — the SQLite test shim has no sp_player posts, no
- * sp_season terms and no sp_current_team postmeta. Verified manually in
- * wp-admin during slice 3 (task 2.12): confirm the sp_current_team = '0'
- * sentinel renders "Sin equipo", not a broken team link
+ * The ONLY WordPress-coupled file in the Linking domain (design §4). Its
+ * SQL cannot run against the SQLite test shim — it has no sp_player posts,
+ * no sp_season terms and no sp_current_team postmeta — so WpPlayerDirectoryTest
+ * scripts a fake wpdb's get_results() calls directly instead of hitting real
+ * storage. That covers the bucketing, the season join and the
+ * sp_current_team = '0' sentinel mapping to null in this class's own code;
+ * it does NOT confirm wp-admin actually renders that null as "Sin equipo" —
+ * that remains a manual wp-admin check, still outstanding as of this slice
  * (runbook-prode-sin-equipo).
  *
  * The index is built once per request the first time it is needed — a
