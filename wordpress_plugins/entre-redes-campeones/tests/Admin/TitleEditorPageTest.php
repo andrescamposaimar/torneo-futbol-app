@@ -10,6 +10,7 @@ use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
+use EntreRedes\Campeones\Tests\Support\FailingResolutionApplyWpdb;
 use EntreRedes\Campeones\Tests\Support\RedirectTerminatedException;
 use EntreRedes\Campeones\Tests\Support\TestableTitleEditorPage;
 use EntreRedes\Campeones\Titles\SquadEntry;
@@ -257,6 +258,78 @@ class TitleEditorPageTest extends TestCase {
 
         $this->assertTrue( $this->invoke( 'handleDeleteRow', $id ) );
         $this->assertNull( $this->squads->find( $id ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 6 — handleAddRow()/handleEditRow() reported success even when
+    // applyResolution()'s write failed. Force the resolution write to fail
+    // while the row's own insert/update still succeeds, and prove the
+    // reported outcome now reflects that.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_add_row_reports_failure_when_the_resolution_write_fails(): void {
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $page = new TitleEditorPage(
+                $titles,
+                $squads,
+                new LinkResolver( $directory ),
+                new LinkWriteService( $squads )
+            );
+
+            $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleAddRow' );
+            $result = $ref->invoke( $page, $title->id, 'BASSO, A.', false );
+
+            $this->assertNull( $result, 'A failed resolution write must not be reported as a successful add.' );
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    public function test_handle_edit_row_reports_failure_when_the_resolution_write_fails(): void {
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+            $id     = $squads->insert( new SquadEntry( $title->id, 0, 'ZUBIZARRETA, F.' ) );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $page = new TitleEditorPage(
+                $titles,
+                $squads,
+                new LinkResolver( $directory ),
+                new LinkWriteService( $squads )
+            );
+
+            $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleEditRow' );
+            $result = $ref->invoke( $page, $id, 'BASSO, A.', false, 0 );
+
+            $this->assertFalse( $result, 'A failed resolution write must not be reported as a successful edit.' );
+        } finally {
+            $wpdb = $original;
+        }
     }
 
     // -------------------------------------------------------------------------

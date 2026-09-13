@@ -9,6 +9,7 @@ use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
+use EntreRedes\Campeones\Tests\Support\FailingResolutionApplyWpdb;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -129,5 +130,46 @@ class RevalidationServiceTest extends TestCase {
         $count = $this->service->revalidateYear( $this->tituloId );
 
         $this->assertSame( 1, $count, 'The manual row must not be counted among revalidated rows.' );
+    }
+
+    public function test_a_row_whose_resolution_write_fails_is_not_counted_as_revalidated(): void {
+        // Item 6: revalidateYear() discarded applyResolution()'s boolean
+        // inside the loop and returned count($entries) regardless — row 14
+        // of 25 failing still reported 25. Force the write to fail for
+        // every resolvable row and prove the count reflects that, not the
+        // number of rows merely iterated.
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $service = new RevalidationService(
+                $titles,
+                $squads,
+                new LinkResolver( $directory ),
+                new LinkWriteService( $squads )
+            );
+
+            $id = $squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );
+
+            $count = $service->revalidateYear( $title->id );
+
+            $this->assertSame( 0, $count, 'A failed resolution write must not be counted as revalidated.' );
+
+            $row = $squads->find( $id );
+            $this->assertSame( LinkState::SIN_CANDIDATO, $row->estadoVinculo, 'The row must be left exactly as it was when its write failed.' );
+        } finally {
+            $wpdb = $original;
+        }
     }
 }

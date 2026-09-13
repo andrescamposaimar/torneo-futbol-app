@@ -350,6 +350,12 @@ class TitleEditorPage {
     /**
      * Adds a squad row and immediately runs LinkResolver over it (LINK-1) —
      * a manually-added row is resolved exactly like an imported one.
+     *
+     * Returns null if applyResolution()'s write fails, even though the row
+     * itself was already inserted — the row is left in the plain
+     * `sin_candidato` state insert() gave it (visible and re-revalidatable
+     * later), but the caller is never told this add fully succeeded when
+     * the resolution it promised silently did not happen (item 6).
      */
     private function handleAddRow( int $tituloId, string $jugadorNombre, bool $esCapitan ): ?int {
         $title = $this->titles->find( $tituloId );
@@ -364,7 +370,9 @@ class TitleEditorPage {
         );
 
         $resolution = $this->resolver->resolve( $jugadorNombre, $title->anio );
-        $this->linkWriter->applyResolution( $id, $resolution );
+        if ( ! $this->linkWriter->applyResolution( $id, $resolution ) ) {
+            return null;
+        }
 
         return $id;
     }
@@ -394,7 +402,10 @@ class TitleEditorPage {
             $title = $this->titles->find( $entry->tituloId );
             if ( null !== $title ) {
                 $resolution = $this->resolver->resolve( $jugadorNombre, $title->anio );
-                $this->linkWriter->applyResolution( $rowId, $resolution );
+                // Fold the resolution write's own result into $ok (item 6) —
+                // the row's name/captain/orden fields did save, but a failed
+                // re-resolution must not be reported as a successful edit.
+                $ok = $this->linkWriter->applyResolution( $rowId, $resolution ) && $ok;
             }
         }
 

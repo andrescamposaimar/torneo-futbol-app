@@ -30,7 +30,15 @@ final class RevalidationService {
 
     /**
      * Re-runs LINK-1 through LINK-6 for every non-`manual` entry of one
-     * title. Returns the number of entries re-resolved.
+     * title. Returns the number of entries ACTUALLY re-resolved — i.e. whose
+     * write succeeded, not merely the number iterated. The previous version
+     * discarded applyResolution()'s boolean and returned count($entries)
+     * regardless: row 14 of 25 failing still reported 25. Counting real
+     * successes (rather than making the whole pass transactional) matches
+     * every other write path in this class's own dependencies — a squad row
+     * is always written and reported one at a time, never batched — and
+     * lets an operator retry just the rows that actually failed instead of
+     * every row in the year.
      */
     public function revalidateYear( int $tituloId ): int {
         $title = $this->titles->find( $tituloId );
@@ -40,11 +48,14 @@ final class RevalidationService {
 
         $entries = $this->squads->findResolvableByTitle( $tituloId );
 
+        $succeeded = 0;
         foreach ( $entries as $entry ) {
             $resolution = $this->resolver->resolve( $entry->jugadorNombre, $title->anio );
-            $this->writer->applyResolution( (int) $entry->id, $resolution );
+            if ( $this->writer->applyResolution( (int) $entry->id, $resolution ) ) {
+                ++$succeeded;
+            }
         }
 
-        return count( $entries );
+        return $succeeded;
     }
 }
