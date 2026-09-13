@@ -160,9 +160,8 @@ class SquadListTable extends \WP_List_Table {
             'campeones_link_nonce',
             $nonce,
             __( 'Eliminar', 'entre-redes-campeones' ),
-            '',
-            __( '¿Eliminar esta fila del plantel?', 'entre-redes-campeones' ),
-            'button-link submitdelete'
+            confirmMessage: __( '¿Eliminar esta fila del plantel?', 'entre-redes-campeones' ),
+            buttonClass: 'button-link submitdelete'
         );
 
         return $html;

@@ -93,9 +93,8 @@ class TitlesListTable extends \WP_List_Table {
             'campeones_titulo_nonce',
             wp_create_nonce( 'campeones_eliminar_titulo_' . $tituloId ),
             __( 'Eliminar', 'entre-redes-campeones' ),
-            '',
-            __( '¿Eliminar este título y todo su plantel? Esta acción no se puede deshacer.', 'entre-redes-campeones' ),
-            'button-link submitdelete'
+            confirmMessage: __( '¿Eliminar este título y todo su plantel? Esta acción no se puede deshacer.', 'entre-redes-campeones' ),
+            buttonClass: 'button-link submitdelete'
         );
 
         return $editLink . ' | ' . $revalidarForm . ' | ' . $eliminarForm;
