@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Tests\Titles;
 
 use EntreRedes\Campeones\Migrations\InitialSchema;
+use EntreRedes\Campeones\Tests\Support\FailingSquadDeleteWpdb;
 use EntreRedes\Campeones\Tests\Support\FailingTitleDeleteWpdb;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
@@ -83,6 +84,35 @@ class TitleDeletionServiceTest extends TestCase {
 
             // The squad delete happened inside the same transaction as the
             // failed title delete — a real ROLLBACK undoes both, or neither.
+            $this->assertNotNull( $titles->find( $title->id ), 'A rolled-back delete must leave the title in place.' );
+            $this->assertCount( 1, $squads->findByTitle( $title->id ), 'A rolled-back delete must leave the squad in place.' );
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    public function test_a_failed_squad_delete_rolls_back_and_leaves_the_title_intact(): void {
+        // Item 9: the existing rollback test above forces the SECOND write
+        // (the title delete) to fail. The FIRST write failing — the squad
+        // delete, before anything has been removed yet — was untested, and
+        // is the cheaper, more important branch to prove.
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingSquadDeleteWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles  = new TitleRepository( $failing );
+            $squads  = new SquadRepository( $failing );
+            $service = new TitleDeletionService( $failing, $titles, $squads );
+
+            $title = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+            $squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );
+
+            $this->assertFalse( $service->delete( $title->id ) );
+
             $this->assertNotNull( $titles->find( $title->id ), 'A rolled-back delete must leave the title in place.' );
             $this->assertCount( 1, $squads->findByTitle( $title->id ), 'A rolled-back delete must leave the squad in place.' );
         } finally {

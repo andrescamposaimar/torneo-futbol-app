@@ -6,6 +6,7 @@ namespace EntreRedes\Campeones\Tests\Titles;
 
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
+use EntreRedes\Campeones\Tests\Support\FailingUpdateWpdb;
 use EntreRedes\Campeones\Titles\TitleRepository;
 use EntreRedes\Campeones\Titles\WriteFailedException;
 use PHPUnit\Framework\TestCase;
@@ -170,6 +171,30 @@ class TitleRepositoryTest extends TestCase {
         $this->assertSame( 'BOCA', $reread->equipoNombre );
         // Identity fields (anio/zona/posicion) are untouched by a header edit.
         $this->assertSame( 2016, $reread->anio );
+    }
+
+    public function test_update_reports_failure_when_the_write_fails(): void {
+        // Item 9: no test previously forced $wpdb->update() to return false
+        // for campeones_titulo — update() silently trusted it always
+        // succeeded.
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingUpdateWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $repository = new TitleRepository( $failing );
+            $created    = $repository->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $this->assertFalse( $repository->update( $created->id, [ 'equipo_nombre' => 'BOCA' ] ) );
+
+            $reread = $repository->find( $created->id );
+            $this->assertSame( 'CHELSEA', $reread->equipoNombre, 'A failed update must leave the existing row unchanged.' );
+        } finally {
+            $wpdb = $original;
+        }
     }
 
     public function test_delete_removes_the_title_row(): void {
