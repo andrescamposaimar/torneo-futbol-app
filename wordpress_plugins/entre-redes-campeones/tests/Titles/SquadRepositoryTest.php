@@ -159,6 +159,31 @@ class SquadRepositoryTest extends TestCase {
         $this->assertSame( 'BASSO, A.', $rowsA[0]->jugadorNombre );
     }
 
+    // -------------------------------------------------------------------------
+    // deleteByTitle() — added slice 3, backs TitleDeletionService's
+    // squad-then-title delete transaction (ADMIN-7).
+    // -------------------------------------------------------------------------
+
+    public function test_delete_by_title_removes_every_row_for_that_title_only(): void {
+        $tituloA = $this->makeTitle( 2016 );
+        $tituloB = $this->makeTitle( 2017 );
+
+        $this->repository->insert( new SquadEntry( $tituloA, 0, 'BASSO, A.' ) );
+        $this->repository->insert( new SquadEntry( $tituloA, 1, 'CALELLO, G.' ) );
+        $keepId = $this->repository->insert( new SquadEntry( $tituloB, 0, 'MAZZARA, M.' ) );
+
+        $this->assertTrue( $this->repository->deleteByTitle( $tituloA ) );
+
+        $this->assertSame( [], $this->repository->findByTitle( $tituloA ) );
+        $this->assertNotNull( $this->repository->find( $keepId ), 'A different title\'s squad must be untouched.' );
+    }
+
+    public function test_delete_by_title_on_a_title_with_no_squad_is_a_no_op_success(): void {
+        $tituloId = $this->makeTitle();
+
+        $this->assertTrue( $this->repository->deleteByTitle( $tituloId ) );
+    }
+
     public function test_a_failed_insert_throws_instead_of_returning_a_bogus_id(): void {
         global $wpdb;
         $original = $wpdb;
