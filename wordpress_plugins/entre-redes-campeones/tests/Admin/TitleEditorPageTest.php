@@ -912,6 +912,97 @@ class TitleEditorPageTest extends TestCase {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Item 8 — an empty (or empty-after-normalization) player name was
+    // guarded only by the HTML5 `required` attribute on the add-row form.
+    // handleAddRow()/handleEditRow() accepted whatever sanitize_text_field()
+    // returned with no non-empty check and passed it straight into
+    // NameNormalizer::normalize() / LinkResolver::resolve(). A hand-built
+    // POST (or a browser that ignores `required`) could still submit one.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_agregar_fila_rejects_an_empty_name(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $_POST['campeones_editor_action'] = 'agregar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['jugador_nombre']          = '';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=error_nombre_requerido', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $this->assertCount( 0, $this->squads->findByTitle( $this->tituloId ), 'An empty name must never be inserted as a row.' );
+        }
+    }
+
+    public function test_handle_post_agregar_fila_rejects_a_name_that_normalizes_to_nothing(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $_POST['campeones_editor_action'] = 'agregar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['jugador_nombre']          = '.';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=error_nombre_requerido', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $this->assertCount( 0, $this->squads->findByTitle( $this->tituloId ), 'A name that normalizes to nothing must never be inserted as a row.' );
+        }
+    }
+
+    public function test_handle_post_editar_fila_rejects_an_empty_name(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_nombre']          = '';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=error_nombre_requerido', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $row = $this->squads->find( $id );
+            $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'A rejected empty-name edit must leave the row unchanged.' );
+        }
+    }
+
+    public function test_handle_post_editar_fila_rejects_a_name_that_normalizes_to_nothing(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_nombre']          = '.';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=error_nombre_requerido', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $row = $this->squads->find( $id );
+            $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'A rejected empty-after-normalization edit must leave the row unchanged.' );
+        }
+    }
+
     public function test_handle_post_crear_titulo_catches_a_write_failed_exception(): void {
         // Item 4: a WriteFailedException (a local DB write failure) was
         // caught in the same block as PlayerDirectoryQueryException and

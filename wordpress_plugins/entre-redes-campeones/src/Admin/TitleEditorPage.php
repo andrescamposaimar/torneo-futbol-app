@@ -110,12 +110,16 @@ class TitleEditorPage {
                     break;
 
                 case 'agregar_fila':
-                    $addResult = $this->handleAddRow(
-                        $tituloId,
-                        sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
-                        ! empty( $_POST['es_capitan'] )
-                    );
-                    $notice = match ( true ) {
+                    $jugadorNombre = sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) );
+                    if ( '' === $jugadorNombre || '' === NameNormalizer::normalize( $jugadorNombre ) ) {
+                        // Item 8: the add-row form only guards this with the
+                        // HTML5 `required` attribute — a client-side-only
+                        // check a hand-built POST ignores entirely.
+                        $notice = 'error_nombre_requerido';
+                        break;
+                    }
+                    $addResult = $this->handleAddRow( $tituloId, $jugadorNombre, ! empty( $_POST['es_capitan'] ) );
+                    $notice    = match ( true ) {
                         ! $addResult->rowSaved => 'error_fila',
                         ! $addResult->linkResolved => 'fila_agregada_sin_vinculo',
                         default => 'fila_agregada',
@@ -128,9 +132,14 @@ class TitleEditorPage {
                         $notice = 'error_fila_ajena';
                         break;
                     }
+                    $jugadorNombre = sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) );
+                    if ( '' === $jugadorNombre || '' === NameNormalizer::normalize( $jugadorNombre ) ) {
+                        $notice = 'error_nombre_requerido';
+                        break;
+                    }
                     $editResult = $this->handleEditRow(
                         $plantelId,
-                        sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
+                        $jugadorNombre,
                         ! empty( $_POST['es_capitan'] ),
                         absint( $_POST['orden'] ?? 0 )
                     );
@@ -417,6 +426,7 @@ class TitleEditorPage {
             'fila_actualizada_sin_vinculo' => [ 'message' => __( 'La fila fue actualizada, pero no se pudo re-evaluar su vínculo. Usá "Revalidar" o vinculalo manualmente.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_eliminada'   => [ 'message' => __( 'La fila fue eliminada del plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_fila'       => [ 'message' => __( 'Error al guardar la fila. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'error_nombre_requerido' => [ 'message' => __( 'Ingresá un nombre de jugador válido.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'vinculado'        => [ 'message' => __( 'El jugador fue vinculado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'desvinculado'     => [ 'message' => __( 'El vínculo fue quitado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_vincular'   => [ 'message' => __( 'Error al modificar el vínculo. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
