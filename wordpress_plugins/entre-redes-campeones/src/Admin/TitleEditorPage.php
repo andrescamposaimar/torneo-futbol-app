@@ -143,6 +143,18 @@ class TitleEditorPage {
 
         $redirectUrl = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $redirectTituloId );
         wp_safe_redirect( add_query_arg( 'campeones_notice', $notice, $redirectUrl ) );
+        $this->terminateAfterRedirect();
+    }
+
+    /**
+     * Isolated in its own method (rather than a bare `exit;` inline in
+     * handlePost()) so a test can override this single point with a
+     * catchable signal instead of ending the PHP process outright — the
+     * only way to drive a real success path through the public handlePost()
+     * entry point instead of Reflection (see
+     * tests/Support/TestableTitleEditorPage.php).
+     */
+    protected function terminateAfterRedirect(): void {
         exit;
     }
 
@@ -233,6 +245,22 @@ class TitleEditorPage {
             </form>
 
             <?php $listTable->display(); ?>
+
+            <h2><?php echo esc_html__( 'Agregar jugador', 'entre-redes-campeones' ); ?></h2>
+            <form method="post" action="<?php echo esc_url( admin_url( 'admin.php?page=campeones-titulo-edit' ) ); ?>">
+                <input type="hidden" name="campeones_editor_action" value="agregar_fila">
+                <input type="hidden" name="titulo_id" value="<?php echo esc_attr( (string) $tituloId ); ?>">
+                <?php wp_nonce_field( 'campeones_agregar_fila_' . $tituloId, 'campeones_editor_nonce' ); ?>
+                <label>
+                    <?php echo esc_html__( 'Jugador (Apellido, Nombre)', 'entre-redes-campeones' ); ?>
+                    <input type="text" name="jugador_nombre" required>
+                </label>
+                <label>
+                    <input type="checkbox" name="es_capitan" value="1">
+                    <?php echo esc_html__( 'Capitán', 'entre-redes-campeones' ); ?>
+                </label>
+                <?php submit_button( __( 'Agregar', 'entre-redes-campeones' ) ); ?>
+            </form>
         </div>
         <?php
     }

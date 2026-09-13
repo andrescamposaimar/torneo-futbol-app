@@ -10,6 +10,8 @@ use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
+use EntreRedes\Campeones\Tests\Support\RedirectTerminatedException;
+use EntreRedes\Campeones\Tests\Support\TestableTitleEditorPage;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -20,9 +22,14 @@ use PHPUnit\Framework\TestCase;
  *
  * Same strategy as TitlesPageTest: the shim's current_user_can() always
  * returns false, so render()/handlePost() only prove the capability guard
- * (RuntimeException via wp_die()). The private mutation handlers hold no
- * capability check of their own and never redirect/exit, so real add /
- * edit / delete / link behaviour is exercised directly via Reflection.
+ * (RuntimeException via wp_die()) by default. The private mutation
+ * handlers hold no capability check of their own and never redirect/exit,
+ * so most add / edit / delete / link behaviour is exercised directly via
+ * Reflection. The "driven through handlePost()" tests below use
+ * TestableTitleEditorPage instead — a real request end to end (capability
+ * granted, correct nonce, dispatch, PRG redirect) with only the final
+ * `exit;` replaced by a catchable exception, so a missing or
+ * disconnected form/entry point fails the suite instead of going unnoticed.
  */
 class TitleEditorPageTest extends TestCase {
 
@@ -49,6 +56,7 @@ class TitleEditorPageTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         $GLOBALS['_campeones_test_current_user_can'] = false;
+        unset( $_GET['titulo_id'] );
     }
 
     private function makePage(): TitleEditorPage {
@@ -66,6 +74,18 @@ class TitleEditorPageTest extends TestCase {
     private function invoke( string $method, mixed ...$args ): mixed {
         $ref = new \ReflectionMethod( TitleEditorPage::class, $method );
         return $ref->invoke( $this->makePage(), ...$args );
+    }
+
+    private function makeTestablePage(): TestableTitleEditorPage {
+        $rows      = require __DIR__ . '/../Fixtures/players.php';
+        $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+        return new TestableTitleEditorPage(
+            $this->titles,
+            $this->squads,
+            new LinkResolver( $directory ),
+            new LinkWriteService( $this->squads )
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -277,5 +297,71 @@ class TitleEditorPageTest extends TestCase {
         $row = $this->squads->find( $id );
         $this->assertNull( $row->jugadorId );
         $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 3 — the slice's purpose is unreachable without a form that
+    // triggers agregar_fila / editar_fila. These drive the REAL handlePost()
+    // entry point (allow-list, capability, nonce, dispatch, redirect), not
+    // Reflection — a missing or disconnected form fails these, where the
+    // Reflection-based tests above could not have caught it.
+    // -------------------------------------------------------------------------
+
+    public function test_render_emits_a_form_that_submits_agregar_fila(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['titulo_id'] = (string) $this->tituloId;
+
+        ob_start();
+        $this->makeTestablePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'name="campeones_editor_action" value="agregar_fila"', $html );
+        $this->assertStringContainsString( 'name="jugador_nombre"', $html );
+        $this->assertStringContainsString( 'name="es_capitan"', $html );
+    }
+
+    public function test_handle_post_agregar_fila_inserts_and_resolves_a_row(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $_POST['campeones_editor_action'] = 'agregar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['es_capitan']              = '1';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $rows = $this->squads->findByTitle( $this->tituloId );
+            $this->assertCount( 1, $rows, 'agregar_fila must actually reach handleAddRow() and insert a row.' );
+            $this->assertSame( 'BASSO, A.', $rows[0]->jugadorNombre );
+            $this->assertTrue( $rows[0]->esCapitan );
+            $this->assertSame( LinkState::AUTO, $rows[0]->estadoVinculo );
+        }
+    }
+
+    public function test_handle_post_editar_fila_updates_a_row(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['es_capitan']              = '1';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $row = $this->squads->find( $id );
+            $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'editar_fila must actually reach handleEditRow() and update the row.' );
+            $this->assertTrue( $row->esCapitan );
+            $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
+        }
     }
 }

@@ -87,8 +87,10 @@ class SquadListTable extends \WP_List_Table {
     }
 
     /**
-     * Eliminar the row, plus the link control (Vincular / Cambiar /
-     * Desvincular). One nonce per row, keyed to the row id (LINK-8).
+     * Editar (name / captain / order) plus Eliminar the row, plus the link
+     * control (Vincular / Cambiar / Desvincular). One nonce per row, keyed
+     * to the row id (LINK-8), shared by every form below — editar_fila
+     * included.
      *
      * @param array<string, mixed> $item
      */
@@ -101,6 +103,27 @@ class SquadListTable extends \WP_List_Table {
         $linkAction = $isLinked ? 'cambiar' : 'vincular';
 
         $html = sprintf(
+            '<form method="post" action="%1$s" style="display:inline;">'
+            . '<input type="hidden" name="campeones_editor_action" value="editar_fila">'
+            . '<input type="hidden" name="titulo_id" value="%7$d">'
+            . '<input type="hidden" name="plantel_id" value="%2$d">'
+            . '<input type="hidden" name="campeones_link_nonce" value="%3$s">'
+            . '<input type="text" name="jugador_nombre" value="%4$s" style="width:10em;">'
+            . '<label><input type="checkbox" name="es_capitan" value="1"%5$s> %6$s</label>'
+            . '<input type="hidden" name="orden" value="%8$d">'
+            . '<button type="submit" class="button-link">%9$s</button></form> ',
+            esc_url( $adminUrl ),
+            $plantelId,
+            esc_attr( $nonce ),
+            esc_attr( (string) ( $item['jugador_nombre'] ?? '' ) ),
+            ! empty( $item['es_capitan'] ) ? ' checked' : '',
+            esc_html__( 'Capitán', 'entre-redes-campeones' ),
+            $this->tituloId,
+            (int) ( $item['orden'] ?? 0 ),
+            esc_html__( 'Guardar', 'entre-redes-campeones' )
+        );
+
+        $html .= sprintf(
             '<form method="post" action="%1$s" style="display:inline;">'
             . '<input type="hidden" name="campeones_editor_action" value="%2$s">'
             . '<input type="hidden" name="plantel_id" value="%3$d">'
