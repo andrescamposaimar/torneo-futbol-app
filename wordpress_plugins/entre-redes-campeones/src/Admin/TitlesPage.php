@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace EntreRedes\Campeones\Admin;
 
+use EntreRedes\Campeones\Linking\PlayerDirectoryQueryException;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Titles\TitleDeletionService;
 use EntreRedes\Campeones\Titles\TitleRepository;
+use EntreRedes\Campeones\Titles\WriteFailedException;
 
 /**
  * Renders and handles POST for the top-level Titles admin page (slug:
@@ -54,14 +56,39 @@ class TitlesPage {
             wp_die( esc_html__( 'Verificación de seguridad fallida. Por favor recargá la página e intentá de nuevo.', 'entre-redes-campeones' ) );
         }
 
-        if ( 'eliminar' === $action ) {
-            $notice = $this->handleDelete( $tituloId ) ? 'eliminado' : 'error_eliminar';
-        } else {
-            $count  = $this->handleRevalidate( $tituloId );
-            $notice = 'revalidado_' . $count;
+        try {
+            if ( 'eliminar' === $action ) {
+                $notice = $this->handleDelete( $tituloId ) ? 'eliminado' : 'error_eliminar';
+            } else {
+                $count  = $this->handleRevalidate( $tituloId );
+                $notice = 'revalidado_' . $count;
+            }
+        } catch ( PlayerDirectoryQueryException | WriteFailedException $e ) {
+            // Neither exception is caught anywhere else in this class.
+            // handleRevalidate() runs LinkResolver over every resolvable row
+            // in the year; a broken directory read must not turn into a
+            // fatal mid-loop (item 7).
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: %s failed for titulo_id=%d. %s',
+                $action,
+                $tituloId,
+                $e->getMessage()
+            ) );
+            $notice = 'error_directorio';
         }
 
         wp_safe_redirect( add_query_arg( 'campeones_notice', $notice, admin_url( 'admin.php?page=campeones' ) ) );
+        $this->terminateAfterRedirect();
+    }
+
+    /**
+     * Isolated in its own method (rather than a bare `exit;` inline in
+     * handlePost()) so a test can override this single point with a
+     * catchable signal instead of ending the PHP process outright — the
+     * only way to drive a real success path through the public handlePost()
+     * entry point instead of Reflection.
+     */
+    protected function terminateAfterRedirect(): void {
         exit;
     }
 
@@ -138,6 +165,10 @@ class TitlesPage {
 
         if ( 'error_eliminar' === $key ) {
             return [ 'message' => __( 'Error al eliminar el título. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ];
+        }
+
+        if ( 'error_directorio' === $key ) {
+            return [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ];
         }
 
         if ( str_starts_with( $key, 'revalidado_' ) ) {

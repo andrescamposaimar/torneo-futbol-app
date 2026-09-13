@@ -11,6 +11,9 @@ use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
+use EntreRedes\Campeones\Tests\Support\RedirectTerminatedException;
+use EntreRedes\Campeones\Tests\Support\TestableTitlesPage;
+use EntreRedes\Campeones\Tests\Support\ThrowingPlayerDirectory;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleDeletionService;
@@ -214,5 +217,41 @@ class TitlesPageTest extends TestCase {
         $html = ob_get_clean();
 
         $this->assertStringNotContainsString( 'class="notice', $html );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 7 — PlayerDirectoryQueryException is caught nowhere in
+    // src/Admin/. handleRevalidate() runs LinkResolver over every
+    // resolvable row in the year; a broken directory read must redirect
+    // with a distinct notice instead of a fatal mid-loop.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_revalidar_catches_a_directory_query_exception(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $throwingResolver = new LinkResolver( new ThrowingPlayerDirectory() );
+        $page             = new TestableTitlesPage(
+            $this->titles,
+            new TitleDeletionService( $wpdb, $this->titles, $this->squads ),
+            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads ) )
+        );
+
+        $_POST['campeones_titulo_action'] = 'revalidar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_revalidar_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $page->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'campeones_notice=error_directorio',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A directory query failure must redirect with a distinct notice, not fall through to a fatal.'
+            );
+        }
     }
 }

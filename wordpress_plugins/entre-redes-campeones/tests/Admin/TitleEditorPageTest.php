@@ -10,9 +10,11 @@ use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
+use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
 use EntreRedes\Campeones\Tests\Support\FailingResolutionApplyWpdb;
 use EntreRedes\Campeones\Tests\Support\RedirectTerminatedException;
 use EntreRedes\Campeones\Tests\Support\TestableTitleEditorPage;
+use EntreRedes\Campeones\Tests\Support\ThrowingPlayerDirectory;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -506,5 +508,90 @@ class TitleEditorPageTest extends TestCase {
         $html = ob_get_clean();
 
         $this->assertStringContainsString( 'notice-error', $html );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 7 — PlayerDirectoryQueryException / WriteFailedException were
+    // caught nowhere in src/Admin/. Worse, in handleAddRow the row is
+    // already inserted before the resolver runs, so an uncaught throw there
+    // left a real row behind and sent the operator to WordPress's fatal
+    // error screen instead of a notice.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_agregar_fila_catches_a_directory_query_exception(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $throwingResolver = new LinkResolver( new ThrowingPlayerDirectory() );
+        $page             = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads ) );
+
+        $_POST['campeones_editor_action'] = 'agregar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $page->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'campeones_notice=error_directorio',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A directory query failure must redirect with a distinct notice, not fall through to a fatal.'
+            );
+            // The row itself was already inserted before the resolver threw
+            // — it must still exist (in its sin_candidato default), so a
+            // later "Revalidar" can pick it up, exactly as item 7 requires.
+            $rows = $this->squads->findByTitle( $this->tituloId );
+            $this->assertCount( 1, $rows );
+            $this->assertSame( LinkState::SIN_CANDIDATO, $rows[0]->estadoVinculo );
+        }
+    }
+
+    public function test_handle_post_crear_titulo_catches_a_write_failed_exception(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingInsertWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads ) );
+
+            $_POST['campeones_editor_action'] = 'crear_titulo';
+            unset( $_POST['titulo_id'] );
+            $_POST['anio']                    = '2099';
+            $_POST['zona']                    = 'A';
+            $_POST['posicion']                = 'campeon';
+            $_POST['equipo_nombre']           = 'BOCA';
+            $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_crear_titulo' );
+
+            $this->expectException( RedirectTerminatedException::class );
+            try {
+                $page->handlePost();
+            } finally {
+                $this->assertStringContainsString(
+                    'campeones_notice=error_directorio',
+                    (string) $GLOBALS['_campeones_test_last_redirect'],
+                    'A failed insert must redirect with a distinct notice, not fall through to a fatal.'
+                );
+                $this->assertSame(
+                    '0',
+                    (string) $failing->get_var( "SELECT COUNT(*) FROM {$failing->prefix}campeones_titulo WHERE anio = 2099" ),
+                    'A failed insert must not leave a partial row behind.'
+                );
+            }
+        } finally {
+            $wpdb = $original;
+            $_POST['titulo_id'] = (string) $this->tituloId;
+        }
     }
 }

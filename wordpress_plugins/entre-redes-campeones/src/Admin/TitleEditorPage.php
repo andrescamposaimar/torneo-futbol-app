@@ -8,9 +8,11 @@ use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\NameNormalizer;
+use EntreRedes\Campeones\Linking\PlayerDirectoryQueryException;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
+use EntreRedes\Campeones\Titles\WriteFailedException;
 
 /**
  * Renders and handles POST for the hidden "one title" editor (slug:
@@ -81,64 +83,80 @@ class TitleEditorPage {
         $redirectTituloId = $tituloId;
         $notice           = 'error';
 
-        switch ( $action ) {
-            case 'crear_titulo':
-                $newId = $this->handleCreateTitle(
-                    absint( $_POST['anio'] ?? 0 ),
-                    sanitize_text_field( (string) ( $_POST['zona'] ?? 'A' ) ),
-                    sanitize_text_field( (string) ( $_POST['posicion'] ?? 'campeon' ) ),
-                    sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) )
-                );
-                if ( null !== $newId ) {
-                    $redirectTituloId = $newId;
-                    $notice           = 'creado';
-                } else {
-                    $notice = 'conflicto';
-                }
-                break;
+        try {
+            switch ( $action ) {
+                case 'crear_titulo':
+                    $newId = $this->handleCreateTitle(
+                        absint( $_POST['anio'] ?? 0 ),
+                        sanitize_text_field( (string) ( $_POST['zona'] ?? 'A' ) ),
+                        sanitize_text_field( (string) ( $_POST['posicion'] ?? 'campeon' ) ),
+                        sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) )
+                    );
+                    if ( null !== $newId ) {
+                        $redirectTituloId = $newId;
+                        $notice           = 'creado';
+                    } else {
+                        $notice = 'conflicto';
+                    }
+                    break;
 
-            case 'actualizar_titulo':
-                $notice = $this->handleUpdateHeader( $tituloId, sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) ) )
-                    ? 'actualizado'
-                    : 'error_actualizar';
-                break;
+                case 'actualizar_titulo':
+                    $notice = $this->handleUpdateHeader( $tituloId, sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) ) )
+                        ? 'actualizado'
+                        : 'error_actualizar';
+                    break;
 
-            case 'agregar_fila':
-                $newRowId = $this->handleAddRow(
-                    $tituloId,
-                    sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
-                    ! empty( $_POST['es_capitan'] )
-                );
-                $notice = null !== $newRowId ? 'fila_agregada' : 'error_fila';
-                break;
+                case 'agregar_fila':
+                    $newRowId = $this->handleAddRow(
+                        $tituloId,
+                        sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
+                        ! empty( $_POST['es_capitan'] )
+                    );
+                    $notice = null !== $newRowId ? 'fila_agregada' : 'error_fila';
+                    break;
 
-            case 'editar_fila':
-                $notice = $this->handleEditRow(
-                    absint( $_POST['plantel_id'] ?? 0 ),
-                    sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
-                    ! empty( $_POST['es_capitan'] ),
-                    absint( $_POST['orden'] ?? 0 )
-                ) ? 'fila_actualizada' : 'error_fila';
-                break;
+                case 'editar_fila':
+                    $notice = $this->handleEditRow(
+                        absint( $_POST['plantel_id'] ?? 0 ),
+                        sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) ),
+                        ! empty( $_POST['es_capitan'] ),
+                        absint( $_POST['orden'] ?? 0 )
+                    ) ? 'fila_actualizada' : 'error_fila';
+                    break;
 
-            case 'eliminar_fila':
-                $notice = $this->handleDeleteRow( absint( $_POST['plantel_id'] ?? 0 ) )
-                    ? 'fila_eliminada'
-                    : 'error_fila';
-                break;
+                case 'eliminar_fila':
+                    $notice = $this->handleDeleteRow( absint( $_POST['plantel_id'] ?? 0 ) )
+                        ? 'fila_eliminada'
+                        : 'error_fila';
+                    break;
 
-            case 'vincular':
-            case 'cambiar':
-                $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), absint( $_POST['jugador_id'] ?? 0 ) ?: null )
-                    ? 'vinculado'
-                    : 'error_vincular';
-                break;
+                case 'vincular':
+                case 'cambiar':
+                    $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), absint( $_POST['jugador_id'] ?? 0 ) ?: null )
+                        ? 'vinculado'
+                        : 'error_vincular';
+                    break;
 
-            case 'desvincular':
-                $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), null )
-                    ? 'desvinculado'
-                    : 'error_vincular';
-                break;
+                case 'desvincular':
+                    $notice = $this->handleSetLink( absint( $_POST['plantel_id'] ?? 0 ), null )
+                        ? 'desvinculado'
+                        : 'error_vincular';
+                    break;
+            }
+        } catch ( PlayerDirectoryQueryException | WriteFailedException $e ) {
+            // Neither exception is caught anywhere else in this class. In
+            // handleAddRow() specifically, the throw can happen AFTER the
+            // row's own insert already committed — a fatal here would abort
+            // the redirect mid-write and hand the operator WordPress's
+            // critical-error screen instead of a notice they can act on.
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: %s failed for titulo_id=%d (plantel_id=%d). %s',
+                $action,
+                $tituloId,
+                absint( $_POST['plantel_id'] ?? 0 ),
+                $e->getMessage()
+            ) );
+            $notice = 'error_directorio';
         }
 
         $redirectUrl = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $redirectTituloId );
@@ -328,6 +346,7 @@ class TitleEditorPage {
             'vinculado'        => [ 'message' => __( 'El jugador fue vinculado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'desvinculado'     => [ 'message' => __( 'El vínculo fue quitado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_vincular'   => [ 'message' => __( 'Error al modificar el vínculo. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'error_directorio' => [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
             default            => null,
         };
     }
