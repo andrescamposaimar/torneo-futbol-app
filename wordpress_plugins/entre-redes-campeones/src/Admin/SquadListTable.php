@@ -126,6 +126,7 @@ class SquadListTable extends \WP_List_Table {
         $html .= sprintf(
             '<form method="post" action="%1$s" style="display:inline;">'
             . '<input type="hidden" name="campeones_editor_action" value="%2$s">'
+            . '<input type="hidden" name="titulo_id" value="%7$d">'
             . '<input type="hidden" name="plantel_id" value="%3$d">'
             . '<input type="hidden" name="campeones_link_nonce" value="%4$s">'
             . '<input type="number" name="jugador_id" placeholder="%5$s" style="width:6em;">'
@@ -135,26 +136,30 @@ class SquadListTable extends \WP_List_Table {
             $plantelId,
             esc_attr( $nonce ),
             esc_attr__( 'ID jugador', 'entre-redes-campeones' ),
-            esc_html( $linkLabel )
+            esc_html( $linkLabel ),
+            $this->tituloId
         );
 
         if ( $isLinked ) {
             $html .= sprintf(
                 ' <form method="post" action="%1$s" style="display:inline;">'
                 . '<input type="hidden" name="campeones_editor_action" value="desvincular">'
+                . '<input type="hidden" name="titulo_id" value="%5$d">'
                 . '<input type="hidden" name="plantel_id" value="%2$d">'
                 . '<input type="hidden" name="campeones_link_nonce" value="%3$s">'
                 . '<button type="submit" class="button-link">%4$s</button></form>',
                 esc_url( $adminUrl ),
                 $plantelId,
                 esc_attr( $nonce ),
-                esc_html__( 'Desvincular', 'entre-redes-campeones' )
+                esc_html__( 'Desvincular', 'entre-redes-campeones' ),
+                $this->tituloId
             );
         }
 
         $html .= sprintf(
             ' <form method="post" action="%1$s" style="display:inline;" onsubmit="return confirm(\'%2$s\');">'
             . '<input type="hidden" name="campeones_editor_action" value="eliminar_fila">'
+            . '<input type="hidden" name="titulo_id" value="%6$d">'
             . '<input type="hidden" name="plantel_id" value="%3$d">'
             . '<input type="hidden" name="campeones_link_nonce" value="%4$s">'
             . '<button type="submit" class="button-link submitdelete">%5$s</button></form>',
@@ -162,7 +167,8 @@ class SquadListTable extends \WP_List_Table {
             esc_js( __( '¿Eliminar esta fila del plantel?', 'entre-redes-campeones' ) ),
             $plantelId,
             esc_attr( $nonce ),
-            esc_html__( 'Eliminar', 'entre-redes-campeones' )
+            esc_html__( 'Eliminar', 'entre-redes-campeones' ),
+            $this->tituloId
         );
 
         return $html;

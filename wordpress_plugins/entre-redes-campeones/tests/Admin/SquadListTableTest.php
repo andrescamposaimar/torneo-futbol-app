@@ -91,6 +91,25 @@ class SquadListTableTest extends TestCase {
         $this->assertStringContainsString( 'Desvincular', $html );
     }
 
+    public function test_column_acciones_carries_titulo_id_as_a_hidden_field_on_every_form(): void {
+        // Item 4: the three action forms only ever carried titulo_id on the
+        // form's action="...&titulo_id=..." URL, never as a POST field.
+        // handlePost() reads $_POST['titulo_id'], which was therefore always
+        // 0, sending the operator to the "Nuevo título" create form after
+        // any link/unlink/delete. editar_fila (added by item 3) is already
+        // correct — cambiar, desvincular, and eliminar_fila must match it.
+        $this->table->setData( [], 42 );
+        $item = [ 'id' => 7, 'jugador_id' => 5078, 'jugador_nombre' => 'BASSO, A.', 'orden' => 0 ];
+
+        $html = $this->invokeColumnMethod( 'column_acciones', $item );
+
+        $this->assertSame(
+            4,
+            substr_count( $html, 'name="titulo_id" value="42"' ),
+            'editar_fila, cambiar, desvincular, and eliminar_fila must each POST the hidden titulo_id field.'
+        );
+    }
+
     public function test_no_items_message(): void {
         ob_start();
         $this->table->no_items();

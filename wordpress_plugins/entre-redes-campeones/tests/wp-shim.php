@@ -634,14 +634,34 @@ if ( ! function_exists( 'wp_redirect' ) ) {
 }
 
 if ( ! function_exists( 'wp_safe_redirect' ) ) {
+    $GLOBALS['_campeones_test_last_redirect'] = null;
+
+    /**
+     * Records the final redirect location so a test can assert what URL a
+     * handlePost()-driven request actually redirected to (item 4's hidden
+     * titulo_id fix needs this: the redirect target must carry the real
+     * title id, not 0).
+     */
     function wp_safe_redirect( string $location, int $status = 302 ): bool {
+        $GLOBALS['_campeones_test_last_redirect'] = $location;
         return true;
     }
 }
 
 if ( ! function_exists( 'add_query_arg' ) ) {
+    /**
+     * Covers the one call shape this plugin uses: add_query_arg( $key,
+     * $value, $url ). The previous stub discarded every argument and always
+     * returned '', so wp_safe_redirect() above could never be told what URL
+     * a redirect actually carried.
+     */
     function add_query_arg( mixed ...$args ): string {
-        return '';
+        if ( 3 !== count( $args ) || ! is_string( $args[0] ) || ! is_string( $args[2] ) ) {
+            return '';
+        }
+        [ $key, $value, $url ] = $args;
+        $separator = str_contains( $url, '?' ) ? '&' : '?';
+        return $url . $separator . rawurlencode( $key ) . '=' . rawurlencode( (string) $value );
     }
 }
 

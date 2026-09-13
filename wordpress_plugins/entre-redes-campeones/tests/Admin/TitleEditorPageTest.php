@@ -341,6 +341,34 @@ class TitleEditorPageTest extends TestCase {
         }
     }
 
+    public function test_handle_post_desvincular_redirects_to_the_real_titulo_id_not_zero(): void {
+        // Item 4: the row's forms only ever carried titulo_id on the form's
+        // action="...&titulo_id=..." URL, never as a hidden POST field, so
+        // handlePost() always read titulo_id=0 and the redirect landed on
+        // the "Nuevo título" create form instead of back on this title.
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        $_POST['campeones_editor_action'] = 'desvincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'titulo_id=' . $this->tituloId,
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A row action must redirect back to the title it acted on, not titulo_id=0.'
+            );
+        }
+    }
+
     public function test_handle_post_editar_fila_updates_a_row(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
