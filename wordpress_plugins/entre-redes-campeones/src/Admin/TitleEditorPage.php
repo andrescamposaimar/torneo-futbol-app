@@ -408,9 +408,20 @@ class TitleEditorPage {
     }
 
     /**
-     * Edits a squad row's name/captain flag/order. A name change re-runs
-     * LinkResolver (LINK-1) UNLESS the row is currently `manual` — a human
-     * decision is never silently re-evaluated by an unrelated edit.
+     * Edits a squad row's name/captain flag/order. LinkResolver (LINK-1) is
+     * re-run on every successful update to a row that is not currently
+     * `manual` — not only when the name actually changed, but also on a
+     * captain-flag-only or order-only edit. This is broader than earlier
+     * revisions of this docblock claimed, and is a deliberate choice, not
+     * an oversight left uncorrected: re-resolving is idempotent for an
+     * unchanged name (the same LinkResolver input yields the same
+     * LinkResolution) and keeps this method's behaviour simple to reason
+     * about — one rule ("not manual -> always re-resolved on edit"),
+     * rather than a second one ("...unless only the flag/order changed")
+     * that would need its own justification and its own tests. A `manual`
+     * row is still never touched, regardless of what changed
+     * (see test_handle_edit_row_never_re_resolves_a_manual_row and
+     * test_handle_edit_row_re_resolves_even_when_only_the_captain_flag_changes).
      */
     private function handleEditRow( int $rowId, string $jugadorNombre, bool $esCapitan, int $orden ): bool {
         $entry = $this->squads->find( $rowId );

@@ -240,6 +240,26 @@ class TitleEditorPageTest extends TestCase {
         $this->assertSame( 5078, $row->jugadorId );
     }
 
+    public function test_handle_edit_row_re_resolves_even_when_only_the_captain_flag_changes(): void {
+        // Pins the documented, deliberate choice: a non-manual row is
+        // re-resolved on every successful edit, not only when the name
+        // itself changed. Insert as if stale (sin_candidato) with a name
+        // that DOES resolve auto, then edit only the captain flag with the
+        // SAME name — the row must still come out AUTO/5078, proving
+        // handleEditRow() re-ran LinkResolver despite no name change.
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::SIN_CANDIDATO )
+        );
+
+        $ok = $this->invoke( 'handleEditRow', $id, 'BASSO, A.', true, 0 );
+
+        $this->assertTrue( $ok );
+        $row = $this->squads->find( $id );
+        $this->assertSame( LinkState::AUTO, $row->estadoVinculo );
+        $this->assertSame( 5078, $row->jugadorId );
+        $this->assertTrue( $row->esCapitan );
+    }
+
     public function test_handle_edit_row_never_re_resolves_a_manual_row(): void {
         $id = $this->squads->insert(
             new SquadEntry( $this->tituloId, 0, 'MAZZARA, M.', false, LinkState::MANUAL, 999999 )
