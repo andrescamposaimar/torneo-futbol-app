@@ -29,9 +29,15 @@ use EntreRedes\Campeones\Titles\TitleRepository;
  * silently re-evaluated by a routine header/name touch-up.
  *
  * Security, identical to TitlesPage / entre-redes-prode's RegistryPage:
- * manage_options re-checked in both render() and handlePost(); per-row
- * nonce campeones_link_{plantelId}; PRG after every POST; WP_List_Table
- * required behind a class_exists guard at render time.
+ * manage_options re-checked in both render() and handlePost(); PRG after
+ * every POST; WP_List_Table required behind a class_exists guard at render
+ * time. Nonce, one per action family: crear_titulo uses a fixed action
+ * name (there is no id yet); actualizar_titulo and agregar_fila are
+ * title-scoped (campeones_actualizar_titulo_{tituloId} /
+ * campeones_agregar_fila_{tituloId}), both carried in the
+ * campeones_editor_nonce field; editar_fila / eliminar_fila / vincular /
+ * cambiar / desvincular share one per-row nonce, campeones_link_{plantelId},
+ * carried in campeones_link_nonce.
  */
 class TitleEditorPage {
 
@@ -69,6 +75,8 @@ class TitleEditorPage {
         }
 
         $tituloId = absint( $_POST['titulo_id'] ?? 0 );
+
+        $this->verifyNonceOrDie( $action, $tituloId );
 
         $redirectTituloId = $tituloId;
         $notice           = 'error';
@@ -136,6 +144,38 @@ class TitleEditorPage {
         $redirectUrl = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $redirectTituloId );
         wp_safe_redirect( add_query_arg( 'campeones_notice', $notice, $redirectUrl ) );
         exit;
+    }
+
+    /**
+     * Verifies the correct nonce for $action before handlePost() dispatches
+     * to it, mirroring TitlesPage::handlePost():49-55. crear_titulo /
+     * actualizar_titulo / agregar_fila are title-scoped (there is no
+     * plantel_id yet, or the action is not row-scoped); the other four are
+     * scoped to the one row they act on, sharing the same per-row nonce the
+     * row's forms already generate (SquadListTable::column_acciones()).
+     */
+    private function verifyNonceOrDie( string $action, int $tituloId ): void {
+        $titleScoped = [
+            'crear_titulo'      => 'campeones_crear_titulo',
+            'actualizar_titulo' => 'campeones_actualizar_titulo_' . $tituloId,
+            'agregar_fila'      => 'campeones_agregar_fila_' . $tituloId,
+        ];
+
+        if ( isset( $titleScoped[ $action ] ) ) {
+            $nonce = (string) ( $_POST['campeones_editor_nonce'] ?? '' );
+            if ( ! wp_verify_nonce( $nonce, $titleScoped[ $action ] ) ) {
+                wp_die( esc_html__( 'Verificación de seguridad fallida. Por favor recargá la página e intentá de nuevo.', 'entre-redes-campeones' ) );
+            }
+            return;
+        }
+
+        // editar_fila / eliminar_fila / vincular / cambiar / desvincular —
+        // one nonce per row, shared across the row's action forms.
+        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+        $nonce     = (string) ( $_POST['campeones_link_nonce'] ?? '' );
+        if ( ! wp_verify_nonce( $nonce, 'campeones_link_' . $plantelId ) ) {
+            wp_die( esc_html__( 'Verificación de seguridad fallida. Por favor recargá la página e intentá de nuevo.', 'entre-redes-campeones' ) );
+        }
     }
 
     // -------------------------------------------------------------------------

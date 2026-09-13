@@ -48,6 +48,7 @@ class TitleEditorPageTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
+        $GLOBALS['_campeones_test_current_user_can'] = false;
     }
 
     private function makePage(): TitleEditorPage {
@@ -92,6 +93,62 @@ class TitleEditorPageTest extends TestCase {
 
         $this->makePage()->handlePost();
         $this->assertTrue( true );
+    }
+
+    // -------------------------------------------------------------------------
+    // CSRF — item 2: handlePost() verified NO nonce at all for any of its
+    // eight actions. Every one of them must now reject a forged nonce even
+    // when manage_options is granted, driven through the real public
+    // handlePost() entry point (not Reflection), so the check actually sits
+    // where a real request would hit it.
+    // -------------------------------------------------------------------------
+
+    /** @return array<string, array{0: string}> */
+    public static function actionsProvider(): array {
+        return [
+            'crear_titulo'      => [ 'crear_titulo' ],
+            'actualizar_titulo' => [ 'actualizar_titulo' ],
+            'agregar_fila'      => [ 'agregar_fila' ],
+            'editar_fila'       => [ 'editar_fila' ],
+            'eliminar_fila'     => [ 'eliminar_fila' ],
+            'vincular'          => [ 'vincular' ],
+            'cambiar'           => [ 'cambiar' ],
+            'desvincular'       => [ 'desvincular' ],
+        ];
+    }
+
+    /** @dataProvider actionsProvider */
+    public function test_handle_post_rejects_an_invalid_nonce_for_every_action( string $action ): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $rowId = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $_POST['campeones_editor_action'] = $action;
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $rowId;
+        $_POST['jugador_id']              = '5078';
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['es_capitan']              = '';
+        $_POST['orden']                   = '0';
+        $_POST['equipo_nombre']           = 'BOCA';
+        $_POST['anio']                    = '2020';
+        $_POST['zona']                    = 'A';
+        $_POST['posicion']                = 'campeon';
+        $_POST['campeones_editor_nonce']  = 'forged-nonce';
+        $_POST['campeones_link_nonce']    = 'forged-nonce';
+
+        $this->expectException( \RuntimeException::class );
+        try {
+            $this->makePage()->handlePost();
+        } finally {
+            $row = $this->squads->find( $rowId );
+            $this->assertSame(
+                'sin_candidato',
+                $row->estadoVinculo,
+                "A forged nonce must not let '{$action}' reach its handler."
+            );
+            $this->assertNull( $row->jugadorId );
+        }
     }
 
     // -------------------------------------------------------------------------
