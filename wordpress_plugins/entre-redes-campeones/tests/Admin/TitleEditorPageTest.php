@@ -534,6 +534,53 @@ class TitleEditorPageTest extends TestCase {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Item 7 — actualizar_titulo and cambiar were exercised only via
+    // Reflection or the nonce-rejection provider, never through a real
+    // handlePost() success path — the exact testing style whose blind spot
+    // let the original CSRF/dispatch defects ship unnoticed.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_actualizar_titulo_updates_the_team_name(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $_POST['campeones_editor_action'] = 'actualizar_titulo';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['equipo_nombre']           = 'BOCA';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_actualizar_titulo_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=actualizado', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $reread = $this->titles->find( $this->tituloId );
+            $this->assertSame( 'BOCA', $reread->equipoNombre, 'actualizar_titulo must actually reach handleUpdateHeader() and update the record.' );
+        }
+    }
+
+    public function test_handle_post_cambiar_replaces_an_existing_link(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'GARCIA, M.', false, LinkState::AMBIGUO ) );
+
+        $_POST['campeones_editor_action'] = 'cambiar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '2461';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=vinculado', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $row = $this->squads->find( $id );
+            $this->assertSame( 2461, $row->jugadorId, 'cambiar must actually reach handleSetLink() and replace the pointer.' );
+            $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
+        }
+    }
+
     public function test_handle_post_eliminar_fila_removes_a_row(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
