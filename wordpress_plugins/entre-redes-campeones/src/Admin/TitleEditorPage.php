@@ -87,111 +87,42 @@ class TitleEditorPage {
         $notice           = 'error';
 
         try {
+            // Pure dispatch from here: each case parses/validates its own
+            // request fields and calls its own private handler in one
+            // dispatchXxx() method (item 11) — handlePost() itself no
+            // longer carries inline sanitisation/validation for eight
+            // different actions.
             switch ( $action ) {
                 case 'crear_titulo':
-                    $newId = $this->handleCreateTitle(
-                        absint( $_POST['anio'] ?? 0 ),
-                        sanitize_text_field( (string) ( $_POST['zona'] ?? 'A' ) ),
-                        sanitize_text_field( (string) ( $_POST['posicion'] ?? 'campeon' ) ),
-                        sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) )
-                    );
-                    if ( null !== $newId ) {
-                        $redirectTituloId = $newId;
-                        $notice           = 'creado';
-                    } else {
-                        $notice = 'conflicto';
+                    [ $notice, $newTituloId ] = $this->dispatchCrearTitulo();
+                    if ( null !== $newTituloId ) {
+                        $redirectTituloId = $newTituloId;
                     }
                     break;
 
                 case 'actualizar_titulo':
-                    $notice = $this->handleUpdateHeader( $tituloId, sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) ) )
-                        ? 'actualizado'
-                        : 'error_actualizar';
+                    $notice = $this->dispatchActualizarTitulo( $tituloId );
                     break;
 
                 case 'agregar_fila':
-                    $jugadorNombre = sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) );
-                    if ( '' === $jugadorNombre || '' === NameNormalizer::normalize( $jugadorNombre ) ) {
-                        // Item 8: the add-row form only guards this with the
-                        // HTML5 `required` attribute — a client-side-only
-                        // check a hand-built POST ignores entirely.
-                        $notice = 'error_nombre_requerido';
-                        break;
-                    }
-                    $addResult = $this->handleAddRow( $tituloId, $jugadorNombre, ! empty( $_POST['es_capitan'] ) );
-                    $notice    = match ( true ) {
-                        ! $addResult->rowSaved => 'error_fila',
-                        ! $addResult->linkResolved => 'fila_agregada_sin_vinculo',
-                        default => 'fila_agregada',
-                    };
+                    $notice = $this->dispatchAgregarFila( $tituloId );
                     break;
 
                 case 'editar_fila':
-                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
-                        $notice = 'error_fila_ajena';
-                        break;
-                    }
-                    $jugadorNombre = sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) );
-                    if ( '' === $jugadorNombre || '' === NameNormalizer::normalize( $jugadorNombre ) ) {
-                        $notice = 'error_nombre_requerido';
-                        break;
-                    }
-                    $editResult = $this->handleEditRow(
-                        $plantelId,
-                        $jugadorNombre,
-                        ! empty( $_POST['es_capitan'] ),
-                        absint( $_POST['orden'] ?? 0 )
-                    );
-                    $notice = match ( true ) {
-                        ! $editResult->rowSaved => 'error_fila',
-                        ! $editResult->linkResolved => 'fila_actualizada_sin_vinculo',
-                        default => 'fila_actualizada',
-                    };
+                    $notice = $this->dispatchEditarFila( $tituloId );
                     break;
 
                 case 'eliminar_fila':
-                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
-                        $notice = 'error_fila_ajena';
-                        break;
-                    }
-                    $notice = $this->handleDeleteRow( $plantelId )
-                        ? 'fila_eliminada'
-                        : 'error_fila';
+                    $notice = $this->dispatchEliminarFila( $tituloId );
                     break;
 
                 case 'vincular':
                 case 'cambiar':
-                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
-                        $notice = 'error_fila_ajena';
-                        break;
-                    }
-                    // A missing/zero jugador_id must be rejected here, before
-                    // it ever reaches handleSetLink() — absint(...) ?: null
-                    // would otherwise turn it into null, which is exactly the
-                    // desvincular write. Two buttons presented as opposites
-                    // must never collapse into the same write (item 8).
-                    $jugadorId = absint( $_POST['jugador_id'] ?? 0 );
-                    if ( 0 === $jugadorId ) {
-                        $notice = 'error_id_requerido';
-                        break;
-                    }
-                    $notice = $this->handleSetLink( $plantelId, $jugadorId )
-                        ? 'vinculado'
-                        : 'error_vincular';
+                    $notice = $this->dispatchVincularOCambiar( $tituloId );
                     break;
 
                 case 'desvincular':
-                    $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-                    if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
-                        $notice = 'error_fila_ajena';
-                        break;
-                    }
-                    $notice = $this->handleSetLink( $plantelId, null )
-                        ? 'desvinculado'
-                        : 'error_vincular';
+                    $notice = $this->dispatchDesvincular( $tituloId );
                     break;
             }
         } catch ( PlayerDirectoryQueryException $e ) {
@@ -287,6 +218,112 @@ class TitleEditorPage {
     private function rowBelongsToRequestedTitle( int $rowId, int $tituloId ): bool {
         $entry = $this->squads->find( $rowId );
         return null !== $entry && $entry->tituloId === $tituloId;
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-action dispatch (item 11) — each method parses/validates its own
+    // $_POST fields and calls the matching private mutation handler,
+    // keeping handlePost()'s switch a plain one-line-per-case dispatch.
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array{0: string, 1: ?int} [$notice, $newTituloId]
+     */
+    private function dispatchCrearTitulo(): array {
+        $newId = $this->handleCreateTitle(
+            absint( $_POST['anio'] ?? 0 ),
+            sanitize_text_field( (string) ( $_POST['zona'] ?? 'A' ) ),
+            sanitize_text_field( (string) ( $_POST['posicion'] ?? 'campeon' ) ),
+            sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) )
+        );
+
+        return null !== $newId ? [ 'creado', $newId ] : [ 'conflicto', null ];
+    }
+
+    private function dispatchActualizarTitulo( int $tituloId ): string {
+        return $this->handleUpdateHeader( $tituloId, sanitize_text_field( (string) ( $_POST['equipo_nombre'] ?? '' ) ) )
+            ? 'actualizado'
+            : 'error_actualizar';
+    }
+
+    private function dispatchAgregarFila( int $tituloId ): string {
+        $jugadorNombre = sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) );
+        if ( '' === $jugadorNombre || '' === NameNormalizer::normalize( $jugadorNombre ) ) {
+            // Item 8: the add-row form only guards this with the HTML5
+            // `required` attribute — a client-side-only check a hand-built
+            // POST ignores entirely.
+            return 'error_nombre_requerido';
+        }
+
+        $result = $this->handleAddRow( $tituloId, $jugadorNombre, ! empty( $_POST['es_capitan'] ) );
+
+        return match ( true ) {
+            ! $result->rowSaved => 'error_fila',
+            ! $result->linkResolved => 'fila_agregada_sin_vinculo',
+            default => 'fila_agregada',
+        };
+    }
+
+    private function dispatchEditarFila( int $tituloId ): string {
+        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+            return 'error_fila_ajena';
+        }
+
+        $jugadorNombre = sanitize_text_field( (string) ( $_POST['jugador_nombre'] ?? '' ) );
+        if ( '' === $jugadorNombre || '' === NameNormalizer::normalize( $jugadorNombre ) ) {
+            return 'error_nombre_requerido';
+        }
+
+        $result = $this->handleEditRow(
+            $plantelId,
+            $jugadorNombre,
+            ! empty( $_POST['es_capitan'] ),
+            absint( $_POST['orden'] ?? 0 )
+        );
+
+        return match ( true ) {
+            ! $result->rowSaved => 'error_fila',
+            ! $result->linkResolved => 'fila_actualizada_sin_vinculo',
+            default => 'fila_actualizada',
+        };
+    }
+
+    private function dispatchEliminarFila( int $tituloId ): string {
+        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+            return 'error_fila_ajena';
+        }
+
+        return $this->handleDeleteRow( $plantelId ) ? 'fila_eliminada' : 'error_fila';
+    }
+
+    private function dispatchVincularOCambiar( int $tituloId ): string {
+        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+            return 'error_fila_ajena';
+        }
+
+        // A missing/zero jugador_id must be rejected here, before it ever
+        // reaches handleSetLink() — absint(...) ?: null would otherwise turn
+        // it into null, which is exactly the desvincular write. Two buttons
+        // presented as opposites must never collapse into the same write
+        // (item 8).
+        $jugadorId = absint( $_POST['jugador_id'] ?? 0 );
+        if ( 0 === $jugadorId ) {
+            return 'error_id_requerido';
+        }
+
+        return $this->handleSetLink( $plantelId, $jugadorId ) ? 'vinculado' : 'error_vincular';
+    }
+
+    private function dispatchDesvincular( int $tituloId ): string {
+        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+            return 'error_fila_ajena';
+        }
+
+        return $this->handleSetLink( $plantelId, null ) ? 'desvinculado' : 'error_vincular';
     }
 
     // -------------------------------------------------------------------------
