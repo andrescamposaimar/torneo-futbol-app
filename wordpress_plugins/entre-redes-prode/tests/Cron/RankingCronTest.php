@@ -17,6 +17,12 @@ use PHPUnit\Framework\TestCase;
  * Hook assertion: did_action('prode_ranking_cron_ran') > 0 after run().
  * (The shim's add_action() is a no-op; do_action() increments $GLOBALS['_prode_test_actions'].)
  *
+ * Counter assertion (ADR-G8-1): 'prode_ranking_cron_ran' now carries
+ * ($processed, $skippedUnscored, $skippedEmpty). captureCronCounters()
+ * registers a real listener via the shim's add_action()/do_action() pair so
+ * these tests observe the args exactly the way RecomputeRankingsController
+ * will, rather than re-deriving the counts by hand.
+ *
  * Spec coverage: CRN-01..06.
  */
 class RankingCronTest extends TestCase {
@@ -128,6 +134,29 @@ class RankingCronTest extends TestCase {
         return $this->rankingRepo->countFechaCache( $fechaId );
     }
 
+    /**
+     * Registers a temporary listener on 'prode_ranking_cron_ran' (ADR-G8-1)
+     * and fills $counters (by reference) with the three args it fired with.
+     * Must be called BEFORE RankingCron::run().
+     *
+     * @param array{processed?: int, skipped_unscored?: int, skipped_empty?: int} $counters
+     */
+    private function captureCronCounters( array &$counters ): void {
+        $counters = [ 'processed' => 0, 'skipped_unscored' => 0, 'skipped_empty' => 0 ];
+        add_action(
+            'prode_ranking_cron_ran',
+            function ( int $processed, int $skippedUnscored, int $skippedEmpty ) use ( &$counters ): void {
+                $counters = [
+                    'processed'        => $processed,
+                    'skipped_unscored' => $skippedUnscored,
+                    'skipped_empty'    => $skippedEmpty,
+                ];
+            },
+            10,
+            3
+        );
+    }
+
     // -------------------------------------------------------------------------
     // CRN-01 — Single evaluated fecha, fully scored → 2 cache rows, hook fires
     // -------------------------------------------------------------------------
@@ -139,10 +168,17 @@ class RankingCronTest extends TestCase {
         $this->seedScore( $fechaId, 1, 101, 3 );
         $this->seedScore( $fechaId, 2, 102, 1 );
 
+        $counters = [];
+        $this->captureCronCounters( $counters );
+
         RankingCron::run();
 
         $this->assertSame( 2, $this->countCacheRows( $fechaId ) );
         $this->assertGreaterThan( 0, did_action( 'prode_ranking_cron_ran' ) );
+        $this->assertSame(
+            [ 'processed' => 1, 'skipped_unscored' => 0, 'skipped_empty' => 0 ],
+            $counters
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -190,10 +226,48 @@ class RankingCronTest extends TestCase {
         $this->seedUnscoredMatch( $fechaId, 1, 101 );
         $this->seedUnscoredMatch( $fechaId, 1, 102 );
 
+        $counters = [];
+        $this->captureCronCounters( $counters );
+
         RankingCron::run();
 
         $this->assertSame( 0, $this->countCacheRows( $fechaId ), 'No cache for partially evaluated fecha.' );
         $this->assertGreaterThan( 0, did_action( 'prode_ranking_cron_ran' ) );
+        $this->assertSame(
+            [ 'processed' => 0, 'skipped_unscored' => 1, 'skipped_empty' => 0 ],
+            $counters
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // CRN-07 — Counters (ADR-G8-1): processed / skipped_unscored / skipped_empty
+    // distinguish all three loop outcomes in a single run.
+    // -------------------------------------------------------------------------
+
+    public function test_counters_distinguish_processed_skipped_unscored_and_skipped_empty(): void {
+        $processedId = $this->seedFecha( 'evaluated' );
+        $unscoredId  = $this->seedFecha( 'evaluated' );
+        $emptyId     = $this->seedFecha( 'evaluated' );
+        $this->seedUser( 1 );
+
+        $this->seedScore( $processedId, 1, 101, 3 );
+        $this->seedUnscoredMatch( $unscoredId, 1, 201 );
+        // $emptyId is seeded as 'evaluated' but has NO prode_scores rows at all:
+        // countUnscoredMatches() returns 0 (nothing to count), yet
+        // aggregateByFecha() also returns no rows — the "skipped_empty" branch.
+
+        $counters = [];
+        $this->captureCronCounters( $counters );
+
+        RankingCron::run();
+
+        $this->assertSame(
+            [ 'processed' => 1, 'skipped_unscored' => 1, 'skipped_empty' => 1 ],
+            $counters
+        );
+        $this->assertSame( 1, $this->countCacheRows( $processedId ) );
+        $this->assertSame( 0, $this->countCacheRows( $unscoredId ) );
+        $this->assertSame( 0, $this->countCacheRows( $emptyId ) );
     }
 
     // -------------------------------------------------------------------------
