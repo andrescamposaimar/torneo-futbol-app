@@ -195,4 +195,33 @@ a changed plugin under an unchanged version number means the migration never run
 
 ---
 
-*Last updated: 2026-09-07 — corrected §8: the upgrade path no longer tells operators to delete the plugin (which drops every table via uninstall.php).*
+## 12. Correcting a result after evaluation (self-heals automatically)
+
+As of v0.9.4, correcting a played match's score in SportsPress (e.g. 2-2 → 2-1)
+on a fecha that was **already evaluated** no longer requires any manual step.
+
+Saving the corrected `sp_event` post triggers `ResultChangeListener`, which
+purges the plugin's `/partidos` cache and schedules a repair evaluation
+(`prode_reevaluate_fecha`) roughly 30 seconds later. That repair re-reads the
+live result, re-scores every prediction for the fecha, and recomputes the
+ranking cache — exactly like the original evaluation.
+
+This depends on WP-Cron being triggered, same as the daily evaluation pass
+(§3) — on a low-traffic install without a system cron hitting `wp-cron.php`,
+the repair can be delayed until the next page load.
+
+**Fallback (manual reopen-and-evaluate)** — use this only if the automatic
+repair does not appear to have run (check `prode_scores.evaluated_at` /
+`prode_ranking_fecha_cache` for the fecha):
+
+1. In the database, set the affected `prode_fechas` row's `state` back to an
+   evaluable state (not `'evaluated'`) so `POST /prode/evaluar-fecha` accepts
+   it, or trigger evaluation directly via WP-CLI if available.
+2. Re-run the evaluation for that fecha (admin "Evaluate" action, or the
+   equivalent WP-CLI command — see §10).
+3. Verify `prode_scores` and `prode_ranking_fecha_cache` reflect the corrected
+   result for every affected match.
+
+---
+
+*Last updated: 2026-09-13 — documented the automatic result-change self-heal (§12) and its manual fallback.*

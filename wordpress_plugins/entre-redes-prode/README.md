@@ -53,6 +53,28 @@ The plugin creates 10 custom tables prefixed with `{wp_prefix}prode_`:
 
 Auth, game, and account endpoints are added in subsequent PRs.
 
+## Result-change self-heal
+
+If an operator corrects a played match's score in SportsPress (e.g. 2-2 → 2-1)
+on a fecha the plugin already evaluated, the plugin repairs itself instead of
+leaving `prode_scores` / `prode_ranking_fecha_cache` stale:
+
+- `ResultChangeListener::onSavePost()` is bound to WordPress's `save_post`
+  hook at **priority 20** (never `save_post_sp_event` — see the class
+  docblock for why priority alone can't fix that hook choice) and detects a
+  changed result on an already-`evaluated` fecha.
+- It purges the plugin's own `/partidos` transient cache and schedules the
+  `prode_reevaluate_fecha` cron action ~30 seconds later, so several quick
+  corrections to the same fecha collapse into a single repair pass (WP-Cron
+  dedupes identical `(hook, args)` schedules within a 10-minute window).
+- `ReevaluateFechaCron::run()` handles that action by calling
+  `FechaEvaluator::evaluateFecha()` directly — the same idempotent evaluation
+  used by the daily cron and the manual admin endpoint.
+
+Like `prode_evaluate_matches_cron`, this relies on WP-Cron being triggered
+(page loads, or a system cron hitting `wp-cron.php` — see the runbook §3):
+on a low-traffic install the repair may take longer than 30 seconds to fire.
+
 ## Full documentation
 
 See `docs/entre-redes-prode-runbook.md` for installation, configuration, and operations.
