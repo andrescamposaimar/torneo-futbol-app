@@ -596,6 +596,18 @@ if ( ! function_exists( 'wp_verify_nonce' ) ) {
     }
 }
 
+if ( ! function_exists( 'wp_create_nonce' ) ) {
+    function wp_create_nonce( string $action = '' ): string {
+        return 'test-nonce-' . md5( $action );
+    }
+}
+
+if ( ! function_exists( 'esc_js' ) ) {
+    function esc_js( string $text ): string {
+        return addslashes( $text );
+    }
+}
+
 if ( ! function_exists( 'check_ajax_referer' ) ) {
     function check_ajax_referer( int|string $action = -1, mixed $query_arg = false, bool $die = true ): int|false {
         return 1;
