@@ -101,6 +101,20 @@ $expectedCols  = count(WP_POSTS_COLUMNS);
 $players  = [];
 $inBlock  = false;
 
+// Two independent guards against the class of bug that already bit once —
+// the generator silently dropping the last row of every INSERT batch,
+// caught only by a human noticing a count mismatch:
+//   1. $skippedRowCount counts every row-tuple this parser could not make
+//      sense of (malformed body, or the wrong number of columns) — these
+//      abort the run below rather than being silently continue'd past.
+//   2. $rawSpPlayerPublishCount is a second, independent count of the same
+//      rows via a raw substring match on the untouched line text, computed
+//      without going through parseRowTuple() at all — it must agree with
+//      the parsed count, or a bug in the structured parser itself (not
+//      just a malformed row) would otherwise go unnoticed.
+$skippedRowCount         = 0;
+$rawSpPlayerPublishCount = 0;
+
 $handle = fopen($sqlPath, 'r');
 if ($handle === false) {
     fwrite(STDERR, "Could not open {$sqlPath}\n");
@@ -140,18 +154,27 @@ while (($line = fgets($handle)) !== false) {
         $inBlock = false;
     }
 
+    // Independent of parseRowTuple() below: a raw substring match on the
+    // untouched line text, so a bug in the structured parser itself cannot
+    // also corrupt this count.
+    if (str_contains($trimmed, "'sp_player'") && str_contains($trimmed, "'publish'")) {
+        $rawSpPlayerPublishCount++;
+    }
+
     // Both the mid-statement row terminator ")," and the final-row
     // terminator ");" end in exactly one character after the row's own
     // closing paren — strip only that one trailing character either way.
     $body = substr($trimmed, 0, -1);
 
     if (!str_starts_with($body, '(') || !str_ends_with($body, ')')) {
+        $skippedRowCount++;
         continue;
     }
     $body = substr($body, 1, -1);
 
     $fields = parseRowTuple($body);
     if ($fields === null || count($fields) !== $expectedCols) {
+        $skippedRowCount++;
         continue;
     }
 
@@ -167,9 +190,19 @@ while (($line = fgets($handle)) !== false) {
 
 fclose($handle);
 
-usort($players, static fn (array $a, array $b): int => $a['id'] <=> $b['id']);
+if ($skippedRowCount > 0) {
+    fwrite(STDERR, "Aborting: {$skippedRowCount} wp_posts row(s) could not be parsed (malformed tuple or unexpected column count). Fix the parser or inspect the dump before regenerating the fixture.\n");
+    exit(1);
+}
 
 $count = count($players);
+
+if ($count !== $rawSpPlayerPublishCount) {
+    fwrite(STDERR, "Aborting: parsed {$count} sp_player/publish row(s) but an independent raw-text count found {$rawSpPlayerPublishCount}. The structured parser and the raw count disagree — do not trust either output until this is resolved.\n");
+    exit(1);
+}
+
+usort($players, static fn (array $a, array $b): int => $a['id'] <=> $b['id']);
 
 $export = "<?php\n\n";
 $export .= "declare(strict_types=1);\n\n";

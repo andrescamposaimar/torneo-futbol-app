@@ -170,7 +170,7 @@ final class LinkResolverTest extends TestCase {
     }
 
     public function testYear2012SeasonFilterNotApplied(): void {
-        // GARCIA, M. bucket: 2225 season 2016, 2461 season 2019 — neither
+        // GARCIA, M. bucket: 2225 season 2016, 2461 season 2016 — neither
         // covers 2012, but LINK-3 says pre-2016 skips narrowing entirely,
         // so both remain and the entry is still ambiguo.
         $resolution = $this->resolver->resolve( 'GARCIA, M.', 2012 );
