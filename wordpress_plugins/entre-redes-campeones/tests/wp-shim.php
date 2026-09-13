@@ -590,15 +590,28 @@ if ( ! function_exists( 'wp_nonce_field' ) ) {
     }
 }
 
-if ( ! function_exists( 'wp_verify_nonce' ) ) {
-    function wp_verify_nonce( string $nonce, string $action ): int|false {
-        return 1;
-    }
-}
-
 if ( ! function_exists( 'wp_create_nonce' ) ) {
     function wp_create_nonce( string $action = '' ): string {
         return 'test-nonce-' . md5( $action );
+    }
+}
+
+if ( ! function_exists( 'wp_verify_nonce' ) ) {
+    /**
+     * Ties verification to the same deterministic derivation wp_create_nonce()
+     * uses above, instead of returning truthy unconditionally.
+     *
+     * The previous shim returned 1 for ANY $nonce/$action pair, so no test
+     * could ever make a nonce check fail — every wp_verify_nonce() call in
+     * the plugin was decorative as far as the suite was concerned. Deriving
+     * the expected value from $action the same way wp_create_nonce() does
+     * means a nonce is only valid for the action it was actually created
+     * for: a wrong string, a nonce created for a different action, or a
+     * stale/forged value all correctly return false, with no extra
+     * test-only registry to keep in sync.
+     */
+    function wp_verify_nonce( string $nonce, string $action ): int|false {
+        return hash_equals( wp_create_nonce( $action ), $nonce ) ? 1 : false;
     }
 }
 
@@ -677,8 +690,19 @@ if ( ! function_exists( 'get_admin_page_title' ) ) {
 }
 
 if ( ! function_exists( 'current_user_can' ) ) {
+    /**
+     * Controllable via $GLOBALS['_campeones_test_current_user_can'], default
+     * false — most admin tests exercise the capability guard itself (via
+     * Reflection past the exit()-ing public entry point when they need the
+     * capability check bypassed). Tests that need to prove behaviour PAST
+     * the capability check (e.g. a nonce rejection) set the flag to true and
+     * must reset it to false afterwards so it never bleeds into another
+     * test.
+     */
+    $GLOBALS['_campeones_test_current_user_can'] = false;
+
     function current_user_can( string $capability ): bool {
-        return false;
+        return $GLOBALS['_campeones_test_current_user_can'];
     }
 }
 

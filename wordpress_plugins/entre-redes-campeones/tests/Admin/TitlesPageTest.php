@@ -53,6 +53,7 @@ class TitlesPageTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
+        $GLOBALS['_campeones_test_current_user_can'] = false;
     }
 
     private function makePage(): TitlesPage {
@@ -99,6 +100,25 @@ class TitlesPageTest extends TestCase {
 
         $this->makePage()->handlePost();
         $this->assertTrue( true, 'handlePost() must not die on unrelated admin_init requests.' );
+    }
+
+    public function test_handle_post_rejects_an_invalid_nonce_even_when_capability_check_passes(): void {
+        // Proves the nonce check is load-bearing, not decorative (item 1):
+        // with manage_options granted, an eliminar POST carrying a nonce
+        // that does not match campeones_eliminar_titulo_{id} must still be
+        // rejected before any row is touched.
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $_POST['campeones_titulo_action'] = 'eliminar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = 'forged-nonce';
+
+        $this->expectException( \RuntimeException::class );
+        try {
+            $this->makePage()->handlePost();
+        } finally {
+            $this->assertNotNull( $this->titles->find( $this->tituloId ), 'A rejected nonce must never let the delete run.' );
+        }
     }
 
     // -------------------------------------------------------------------------
