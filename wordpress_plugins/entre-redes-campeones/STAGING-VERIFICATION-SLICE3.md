@@ -85,9 +85,16 @@ Steps:
 
 ## Out of scope for this checklist
 
-Everything else in slice 3 (repository CRUD, the delete-transaction
-rollback, `LinkWriteService`'s auto/ambiguo/manual writes,
-`RevalidationService`'s manual-exclusion) is fully covered by `composer
-test` and needs no manual check. The aggregate review queue (slice 4),
-ranked player search (slice 5), and the bulk importer (slice 6) do not
-exist yet.
+Repository CRUD, the delete-transaction rollback, `LinkWriteService`'s
+auto/ambiguo/manual writes, `RevalidationService`'s manual-exclusion,
+CSRF/nonce verification on both admin pages (`TitlesPage` and
+`TitleEditorPage`, all eight `TitleEditorPage` actions), and the
+add-row/edit-row forms being reachable from `handlePost()` are all
+covered by `composer test` and need no manual check — a prior version of
+this section claimed this blanket coverage while the CSRF check did not
+actually exist yet and the suite could not have proven it either way
+(the test shim's `wp_verify_nonce()` returned truthy unconditionally, so
+no test could ever make a nonce check fail). Both gaps are closed now,
+with the invalid-nonce and handlePost()-driven tests to prove it. The
+aggregate review queue (slice 4), ranked player search (slice 5), and the
+bulk importer (slice 6) do not exist yet.
