@@ -26,6 +26,7 @@ class RestController {
     private ?\EntreRedes\Prode\Rest\RankingController     $ranking_controller;
     private ?\EntreRedes\Prode\Rest\PredictionHistoryController $prediction_history_controller;
     private ?\EntreRedes\Prode\Rest\PopularesController      $populares_controller;
+    private ?\EntreRedes\Prode\Rest\RecomputeRankingsController $recompute_rankings_controller;
 
     public function __construct(
         ?\EntreRedes\Prode\Rest\AuthEndpoints $auth_endpoints = null,
@@ -36,7 +37,8 @@ class RestController {
         ?\EntreRedes\Prode\Rest\RankingController $ranking_controller = null,
         ?\EntreRedes\Prode\Rest\FechaListController $fecha_list_controller = null,
         ?\EntreRedes\Prode\Rest\PredictionHistoryController $prediction_history_controller = null,
-        ?\EntreRedes\Prode\Rest\PopularesController $populares_controller = null
+        ?\EntreRedes\Prode\Rest\PopularesController $populares_controller = null,
+        ?\EntreRedes\Prode\Rest\RecomputeRankingsController $recompute_rankings_controller = null
     ) {
         $this->auth_endpoints        = $auth_endpoints;
         $this->account_controller    = $account_controller;
@@ -47,6 +49,7 @@ class RestController {
         $this->ranking_controller    = $ranking_controller;
         $this->prediction_history_controller = $prediction_history_controller;
         $this->populares_controller  = $populares_controller;
+        $this->recompute_rankings_controller = $recompute_rankings_controller;
     }
 
     public function register_routes(): void {
@@ -123,6 +126,11 @@ class RestController {
         // Populares endpoint: GET /prode/populares (prediction split for one match).
         if ( null !== $this->populares_controller ) {
             $this->populares_controller->register_routes();
+        }
+
+        // Recompute rankings endpoint (ADR-G8-1): POST /prode/recompute-rankings.
+        if ( null !== $this->recompute_rankings_controller ) {
+            $this->recompute_rankings_controller->register_routes();
         }
     }
 

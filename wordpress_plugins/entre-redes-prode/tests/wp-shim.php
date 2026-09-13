@@ -13,7 +13,7 @@ declare(strict_types=1);
  *   - dbDelta() that maps MySQL DDL to SQLite CREATE TABLE (schema-only check)
  *   - get_option() / update_option() backed by a static array
  *   - current_time() / wp_generate_uuid4() / wp_salt() / wp_generate_password()
- *   - add_action() / do_action() / add_filter() — no-ops in test context
+ *   - add_action() / do_action() / add_filter() / remove_action() — no-ops in test context
  *   - current_user_can() — returns false (admin tests are manual)
  */
 
@@ -401,6 +401,60 @@ if ( ! function_exists( 'did_action' ) ) {
     }
 }
 
+if ( ! function_exists( 'remove_action' ) ) {
+    /**
+     * Mirrors WordPress's remove_action(): removes a callback previously
+     * registered on $tag via add_action(), matched by identity ($fn === the
+     * registered callback) and $priority. Needed by
+     * RecomputeRankingsController, which registers a temporary listener on
+     * 'prode_ranking_cron_ran' to capture RankingCron's counters and MUST
+     * remove it again afterwards so repeated requests don't stack listeners
+     * (each stacked listener would double-count on the next call).
+     *
+     * Cleans both bookkeeping arrays add_action() writes to, so a removed
+     * callback disappears from do_action() dispatch AND from any test
+     * assertion made against _prode_test_action_registrations.
+     */
+    function remove_action( string $tag, callable $fn, int $priority = 10 ): bool {
+        $matched = 0;
+
+        foreach ( $GLOBALS['_prode_test_action_registrations'][ $tag ] ?? [] as $i => $reg ) {
+            if ( $reg['callback'] === $fn && $reg['priority'] === $priority ) {
+                unset( $GLOBALS['_prode_test_action_registrations'][ $tag ][ $i ] );
+                ++$matched;
+            }
+        }
+        if ( isset( $GLOBALS['_prode_test_action_registrations'][ $tag ] ) ) {
+            $GLOBALS['_prode_test_action_registrations'][ $tag ] = array_values(
+                $GLOBALS['_prode_test_action_registrations'][ $tag ]
+            );
+        }
+
+        // _prode_test_action_callbacks stores bare callables with no priority,
+        // so mirror WordPress by removing only as many occurrences as matched a
+        // registration at THIS priority. Removing every identical callable would
+        // also detach copies registered at other priorities, which the real
+        // remove_action() leaves alone.
+        $toRemove = $matched;
+        foreach ( $GLOBALS['_prode_test_action_callbacks'][ $tag ] ?? [] as $i => $cb ) {
+            if ( 0 === $toRemove ) {
+                break;
+            }
+            if ( $cb === $fn ) {
+                unset( $GLOBALS['_prode_test_action_callbacks'][ $tag ][ $i ] );
+                --$toRemove;
+            }
+        }
+        if ( isset( $GLOBALS['_prode_test_action_callbacks'][ $tag ] ) ) {
+            $GLOBALS['_prode_test_action_callbacks'][ $tag ] = array_values(
+                $GLOBALS['_prode_test_action_callbacks'][ $tag ]
+            );
+        }
+
+        return $matched > 0;
+    }
+}
+
 if ( ! function_exists( 'add_filter' ) ) {
     function add_filter( string $tag, callable $fn, int $priority = 10, int $accepted_args = 1 ): true {
         return true;
@@ -544,7 +598,19 @@ if ( ! function_exists( 'get_transient' ) ) {
 // ─── WP REST API stubs ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'register_rest_route' ) ) {
+    /**
+     * Records every call (namespace, route, full $args) into
+     * _prode_test_registered_routes so tests can assert a controller's
+     * register_routes() wired up the expected path and HTTP method — e.g.
+     * RecomputeRankingsControllerTest asserting CREATABLE on
+     * 'prode/recompute-rankings' — without a real WP REST server.
+     */
     function register_rest_route( string $namespace, string $route, array $args ): bool {
+        $GLOBALS['_prode_test_registered_routes'][] = [
+            'namespace' => $namespace,
+            'route'     => $route,
+            'args'      => $args,
+        ];
         return true;
     }
 }

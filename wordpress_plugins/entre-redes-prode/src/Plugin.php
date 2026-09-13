@@ -112,6 +112,12 @@ final class Plugin {
             // Populares endpoint: GET /prode/populares (prediction split for one match).
             $populares_controller = new Rest\PopularesController( $pred_repo );
 
+            // Recompute rankings endpoint (ADR-G8-1): POST /prode/recompute-rankings.
+            // Replaces the temporary mu-plugin workaround for forcing a rebuild of
+            // the ranking cache. Scope is global (every evaluated fecha of the
+            // tenant), not per-fecha — see RecomputeRankingsController's docblock.
+            $recompute_rankings_controller = new Rest\RecomputeRankingsController( $cap_check );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
@@ -121,7 +127,8 @@ final class Plugin {
                 $ranking_controller,
                 $fecha_list_controller,
                 $prediction_history_controller,
-                $populares_controller
+                $populares_controller,
+                $recompute_rankings_controller
             );
             $controller->register_routes();
         } );
