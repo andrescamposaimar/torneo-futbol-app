@@ -495,6 +495,73 @@ class TitleEditorPageTest extends TestCase {
                 (string) $GLOBALS['_campeones_test_last_redirect'],
                 'A row action must redirect back to the title it acted on, not titulo_id=0.'
             );
+            $row = $this->squads->find( $id );
+            $this->assertNull( $row->jugadorId, 'desvincular must actually reach handleSetLink() and clear the pointer.' );
+            $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
+        }
+    }
+
+    public function test_handle_post_vincular_links_a_row(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'vincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '5078';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=vinculado', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $row = $this->squads->find( $id );
+            $this->assertSame( 5078, $row->jugadorId, 'vincular must actually reach handleSetLink() and set the pointer.' );
+            $this->assertSame( LinkState::MANUAL, $row->estadoVinculo );
+        }
+    }
+
+    public function test_handle_post_eliminar_fila_removes_a_row(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $_POST['campeones_editor_action'] = 'eliminar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=fila_eliminada', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $this->assertNull( $this->squads->find( $id ), 'eliminar_fila must actually reach handleDeleteRow() and remove the row.' );
+        }
+    }
+
+    public function test_handle_post_crear_titulo_creates_a_title(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        unset( $_POST['titulo_id'] );
+        $_POST['campeones_editor_action'] = 'crear_titulo';
+        $_POST['anio']                    = '2011';
+        $_POST['zona']                    = 'A';
+        $_POST['posicion']                = 'campeon';
+        $_POST['equipo_nombre']           = 'INDEPENDIENTE';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_crear_titulo' );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=creado', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $created = $this->titles->findByKey( 2011, 'A', 'campeon' );
+            $this->assertNotNull( $created, 'crear_titulo must actually reach handleCreateTitle() and insert the title.' );
+            $this->assertSame( 'INDEPENDIENTE', $created->equipoNombre );
+            $_POST['titulo_id'] = (string) $this->tituloId;
         }
     }
 

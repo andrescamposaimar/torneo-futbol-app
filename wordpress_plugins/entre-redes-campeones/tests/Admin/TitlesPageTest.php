@@ -78,6 +78,24 @@ class TitlesPageTest extends TestCase {
         );
     }
 
+    private function makeTestablePage(): TestableTitlesPage {
+        global $wpdb;
+
+        $rows      = require __DIR__ . '/../Fixtures/players.php';
+        $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+        return new TestableTitlesPage(
+            $this->titles,
+            new TitleDeletionService( $wpdb, $this->titles, $this->squads ),
+            new RevalidationService(
+                $this->titles,
+                $this->squads,
+                new LinkResolver( $directory ),
+                new LinkWriteService( $this->squads, $directory )
+            )
+        );
+    }
+
     // -------------------------------------------------------------------------
     // Constructor / capability guard
     // -------------------------------------------------------------------------
@@ -122,6 +140,45 @@ class TitlesPageTest extends TestCase {
             $this->makePage()->handlePost();
         } finally {
             $this->assertNotNull( $this->titles->find( $this->tituloId ), 'A rejected nonce must never let the delete run.' );
+        }
+    }
+
+    public function test_handle_post_eliminar_deletes_the_title_and_its_squad(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $_POST['campeones_titulo_action'] = 'eliminar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_eliminar_titulo_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=eliminado', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $this->assertNull( $this->titles->find( $this->tituloId ), 'eliminar must actually reach handleDelete() and remove the title.' );
+        }
+    }
+
+    public function test_handle_post_revalidar_re_resolves_the_year(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'GARCIA, M.', false, LinkState::SIN_CANDIDATO )
+        );
+
+        $_POST['campeones_titulo_action'] = 'revalidar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_revalidar_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringContainsString( 'campeones_notice=revalidado_1', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $row = $this->squads->find( $id );
+            $this->assertSame( LinkState::AMBIGUO, $row->estadoVinculo, 'revalidar must actually reach handleRevalidate() and re-resolve the row.' );
         }
     }
 
