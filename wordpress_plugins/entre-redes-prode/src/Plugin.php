@@ -246,6 +246,24 @@ final class Plugin {
         // have none (legacy rows seeded before v0.5.2). Idempotent no-op once filled.
         add_action( Cron\BackfillMatchMetaCron::HOOK,    [ Cron\BackfillMatchMetaCron::class, 'run' ] );
 
+        // Result-change self-heal (ADR-G7-1): repair an already-evaluated fecha
+        // when an operator corrects a played match's score in SportsPress.
+        //
+        // MUST bind to `save_post` at priority 20, NOT `save_post_sp_event` —
+        // see ResultChangeListener's class docblock for why (SportsPress writes
+        // its score meta boxes on `save_post` priority 1, and `save_post_sp_event`
+        // fires BEFORE the generic `save_post`, so no priority there can ever
+        // observe the write). 2 accepted args for the defensive ($post_id, $post)
+        // signature.
+        add_action( 'save_post', [ Sync\ResultChangeListener::class, 'onSavePost' ], 20, 2 );
+
+        // ResultChangeListener schedules this single event (30s delay) instead
+        // of calling the evaluator inline, so the save_post request returns fast
+        // and several quick corrections to the same fecha collapse into one
+        // repair pass (WordPress dedupes identical (hook, args) schedules within
+        // a 10-minute window).
+        add_action( Cron\ReevaluateFechaCron::HOOK, [ Cron\ReevaluateFechaCron::class, 'run' ], 10, 1 );
+
         // Safety net: (re)schedule the crons on any normal request where the
         // primary evaluation event is missing. MigrationRunner::run() only fires
         // from the activation hook, so a plugin updated by file overwrite (which

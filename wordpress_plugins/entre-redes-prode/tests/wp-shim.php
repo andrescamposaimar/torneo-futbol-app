@@ -25,6 +25,7 @@ if ( ! class_exists( 'wpdb' ) ) {
      */
     class wpdb {
         public string $prefix      = 'wp_';
+        public string $options     = 'wp_options';
         public ?string $last_error = null;
 
         private \PDO $pdo;
@@ -365,9 +366,20 @@ if ( ! function_exists( 'add_action' ) ) {
      * hooks — e.g. admin_notices closures registered by InitialSchema /
      * MigrationRunner — the same way WordPress would when rendering wp-admin.
      * do_action() below fires them; did_action()'s counter is unaffected.
+     *
+     * Also records priority/accepted_args per registration in
+     * _prode_test_action_registrations — separate from the plain callback list
+     * above so existing do_action() dispatch is unaffected — so tests can
+     * assert WHICH hook and priority a callback was bound to. This matters for
+     * regressions like ADR-G7-1 (save_post priority 20, never save_post_sp_event).
      */
     function add_action( string $tag, callable $fn, int $priority = 10, int $accepted_args = 1 ): true {
         $GLOBALS['_prode_test_action_callbacks'][ $tag ][] = $fn;
+        $GLOBALS['_prode_test_action_registrations'][ $tag ][] = [
+            'callback'      => $fn,
+            'priority'      => $priority,
+            'accepted_args' => $accepted_args,
+        ];
         return true;
     }
 }
@@ -705,6 +717,62 @@ if ( ! function_exists( 'get_the_title' ) ) {
         global $wp_test_post_titles;
 
         return (string) ( $wp_test_post_titles[ (int) $post ] ?? '' );
+    }
+}
+
+// ─── WP_Post / get_post / revision shims (ResultChangeListener, ADR-G7-1) ─────
+// Data-driven via $wp_test_posts, keyed by post ID, so tests can reproduce the
+// exact shapes ResultChangeListener::onSavePost() reads: post_type, post_status.
+
+if ( ! class_exists( 'WP_Post' ) ) {
+    class WP_Post {
+        public int $ID;
+        public string $post_type;
+        public string $post_status;
+
+        public function __construct( int $id, string $post_type, string $post_status ) {
+            $this->ID          = $id;
+            $this->post_type   = $post_type;
+            $this->post_status = $post_status;
+        }
+    }
+}
+
+if ( ! function_exists( 'get_post' ) ) {
+    function get_post( int $post_id ): ?WP_Post {
+        global $wp_test_posts;
+
+        $row = $wp_test_posts[ $post_id ] ?? null;
+        if ( null === $row ) {
+            return null;
+        }
+
+        return new WP_Post( $post_id, $row['post_type'], $row['post_status'] );
+    }
+}
+
+if ( ! function_exists( 'wp_is_post_revision' ) ) {
+    function wp_is_post_revision( int $post_id ): bool {
+        global $wp_test_post_revisions;
+
+        return (bool) ( $wp_test_post_revisions[ $post_id ] ?? false );
+    }
+}
+
+// ─── WP-Cron scheduling shim ──────────────────────────────────────────────────
+// Records every call so tests can assert what was scheduled — hook, args, and
+// approximate fire time — without a real WP-Cron runtime.
+
+if ( ! function_exists( 'wp_schedule_single_event' ) ) {
+    $GLOBALS['_prode_test_scheduled_events'] = [];
+
+    function wp_schedule_single_event( int $timestamp, string $hook, array $args = [] ): bool {
+        $GLOBALS['_prode_test_scheduled_events'][] = [
+            'timestamp' => $timestamp,
+            'hook'      => $hook,
+            'args'      => $args,
+        ];
+        return true;
     }
 }
 
