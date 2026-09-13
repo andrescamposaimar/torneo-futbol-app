@@ -50,8 +50,31 @@ The plugin creates 10 custom tables prefixed with `{wp_prefix}prode_`:
 |--------|------|-------------|
 | GET | `/wp-json/entre-redes/v1/prode/healthcheck` | Plugin liveness check |
 | GET | `/wp-json/entre-redes/v1/prode/.well-known/jwks.json` | RS256 public key (JWK format) |
+| POST | `/wp-json/entre-redes/v1/prode/recompute-rankings` | Force a full rebuild of every evaluated fecha's ranking cache (admin-only) |
 
 Auth, game, and account endpoints are added in subsequent PRs.
+
+### POST /prode/recompute-rankings
+
+Admin-only (`manage_options`). Forces `prode_ranking_fecha_cache` to be rebuilt
+for every evaluated fecha of the tenant — the same work `RankingCron` does on
+its normal event-driven trigger, just synchronous and on demand. Reach for
+this when the cache looks stale (e.g. after a manual DB fix, or while
+diagnosing a discrepancy) and you don't want to wait for the next evaluation
+to fire it as a side effect. Takes no parameters — the rebuild is always
+global, never scoped to one fecha.
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "fechas_processed": 3,
+  "skipped_unscored": 1,
+  "skipped_empty": 0,
+  "computed_at": "2026-09-13 12:00:00"
+}
+```
 
 ## Result-change self-heal
 

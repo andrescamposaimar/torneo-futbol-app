@@ -180,7 +180,11 @@ a changed plugin under an unchanged version number means the migration never run
 
 ## 10. WP-CLI commands
 
-[TODO — PR-11: `wp prode evaluate-fecha <id>`, `wp prode recompute-rankings`, `wp prode rotate-pepper [--dry-run|--apply]`.]
+[TODO — PR-11: `wp prode evaluate-fecha <id>`, `wp prode rotate-pepper [--dry-run|--apply]`.]
+
+The production host is cPanel shared hosting with **no WP-CLI available**, so
+a `wp prode recompute-rankings` command would be useless there even if it
+existed. §12a documents the REST route that replaces it.
 
 ---
 
@@ -224,4 +228,50 @@ repair does not appear to have run (check `prode_scores.evaluated_at` /
 
 ---
 
-*Last updated: 2026-09-13 — documented the automatic result-change self-heal (§12) and its manual fallback.*
+## 12a. Forcing a ranking rebuild (POST /prode/recompute-rankings)
+
+As of v0.9.5, `prode_ranking_fecha_cache` can be rebuilt on demand through a
+REST endpoint. This **replaces the previous workaround** of dropping a
+temporary mu-plugin that called
+`do_action('prode_recompute_rankings_cron')` by hand — that workaround is no
+longer needed and should not be used going forward.
+
+Use this when the cache looks stale and you don't want to wait for the next
+evaluation (or the result-change self-heal in §12) to recompute it as a side
+effect — for example after a manual database fix, or while diagnosing a
+ranking discrepancy.
+
+The endpoint is admin-only (`manage_options`) and takes no parameters: it
+always rebuilds every evaluated fecha for the tenant, exactly like the
+`RankingCron` scheduled job does. There is no per-fecha scoping.
+
+**Since the production server has no WP-CLI (§10), the supported way to call
+this endpoint is from the browser console**, on any wp-admin **block editor**
+screen while logged in as an administrator (the block editor page already
+loads `wp.apiFetch` with the current session's nonce):
+
+```js
+wp.apiFetch({ path: '/entre-redes/v1/prode/recompute-rankings', method: 'POST' }).then(console.log)
+```
+
+Expected output:
+
+```json
+{
+  "status": "ok",
+  "fechas_processed": 3,
+  "skipped_unscored": 1,
+  "skipped_empty": 0,
+  "computed_at": "2026-09-13 12:00:00"
+}
+```
+
+This call is **synchronous and can take a few seconds** on a tenant with many
+evaluated fechas: `RankingCron` recomputes every one of them from a full
+`SUM(points)` aggregation each time, not incrementally. That's expected and
+acceptable — this route is only ever triggered by an operator on demand, not
+on a path a player waits on.
+
+---
+
+*Last updated: 2026-09-13 — documented POST /prode/recompute-rankings (§12a), which replaces the temporary mu-plugin workaround for forcing a ranking rebuild.*
