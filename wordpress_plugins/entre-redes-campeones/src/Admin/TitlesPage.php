@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Admin;
 
 use EntreRedes\Campeones\Linking\PlayerDirectoryQueryException;
+use EntreRedes\Campeones\Linking\RevalidationResult;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Titles\TitleDeletionService;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -60,8 +61,8 @@ class TitlesPage {
             if ( 'eliminar' === $action ) {
                 $notice = $this->handleDelete( $tituloId ) ? 'eliminado' : 'error_eliminar';
             } else {
-                $count  = $this->handleRevalidate( $tituloId );
-                $notice = 'revalidado_' . $count;
+                $result = $this->handleRevalidate( $tituloId );
+                $notice = sprintf( 'revalidado_%d_%d', $result->succeeded, $result->total );
             }
         } catch ( PlayerDirectoryQueryException | WriteFailedException $e ) {
             // Neither exception is caught anywhere else in this class.
@@ -172,14 +173,27 @@ class TitlesPage {
         }
 
         if ( str_starts_with( $key, 'revalidado_' ) ) {
-            $count = (int) substr( $key, strlen( 'revalidado_' ) );
+            // Item 2: the notice must state BOTH how many rows succeeded
+            // and how many were attempted — a bare count let a 1-of-1
+            // failure render as a green "0 fila(s)" success, indistinguishable
+            // from a genuine 0-of-0 no-op.
+            $parts     = explode( '_', substr( $key, strlen( 'revalidado_' ) ), 2 );
+            $succeeded = (int) ( $parts[0] ?? 0 );
+            $total     = (int) ( $parts[1] ?? 0 );
+
+            $type = 'success';
+            if ( $total > 0 && $succeeded < $total ) {
+                $type = 0 === $succeeded ? 'error' : 'warning';
+            }
+
             return [
                 'message' => sprintf(
-                    /* translators: %d: number of squad rows re-evaluated */
-                    __( 'Revalidación completa: %d fila(s) del plantel fueron re-evaluadas.', 'entre-redes-campeones' ),
-                    $count
+                    /* translators: 1: number of squad rows successfully re-evaluated, 2: number of squad rows attempted */
+                    __( 'Revalidación: %1$d de %2$d fila(s) del plantel fueron re-evaluadas correctamente.', 'entre-redes-campeones' ),
+                    $succeeded,
+                    $total
                 ),
-                'type'    => 'success',
+                'type'    => $type,
             ];
         }
 
@@ -196,7 +210,7 @@ class TitlesPage {
         return $this->deletionService->delete( $tituloId );
     }
 
-    private function handleRevalidate( int $tituloId ): int {
+    private function handleRevalidate( int $tituloId ): RevalidationResult {
         return $this->revalidationService->revalidateYear( $tituloId );
     }
 }

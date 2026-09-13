@@ -10,6 +10,7 @@ use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Support\FailingResolutionApplyWpdb;
+use EntreRedes\Campeones\Tests\Support\PartialFailureResolutionApplyWpdb;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -68,9 +69,10 @@ class RevalidationServiceTest extends TestCase {
             new SquadEntry( $this->tituloId, 0, 'GARCIA, M.', false, LinkState::SIN_CANDIDATO )
         );
 
-        $count = $this->service->revalidateYear( $this->tituloId );
+        $result = $this->service->revalidateYear( $this->tituloId );
 
-        $this->assertSame( 1, $count );
+        $this->assertSame( 1, $result->succeeded );
+        $this->assertSame( 1, $result->total );
 
         $row = $this->squads->find( $id );
         $this->assertSame( LinkState::AMBIGUO, $row->estadoVinculo );
@@ -127,9 +129,10 @@ class RevalidationServiceTest extends TestCase {
             new SquadEntry( $this->tituloId, 1, 'MAZZARA, M.', false, LinkState::MANUAL, 999999 )
         );
 
-        $count = $this->service->revalidateYear( $this->tituloId );
+        $result = $this->service->revalidateYear( $this->tituloId );
 
-        $this->assertSame( 1, $count, 'The manual row must not be counted among revalidated rows.' );
+        $this->assertSame( 1, $result->succeeded, 'The manual row must not be counted among revalidated rows.' );
+        $this->assertSame( 1, $result->total, 'The manual row must not be counted among attempted rows either.' );
     }
 
     public function test_a_row_whose_resolution_write_fails_is_not_counted_as_revalidated(): void {
@@ -162,12 +165,56 @@ class RevalidationServiceTest extends TestCase {
 
             $id = $squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );
 
-            $count = $service->revalidateYear( $title->id );
+            $result = $service->revalidateYear( $title->id );
 
-            $this->assertSame( 0, $count, 'A failed resolution write must not be counted as revalidated.' );
+            $this->assertSame( 0, $result->succeeded, 'A failed resolution write must not be counted as revalidated.' );
+            $this->assertSame( 1, $result->total, 'The row was still attempted, even though its write failed.' );
 
             $row = $squads->find( $id );
             $this->assertSame( LinkState::SIN_CANDIDATO, $row->estadoVinculo, 'The row must be left exactly as it was when its write failed.' );
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 2 — revalidateYear() returned only $succeeded, discarding how
+    // many rows were attempted. A caller could not tell "1 of 1 succeeded"
+    // apart from "1 of 25 succeeded" — both came back as a bare `1`.
+    // -------------------------------------------------------------------------
+
+    public function test_a_partial_failure_reports_succeeded_strictly_less_than_total(): void {
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new PartialFailureResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $service = new RevalidationService(
+                $titles,
+                $squads,
+                new LinkResolver( $directory ),
+                new LinkWriteService( $squads, $directory )
+            );
+
+            // Two resolvable rows; PartialFailureResolutionApplyWpdb fails
+            // exactly the second resolution write it sees.
+            $squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );
+            $squads->insert( new SquadEntry( $title->id, 1, 'ZUBIZARRETA, F.' ) );
+
+            $result = $service->revalidateYear( $title->id );
+
+            $this->assertSame( 1, $result->succeeded );
+            $this->assertSame( 2, $result->total, 'Both rows were attempted, even though only one write succeeded.' );
         } finally {
             $wpdb = $original;
         }

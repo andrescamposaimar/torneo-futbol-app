@@ -11,6 +11,7 @@ use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
+use EntreRedes\Campeones\Tests\Support\PartialFailureResolutionApplyWpdb;
 use EntreRedes\Campeones\Tests\Support\RedirectTerminatedException;
 use EntreRedes\Campeones\Tests\Support\TestableTitlesPage;
 use EntreRedes\Campeones\Tests\Support\ThrowingPlayerDirectory;
@@ -176,9 +177,66 @@ class TitlesPageTest extends TestCase {
         try {
             $this->makeTestablePage()->handlePost();
         } finally {
-            $this->assertStringContainsString( 'campeones_notice=revalidado_1', (string) $GLOBALS['_campeones_test_last_redirect'] );
+            $this->assertStringContainsString( 'campeones_notice=revalidado_1_1', (string) $GLOBALS['_campeones_test_last_redirect'] );
             $row = $this->squads->find( $id );
             $this->assertSame( LinkState::AMBIGUO, $row->estadoVinculo, 'revalidar must actually reach handleRevalidate() and re-resolve the row.' );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 2 — handleRevalidate()/the redirect notice reported only how
+    // many rows succeeded, never how many were attempted. A 1-of-1 failure
+    // and a 24-of-25 failure both rendered as a bare, green "0 fila(s)" /
+    // "24 fila(s)" success notice. Drive a genuine partial failure (1 of 2
+    // rows) through the real handlePost() entry point and prove both
+    // numbers reach the notice, with a non-success type.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_revalidar_reports_a_partial_failure_with_both_numbers(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new PartialFailureResolutionApplyWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            // Two resolvable rows; PartialFailureResolutionApplyWpdb fails
+            // exactly the second resolution write it sees.
+            $squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.' ) );
+            $squads->insert( new SquadEntry( $title->id, 1, 'ZUBIZARRETA, F.' ) );
+
+            $page = new TestableTitlesPage(
+                $titles,
+                new TitleDeletionService( $failing, $titles, $squads ),
+                new RevalidationService( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) )
+            );
+
+            $_POST['campeones_titulo_action'] = 'revalidar';
+            $_POST['titulo_id']               = (string) $title->id;
+            $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_revalidar_' . $title->id );
+
+            $this->expectException( RedirectTerminatedException::class );
+            try {
+                $page->handlePost();
+            } finally {
+                $this->assertStringContainsString(
+                    'campeones_notice=revalidado_1_2',
+                    (string) $GLOBALS['_campeones_test_last_redirect'],
+                    'A partial revalidation failure must report both how many succeeded and how many were attempted.'
+                );
+            }
+        } finally {
+            $wpdb = $original;
         }
     }
 
@@ -205,7 +263,9 @@ class TitlesPageTest extends TestCase {
         $page = $this->makePage();
         $ref  = new \ReflectionMethod( TitlesPage::class, 'handleRevalidate' );
 
-        $this->assertSame( 1, $ref->invoke( $page, $this->tituloId ) );
+        $result = $ref->invoke( $page, $this->tituloId );
+        $this->assertSame( 1, $result->succeeded );
+        $this->assertSame( 1, $result->total );
 
         $row = $this->squads->find( $id );
         $this->assertSame( LinkState::AMBIGUO, $row->estadoVinculo );
@@ -256,7 +316,7 @@ class TitlesPageTest extends TestCase {
 
     public function test_render_shows_the_revalidation_count_in_its_notice(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
-        $_GET['campeones_notice'] = 'revalidado_7';
+        $_GET['campeones_notice'] = 'revalidado_7_7';
 
         ob_start();
         $this->makePage()->render();
@@ -264,6 +324,32 @@ class TitlesPageTest extends TestCase {
 
         $this->assertStringContainsString( 'notice-success', $html );
         $this->assertStringContainsString( '7', $html );
+    }
+
+    public function test_render_shows_a_warning_notice_when_revalidation_is_only_partially_successful(): void {
+        // Item 2: a mixed result (1 of 2 succeeded) must never render as the
+        // same green success box a fully-successful revalidation gets.
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['campeones_notice'] = 'revalidado_1_2';
+
+        ob_start();
+        $this->makePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-warning', $html );
+        $this->assertStringContainsString( '1', $html );
+        $this->assertStringContainsString( '2', $html );
+    }
+
+    public function test_render_shows_an_error_notice_when_revalidation_fully_fails(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['campeones_notice'] = 'revalidado_0_2';
+
+        ob_start();
+        $this->makePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-error', $html );
     }
 
     public function test_render_shows_no_notice_when_none_is_present_in_the_query(): void {
