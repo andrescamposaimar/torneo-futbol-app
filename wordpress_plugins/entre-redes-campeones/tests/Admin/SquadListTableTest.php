@@ -221,17 +221,53 @@ class SquadListTableTest extends TestCase {
     }
 
     public function test_column_acciones_separates_action_forms_with_a_visible_separator(): void {
-        // Linked row: editar, cambiar, desvincular, eliminar — 4 forms, 3
-        // separators.
+        // Deliberately updated (layout task, round 2): editar_fila (name +
+        // captain + Guardar) is no longer part of the pipe-separated run —
+        // it now sits on its own stacked lines, joined to the actions line
+        // by a plain line break instead. Linked row: cambiar, desvincular,
+        // eliminar — 3 forms, 2 separators.
         $item = [ 'id' => 7, 'jugador_id' => 5078, 'jugador_nombre' => 'BASSO, A.', 'orden' => 0 ];
 
         $html = $this->invokeColumnMethod( 'column_acciones', $item );
 
         $this->assertSame(
-            3,
+            2,
             substr_count( $html, ' | ' ),
             'Cambiar / Desvincular / Eliminar must not run together with no separation.'
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Operator-requested stacked layout, found on real use: name input,
+    // then the captain checkbox (with Guardar), then the ID jugador input,
+    // then the three action links. Pinned here so a future refactor cannot
+    // silently scramble it (task: "Pin the order with a test").
+    // -------------------------------------------------------------------------
+
+    public function test_column_acciones_renders_controls_in_the_requested_order(): void {
+        $item = [ 'id' => 7, 'jugador_id' => 5078, 'jugador_nombre' => 'BASSO, A.', 'orden' => 0 ];
+
+        $html = $this->invokeColumnMethod( 'column_acciones', $item );
+
+        $nombrePos      = strpos( $html, 'name="jugador_nombre"' );
+        $capitanPos     = strpos( $html, 'name="es_capitan"' );
+        $idPos          = strpos( $html, 'name="jugador_id"' );
+        $cambiarPos     = strpos( $html, '>Cambiar</button>' );
+        $desvincularPos = strpos( $html, '>Desvincular</button>' );
+        $eliminarPos    = strpos( $html, '>Eliminar</button>' );
+
+        $this->assertNotFalse( $nombrePos, 'The jugador_nombre input must be present.' );
+        $this->assertNotFalse( $capitanPos, 'The es_capitan checkbox must be present.' );
+        $this->assertNotFalse( $idPos, 'The jugador_id input must be present.' );
+        $this->assertNotFalse( $cambiarPos, 'The Cambiar button must be present.' );
+        $this->assertNotFalse( $desvincularPos, 'The Desvincular button must be present.' );
+        $this->assertNotFalse( $eliminarPos, 'The Eliminar button must be present.' );
+
+        $this->assertTrue( $nombrePos < $capitanPos, 'The name input must come before the captain checkbox.' );
+        $this->assertTrue( $capitanPos < $idPos, 'The captain checkbox must come before the ID jugador input.' );
+        $this->assertTrue( $idPos < $cambiarPos, 'The ID jugador input must come before the Cambiar action.' );
+        $this->assertTrue( $cambiarPos < $desvincularPos, 'Cambiar must come before Desvincular.' );
+        $this->assertTrue( $desvincularPos < $eliminarPos, 'Desvincular must come before Eliminar.' );
     }
 
     public function test_no_items_message(): void {

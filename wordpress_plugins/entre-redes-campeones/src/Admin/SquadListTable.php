@@ -177,9 +177,25 @@ class SquadListTable extends \WP_List_Table {
      * Editar (name / captain / order) plus Eliminar the row, plus the link
      * control (Vincular / Cambiar / Desvincular). One nonce per row, keyed
      * to the row id (LINK-8), shared by every form below — editar_fila
-     * included. The forms are joined with a visible " | " separator
-     * (design §6 amendment) — without it, "Cambiar Desvincular Eliminar"
-     * ran together with no separation.
+     * included.
+     *
+     * Stacked into four visual lines, in this exact order (pinned by
+     * test_column_acciones_renders_controls_in_the_requested_order —
+     * operator-requested layout after real use, see the "Layout work on a
+     * WordPress admin list table" task):
+     *   1. the jugador_nombre text input, alone;
+     *   2. the Capitán checkbox with its label, and the Guardar submit on
+     *      the same line — Guardar submits the name/captain form above it,
+     *      so it belongs there, not with the link actions below;
+     *   3. the jugador_id ("ID jugador") input, alone;
+     *   4. Cambiar (or Vincular) / Desvincular / Eliminar, pipe-separated —
+     *      Cambiar submits the ID field directly above it.
+     * Each line break is a plain <br> inside the form that owns the field
+     * above it, so the visual stacking never moves a control out of the
+     * <form> that actually submits it. The " | " separator (design §6
+     * amendment) is kept only between the three action links on line 4 —
+     * without it, "Cambiar Desvincular Eliminar" ran together with no
+     * separation.
      *
      * @param array<string, mixed> $item
      */
@@ -192,8 +208,11 @@ class SquadListTable extends \WP_List_Table {
         $linkAction = $isLinked ? 'cambiar' : 'vincular';
         $hiddenIds  = [ 'titulo_id' => $this->tituloId, 'plantel_id' => $plantelId ];
 
+        // Line 1 (name input) then line 2 (Capitán checkbox); the trailing
+        // hidden "orden" field and Guardar (added by ActionForm right after
+        // $extraHtml) stay on line 2, next to the checkbox.
         $editarExtra = sprintf(
-            '<input type="text" name="jugador_nombre" value="%s" style="width:12em;"> '
+            '<input type="text" name="jugador_nombre" value="%s" style="width:12em;"><br>'
             . '<label><input type="checkbox" name="es_capitan" value="1"%s> %s</label>'
             . '<input type="hidden" name="orden" value="%d">',
             esc_attr( (string) ( $item['jugador_nombre'] ?? '' ) ),
@@ -202,8 +221,7 @@ class SquadListTable extends \WP_List_Table {
             (int) ( $item['orden'] ?? 0 )
         );
 
-        $parts   = [];
-        $parts[] = ActionForm::render(
+        $editarForm = ActionForm::render(
             'campeones_editor_action',
             'editar_fila',
             $adminUrl,
@@ -214,12 +232,16 @@ class SquadListTable extends \WP_List_Table {
             $editarExtra
         );
 
+        // Line 3 (ID jugador input); the trailing <br> pushes Cambiar
+        // (added by ActionForm right after $extraHtml) down to line 4, next
+        // to Desvincular / Eliminar instead of trailing the input.
         $linkExtra = sprintf(
-            '<input type="number" name="jugador_id" placeholder="%s" style="width:9em;">',
+            '<input type="number" name="jugador_id" placeholder="%s" style="width:9em;"><br>',
             esc_attr__( 'ID jugador', 'entre-redes-campeones' )
         );
 
-        $parts[] = ActionForm::render(
+        $actionLinks   = [];
+        $actionLinks[] = ActionForm::render(
             'campeones_editor_action',
             $linkAction,
             $adminUrl,
@@ -231,7 +253,7 @@ class SquadListTable extends \WP_List_Table {
         );
 
         if ( $isLinked ) {
-            $parts[] = ActionForm::render(
+            $actionLinks[] = ActionForm::render(
                 'campeones_editor_action',
                 'desvincular',
                 $adminUrl,
@@ -242,7 +264,7 @@ class SquadListTable extends \WP_List_Table {
             );
         }
 
-        $parts[] = ActionForm::render(
+        $actionLinks[] = ActionForm::render(
             'campeones_editor_action',
             'eliminar_fila',
             $adminUrl,
@@ -254,7 +276,7 @@ class SquadListTable extends \WP_List_Table {
             buttonClass: 'button-link submitdelete'
         );
 
-        return implode( ' | ', $parts );
+        return $editarForm . '<br>' . implode( ' | ', $actionLinks );
     }
 
     /**

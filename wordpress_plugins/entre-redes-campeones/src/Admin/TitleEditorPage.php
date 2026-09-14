@@ -454,7 +454,32 @@ class TitleEditorPage {
                 <?php submit_button( __( 'Guardar', 'entre-redes-campeones' ) ); ?>
             </form>
 
-            <?php $listTable->display(); ?>
+            <?php /*
+            Scoped to .campeones-squad-list so it can never bleed into any
+            other admin list table (TitlesListTable included) — column
+            slugs like "acciones" or "orden" are generic enough that an
+            unscoped rule would be a real risk. Orden and ID are shrunk to
+            just their content (the header word / seven digits); Acciones
+            gets the space that frees up, since it is the column the
+            operator actually works in (task: "Layout work on a WordPress
+            admin list table").
+            */ ?>
+            <style>
+                .campeones-squad-list .column-orden {
+                    width: 5ch; /* "Orden" is 5 characters; it only ever holds a small int */
+                    white-space: nowrap;
+                }
+                .campeones-squad-list .column-jugador_id {
+                    width: 7ch; /* seven digits, no more */
+                    white-space: nowrap;
+                }
+                .campeones-squad-list .column-acciones {
+                    width: 40%;
+                }
+            </style>
+            <div class="campeones-squad-list">
+                <?php $listTable->display(); ?>
+            </div>
 
             <h2><?php echo esc_html__( 'Agregar jugador', 'entre-redes-campeones' ); ?></h2>
             <form method="post" action="<?php echo esc_url( admin_url( 'admin.php?page=campeones-titulo-edit' ) ); ?>">
