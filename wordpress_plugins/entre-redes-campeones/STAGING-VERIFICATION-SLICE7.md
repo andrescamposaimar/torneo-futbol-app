@@ -125,6 +125,23 @@ history with ~17 years / ~220 entries would suggest the photo lookup
 regressed to one query per entry instead of one batched query for the
 whole response (`WpPlayerPhotoProvider::findPhotoUrls()`).
 
+## 5. Photo lookup post-type guard
+
+`WpPlayerPhotoProvider::findPhotoUrls()` now joins against `wp_posts`
+and requires `post_type = 'sp_player'` before serving a `_thumbnail_id`
+for a linked id. This class is explicitly NOT unit-tested against the
+SQLite shim (no real posts/attachments there — see its class docblock),
+so this check can only be confirmed by hand:
+
+- Pick a linked `jugador_id` whose `sp_player` post has a featured
+  image (step 1's `foto_url` already proves this end to end).
+- There is no separate negative case to construct on a production
+  database without creating a non-`sp_player` post that happens to
+  share an id with a real player — this guard is a defensive
+  correctness fix (a squad row must never be able to serve an
+  unrelated post's attachment as a player's photo), not something
+  slice 7's staging data can exercise directly.
+
 ## Out of scope for this checklist
 
 Everything else in slice 7 — response shape, the nullable-slot
