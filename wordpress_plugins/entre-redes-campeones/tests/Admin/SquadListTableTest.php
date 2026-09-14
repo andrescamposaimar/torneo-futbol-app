@@ -27,6 +27,8 @@ class SquadListTableTest extends TestCase {
         $this->assertArrayHasKey( 'orden', $columns );
         $this->assertArrayHasKey( 'jugador_nombre', $columns );
         $this->assertArrayHasKey( 'estado_vinculo', $columns );
+        $this->assertArrayHasKey( 'vinculado_a', $columns );
+        $this->assertArrayHasKey( 'jugador_id', $columns );
         $this->assertArrayHasKey( 'acciones', $columns );
     }
 
@@ -107,6 +109,128 @@ class SquadListTableTest extends TestCase {
             4,
             substr_count( $html, 'name="titulo_id" value="42"' ),
             'editar_fila, cambiar, desvincular, and eliminar_fila must each POST the hidden titulo_id field.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // "Vinculado a" / "ID" columns — the operator must be able to see, for
+    // every row, whether it is linked, to whom, and with which id (task's
+    // "Definition of done"). A row with no link shows a dash in both; a set
+    // jugador_id with no matching entry in the lookup (a dangling pointer —
+    // the player was deleted or unpublished) must say so loudly, never
+    // silently render as an empty cell; a directory-wide failure must be
+    // reported distinctly from a single dangling pointer.
+    // -------------------------------------------------------------------------
+
+    public function test_column_vinculado_a_shows_a_dash_for_an_unlinked_row(): void {
+        $result = $this->invokeColumnMethod( 'column_vinculado_a', [ 'jugador_id' => null ] );
+
+        $this->assertSame( '—', $result );
+    }
+
+    public function test_column_vinculado_a_shows_the_registered_name_when_looked_up(): void {
+        $this->table->setPlayerLookup( [ 5078 => 'Basso, Alejandro' ] );
+
+        $result = $this->invokeColumnMethod( 'column_vinculado_a', [ 'jugador_id' => 5078 ] );
+
+        $this->assertSame( 'Basso, Alejandro', $result );
+    }
+
+    public function test_column_vinculado_a_reports_a_dangling_pointer_loudly(): void {
+        // jugador_id is set but the batched lookup has nothing for it — the
+        // player was deleted or unpublished. A blank cell here would hide
+        // exactly the kind of failure this project has already had to fix
+        // (runbook-prode-sin-equipo).
+        $this->table->setPlayerLookup( [] );
+
+        $result = $this->invokeColumnMethod( 'column_vinculado_a', [ 'jugador_id' => 9999 ] );
+
+        $this->assertStringContainsString( '9999', $result );
+        $this->assertStringContainsString( 'no encontrado', $result );
+    }
+
+    public function test_column_vinculado_a_reports_a_directory_outage_distinctly_from_a_dangling_pointer(): void {
+        $this->table->setPlayerLookup( [], true );
+
+        $result = $this->invokeColumnMethod( 'column_vinculado_a', [ 'jugador_id' => 9999 ] );
+
+        $this->assertStringContainsString( 'directorio', $result );
+        $this->assertStringNotContainsString( 'no encontrado', $result );
+    }
+
+    public function test_column_jugador_id_shows_a_dash_for_an_unlinked_row(): void {
+        $result = $this->invokeColumnMethod( 'column_jugador_id', [ 'jugador_id' => null ] );
+
+        $this->assertSame( '—', $result );
+    }
+
+    public function test_column_jugador_id_shows_the_raw_id_for_a_linked_row(): void {
+        // Shown plainly, on purpose (not just implied by the name), so the
+        // operator can copy it into another row's "ID jugador" field to
+        // relink by hand.
+        $result = $this->invokeColumnMethod( 'column_jugador_id', [ 'jugador_id' => 5078 ] );
+
+        $this->assertSame( '5078', $result );
+    }
+
+    public function test_column_jugador_id_shows_the_raw_id_even_for_a_dangling_pointer(): void {
+        // The id must stay visible even when the name lookup fails — that is
+        // the whole point of showing it plainly.
+        $this->table->setPlayerLookup( [] );
+
+        $result = $this->invokeColumnMethod( 'column_jugador_id', [ 'jugador_id' => 9999 ] );
+
+        $this->assertSame( '9999', $result );
+    }
+
+    // -------------------------------------------------------------------------
+    // Cramped actions column, found in real use on staging: the captain
+    // checkbox label ran into "Guardar" with no space ("CapitánGuardar"),
+    // the "ID jugador" placeholder was cut to "ID juga" by too narrow a
+    // field, and "Cambiar Desvincular Eliminar" had no visual separator.
+    // -------------------------------------------------------------------------
+
+    public function test_column_acciones_does_not_glue_the_captain_label_to_the_guardar_button(): void {
+        $item = [ 'id' => 7, 'jugador_id' => null, 'jugador_nombre' => 'BASSO, A.', 'es_capitan' => true, 'orden' => 0 ];
+
+        $html = $this->invokeColumnMethod( 'column_acciones', $item );
+
+        // The Capitán <label> is followed by a hidden (invisible) "orden"
+        // input, then the Guardar button — a browser renders "Capitán"
+        // immediately butted against "Guardar" unless a real space
+        // separates the last visible element from <button>.
+        $this->assertMatchesRegularExpression(
+            '/Capitán<\/label>.*?\s<button/s',
+            $html,
+            'A missing space here renders as "CapitánGuardar" in the browser.'
+        );
+        $this->assertStringNotContainsString(
+            '"><button',
+            $html,
+            'No hidden field may be glued directly to the following <button> with no separating space.'
+        );
+    }
+
+    public function test_column_acciones_id_jugador_field_is_wide_enough_for_its_placeholder(): void {
+        $item = [ 'id' => 7, 'jugador_id' => null ];
+
+        $html = $this->invokeColumnMethod( 'column_acciones', $item );
+
+        $this->assertStringContainsString( 'placeholder="ID jugador"', $html );
+        $this->assertStringNotContainsString( 'width:6em', $html );
+    }
+
+    public function test_column_acciones_separates_action_forms_with_a_visible_separator(): void {
+        // Linked row: editar, cambiar, desvincular, eliminar — 4 forms, 3
+        // separators.
+        $item = [ 'id' => 7, 'jugador_id' => 5078, 'jugador_nombre' => 'BASSO, A.', 'orden' => 0 ];
+
+        $html = $this->invokeColumnMethod( 'column_acciones', $item );
+
+        $this->assertSame(
+            3,
+            substr_count( $html, ' | ' ),
+            'Cambiar / Desvincular / Eliminar must not run together with no separation.'
         );
     }
 
