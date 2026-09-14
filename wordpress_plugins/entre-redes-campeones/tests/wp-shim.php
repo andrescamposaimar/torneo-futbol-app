@@ -52,7 +52,8 @@ if ( ! class_exists( 'wpdb' ) ) {
          * Executes a raw SQL string. Returns number of affected rows or false.
          */
         public function query( string $sql ): int|false {
-            $sql = $this->translateForSqlite( $sql );
+            $this->last_error = null;
+            $sql              = $this->translateForSqlite( $sql );
             try {
                 return $this->pdo->exec( $sql );
             } catch ( \PDOException $e ) {
@@ -77,6 +78,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * Returns first column of first row, or null.
          */
         public function get_var( string $sql ): ?string {
+            $this->last_error = null;
             try {
                 $stmt = $this->pdo->query( $sql );
                 $row  = $stmt->fetch( \PDO::FETCH_NUM );
@@ -98,6 +100,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @return array<int, array<string, mixed>|\stdClass>
          */
         public function get_results( string $sql, string $output = OBJECT ): array {
+            $this->last_error = null;
             try {
                 $stmt = $this->pdo->query( $sql );
                 $rows = $stmt->fetchAll( \PDO::FETCH_ASSOC );
@@ -147,6 +150,7 @@ if ( ! class_exists( 'wpdb' ) ) {
         public int $insert_id = 0;
 
         public function insert( string $table, array $data, mixed $format = null ): int|false {
+            $this->last_error = null;
             if ( empty( $data ) ) {
                 return false;
             }
@@ -171,6 +175,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @param array<string, mixed> $where
          */
         public function update( string $table, array $data, array $where ): int|false {
+            $this->last_error = null;
             $set_parts   = array_map( static fn( $k ) => "{$k} = ?", array_keys( $data ) );
             $where_parts = array_map( static fn( $k ) => "{$k} = ?", array_keys( $where ) );
             $sql         = "UPDATE {$table} SET " . implode( ', ', $set_parts )
@@ -191,6 +196,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @param array<string, mixed> $where
          */
         public function delete( string $table, array $where ): int|false {
+            $this->last_error = null;
             $where_parts = array_map( static fn( $k ) => "{$k} = ?", array_keys( $where ) );
             $sql         = "DELETE FROM {$table} WHERE " . implode( ' AND ', $where_parts );
             try {
