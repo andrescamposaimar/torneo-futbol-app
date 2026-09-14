@@ -142,9 +142,10 @@ class TitleEditorPage {
         } catch ( WriteFailedException $e ) {
             // Item 4: a local DB write failure has nothing to do with the
             // player directory. Reporting it with error_directorio's copy
-            // ("Error al consultar el directorio de jugadores... esperá
-            // unos minutos") tells the operator to wait out an external
-            // dependency while their own database is what actually broke.
+            // ("Error al consultar el directorio de jugadores. Intentá
+            // nuevamente en unos minutos.") tells the operator to wait out
+            // an external dependency while their own database is what
+            // actually broke.
             error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
                 'entre-redes-campeones: %s failed for titulo_id=%d (plantel_id=%d) writing to the database. %s',
                 $action,
@@ -490,7 +491,7 @@ class TitleEditorPage {
             'desvinculado'     => [ 'message' => __( 'El vínculo fue quitado.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_vincular'   => [ 'message' => __( 'Error al modificar el vínculo. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_id_requerido' => [ 'message' => __( 'Ingresá un ID de jugador para vincular.', 'entre-redes-campeones' ), 'type' => 'error' ],
-            'error_fila_ajena' => [ 'message' => __( 'Esa fila no pertenece a este título.', 'entre-redes-campeones' ), 'type' => 'error' ],
+            'error_fila_ajena' => [ 'message' => __( 'Esa fila no pertenece a este título. Recargá la página e intentá de nuevo desde el título correcto.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_directorio' => [ 'message' => __( 'Error al consultar el directorio de jugadores. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_guardado'   => [ 'message' => __( 'Error al guardar los datos. Intentá nuevamente en unos minutos.', 'entre-redes-campeones' ), 'type' => 'error' ],
             default            => null,

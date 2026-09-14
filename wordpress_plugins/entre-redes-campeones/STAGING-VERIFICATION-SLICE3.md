@@ -95,6 +95,19 @@ this section claimed this blanket coverage while the CSRF check did not
 actually exist yet and the suite could not have proven it either way
 (the test shim's `wp_verify_nonce()` returned truthy unconditionally, so
 no test could ever make a nonce check fail). Both gaps are closed now,
-with the invalid-nonce and handlePost()-driven tests to prove it. The
-aggregate review queue (slice 4), ranked player search (slice 5), and the
-bulk importer (slice 6) do not exist yet.
+with the invalid-nonce and handlePost()-driven tests to prove it.
+
+Also covered by `composer test` and needing no manual check: the
+`rowBelongsToRequestedTitle()` / `requireOwnedRow()` **authorization**
+gate on every row-scoped `TitleEditorPage` action (`editar_fila`,
+`eliminar_fila`, `vincular`, `cambiar`, `desvincular`) — a distinct
+control from CSRF, per its own docblock, that rejects a row nonce which
+is genuinely valid for its own row but paired with a different
+`titulo_id` — and every notice key this slice introduced:
+`error_fila_ajena`, `error_guardado`, `error_nombre_requerido`,
+`fila_agregada_sin_vinculo` / `fila_agregada_sin_vinculo_directorio`,
+`fila_actualizada_sin_vinculo` / `fila_actualizada_sin_vinculo_directorio`,
+and the three-segment `revalidado_{succeeded}_{total}_{directoryErrors}`
+notice on the Titles list page. The aggregate review queue (slice 4),
+ranked player search (slice 5), and the bulk importer (slice 6) do not
+exist yet.

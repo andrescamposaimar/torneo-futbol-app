@@ -25,6 +25,16 @@ final class ActionForm {
     /**
      * @param array<string, int|string> $hiddenFields Hidden name => value
      *        pairs beyond the action itself — e.g. titulo_id, plantel_id.
+     *
+     * Calling convention (item 8): every call site in this codebase passes
+     * $confirmMessage / $buttonClass by NAME, never positionally, and ONLY
+     * when it also skips $extraHtml (its default, ''). A call that needs
+     * $extraHtml (a form with its own inline input — Editar, Vincular /
+     * Cambiar) passes every parameter up to and including $extraHtml
+     * positionally instead. This is a rule, not an inconsistency: named
+     * args exist here specifically to skip an unused optional parameter
+     * without repeating its default, never to skip past one that is
+     * actually needed.
      */
     public static function render(
         string $actionFieldName,
