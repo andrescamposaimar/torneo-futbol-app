@@ -94,6 +94,18 @@ class PlayerTitlesControllerTest extends TestCase {
         $this->assertArrayNotHasKey( 'foto_url', $response->get_data()['titulos'][0] );
     }
 
+    public function test_titles_never_carry_an_estado_vinculo_field(): void {
+        // Item 7: internal diagnostic state, dropped from the public
+        // payload (product decision) — mirrored here for both endpoints.
+        $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        $controller = new PlayerTitlesController( $this->squads, $this->directory );
+        $response   = $controller->handle( $this->request( 5078 ) );
+
+        $this->assertArrayNotHasKey( 'estado_vinculo', $response->get_data()['titulos'][0] );
+    }
+
     public function test_a_second_call_is_served_from_the_transient(): void {
         $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
         $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );

@@ -78,8 +78,23 @@ class HistoryControllerTest extends TestCase {
         $this->assertCount( 2, $plantel );
         foreach ( $plantel as $row ) {
             $this->assertNull( $row['jugador_id'] );
-            $this->assertSame( 'sin_candidato', $row['estado_vinculo'] );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 7 — estado_vinculo is internal diagnostic state, dropped from the
+    // public payload (product decision). Mirrors the existing foto_url
+    // absence test on the per-player endpoint.
+    // -------------------------------------------------------------------------
+
+    public function test_history_entries_never_carry_an_estado_vinculo_field(): void {
+        $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        [ $controller ] = $this->makeController();
+        $response = $controller->handle( new \WP_REST_Request() );
+
+        $this->assertArrayNotHasKey( 'estado_vinculo', $response->get_data()['titulos'][0]['plantel'][0] );
     }
 
     public function test_no_titles_returns_200_with_an_empty_list(): void {

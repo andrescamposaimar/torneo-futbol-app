@@ -54,11 +54,17 @@ final class TitleShaper {
         }
 
         return [
-            'nombre'         => $entry->jugadorNombre,
-            'es_capitan'     => $entry->esCapitan,
-            'jugador_id'     => $entry->jugadorId,
-            'estado_vinculo' => $entry->estadoVinculo,
-            'foto_url'       => $fotoUrl,
+            'nombre'     => $entry->jugadorNombre,
+            'es_capitan' => $entry->esCapitan,
+            'jugador_id' => $entry->jugadorId,
+            // Item 7 (product decision): estado_vinculo (auto / ambiguo /
+            // sin_candidato / manual) is internal diagnostic state
+            // describing how confident the matching pipeline was.
+            // Publishing it tells any anonymous caller about the data
+            // quality of the record, and no consumer needs it — the app
+            // derives everything it needs from whether jugador_id is
+            // present, which already travels. Deliberately absent.
+            'foto_url'   => $fotoUrl,
         ];
     }
 

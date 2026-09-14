@@ -63,7 +63,6 @@ class TitleShaperTest extends TestCase {
         $this->assertSame( 'BASSO, A.', $row['nombre'] );
         $this->assertTrue( $row['es_capitan'] );
         $this->assertSame( 5078, $row['jugador_id'] );
-        $this->assertSame( 'auto', $row['estado_vinculo'] );
     }
 
     public function test_shape_history_entry_includes_an_all_unlinked_year_in_full(): void {
@@ -75,8 +74,23 @@ class TitleShaperTest extends TestCase {
         $this->assertCount( 2, $shaped['plantel'] );
         foreach ( $shaped['plantel'] as $row ) {
             $this->assertNull( $row['jugador_id'] );
-            $this->assertSame( 'sin_candidato', $row['estado_vinculo'] );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 7 — estado_vinculo (auto/ambiguo/sin_candidato/manual) is
+    // internal diagnostic state describing how confident the matching
+    // pipeline was. Publishing it tells any anonymous caller about the
+    // data quality of the record, and no consumer needs it — the app
+    // derives everything from whether jugador_id is present. Product
+    // decision: drop it from the public payload entirely.
+    // -------------------------------------------------------------------------
+
+    public function test_shape_history_entry_never_emits_an_estado_vinculo_field(): void {
+        $entry  = $this->entry( 'BASSO, A.', true, 5078, 'auto' );
+        $shaped = TitleShaper::shapeHistoryEntry( $this->title(), [ $entry ] );
+
+        $this->assertArrayNotHasKey( 'estado_vinculo', $shaped['plantel'][0] );
     }
 
     public function test_a_linked_entry_present_in_the_photo_map_gets_that_url(): void {

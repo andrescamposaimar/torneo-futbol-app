@@ -32,13 +32,13 @@ curl -s 'https://entreredespadres.com.ar/wp-json/entre-redes/v1/campeones/histor
 - Each entry has `anio` (int), `zona` (string), `posicion` (string),
   `equipo_nombre` (string), and `plantel` (array).
 - Each `plantel` entry has `nombre`, `es_capitan` (bool), `jugador_id`
-  (int or `null`), `estado_vinculo` (string: `auto` / `ambiguo` /
-  `sin_candidato` / `manual`), and `foto_url` (string or `null` —
-  **never** `false`, never `""`).
+  (int or `null`), and `foto_url` (string or `null` — **never** `false`,
+  never `""`). There is **no** `estado_vinculo` key — it is internal
+  diagnostic state, deliberately excluded from the public payload.
 - At least one pre-2016 year (e.g. 2011) is present **in full**, with
-  every squad name visible even though most or all of its
-  `estado_vinculo` values are `sin_candidato`. This is API-3 / REC-6: a
-  fully-unlinked year is a valid, complete record, not an error.
+  every squad name visible even though most or all of its rows are
+  unlinked (`jugador_id: null`) in the underlying data. This is API-3 /
+  REC-6: a fully-unlinked year is a valid, complete record, not an error.
 - A player known to be linked AND to have a WordPress featured image
   shows a real `https://.../wp-content/uploads/.../*-medium*.jpg`-shaped
   URL in `foto_url`.
@@ -57,6 +57,8 @@ curl -s 'https://entreredespadres.com.ar/wp-json/entre-redes/v1/campeones/histor
   array instead of the real (unlinked) names.
 - `"foto_url": false` anywhere — means `TitleShaper`'s coercion regressed
   and a raw `get_the_post_thumbnail_url()` `false` leaked onto the wire.
+- An `estado_vinculo` key present anywhere in a `plantel` entry — it is
+  internal diagnostic state and must never be published (item 7).
 - The response takes a noticeably long time (multiple seconds) on a
   cache MISS — would suggest the photo lookup is not actually batched
   (compare against re-running the same curl immediately after: the
