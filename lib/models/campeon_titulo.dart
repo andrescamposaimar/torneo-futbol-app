@@ -1,3 +1,9 @@
+/// Coerces [value] to a [String], defaulting to `''` for anything other
+/// than an actual `String` — a wrong-typed field (e.g. a number where a
+/// name was expected) must default, never throw, same contract as
+/// `JugadorTitulo._parseInt` for numeric fields.
+String _parseString(dynamic value) => value is String ? value : '';
+
 /// One Copa Chaminade title won by the viewed player, as fed by
 /// `GET /entre-redes/v1/campeones/jugador/{id}/titulos` (API-2).
 ///
@@ -20,8 +26,8 @@ class JugadorTitulo {
   factory JugadorTitulo.fromJson(Map<String, dynamic> json) {
     return JugadorTitulo(
       anio: _parseInt(json['anio']),
-      zona: (json['zona'] as String?) ?? '',
-      equipoNombre: (json['equipo_nombre'] as String?) ?? '',
+      zona: _parseString(json['zona']),
+      equipoNombre: _parseString(json['equipo_nombre']),
       esCapitan: json['es_capitan'] == true,
     );
   }
@@ -71,15 +77,28 @@ class CampeonPlantelEntry {
     final rawFotoUrl = json['foto_url'];
     return CampeonPlantelEntry(
       orden: orden,
-      nombre: (json['nombre'] as String?) ?? '',
-      jugadorId: json['jugador_id'] == null
-          ? null
-          : JugadorTitulo._parseInt(json['jugador_id']),
+      nombre: _parseString(json['nombre']),
+      jugadorId: _parseJugadorId(json['jugador_id']),
       esCapitan: json['es_capitan'] == true,
       fotoUrl: (rawFotoUrl is String && rawFotoUrl.isNotEmpty)
           ? rawFotoUrl
           : null,
     );
+  }
+
+  /// `null` for an explicit JSON `null` and for any type `_parseInt` cannot
+  /// genuinely parse (a bool, a list, a map, an unparseable string). Unlike
+  /// `JugadorTitulo._parseInt`'s catch-all-to-`0`, a wrong-typed
+  /// `jugador_id` must stay `null` rather than silently becoming the int
+  /// `0` — `CampeonesScreen._plantelRow` treats `jugadorId != null` as
+  /// "this row is linked" and makes it tappable, so a silent `0` would
+  /// render an unlinked player as tappable and fire a real network request
+  /// for player id `0` when tapped.
+  static int? _parseJugadorId(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
   }
 }
 
@@ -108,18 +127,27 @@ class CampeonTitulo {
   });
 
   factory CampeonTitulo.fromJson(Map<String, dynamic> json) {
-    final rawPlantel = List<dynamic>.from(json['plantel'] ?? []);
+    // A non-list `plantel` (missing, null, or wrong-typed — e.g. a string)
+    // becomes an empty squad instead of throwing: `List<dynamic>.from`
+    // requires an `Iterable` and throws on anything else.
+    final plantelJson = json['plantel'];
+    final rawPlantel = plantelJson is List ? plantelJson : const [];
     return CampeonTitulo(
       anio: JugadorTitulo._parseInt(json['anio']),
-      zona: (json['zona'] as String?) ?? '',
+      zona: _parseString(json['zona']),
       posicion: _parsePosicion(json['posicion']),
-      equipoNombre: (json['equipo_nombre'] as String?) ?? '',
+      equipoNombre: _parseString(json['equipo_nombre']),
       plantel: [
         for (var i = 0; i < rawPlantel.length; i++)
-          CampeonPlantelEntry.fromJson(
-            Map<String, dynamic>.from(rawPlantel[i] as Map),
-            orden: i,
-          ),
+          // A non-map entry (e.g. a bare string in the array) is skipped
+          // rather than crashing the whole year's plantel — and, since
+          // this factory maps the entire championship-history response,
+          // rather than crashing every other year in the same response too.
+          if (rawPlantel[i] is Map)
+            CampeonPlantelEntry.fromJson(
+              Map<String, dynamic>.from(rawPlantel[i] as Map),
+              orden: i,
+            ),
       ],
     );
   }

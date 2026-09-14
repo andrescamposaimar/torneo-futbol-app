@@ -119,4 +119,113 @@ void main() {
       expect(titulo.plantel.single.fotoUrl, isNull);
     });
   });
+
+  // ---------------------------------------------------------------------
+  // Wrong-typed (not merely missing) fields — the file's own header
+  // promises "defaults rather than throwing" for these models, but that
+  // promise only covered numeric fields before this fix. A malformed year
+  // used to throw and take down every other year in the same response
+  // (CampeonesScreen._parseTitulos maps the whole list in one pass).
+  // ---------------------------------------------------------------------
+  group('CampeonTitulo.fromJson · wrong-typed fields default instead of throwing', () {
+    test('zona arriving as an int defaults to empty string', () {
+      final titulo = CampeonTitulo.fromJson(const {'anio': 2016, 'zona': 7});
+
+      expect(titulo.zona, '');
+    });
+
+    test('equipo_nombre arriving as an int defaults to empty string', () {
+      final titulo =
+          CampeonTitulo.fromJson(const {'anio': 2016, 'equipo_nombre': 7});
+
+      expect(titulo.equipoNombre, '');
+    });
+
+    test('a non-list plantel (e.g. a String) becomes an empty squad', () {
+      final titulo =
+          CampeonTitulo.fromJson(const {'anio': 2016, 'plantel': 'oops'});
+
+      expect(titulo.plantel, isEmpty);
+    });
+
+    test(
+        'a non-map plantel entry is skipped, and does not take the rest of '
+        'the squad down with it', () {
+      final titulo = CampeonTitulo.fromJson(const {
+        'anio': 2016,
+        'plantel': [
+          'not-a-map',
+          {'nombre': 'BASSO, A.', 'es_capitan': false},
+        ],
+      });
+
+      expect(titulo.plantel, hasLength(1));
+      expect(titulo.plantel.single.nombre, 'BASSO, A.');
+      // The kept entry retains its original array position, not a
+      // renumbered index — orden is documented as "the entry's position
+      // in that array".
+      expect(titulo.plantel.single.orden, 1);
+    });
+
+    test('nombre arriving as an int defaults to empty string, not a throw', () {
+      final titulo = CampeonTitulo.fromJson(const {
+        'anio': 2016,
+        'plantel': [
+          {'nombre': 7, 'es_capitan': false},
+        ],
+      });
+
+      expect(titulo.plantel.single.nombre, '');
+    });
+  });
+
+  group('CampeonPlantelEntry.fromJson · a malformed jugador_id stays null', () {
+    test('jugador_id arriving as a bool stays null (never becomes 0)', () {
+      final titulo = CampeonTitulo.fromJson(const {
+        'anio': 2016,
+        'plantel': [
+          {'nombre': 'BASSO, A.', 'es_capitan': false, 'jugador_id': true},
+        ],
+      });
+
+      expect(titulo.plantel.single.jugadorId, isNull);
+    });
+
+    test('jugador_id arriving as a list stays null (never becomes 0)', () {
+      final titulo = CampeonTitulo.fromJson(const {
+        'anio': 2016,
+        'plantel': [
+          {'nombre': 'BASSO, A.', 'es_capitan': false, 'jugador_id': []},
+        ],
+      });
+
+      expect(titulo.plantel.single.jugadorId, isNull);
+    });
+
+    test('jugador_id arriving as a map stays null (never becomes 0)', () {
+      final titulo = CampeonTitulo.fromJson(const {
+        'anio': 2016,
+        'plantel': [
+          {'nombre': 'BASSO, A.', 'es_capitan': false, 'jugador_id': {}},
+        ],
+      });
+
+      expect(titulo.plantel.single.jugadorId, isNull);
+    });
+  });
+
+  group('JugadorTitulo.fromJson · wrong-typed fields default instead of throwing', () {
+    test('zona arriving as an int defaults to empty string', () {
+      final titulo = JugadorTitulo.fromJson(const {'anio': 2016, 'zona': 7});
+
+      expect(titulo.zona, '');
+    });
+
+    test('equipo_nombre arriving as an int defaults to empty string', () {
+      final titulo =
+          JugadorTitulo.fromJson(const {'anio': 2016, 'equipo_nombre': 7});
+
+      expect(titulo.equipoNombre, '');
+    });
+  });
 }
