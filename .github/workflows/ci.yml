@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - release/bump-build-25
+
+# A new push to the same branch makes the previous run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to the version used locally, not `stable`. A floating channel
+      # turns an unrelated PR red the day Flutter ships a new lint, which is
+      # how a build gate stops being trusted. Bump this deliberately.
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.9
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # `flutter analyze` is deliberately NOT a step here yet.
+      #
+      # analysis_options.yaml includes `package:flutter_lints/flutter.yaml`,
+      # but flutter_lints is not a dependency of this project, so that include
+      # has never resolved and the lint suite has never actually run. Analysis
+      # currently reports 7 pre-existing findings and exits non-zero; wiring it
+      # up here would make this gate red on arrival and train everyone to
+      # ignore it. Installing flutter_lints raises that to 49 findings,
+      # including two `control_flow_in_finally` that can swallow exceptions.
+      #
+      # That cleanup is real work and belongs in its own reviewable PR. Until
+      # then this gate enforces what it can actually prove: the test suite.
+      - name: Test
+        run: flutter test
