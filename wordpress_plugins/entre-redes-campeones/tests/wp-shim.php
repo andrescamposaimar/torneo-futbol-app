@@ -459,7 +459,24 @@ if ( ! function_exists( 'get_transient' ) ) {
 // ─── WP REST API stubs ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'register_rest_route' ) ) {
+    $GLOBALS['_campeones_test_registered_rest_routes'] = [];
+
+    /**
+     * Captures every registered route (namespace, path, args) into a global
+     * array, mirroring add_action()'s callback capture above — a real
+     * register_rest_route() also wires actual HTTP dispatch, which this
+     * plugin's tests never exercise (handle() is always called directly),
+     * but tests must still be able to assert namespace/path/method/
+     * permission_callback for each route actually registered (item 4).
+     *
+     * @param array<string, mixed> $args
+     */
     function register_rest_route( string $namespace, string $route, array $args ): bool {
+        $GLOBALS['_campeones_test_registered_rest_routes'][] = [
+            'namespace' => $namespace,
+            'route'     => $route,
+            'args'      => $args,
+        ];
         return true;
     }
 }
