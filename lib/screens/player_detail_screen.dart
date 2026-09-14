@@ -20,6 +20,11 @@ class PlayerDetailScreen extends ConsumerStatefulWidget {
 
   const PlayerDetailScreen({super.key, required this.player});
 
+  /// Identifies the títulos panel's subtree so tests can scope finders to
+  /// it — e.g. asserting there is no [Icons.star_rounded] *inside the
+  /// panel* without also matching the unrelated hero star above it.
+  static const titulosPanelKey = Key('titulos-panel');
+
   @override
   ConsumerState<PlayerDetailScreen> createState() => _PlayerDetailScreenState();
 }
@@ -582,7 +587,6 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
   /// Seasons the player took part in, as chips. They used to occupy a whole tab
   /// of their own for what amounts to a handful of years.
   Widget _buildTemporadas() {
-    final primary = Theme.of(context).colorScheme.primary;
     final anios = temporadas.map((t) => t.toString()).toList();
 
     return _panel(
@@ -596,25 +600,32 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: anios
-              .map((a) => Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: primary.withValues(alpha: 0.07),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: primary.withValues(alpha: 0.15)),
-                    ),
-                    child: Text(
-                      a,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: primary.withValues(alpha: 0.9),
-                      ),
-                    ),
-                  ))
-              .toList(),
+          children: anios.map(_yearPill).toList(),
+        ),
+      ),
+    );
+  }
+
+  /// A small pill styled the same everywhere a year stands alone in this
+  /// screen: the TEMPORADAS chips and the year pill in each título row are
+  /// the same visual, so they share this one widget instead of two
+  /// independently maintained copies of the same styling.
+  Widget _yearPill(String label) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: primary.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: primary.withValues(alpha: 0.15)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: primary.withValues(alpha: 0.9),
         ),
       ),
     );
@@ -638,16 +649,19 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
   Widget _buildTitulos() {
     final titulosVisibles = _titulosVisibles;
 
-    return _panel(
-      header: _seccionHeader(
-        Icons.emoji_events,
-        'TÍTULOS',
-        trailing: etiquetaTitulos(titulosVisibles.length),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(
-          children: titulosVisibles.map((t) => _tituloRow(t)).toList(),
+    return KeyedSubtree(
+      key: PlayerDetailScreen.titulosPanelKey,
+      child: _panel(
+        header: _seccionHeader(
+          Icons.emoji_events,
+          'TÍTULOS',
+          trailing: etiquetaTitulos(titulosVisibles.length),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: titulosVisibles.map((t) => _tituloRow(t)).toList(),
+          ),
         ),
       ),
     );
@@ -693,22 +707,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-            decoration: BoxDecoration(
-              color: primary.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: primary.withValues(alpha: 0.15)),
-            ),
-            child: Text(
-              '${t.anio}',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: primary.withValues(alpha: 0.9),
-              ),
-            ),
-          ),
+          _yearPill('${t.anio}'),
           const SizedBox(width: 12),
           Expanded(
             child: esTappable

@@ -297,7 +297,7 @@ void main() {
       expect(find.text('Campeón Zona B'), findsOneWidget);
     });
 
-    testWidgets('no captain marker and no star inside the panel',
+    testWidgets('no star inside the panel, even for a captain title',
         (tester) async {
       await _pump(
         tester,
@@ -308,8 +308,29 @@ void main() {
       );
       await _scrollToTitulos(tester);
 
-      expect(find.text('(C)'), findsNothing);
-      expect(find.byIcon(Icons.star_rounded), findsNothing);
+      // Scoped to the panel's own subtree (PlayerDetailScreen.titulosPanelKey)
+      // rather than the whole screen: with 1 title the hero renders exactly
+      // 1 star of its own right after the first pump, and the ListView's
+      // cache extent unmounts that hero star's render object once
+      // _scrollToTitulos() drags far enough — an unscoped
+      // `find.byIcon(Icons.star_rounded)` would read as "no star" for that
+      // unrelated reason, regardless of what the panel itself renders.
+      //
+      // esCapitan is parsed onto JugadorTitulo (see campeon_titulo.dart) but
+      // deliberately never read by this screen — a future slice (the
+      // champion-squad history screen) reads it instead. There is therefore
+      // no '(C)' or similar captain marker produced anywhere in this
+      // screen's code for this test to assert the absence of; a
+      // `findsNothing` on a string that is never emitted regardless of
+      // whether the captain flag is honoured would pass for the wrong
+      // reason, so no such assertion is made here.
+      expect(
+        find.descendant(
+          of: find.byKey(PlayerDetailScreen.titulosPanelKey),
+          matching: find.byIcon(Icons.star_rounded),
+        ),
+        findsNothing,
+      );
     });
 
     testWidgets('the team name is plain, non-tappable text with no chevron',
