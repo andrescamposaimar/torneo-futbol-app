@@ -631,6 +631,139 @@ class TitleEditorPageTest extends TestCase {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Item 5 (CRITICAL) — deleting BOTH $this->cache->flush() call sites in
+    // this plugin only failed 3 of 287 tests: actualizar_titulo and
+    // agregar_fila were covered above, but crear_titulo, editar_fila,
+    // eliminar_fila, vincular, cambiar and desvincular were not. The
+    // guarantee currently holds only because a human reads the single
+    // unconditional call site — a future refactor that makes it conditional
+    // and misses one path would leave the suite green.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_crear_titulo_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        unset( $_POST['titulo_id'] );
+        $_POST['campeones_editor_action'] = 'crear_titulo';
+        $_POST['anio']                    = '2011';
+        $_POST['zona']                    = 'A';
+        $_POST['posicion']                = 'campeon';
+        $_POST['equipo_nombre']           = 'INDEPENDIENTE';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_crear_titulo' );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Creating a title must invalidate the history transient.' );
+            $_POST['titulo_id'] = (string) $this->tituloId;
+        }
+    }
+
+    public function test_handle_post_editar_fila_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['es_capitan']              = '1';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Editing a squad row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_eliminar_fila_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $_POST['campeones_editor_action'] = 'eliminar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Deleting a squad row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_vincular_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'vincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '5078';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Linking a row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_desvincular_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        $_POST['campeones_editor_action'] = 'desvincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Unlinking a row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_cambiar_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'GARCIA, M.', false, LinkState::AMBIGUO ) );
+
+        $_POST['campeones_editor_action'] = 'cambiar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '2461';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Changing a link must invalidate the history transient.' );
+        }
+    }
+
     public function test_handle_post_cambiar_replaces_an_existing_link(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 

@@ -184,6 +184,36 @@ class TitlesPageTest extends TestCase {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Item 5 (CRITICAL) — deleting BOTH $this->cache->flush() call sites
+    // only failed 3 of 287 tests: eliminar's invalidation was covered, but
+    // revalidar's was not. The guarantee currently holds only because a
+    // human reads the single unconditional call site.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_revalidar_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'GARCIA, M.', false, LinkState::SIN_CANDIDATO )
+        );
+
+        $_POST['campeones_titulo_action'] = 'revalidar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_revalidar_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse(
+                get_transient( 'campeones_historia_v2' ),
+                'Revalidating a year must invalidate the history transient.'
+            );
+        }
+    }
+
     public function test_handle_post_revalidar_re_resolves_the_year(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
