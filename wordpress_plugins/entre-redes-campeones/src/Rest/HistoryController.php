@@ -19,8 +19,17 @@ use EntreRedes\Campeones\Titles\TitleRepository;
  */
 final class HistoryController {
 
+    // VERSION-SKEW OBLIGATION (see TitleShaper's class docblock): bumping
+    // this `_v2` suffix is required whenever TitleShaper::shapeHistoryEntry()'s
+    // output shape changes — also update
+    // CacheInvalidator::HISTORY_TRANSIENT to match.
     private const CACHE_KEY = 'campeones_historia_v2';
-    private const CACHE_TTL = 30 * DAY_IN_SECONDS; // matches cachear_respuesta_rest()'s 30-day TTL for entre-redes-api's other once-a-year endpoints
+    // Same 30-day TTL this plugin's sibling entre-redes-api plugin uses for
+    // its own once-a-year endpoints. That plugin is not part of this
+    // repository, so this cannot be verified by file/line from a clone of
+    // this repo alone — the number itself (30 days) is what matters and is
+    // fully owned by this constant.
+    private const CACHE_TTL = 30 * DAY_IN_SECONDS;
 
     public function __construct(
         private readonly TitleRepository $titles,

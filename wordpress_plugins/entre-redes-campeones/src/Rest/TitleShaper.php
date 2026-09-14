@@ -12,6 +12,16 @@ use EntreRedes\Campeones\Titles\TitleRecord;
  * the `MatchShaper` precedent from entre-redes-prode: no `$wpdb`, no
  * WordPress function, no HTTP request — response shape is unit-testable on
  * its own.
+ *
+ * VERSION-SKEW OBLIGATION: the response shapes below are cached for up to
+ * 30 days as opaque values (HistoryController::CACHE_KEY /
+ * PlayerTitlesController::CACHE_PREFIX, both suffixed `_v2`/`_v1`, and
+ * mirrored in CacheInvalidator's own key constants). Whoever changes this
+ * class's output shape — adds, removes, or renames a field, changes a
+ * field's type — MUST bump the version suffix on the affected key in ALL
+ * THREE files, or a live transient written under the old shape will keep
+ * serving stale-shaped data to the app for up to 30 days after deploy. This
+ * has already happened once (the history key is on `_v2`).
  */
 final class TitleShaper {
 
