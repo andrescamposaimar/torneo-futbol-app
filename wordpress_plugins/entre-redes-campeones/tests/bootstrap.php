@@ -35,3 +35,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // ─── Minimal WP shim for standalone tests ───────────────────────────────────
 require_once __DIR__ . '/wp-shim.php';
+
+// ─── error_log() capture for the Cache/ and Rest/ namespaces ───────────────
+require_once __DIR__ . '/error-log-capture.php';

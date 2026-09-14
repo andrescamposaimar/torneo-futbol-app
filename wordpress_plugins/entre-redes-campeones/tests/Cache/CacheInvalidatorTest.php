@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Tests\Cache;
 
 use EntreRedes\Campeones\Cache\CacheInvalidator;
+use EntreRedes\Campeones\Tests\Support\FailingOptionsDeleteWpdb;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -40,6 +41,7 @@ class CacheInvalidatorTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}options" );
         delete_transient( 'campeones_historia_v2' );
+        $GLOBALS['_campeones_test_error_log'] = [];
     }
 
     public function test_flush_removes_the_history_transient(): void {
@@ -81,5 +83,38 @@ class CacheInvalidatorTest extends TestCase {
         $this->assertNotFalse( get_transient( 'entre_redes_partidos_v1' ), 'flush() must not remove a transient it does not own.' );
 
         delete_transient( 'entre_redes_partidos_v1' );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 2 (BLOCKER) — flush() discarded the per-player LIKE-delete's
+    // return value entirely: no check, no log, no signal. If it fails, the
+    // operator sees a success notice while the app keeps serving stale data
+    // for up to 30 days with no trace anywhere.
+    // -------------------------------------------------------------------------
+
+    public function test_flush_logs_when_the_per_player_delete_query_fails(): void {
+        $GLOBALS['_campeones_test_error_log'] = [];
+
+        ( new CacheInvalidator( new FailingOptionsDeleteWpdb() ) )->flush();
+
+        $this->assertNotEmpty(
+            $GLOBALS['_campeones_test_error_log'],
+            'A failed per-player transient delete must be logged — silence here is exactly the defect item 2 reports.'
+        );
+        $this->assertStringContainsString(
+            'Simulated per-player transient flush failure for test',
+            $GLOBALS['_campeones_test_error_log'][0]
+        );
+    }
+
+    public function test_flush_still_removes_the_history_transient_even_when_the_per_player_delete_fails(): void {
+        // The two deletion techniques are independent (design docblock) — a
+        // failure in the raw per-player LIKE-delete must not prevent the
+        // exact-key history transient from still being cleared.
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [] ], 2592000 );
+
+        ( new CacheInvalidator( new FailingOptionsDeleteWpdb() ) )->flush();
+
+        $this->assertFalse( get_transient( 'campeones_historia_v2' ) );
     }
 }

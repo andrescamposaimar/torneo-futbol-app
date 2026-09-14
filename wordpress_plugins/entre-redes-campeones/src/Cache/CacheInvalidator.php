@@ -44,10 +44,17 @@ final class CacheInvalidator {
 
         $p = $this->wpdb->prefix;
 
-        $this->wpdb->query(
+        $result = $this->wpdb->query(
             "DELETE FROM {$p}options
               WHERE option_name LIKE '_transient_" . self::PLAYER_TITLES_PREFIX . "%'
                  OR option_name LIKE '_transient_timeout_" . self::PLAYER_TITLES_PREFIX . "%'"
         );
+
+        if ( false === $result ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to flush per-player title transients from wp_options. DB error: %s',
+                (string) $this->wpdb->last_error
+            ) );
+        }
     }
 }
