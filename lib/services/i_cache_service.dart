@@ -68,4 +68,13 @@ abstract class ICacheService {
   /// cached titles even if stale. Used as an offline fallback when the
   /// network is unreachable and there is no fresh cache.
   Future<List<dynamic>?> getCachedTitulosDeJugadorIgnoringTtl(int jugadorId);
+
+  // 🔹 Historia de campeones (Copa Chaminade)
+  Future<void> cacheCampeonesHistoria(List<dynamic> titulos);
+  Future<List<dynamic>?> getCachedCampeonesHistoria();
+
+  /// Same as [getCachedCampeonesHistoria] but ignores the TTL, returning the
+  /// cached history even if stale. Used as an offline fallback when the
+  /// network is unreachable and there is no fresh cache.
+  Future<List<dynamic>?> getCachedCampeonesHistoriaIgnoringTtl();
 }

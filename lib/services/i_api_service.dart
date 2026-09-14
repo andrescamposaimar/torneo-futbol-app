@@ -89,4 +89,9 @@ abstract class IApiService {
   /// public, unauthenticated, `baseUrl`-relative read — same shape as every
   /// other method here, not a separate service.
   Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId);
+
+  /// Full Copa Chaminade championship history (API-1, API-3): every year,
+  /// its zone, its team and its squad. Public, unauthenticated,
+  /// `baseUrl`-relative read — same shape as every other method here.
+  Future<List<dynamic>> getCampeonesHistoria();
 }

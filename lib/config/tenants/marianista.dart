@@ -22,6 +22,7 @@ const marianistaTenant = TenantConfig(
     // is deployed, then flip this back to true. prodeAuth below stays set so
     // re-enabling is a one-line change.
     prode: true,
+    campeones: true,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:

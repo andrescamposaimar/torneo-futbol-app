@@ -158,6 +158,9 @@ class _StubPublicApiService implements IApiService {
   @override
   Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) async =>
       {'jugador_id': jugadorId, 'total': 0, 'titulos': []};
+
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() => throw UnimplementedError();
 }
 
 // ---------------------------------------------------------------------------

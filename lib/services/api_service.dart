@@ -488,4 +488,21 @@ class ApiService implements IApiService {
       throw Exception('Error al obtener títulos del jugador $jugadorId');
     }
   }
+
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() async {
+    final uri = Uri.parse('$baseUrl/campeones/historia');
+    final res = await http.get(uri).timeout(_requestTimeout);
+    _logRequest(uri, res);
+
+    if (res.statusCode == 200) {
+      final data = json.decode(res.body);
+      if (data is Map<String, dynamic> && data['titulos'] is List) {
+        return List<dynamic>.from(data['titulos']);
+      }
+      return [];
+    } else {
+      throw Exception('Error al obtener la historia de campeones');
+    }
+  }
 }

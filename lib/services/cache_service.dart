@@ -394,6 +394,44 @@ class CacheService implements ICacheService {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // 🔹 Historia de campeones (Copa Chaminade)
+  // ─────────────────────────────────────────────────────────────
+
+  // The `_v1` suffix is deliberate, unlike `_titulosJugadorKey` above (which
+  // shipped without one — a known, recorded gap): if the payload shape this
+  // key caches ever changes, bumping the suffix here invalidates every
+  // device's stale cache immediately instead of waiting out a 7-day TTL.
+  static const String _campeonesHistoriaCacheKey = 'cached_campeones_historia_v1';
+
+  @override
+  Future<void> cacheCampeonesHistoria(List<dynamic> titulos) async {
+    final prefs = await _sharedPrefs;
+    final cacheData = {
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'titulos': titulos,
+    };
+    await prefs.setString(_campeonesHistoriaCacheKey, jsonEncode(cacheData));
+  }
+
+  @override
+  Future<List<dynamic>?> getCachedCampeonesHistoria() async {
+    return _readCachedList(
+      _campeonesHistoriaCacheKey,
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['titulos']),
+    );
+  }
+
+  @override
+  Future<List<dynamic>?> getCachedCampeonesHistoriaIgnoringTtl() {
+    return _readCachedList(
+      _campeonesHistoriaCacheKey,
+      ttl: null,
+      extract: (decoded) => List<dynamic>.from(decoded['titulos']),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // 🔹 Clear all caches
   // ─────────────────────────────────────────────────────────────
 
@@ -410,6 +448,7 @@ class CacheService implements ICacheService {
     await prefs.remove(_noticiasCacheKey);
     await prefs.remove('cache_partidos_jugados');
     await prefs.remove('cache_partidos_futuros');
+    await prefs.remove(_campeonesHistoriaCacheKey);
 
     // Eliminar claves dinámicas por prefijo
     final keys = prefs.getKeys();
@@ -520,6 +559,7 @@ class CacheService implements ICacheService {
       await prefs.remove(_playersHistoricosCacheKey);
       await prefs.remove(_temporadasCacheKey);
       await prefs.remove(_noticiasCacheKey);
+      await prefs.remove(_campeonesHistoriaCacheKey);
 
       final keys = prefs.getKeys();
       for (final key in keys) {
