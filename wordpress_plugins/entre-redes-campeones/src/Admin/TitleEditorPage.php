@@ -220,6 +220,24 @@ class TitleEditorPage {
         return null !== $entry && $entry->tituloId === $tituloId;
     }
 
+    /**
+     * Reads plantel_id from $_POST and re-runs rowBelongsToRequestedTitle()
+     * — the exact shape every row-scoped dispatch method (editar_fila,
+     * eliminar_fila, vincular/cambiar, desvincular) needed before it could
+     * mutate anything (item 5). Extracted after this same four-line block
+     * was copy-pasted verbatim into all four: a security check repeated
+     * four times is a security check that will eventually be omitted once a
+     * fifth row-scoped action gets added without it.
+     *
+     * @return int|null The validated plantel_id, or null if the row does
+     *                   not belong to $tituloId (caller must then return
+     *                   'error_fila_ajena').
+     */
+    private function requireOwnedRow( int $tituloId ): ?int {
+        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
+        return $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ? $plantelId : null;
+    }
+
     // -------------------------------------------------------------------------
     // Per-action dispatch (item 11) — each method parses/validates its own
     // $_POST fields and calls the matching private mutation handler,
@@ -266,8 +284,8 @@ class TitleEditorPage {
     }
 
     private function dispatchEditarFila( int $tituloId ): string {
-        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+        $plantelId = $this->requireOwnedRow( $tituloId );
+        if ( null === $plantelId ) {
             return 'error_fila_ajena';
         }
 
@@ -292,8 +310,8 @@ class TitleEditorPage {
     }
 
     private function dispatchEliminarFila( int $tituloId ): string {
-        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+        $plantelId = $this->requireOwnedRow( $tituloId );
+        if ( null === $plantelId ) {
             return 'error_fila_ajena';
         }
 
@@ -301,8 +319,8 @@ class TitleEditorPage {
     }
 
     private function dispatchVincularOCambiar( int $tituloId ): string {
-        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+        $plantelId = $this->requireOwnedRow( $tituloId );
+        if ( null === $plantelId ) {
             return 'error_fila_ajena';
         }
 
@@ -320,8 +338,8 @@ class TitleEditorPage {
     }
 
     private function dispatchDesvincular( int $tituloId ): string {
-        $plantelId = absint( $_POST['plantel_id'] ?? 0 );
-        if ( ! $this->rowBelongsToRequestedTitle( $plantelId, $tituloId ) ) {
+        $plantelId = $this->requireOwnedRow( $tituloId );
+        if ( null === $plantelId ) {
             return 'error_fila_ajena';
         }
 
