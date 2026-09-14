@@ -3,7 +3,7 @@
  * Plugin Name:       Entre Redes — Copa Chaminade
  * Plugin URI:        https://entreredespadres.com.ar
  * Description:       Historical championship record (Copa Chaminade) for the Entre Redes football league.
- * Version:           0.2.0
+ * Version:           0.2.1
  * Requires at least: 6.2
  * Requires PHP:      8.2
  * Author:            Entre Redes
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'ENTRE_REDES_CAMPEONES_VERSION', '0.2.0' );
+define( 'ENTRE_REDES_CAMPEONES_VERSION', '0.2.1' );
 define( 'ENTRE_REDES_CAMPEONES_FILE', __FILE__ );
 define( 'ENTRE_REDES_CAMPEONES_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ENTRE_REDES_CAMPEONES_URL', plugin_dir_url( __FILE__ ) );
