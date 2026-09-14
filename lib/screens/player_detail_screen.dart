@@ -14,6 +14,7 @@ import '../services/i_api_service.dart';
 import '../services/i_cache_service.dart';
 import 'match_detail_screen.dart';
 import '../widgets/match_card.dart';
+import '../widgets/year_pill.dart';
 
 class PlayerDetailScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> player;
@@ -600,32 +601,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: anios.map(_yearPill).toList(),
-        ),
-      ),
-    );
-  }
-
-  /// A small pill styled the same everywhere a year stands alone in this
-  /// screen: the TEMPORADAS chips and the year pill in each título row are
-  /// the same visual, so they share this one widget instead of two
-  /// independently maintained copies of the same styling.
-  Widget _yearPill(String label) {
-    final primary = Theme.of(context).colorScheme.primary;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-      decoration: BoxDecoration(
-        color: primary.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: primary.withValues(alpha: 0.15)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: primary.withValues(alpha: 0.9),
+          children: anios.map((a) => YearPill(a)).toList(),
         ),
       ),
     );
@@ -707,7 +683,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _yearPill('${t.anio}'),
+          YearPill('${t.anio}'),
           const SizedBox(width: 12),
           Expanded(
             child: esTappable
