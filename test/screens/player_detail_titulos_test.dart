@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
+import 'package:torneo_futbol_app/screens/campeones_screen.dart';
 import 'package:torneo_futbol_app/screens/player_detail_screen.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
 import 'package:torneo_futbol_app/services/i_cache_service.dart';
@@ -53,6 +54,12 @@ class _StubApiService implements IApiService {
       'titulos': titulos ?? [],
     };
   }
+
+  /// Explicitly stubbed (not left to `noSuchMethod`) because the wired
+  /// `onTapEquipo` navigation test below actually pushes [CampeonesScreen],
+  /// which calls this on mount.
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() async => [];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -333,8 +340,9 @@ void main() {
       );
     });
 
-    testWidgets('the team name is plain, non-tappable text with no chevron',
-        (tester) async {
+    testWidgets(
+        'the team name is now a tappable chip with a chevron (wired to the '
+        'history screen)', (tester) async {
       await _pump(
         tester,
         size: const Size(320, 568),
@@ -344,9 +352,28 @@ void main() {
 
       expect(
         find.ancestor(of: find.text('CHELSEA'), matching: find.byType(InkWell)),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.byIcon(Icons.chevron_right), findsNothing);
+      expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    });
+
+    testWidgets(
+        'tapping the team name navigates to CampeonesScreen opened on that '
+        "título's year and zone", (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 568),
+        titulos: [_titulo(anio: 2016, zona: 'B', equipo: 'CHELSEA')],
+      );
+      await _scrollToTitulos(tester);
+
+      await tester.tap(find.text('CHELSEA'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CampeonesScreen), findsOneWidget);
+      final pushed = tester.widget<CampeonesScreen>(find.byType(CampeonesScreen));
+      expect(pushed.initialAnio, 2016);
+      expect(pushed.initialZona, 'B');
     });
 
     testWidgets('a down campeones endpoint omits the panel without breaking the profile',

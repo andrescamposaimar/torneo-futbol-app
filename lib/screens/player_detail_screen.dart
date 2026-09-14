@@ -13,6 +13,7 @@ import '../utils/error_reporting.dart';
 import '../services/i_api_service.dart';
 import '../services/i_cache_service.dart';
 import 'match_detail_screen.dart';
+import 'campeones_screen.dart';
 import '../widgets/match_card.dart';
 import '../widgets/year_pill.dart';
 
@@ -636,7 +637,20 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
-            children: titulosVisibles.map((t) => _tituloRow(t)).toList(),
+            children: titulosVisibles
+                .map((t) => _tituloRow(
+                      t,
+                      onTapEquipo: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => CampeonesScreen(
+                            initialAnio: t.anio,
+                            initialZona: t.zona,
+                          ),
+                        ),
+                      ),
+                    ))
+                .toList(),
           ),
         ),
       ),
@@ -648,10 +662,12 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
   /// marker — both were explicitly removed from this panel by the product
   /// owner (they still travel on the wire for the history screen).
   ///
-  /// [onTapEquipo] is injected so a future slice can wire navigation to the
-  /// championship history screen for that year without changing this row:
-  /// null (this slice) renders plain, non-tappable text with no chevron and
-  /// no ripple — no dead tap target.
+  /// [onTapEquipo] navigates to the championship history screen
+  /// ([CampeonesScreen]), opened on this title's year and zone — wired in
+  /// slice 9. A null callback still renders plain, non-tappable text with no
+  /// chevron and no ripple (no dead tap target); every call site today
+  /// always supplies one, so that branch is effectively unreachable, kept
+  /// only as the row's documented no-callback contract.
   Widget _tituloRow(JugadorTitulo t, {VoidCallback? onTapEquipo}) {
     final primary = Theme.of(context).colorScheme.primary;
     final esTappable = onTapEquipo != null;
