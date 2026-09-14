@@ -112,6 +112,12 @@ final class Plugin {
             // Populares endpoint: GET /prode/populares (prediction split for one match).
             $populares_controller = new Rest\PopularesController( $pred_repo );
 
+            // Recompute rankings endpoint (ADR-G8-1): POST /prode/recompute-rankings.
+            // Replaces the temporary mu-plugin workaround for forcing a rebuild of
+            // the ranking cache. Scope is global (every evaluated fecha of the
+            // tenant), not per-fecha — see RecomputeRankingsController's docblock.
+            $recompute_rankings_controller = new Rest\RecomputeRankingsController( $cap_check );
+
             $controller = new Rest\RestController(
                 $auth_endpoints,
                 $account_controller,
@@ -121,7 +127,8 @@ final class Plugin {
                 $ranking_controller,
                 $fecha_list_controller,
                 $prediction_history_controller,
-                $populares_controller
+                $populares_controller,
+                $recompute_rankings_controller
             );
             $controller->register_routes();
         } );
@@ -245,6 +252,24 @@ final class Plugin {
         // Daily backfill of team-meta snapshots for fecha-match rows that still
         // have none (legacy rows seeded before v0.5.2). Idempotent no-op once filled.
         add_action( Cron\BackfillMatchMetaCron::HOOK,    [ Cron\BackfillMatchMetaCron::class, 'run' ] );
+
+        // Result-change self-heal (ADR-G7-1): repair an already-evaluated fecha
+        // when an operator corrects a played match's score in SportsPress.
+        //
+        // MUST bind to `save_post` at priority 20, NOT `save_post_sp_event` —
+        // see ResultChangeListener's class docblock for why (SportsPress writes
+        // its score meta boxes on `save_post` priority 1, and `save_post_sp_event`
+        // fires BEFORE the generic `save_post`, so no priority there can ever
+        // observe the write). 2 accepted args for the defensive ($post_id, $post)
+        // signature.
+        add_action( 'save_post', [ Sync\ResultChangeListener::class, 'onSavePost' ], 20, 2 );
+
+        // ResultChangeListener schedules this single event (30s delay) instead
+        // of calling the evaluator inline, so the save_post request returns fast
+        // and several quick corrections to the same fecha collapse into one
+        // repair pass (WordPress dedupes identical (hook, args) schedules within
+        // a 10-minute window).
+        add_action( Cron\ReevaluateFechaCron::HOOK, [ Cron\ReevaluateFechaCron::class, 'run' ], 10, 1 );
 
         // Safety net: (re)schedule the crons on any normal request where the
         // primary evaluation event is missing. MigrationRunner::run() only fires
