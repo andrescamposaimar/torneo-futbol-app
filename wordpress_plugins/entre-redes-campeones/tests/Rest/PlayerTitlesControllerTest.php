@@ -200,6 +200,43 @@ class PlayerTitlesControllerTest extends TestCase {
     // The response must still be correct, but the failure must be logged.
     // -------------------------------------------------------------------------
 
+    // -------------------------------------------------------------------------
+    // Warning — no shape guard on transient reads. A corrupt or old-shape
+    // cached value that still unserialises to something array-like was
+    // served verbatim. A mismatch must be treated as a miss and rebuilt.
+    // -------------------------------------------------------------------------
+
+    public function test_a_cached_value_with_an_unexpected_shape_is_treated_as_a_miss(): void {
+        $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        set_transient( 'campeones_titulos_jugador_v1_5078', [ 'unexpected' => 'shape' ], 2592000 );
+
+        $controller = new PlayerTitlesController( $this->squads, $this->directory );
+        $response   = $controller->handle( $this->request( 5078 ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame( 5078, $response->get_data()['jugador_id'] );
+        $this->assertSame(
+            1,
+            $response->get_data()['total'],
+            'A cached value missing the expected shape must be treated as a miss and rebuilt from the DB, not served verbatim.'
+        );
+    }
+
+    public function test_a_cached_value_whose_titulos_is_not_an_array_is_treated_as_a_miss(): void {
+        $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        set_transient( 'campeones_titulos_jugador_v1_5078', [ 'jugador_id' => 5078, 'total' => 1, 'titulos' => 'not-an-array' ], 2592000 );
+
+        $controller = new PlayerTitlesController( $this->squads, $this->directory );
+        $response   = $controller->handle( $this->request( 5078 ) );
+
+        $this->assertIsArray( $response->get_data()['titulos'] );
+        $this->assertSame( 1, $response->get_data()['total'] );
+    }
+
     public function test_a_failed_cache_write_still_returns_the_correct_payload(): void {
         $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
         $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );

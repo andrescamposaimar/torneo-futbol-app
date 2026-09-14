@@ -188,6 +188,39 @@ class HistoryControllerTest extends TestCase {
         $this->assertCount( 1, $response->get_data()['titulos'], 'A failed cache write must not affect the response payload — it is still built from the DB.' );
     }
 
+    // -------------------------------------------------------------------------
+    // Warning — no shape guard on transient reads. A corrupt or old-shape
+    // cached value that still unserialises to something array-like was
+    // served verbatim. A mismatch must be treated as a miss and rebuilt.
+    // -------------------------------------------------------------------------
+
+    public function test_a_cached_value_missing_the_titulos_key_is_treated_as_a_miss(): void {
+        $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        set_transient( 'campeones_historia_v2', [ 'unexpected' => 'shape' ], 2592000 );
+
+        [ $controller ] = $this->makeController();
+        $response = $controller->handle( new \WP_REST_Request() );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertArrayHasKey( 'titulos', $response->get_data() );
+        $this->assertCount(
+            1,
+            $response->get_data()['titulos'],
+            'A cached value missing the expected shape must be treated as a miss and rebuilt from the DB, not served verbatim.'
+        );
+    }
+
+    public function test_a_cached_value_whose_titulos_is_not_an_array_is_treated_as_a_miss(): void {
+        $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        set_transient( 'campeones_historia_v2', [ 'titulos' => 'not-an-array' ], 2592000 );
+
+        [ $controller ] = $this->makeController();
+        $response = $controller->handle( new \WP_REST_Request() );
+
+        $this->assertIsArray( $response->get_data()['titulos'] );
+        $this->assertCount( 1, $response->get_data()['titulos'] );
+    }
+
     public function test_a_failed_cache_write_is_logged(): void {
         $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
 

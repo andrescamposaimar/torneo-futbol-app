@@ -43,7 +43,7 @@ final class HistoryController {
 
     public function handle( \WP_REST_Request $request ): \WP_REST_Response {
         $cached = get_transient( self::CACHE_KEY );
-        if ( false !== $cached ) {
+        if ( self::isValidCachedPayload( $cached ) ) {
             return new \WP_REST_Response( $cached, 200 );
         }
 
@@ -87,5 +87,18 @@ final class HistoryController {
         }
 
         return new \WP_REST_Response( $payload, 200 );
+    }
+
+    /**
+     * Guards against a corrupt or old-shape cached value that still
+     * unserialises to something array-like (e.g. a value written by a
+     * previous, incompatible version of this shape — see the CACHE_KEY
+     * `_v2` suffix history) being served verbatim. A mismatch is treated
+     * exactly like a cache miss: rebuild from the DB.
+     */
+    private static function isValidCachedPayload( mixed $value ): bool {
+        return is_array( $value )
+            && array_key_exists( 'titulos', $value )
+            && is_array( $value['titulos'] );
     }
 }

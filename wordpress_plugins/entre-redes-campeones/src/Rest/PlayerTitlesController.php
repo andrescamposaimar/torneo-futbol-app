@@ -43,7 +43,7 @@ final class PlayerTitlesController {
         $cacheKey  = self::CACHE_PREFIX . $jugadorId;
 
         $cached = get_transient( $cacheKey );
-        if ( false !== $cached ) {
+        if ( self::isValidCachedPayload( $cached ) ) {
             return new \WP_REST_Response( $cached, 200 );
         }
 
@@ -92,5 +92,18 @@ final class PlayerTitlesController {
         }
 
         return new \WP_REST_Response( $payload, 200 );
+    }
+
+    /**
+     * Guards against a corrupt or old-shape cached value that still
+     * unserialises to something array-like being served verbatim — a
+     * mismatch is treated exactly like a cache miss: rebuild from the DB.
+     */
+    private static function isValidCachedPayload( mixed $value ): bool {
+        return is_array( $value )
+            && array_key_exists( 'jugador_id', $value )
+            && array_key_exists( 'total', $value )
+            && array_key_exists( 'titulos', $value )
+            && is_array( $value['titulos'] );
     }
 }
