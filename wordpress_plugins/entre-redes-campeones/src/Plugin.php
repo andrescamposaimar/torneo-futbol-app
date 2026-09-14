@@ -7,10 +7,15 @@ namespace EntreRedes\Campeones;
 use EntreRedes\Campeones\Admin\AdminMenu;
 use EntreRedes\Campeones\Admin\TitleEditorPage;
 use EntreRedes\Campeones\Admin\TitlesPage;
+use EntreRedes\Campeones\Cache\CacheInvalidator;
 use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\RevalidationService;
 use EntreRedes\Campeones\Linking\WpPlayerDirectory;
+use EntreRedes\Campeones\Rest\HistoryController;
+use EntreRedes\Campeones\Rest\PlayerTitlesController;
+use EntreRedes\Campeones\Rest\RestController;
+use EntreRedes\Campeones\Rest\WpPlayerPhotoProvider;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleDeletionService;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -39,8 +44,25 @@ final class Plugin {
         }
         self::$booted = true;
 
-        // REST API routes (HistoryController, PlayerTitlesController) are
-        // wired here starting with slice 7a. Nothing to register yet.
+        // REST API routes — HistoryController (API-1/API-3) and
+        // PlayerTitlesController (API-2/API-4), design §7. Both are public,
+        // unauthenticated reads; permission callbacks are '__return_true'
+        // inside each controller's own register_routes().
+        add_action( 'rest_api_init', static function (): void {
+            global $wpdb;
+
+            $titles    = new TitleRepository( $wpdb );
+            $squads    = new SquadRepository( $wpdb );
+            $photos    = new WpPlayerPhotoProvider( $wpdb );
+            $directory = new WpPlayerDirectory( $wpdb );
+
+            $restController = new RestController(
+                new HistoryController( $titles, $squads, $photos ),
+                new PlayerTitlesController( $squads, $directory )
+            );
+
+            $restController->register_routes();
+        } );
 
         // Admin menu — Titles list + hidden title editor (slice 3).
         // ReviewQueuePage (slice 4) and ImportPage (slice 6) extend this
@@ -54,13 +76,15 @@ final class Plugin {
                 $directory = new WpPlayerDirectory( $wpdb );
                 $resolver  = new LinkResolver( $directory );
                 $writer    = new LinkWriteService( $squads, $directory );
+                $cache     = new CacheInvalidator( $wpdb );
 
                 $titlesPage = new TitlesPage(
                     $titles,
                     new TitleDeletionService( $wpdb, $titles, $squads ),
-                    new RevalidationService( $titles, $squads, $resolver, $writer )
+                    new RevalidationService( $titles, $squads, $resolver, $writer ),
+                    $cache
                 );
-                $editorPage = new TitleEditorPage( $titles, $squads, $resolver, $writer, $directory );
+                $editorPage = new TitleEditorPage( $titles, $squads, $resolver, $writer, $directory, $cache );
 
                 ( new AdminMenu( $titlesPage, $editorPage ) )->register();
             } );

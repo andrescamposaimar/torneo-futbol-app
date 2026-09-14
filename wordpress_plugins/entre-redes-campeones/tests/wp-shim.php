@@ -52,7 +52,8 @@ if ( ! class_exists( 'wpdb' ) ) {
          * Executes a raw SQL string. Returns number of affected rows or false.
          */
         public function query( string $sql ): int|false {
-            $sql = $this->translateForSqlite( $sql );
+            $this->last_error = null;
+            $sql              = $this->translateForSqlite( $sql );
             try {
                 return $this->pdo->exec( $sql );
             } catch ( \PDOException $e ) {
@@ -77,6 +78,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * Returns first column of first row, or null.
          */
         public function get_var( string $sql ): ?string {
+            $this->last_error = null;
             try {
                 $stmt = $this->pdo->query( $sql );
                 $row  = $stmt->fetch( \PDO::FETCH_NUM );
@@ -98,6 +100,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @return array<int, array<string, mixed>|\stdClass>
          */
         public function get_results( string $sql, string $output = OBJECT ): array {
+            $this->last_error = null;
             try {
                 $stmt = $this->pdo->query( $sql );
                 $rows = $stmt->fetchAll( \PDO::FETCH_ASSOC );
@@ -147,6 +150,7 @@ if ( ! class_exists( 'wpdb' ) ) {
         public int $insert_id = 0;
 
         public function insert( string $table, array $data, mixed $format = null ): int|false {
+            $this->last_error = null;
             if ( empty( $data ) ) {
                 return false;
             }
@@ -171,6 +175,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @param array<string, mixed> $where
          */
         public function update( string $table, array $data, array $where ): int|false {
+            $this->last_error = null;
             $set_parts   = array_map( static fn( $k ) => "{$k} = ?", array_keys( $data ) );
             $where_parts = array_map( static fn( $k ) => "{$k} = ?", array_keys( $where ) );
             $sql         = "UPDATE {$table} SET " . implode( ', ', $set_parts )
@@ -191,6 +196,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @param array<string, mixed> $where
          */
         public function delete( string $table, array $where ): int|false {
+            $this->last_error = null;
             $where_parts = array_map( static fn( $k ) => "{$k} = ?", array_keys( $where ) );
             $sql         = "DELETE FROM {$table} WHERE " . implode( ' AND ', $where_parts );
             try {
@@ -213,6 +219,20 @@ if ( ! class_exists( 'wpdb' ) ) {
 global $wpdb;
 if ( ! isset( $wpdb ) ) {
     $wpdb = new wpdb();
+
+    // wp_options is a WordPress core table — it always exists on a real
+    // site, created by WP core itself, never by this plugin. Production
+    // code (CacheInvalidator's per-player LIKE delete, design §7) issues raw
+    // SQL against it directly, bypassing the get_transient()/set_transient()
+    // static-array shim entirely (there is no fixed key to hand
+    // delete_transient() for a parametrized transient name). Creating it
+    // once here, exactly like a real WP install guarantees it, means that
+    // query behaves the same everywhere instead of only inside a test that
+    // remembers to create the table itself — and a query against a missing
+    // table would otherwise silently poison $wpdb->last_error (never reset
+    // on a successful query) for every later test in the same process,
+    // including ones that check it for unrelated reasons (MigrationRunner).
+    $wpdb->query( "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}options (option_name TEXT, option_value TEXT)" );
 }
 
 // ─── dbDelta shim ────────────────────────────────────────────────────────────
@@ -415,12 +435,23 @@ if ( ! defined( 'DAY_IN_SECONDS' ) ) {
 
 if ( ! function_exists( 'get_transient' ) ) {
     $GLOBALS['_campeones_test_transients'] = [];
+    $GLOBALS['_campeones_test_force_transient_write_failure'] = false;
 
     function get_transient( string $key ): mixed {
         return $GLOBALS['_campeones_test_transients'][ $key ] ?? false;
     }
 
+    /**
+     * $GLOBALS['_campeones_test_force_transient_write_failure'] lets a test
+     * simulate set_transient() returning false — e.g. a payload too large
+     * for max_allowed_packet, a rejected write, an object-cache drop-in
+     * failure — without needing a real storage backend to actually reject
+     * anything (item 3).
+     */
     function set_transient( string $key, mixed $value, int $expiration = 0 ): bool {
+        if ( $GLOBALS['_campeones_test_force_transient_write_failure'] ?? false ) {
+            return false;
+        }
         $GLOBALS['_campeones_test_transients'][ $key ] = $value;
         return true;
     }
@@ -434,7 +465,24 @@ if ( ! function_exists( 'get_transient' ) ) {
 // ─── WP REST API stubs ────────────────────────────────────────────────────────
 
 if ( ! function_exists( 'register_rest_route' ) ) {
+    $GLOBALS['_campeones_test_registered_rest_routes'] = [];
+
+    /**
+     * Captures every registered route (namespace, path, args) into a global
+     * array, mirroring add_action()'s callback capture above — a real
+     * register_rest_route() also wires actual HTTP dispatch, which this
+     * plugin's tests never exercise (handle() is always called directly),
+     * but tests must still be able to assert namespace/path/method/
+     * permission_callback for each route actually registered (item 4).
+     *
+     * @param array<string, mixed> $args
+     */
     function register_rest_route( string $namespace, string $route, array $args ): bool {
+        $GLOBALS['_campeones_test_registered_rest_routes'][] = [
+            'namespace' => $namespace,
+            'route'     => $route,
+            'args'      => $args,
+        ];
         return true;
     }
 }

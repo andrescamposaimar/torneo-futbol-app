@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Tests\Admin;
 
 use EntreRedes\Campeones\Admin\TitleEditorPage;
+use EntreRedes\Campeones\Cache\CacheInvalidator;
 use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
@@ -39,6 +40,7 @@ class TitleEditorPageTest extends TestCase {
 
     private TitleRepository $titles;
     private SquadRepository $squads;
+    private CacheInvalidator $cache;
     private int $tituloId;
 
     protected function setUp(): void {
@@ -50,6 +52,7 @@ class TitleEditorPageTest extends TestCase {
 
         $this->titles = new TitleRepository( $wpdb );
         $this->squads = new SquadRepository( $wpdb );
+        $this->cache  = new CacheInvalidator( $wpdb );
 
         $title          = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
         $this->tituloId = $title->id;
@@ -61,6 +64,7 @@ class TitleEditorPageTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         $GLOBALS['_campeones_test_current_user_can'] = false;
         unset( $_GET['titulo_id'], $_GET['campeones_notice'] );
+        delete_transient( 'campeones_historia_v2' );
     }
 
     private function makePage(): TitleEditorPage {
@@ -72,7 +76,8 @@ class TitleEditorPageTest extends TestCase {
             $this->squads,
             new LinkResolver( $directory ),
             new LinkWriteService( $this->squads, $directory ),
-            $directory
+            $directory,
+            $this->cache
         );
     }
 
@@ -90,7 +95,8 @@ class TitleEditorPageTest extends TestCase {
             $this->squads,
             new LinkResolver( $directory ),
             new LinkWriteService( $this->squads, $directory ),
-            $directory
+            $directory,
+            $this->cache
         );
     }
 
@@ -105,7 +111,8 @@ class TitleEditorPageTest extends TestCase {
             $this->squads,
             new LinkResolver( $directory ),
             new LinkWriteService( $this->squads, $directory ),
-            $directory
+            $directory,
+            $this->cache
         );
     }
 
@@ -335,7 +342,8 @@ class TitleEditorPageTest extends TestCase {
                 $squads,
                 new LinkResolver( $directory ),
                 new LinkWriteService( $squads, $directory ),
-                $directory
+                $directory,
+                new CacheInvalidator( $failing )
             );
 
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleAddRow' );
@@ -372,7 +380,8 @@ class TitleEditorPageTest extends TestCase {
                 $squads,
                 new LinkResolver( $directory ),
                 new LinkWriteService( $squads, $directory ),
-                $directory
+                $directory,
+                new CacheInvalidator( $failing )
             );
 
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleEditRow' );
@@ -576,6 +585,182 @@ class TitleEditorPageTest extends TestCase {
             $this->assertStringContainsString( 'campeones_notice=actualizado', (string) $GLOBALS['_campeones_test_last_redirect'] );
             $reread = $this->titles->find( $this->tituloId );
             $this->assertSame( 'BOCA', $reread->equipoNombre, 'actualizar_titulo must actually reach handleUpdateHeader() and update the record.' );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // CacheInvalidator wiring (design §7) — a correction the operator makes
+    // in the editor must be visible on the next app request, not up to 30
+    // days later.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_actualizar_titulo_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $_POST['campeones_editor_action'] = 'actualizar_titulo';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['equipo_nombre']           = 'BOCA';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_actualizar_titulo_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse(
+                get_transient( 'campeones_historia_v2' ),
+                'A title header edit must invalidate the history transient so the correction is visible immediately.'
+            );
+        }
+    }
+
+    public function test_handle_post_agregar_fila_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $_POST['campeones_editor_action'] = 'agregar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Adding a squad row must invalidate the history transient.' );
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 5 (CRITICAL) — deleting BOTH $this->cache->flush() call sites in
+    // this plugin only failed 3 of 287 tests: actualizar_titulo and
+    // agregar_fila were covered above, but crear_titulo, editar_fila,
+    // eliminar_fila, vincular, cambiar and desvincular were not. The
+    // guarantee currently holds only because a human reads the single
+    // unconditional call site — a future refactor that makes it conditional
+    // and misses one path would leave the suite green.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_crear_titulo_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        unset( $_POST['titulo_id'] );
+        $_POST['campeones_editor_action'] = 'crear_titulo';
+        $_POST['anio']                    = '2011';
+        $_POST['zona']                    = 'A';
+        $_POST['posicion']                = 'campeon';
+        $_POST['equipo_nombre']           = 'INDEPENDIENTE';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_crear_titulo' );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Creating a title must invalidate the history transient.' );
+            $_POST['titulo_id'] = (string) $this->tituloId;
+        }
+    }
+
+    public function test_handle_post_editar_fila_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['es_capitan']              = '1';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Editing a squad row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_eliminar_fila_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $_POST['campeones_editor_action'] = 'eliminar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Deleting a squad row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_vincular_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $_POST['campeones_editor_action'] = 'vincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '5078';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Linking a row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_desvincular_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        $_POST['campeones_editor_action'] = 'desvincular';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Unlinking a row must invalidate the history transient.' );
+        }
+    }
+
+    public function test_handle_post_cambiar_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'GARCIA, M.', false, LinkState::AMBIGUO ) );
+
+        $_POST['campeones_editor_action'] = 'cambiar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_id']              = '2461';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Changing a link must invalidate the history transient.' );
         }
     }
 
@@ -794,7 +979,7 @@ class TitleEditorPageTest extends TestCase {
 
         $throwingDirectory = new ThrowingPlayerDirectory();
         $throwingResolver  = new LinkResolver( $throwingDirectory );
-        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ), $throwingDirectory );
+        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ), $throwingDirectory, $this->cache );
 
         $_POST['campeones_editor_action'] = 'agregar_fila';
         $_POST['titulo_id']               = (string) $this->tituloId;
@@ -835,7 +1020,7 @@ class TitleEditorPageTest extends TestCase {
 
         $throwingDirectory = new ThrowingPlayerDirectory();
         $throwingResolver  = new LinkResolver( $throwingDirectory );
-        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ), $throwingDirectory );
+        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ), $throwingDirectory, $this->cache );
 
         $_POST['campeones_editor_action'] = 'editar_fila';
         $_POST['titulo_id']               = (string) $this->tituloId;
@@ -979,7 +1164,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory, new CacheInvalidator( $failing ) );
 
             $_POST['campeones_editor_action'] = 'agregar_fila';
             $_POST['titulo_id']               = (string) $title->id;
@@ -1022,7 +1207,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory, new CacheInvalidator( $failing ) );
 
             $_POST['campeones_editor_action'] = 'editar_fila';
             $_POST['titulo_id']               = (string) $title->id;
@@ -1103,7 +1288,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory, new CacheInvalidator( $failing ) );
 
             $_POST['campeones_editor_action'] = 'editar_fila';
             $_POST['titulo_id']               = (string) $title->id;
@@ -1243,7 +1428,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory, new CacheInvalidator( $failing ) );
 
             $_POST['campeones_editor_action'] = 'crear_titulo';
             unset( $_POST['titulo_id'] );

@@ -7,6 +7,7 @@ namespace EntreRedes\Campeones\Tests\Admin;
 use EntreRedes\Campeones\Admin\AdminMenu;
 use EntreRedes\Campeones\Admin\TitleEditorPage;
 use EntreRedes\Campeones\Admin\TitlesPage;
+use EntreRedes\Campeones\Cache\CacheInvalidator;
 use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\RevalidationService;
@@ -39,13 +40,15 @@ class AdminMenuWiringTest extends TestCase {
         $directory = new WpPlayerDirectory( $wpdb );
         $resolver  = new LinkResolver( $directory );
         $writer    = new LinkWriteService( $squads, $directory );
+        $cache     = new CacheInvalidator( $wpdb );
 
         $titlesPage = new TitlesPage(
             $titles,
             new TitleDeletionService( $wpdb, $titles, $squads ),
-            new RevalidationService( $titles, $squads, $resolver, $writer )
+            new RevalidationService( $titles, $squads, $resolver, $writer ),
+            $cache
         );
-        $editorPage = new TitleEditorPage( $titles, $squads, $resolver, $writer, $directory );
+        $editorPage = new TitleEditorPage( $titles, $squads, $resolver, $writer, $directory, $cache );
 
         return new AdminMenu( $titlesPage, $editorPage );
     }

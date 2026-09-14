@@ -168,6 +168,42 @@ class SquadRepository {
     }
 
     /**
+     * Every squad entry pointing at one registered player, joined to that
+     * title's year/team — backs the per-player titles REST endpoint (API-2,
+     * design §7). Ordered by anio DESC server-side so every current and
+     * future consumer of this endpoint gets a descending list without
+     * re-deriving the order itself (the same reasoning as API-2's spec-level
+     * requirement).
+     *
+     * @return array<int, array{anio:int, equipo_nombre:string, es_capitan:bool}>
+     */
+    public function findTitleSummariesByJugadorId( int $jugadorId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT t.anio AS anio, t.equipo_nombre AS equipo_nombre, sp.es_capitan AS es_capitan
+                   FROM {$p}campeones_plantel sp
+                   INNER JOIN {$p}campeones_titulo t ON t.id = sp.titulo_id
+                  WHERE sp.jugador_id = %d
+                  ORDER BY t.anio DESC",
+                $jugadorId
+            ),
+            ARRAY_A
+        );
+
+        return array_map(
+            static fn ( array $row ): array => [
+                'anio'          => (int) $row['anio'],
+                'equipo_nombre' => (string) $row['equipo_nombre'],
+                'es_capitan'    => (bool) $row['es_capitan'],
+            ],
+            $rows ?: []
+        );
+    }
+
+    /**
      * Deletes every squad row for one title — used by TitleDeletionService
      * inside a transaction, before the title row itself is removed. A title
      * with no squad rows is a successful no-op, not a failure.

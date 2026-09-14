@@ -205,4 +205,55 @@ class SquadRepositoryTest extends TestCase {
             $wpdb = $original;
         }
     }
+
+    // -------------------------------------------------------------------------
+    // findTitleSummariesByJugadorId() — backs API-2 (design §7). Ordered
+    // anio DESC server-side so every current and future consumer gets a
+    // descending list without re-deriving the order itself.
+    // -------------------------------------------------------------------------
+
+    public function test_find_title_summaries_orders_by_anio_descending(): void {
+        $t2016 = $this->makeTitle( 2016 );
+        $t2023 = $this->makeTitle( 2023 );
+        $t2019 = $this->makeTitle( 2019 );
+
+        $this->repository->insert( new SquadEntry( $t2016, 0, 'BASSO, A.', true, 'auto', 999 ) );
+        $this->repository->insert( new SquadEntry( $t2023, 0, 'BASSO, A.', false, 'auto', 999 ) );
+        $this->repository->insert( new SquadEntry( $t2019, 0, 'BASSO, A.', false, 'auto', 999 ) );
+
+        $rows = $this->repository->findTitleSummariesByJugadorId( 999 );
+
+        $this->assertSame( [ 2023, 2019, 2016 ], array_column( $rows, 'anio' ) );
+    }
+
+    public function test_find_title_summaries_carries_equipo_nombre_and_captain_flag(): void {
+        $tituloId = $this->makeTitle( 2016 );
+        $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.', true, 'auto', 999 ) );
+
+        $rows = $this->repository->findTitleSummariesByJugadorId( 999 );
+
+        $this->assertCount( 1, $rows );
+        $this->assertSame( 2016, $rows[0]['anio'] );
+        $this->assertSame( 'CHELSEA', $rows[0]['equipo_nombre'] );
+        $this->assertTrue( $rows[0]['es_capitan'] );
+    }
+
+    public function test_find_title_summaries_excludes_other_players_and_unlinked_rows(): void {
+        $tituloId = $this->makeTitle( 2016 );
+        $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.', true, 'auto', 999 ) );
+        $this->repository->insert( new SquadEntry( $tituloId, 1, 'MAZZARA, M.', false, 'auto', 111 ) );
+        $this->repository->insert( new SquadEntry( $tituloId, 2, 'CALELLO, G.', false, 'sin_candidato', null ) );
+
+        $rows = $this->repository->findTitleSummariesByJugadorId( 999 );
+
+        $this->assertCount( 1, $rows );
+    }
+
+    public function test_find_title_summaries_for_a_player_with_no_titles_is_an_empty_array(): void {
+        // API-4: zero titles must be an empty result, never an error or a
+        // null — the controller relies on count() over this return value.
+        $rows = $this->repository->findTitleSummariesByJugadorId( 424242 );
+
+        $this->assertSame( [], $rows );
+    }
 }
