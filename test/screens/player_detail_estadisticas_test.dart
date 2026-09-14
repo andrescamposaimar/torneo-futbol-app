@@ -40,6 +40,10 @@ class _StubApiService implements IApiService {
       {'items': [], 'current_page': 1, 'total_pages': 0};
 
   @override
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) async =>
+      {'jugador_id': jugadorId, 'total': 0, 'titulos': []};
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 

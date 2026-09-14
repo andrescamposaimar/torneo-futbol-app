@@ -84,4 +84,9 @@ abstract class IApiService {
     int page = 1,
     int perPage = 10,
   });
+
+  /// Copa Chaminade titles won by a specific registered player (API-2). A
+  /// public, unauthenticated, `baseUrl`-relative read — same shape as every
+  /// other method here, not a separate service (see design §8).
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId);
 }
