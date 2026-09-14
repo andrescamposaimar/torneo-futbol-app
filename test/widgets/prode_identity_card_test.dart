@@ -8,6 +8,7 @@ import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/player_detail_screen.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
+import 'package:torneo_futbol_app/services/i_cache_service.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_controller.dart';
 import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
@@ -160,6 +161,19 @@ class _StubPublicApiService implements IApiService {
 }
 
 // ---------------------------------------------------------------------------
+// No-op cache service — AC-53i navigates into PlayerDetailScreen, whose
+// titles fetch now reads cacheServiceProvider. The real CacheService's
+// shared_preferences call never resolves under flutter_test without a
+// platform-channel mock, hanging pumpAndSettle; a deterministic
+// cache-miss/no-op fake avoids that entirely.
+// ---------------------------------------------------------------------------
+
+class _NoopCacheService implements ICacheService {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => Future.value(null);
+}
+
+// ---------------------------------------------------------------------------
 // Stub ProdeAuthController — seeds state, all async ops are no-ops
 // ---------------------------------------------------------------------------
 
@@ -225,6 +239,7 @@ Future<void> _pump(
           _FakeProdeApiService(),
         ),
         apiServiceProvider.overrideWithValue(api),
+        cacheServiceProvider.overrideWithValue(_NoopCacheService()),
         prodeAuthControllerProvider.overrideWith(
           (ref) => _StubAuthController(authState),
         ),
