@@ -52,4 +52,8 @@ final class PartiallyThrowingPlayerDirectory implements PlayerDirectoryInterface
     public function existsById( int $id ): bool {
         return $this->delegate->existsById( $id );
     }
+
+    public function findByIds( array $ids ): array {
+        return $this->delegate->findByIds( $ids );
+    }
 }

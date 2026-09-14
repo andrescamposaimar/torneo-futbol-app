@@ -27,4 +27,8 @@ final class ThrowingPlayerDirectory implements PlayerDirectoryInterface {
     public function existsById( int $id ): bool {
         throw new PlayerDirectoryQueryException( 'Simulated player directory query failure for test' );
     }
+
+    public function findByIds( array $ids ): array {
+        throw new PlayerDirectoryQueryException( 'Simulated player directory query failure for test' );
+    }
 }

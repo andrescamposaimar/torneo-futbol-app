@@ -39,6 +39,14 @@ class FakeDirectoryWpdb extends \wpdb {
     private bool $failTeamsQuery   = false;
 
     /**
+     * Counts every sp_player roster query actually executed — used to prove
+     * WpPlayerDirectory::findByIds() reuses the index built by an earlier
+     * call instead of re-querying (no N+1 across repeated lookups on the
+     * same request).
+     */
+    public int $playerQueryCallCount = 0;
+
+    /**
      * @param array<int, array<string, mixed>> $rows
      */
     public function withPlayerRows( array $rows ): self {
@@ -81,6 +89,7 @@ class FakeDirectoryWpdb extends \wpdb {
         $this->last_error = null;
 
         if ( str_contains( $sql, "post_type = 'sp_player'" ) ) {
+            ++$this->playerQueryCallCount;
             if ( $this->failPlayersQuery ) {
                 $this->last_error = 'Simulated sp_player query failure for test';
                 return [];
