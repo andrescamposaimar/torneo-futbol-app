@@ -71,7 +71,8 @@ class TitleEditorPageTest extends TestCase {
             $this->titles,
             $this->squads,
             new LinkResolver( $directory ),
-            new LinkWriteService( $this->squads, $directory )
+            new LinkWriteService( $this->squads, $directory ),
+            $directory
         );
     }
 
@@ -88,7 +89,23 @@ class TitleEditorPageTest extends TestCase {
             $this->titles,
             $this->squads,
             new LinkResolver( $directory ),
-            new LinkWriteService( $this->squads, $directory )
+            new LinkWriteService( $this->squads, $directory ),
+            $directory
+        );
+    }
+
+    /**
+     * For tests that need to control the player directory directly — e.g.
+     * proving render() reports a directory outage honestly, instead of
+     * silently rendering every linked row as unlinked.
+     */
+    private function makeTestablePageWithDirectory( \EntreRedes\Campeones\Linking\PlayerDirectoryInterface $directory ): TestableTitleEditorPage {
+        return new TestableTitleEditorPage(
+            $this->titles,
+            $this->squads,
+            new LinkResolver( $directory ),
+            new LinkWriteService( $this->squads, $directory ),
+            $directory
         );
     }
 
@@ -317,7 +334,8 @@ class TitleEditorPageTest extends TestCase {
                 $titles,
                 $squads,
                 new LinkResolver( $directory ),
-                new LinkWriteService( $squads, $directory )
+                new LinkWriteService( $squads, $directory ),
+                $directory
             );
 
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleAddRow' );
@@ -353,7 +371,8 @@ class TitleEditorPageTest extends TestCase {
                 $titles,
                 $squads,
                 new LinkResolver( $directory ),
-                new LinkWriteService( $squads, $directory )
+                new LinkWriteService( $squads, $directory ),
+                $directory
             );
 
             $ref    = new \ReflectionMethod( TitleEditorPage::class, 'handleEditRow' );
@@ -691,6 +710,71 @@ class TitleEditorPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // resolvePlayerNames() — batched id -> name lookup backing the squad
+    // list's "Vinculado a" column. A directory failure here must be
+    // reported honestly, not silently treated as "no linked players".
+    // -------------------------------------------------------------------------
+
+    public function test_resolve_player_names_returns_empty_for_no_ids(): void {
+        [ $namesById, $directoryUnavailable ] = $this->invoke( 'resolvePlayerNames', [] );
+
+        $this->assertSame( [], $namesById );
+        $this->assertFalse( $directoryUnavailable );
+    }
+
+    public function test_resolve_player_names_maps_ids_to_display_names(): void {
+        // 5078 is "Basso, Alejandro" in tests/Fixtures/players.php.
+        [ $namesById, $directoryUnavailable ] = $this->invoke( 'resolvePlayerNames', [ 5078 ] );
+
+        $this->assertSame( [ 5078 => 'Basso, Alejandro' ], $namesById );
+        $this->assertFalse( $directoryUnavailable );
+    }
+
+    public function test_resolve_player_names_reports_directory_unavailable_on_query_failure(): void {
+        $ref = new \ReflectionMethod( TitleEditorPage::class, 'resolvePlayerNames' );
+        [ $namesById, $directoryUnavailable ] = $ref->invoke(
+            $this->makeTestablePageWithDirectory( new \EntreRedes\Campeones\Tests\Support\ThrowingPlayerDirectory() ),
+            [ 5078 ]
+        );
+
+        $this->assertSame( [], $namesById );
+        $this->assertTrue( $directoryUnavailable );
+    }
+
+    public function test_render_shows_an_honest_notice_when_the_directory_is_unavailable(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['titulo_id'] = (string) $this->tituloId;
+
+        $this->squads->insert(
+            new SquadEntry( $this->tituloId, 0, 'BASSO, A.', false, LinkState::AUTO, 5078 )
+        );
+
+        ob_start();
+        $this->makeTestablePageWithDirectory( new \EntreRedes\Campeones\Tests\Support\ThrowingPlayerDirectory() )->render();
+        $html = ob_get_clean();
+
+        $this->assertStringContainsString(
+            'directorio de jugadores',
+            $html,
+            'A broken player directory must be reported to the operator, not silently rendered as every row being unlinked.'
+        );
+    }
+
+    public function test_render_does_not_show_the_directory_notice_when_no_row_is_linked(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        $_GET['titulo_id'] = (string) $this->tituloId;
+
+        // No squad rows at all -> no ids to resolve -> resolvePlayerNames()
+        // is never even called with a non-empty list, so a working
+        // directory must not trigger a spurious warning.
+        ob_start();
+        $this->makeTestablePage()->render();
+        $html = ob_get_clean();
+
+        $this->assertStringNotContainsString( 'directorio de jugadores', $html );
+    }
+
+    // -------------------------------------------------------------------------
     // Item 7 — PlayerDirectoryQueryException / WriteFailedException were
     // caught nowhere in src/Admin/. Worse, in handleAddRow the row is
     // already inserted before the resolver runs, so an uncaught throw there
@@ -710,7 +794,7 @@ class TitleEditorPageTest extends TestCase {
 
         $throwingDirectory = new ThrowingPlayerDirectory();
         $throwingResolver  = new LinkResolver( $throwingDirectory );
-        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) );
+        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ), $throwingDirectory );
 
         $_POST['campeones_editor_action'] = 'agregar_fila';
         $_POST['titulo_id']               = (string) $this->tituloId;
@@ -751,7 +835,7 @@ class TitleEditorPageTest extends TestCase {
 
         $throwingDirectory = new ThrowingPlayerDirectory();
         $throwingResolver  = new LinkResolver( $throwingDirectory );
-        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) );
+        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ), $throwingDirectory );
 
         $_POST['campeones_editor_action'] = 'editar_fila';
         $_POST['titulo_id']               = (string) $this->tituloId;
@@ -895,7 +979,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
 
             $_POST['campeones_editor_action'] = 'agregar_fila';
             $_POST['titulo_id']               = (string) $title->id;
@@ -938,7 +1022,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
 
             $_POST['campeones_editor_action'] = 'editar_fila';
             $_POST['titulo_id']               = (string) $title->id;
@@ -1019,7 +1103,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
 
             $_POST['campeones_editor_action'] = 'editar_fila';
             $_POST['titulo_id']               = (string) $title->id;
@@ -1159,7 +1243,7 @@ class TitleEditorPageTest extends TestCase {
             $rows      = require __DIR__ . '/../Fixtures/players.php';
             $directory = FakePlayerDirectory::fromFixtureRows( $rows );
 
-            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ), $directory );
 
             $_POST['campeones_editor_action'] = 'crear_titulo';
             unset( $_POST['titulo_id'] );

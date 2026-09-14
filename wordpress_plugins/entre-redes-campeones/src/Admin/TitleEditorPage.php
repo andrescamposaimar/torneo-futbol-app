@@ -8,7 +8,9 @@ use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
 use EntreRedes\Campeones\Linking\NameNormalizer;
+use EntreRedes\Campeones\Linking\PlayerDirectoryInterface;
 use EntreRedes\Campeones\Linking\PlayerDirectoryQueryException;
+use EntreRedes\Campeones\Linking\RegisteredPlayer;
 use EntreRedes\Campeones\Titles\SquadEntry;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
@@ -61,7 +63,8 @@ class TitleEditorPage {
         private readonly TitleRepository $titles,
         private readonly SquadRepository $squads,
         private readonly LinkResolver $resolver,
-        private readonly LinkWriteService $linkWriter
+        private readonly LinkWriteService $linkWriter,
+        private readonly PlayerDirectoryInterface $directory
     ) {
     }
 
@@ -216,6 +219,39 @@ class TitleEditorPage {
      * is an authorization check, not a CSRF one, and it must run before any
      * handler that mutates the row.
      */
+    /**
+     * Batched id -> display-name lookup for the squad list's "Vinculado a"
+     * column (render() only — never called per row). A directory failure
+     * is reported back as $directoryUnavailable = true rather than thrown:
+     * unlike handleAddRow()/handleEditRow(), this runs during a GET render,
+     * not a POST, so there is no partial write to protect — but the caller
+     * must still not treat a failure here as "no linked players" (that
+     * would render every linked row as though it were unlinked, silently).
+     *
+     * @param int[] $jugadorIds
+     * @return array{0: array<int, string>, 1: bool} [$namesById, $directoryUnavailable]
+     */
+    private function resolvePlayerNames( array $jugadorIds ): array {
+        if ( [] === $jugadorIds ) {
+            return [ [], false ];
+        }
+
+        try {
+            $players = $this->directory->findByIds( $jugadorIds );
+        } catch ( PlayerDirectoryQueryException $e ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: could not resolve linked player names for the squad list — the player directory is unavailable. %s',
+                $e->getMessage()
+            ) );
+            return [ [], true ];
+        }
+
+        return [
+            array_map( static fn ( RegisteredPlayer $p ): string => $p->displayName, $players ),
+            false,
+        ];
+    }
+
     private function rowBelongsToRequestedTitle( int $rowId, int $tituloId ): bool {
         $entry = $this->squads->find( $rowId );
         return null !== $entry && $entry->tituloId === $tituloId;
@@ -383,8 +419,12 @@ class TitleEditorPage {
             $rows
         );
 
+        $jugadorIds = array_values( array_unique( array_filter( array_column( $tableRows, 'jugador_id' ) ) ) );
+        [ $playerNamesById, $directoryUnavailable ] = $this->resolvePlayerNames( $jugadorIds );
+
         $listTable = new SquadListTable( [ 'singular' => 'jugador', 'plural' => 'jugadores', 'ajax' => false ] );
         $listTable->setData( $tableRows, $tituloId );
+        $listTable->setPlayerLookup( $playerNamesById, $directoryUnavailable );
         $listTable->prepare_items();
 
         ?>
@@ -394,6 +434,12 @@ class TitleEditorPage {
             <?php if ( null !== $notice ) : ?>
             <div class="notice notice-<?php echo esc_attr( $notice['type'] ); ?> is-dismissible">
                 <p><?php echo esc_html( $notice['message'] ); ?></p>
+            </div>
+            <?php endif; ?>
+
+            <?php if ( $directoryUnavailable ) : ?>
+            <div class="notice notice-warning">
+                <p><?php echo esc_html__( 'No se pudo consultar el directorio de jugadores. Los nombres de los jugadores vinculados no se pueden mostrar en este momento; los datos del plantel en sí siguen siendo correctos.', 'entre-redes-campeones' ); ?></p>
             </div>
             <?php endif; ?>
 
