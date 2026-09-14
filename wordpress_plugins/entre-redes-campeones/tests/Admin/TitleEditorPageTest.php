@@ -698,6 +698,13 @@ class TitleEditorPageTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_handle_post_agregar_fila_catches_a_directory_query_exception(): void {
+        // Round-2 BLOCKER fix: this used to redirect with the generic
+        // 'error_directorio' notice ("Intentá nuevamente en unos minutos")
+        // even though the row was already durably inserted before the
+        // resolver threw. An operator following that advice on an add-row
+        // form would resubmit and create a DUPLICATE row. The exception must
+        // be caught inside handleAddRow() itself and reported with a notice
+        // that says the row WAS saved.
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
         $throwingDirectory = new ThrowingPlayerDirectory();
@@ -714,9 +721,13 @@ class TitleEditorPageTest extends TestCase {
             $page->handlePost();
         } finally {
             $this->assertStringContainsString(
-                'campeones_notice=error_directorio',
+                'campeones_notice=fila_agregada_sin_vinculo_directorio',
                 (string) $GLOBALS['_campeones_test_last_redirect'],
-                'A directory query failure must redirect with a distinct notice, not fall through to a fatal.'
+                'A directory query failure on an add must report that the row WAS saved, never the generic "try again" error_directorio notice that risks a duplicate row.'
+            );
+            $this->assertStringNotContainsString(
+                'campeones_notice=error_directorio',
+                (string) $GLOBALS['_campeones_test_last_redirect']
             );
             // The row itself was already inserted before the resolver threw
             // — it must still exist (in its sin_candidato default), so a

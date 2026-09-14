@@ -20,13 +20,23 @@ namespace EntreRedes\Campeones\Admin;
  *
  * Collapsing the middle case into the first (as the previous `null`/`false`
  * return did) is exactly the defect item 3 fixes.
+ *
+ * $directoryUnavailable narrows the "saved but not resolved" case further
+ * (BLOCKER/CRITICAL round-2 fix): a row that was saved but whose resolution
+ * could not even be ATTEMPTED because the player directory itself threw
+ * PlayerDirectoryQueryException is a different situation from one whose
+ * resolution ran and its write then failed — the operator-facing notice
+ * needs to say "the directory is unavailable", not the generic "could not
+ * evaluate" copy, so they do not waste time retrying an add/edit that
+ * already landed while waiting on an external dependency.
  */
 final class RowSaveResult {
 
     private function __construct(
         public readonly bool $rowSaved,
         public readonly bool $linkResolved,
-        public readonly ?int $rowId
+        public readonly ?int $rowId,
+        public readonly bool $directoryUnavailable = false
     ) {
     }
 
@@ -36,5 +46,9 @@ final class RowSaveResult {
 
     public static function saved( int $rowId, bool $linkResolved ): self {
         return new self( true, $linkResolved, $rowId );
+    }
+
+    public static function savedDirectoryUnavailable( int $rowId ): self {
+        return new self( true, false, $rowId, true );
     }
 }

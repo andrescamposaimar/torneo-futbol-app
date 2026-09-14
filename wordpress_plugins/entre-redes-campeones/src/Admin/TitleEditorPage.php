@@ -259,6 +259,7 @@ class TitleEditorPage {
 
         return match ( true ) {
             ! $result->rowSaved => 'error_fila',
+            $result->directoryUnavailable => 'fila_agregada_sin_vinculo_directorio',
             ! $result->linkResolved => 'fila_agregada_sin_vinculo',
             default => 'fila_agregada',
         };
@@ -459,6 +460,7 @@ class TitleEditorPage {
             'error_actualizar' => [ 'message' => __( 'Error al actualizar el título. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'fila_agregada'    => [ 'message' => __( 'El jugador fue agregado al plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'fila_agregada_sin_vinculo' => [ 'message' => __( 'El jugador fue agregado al plantel, pero no se pudo evaluar su vínculo. Usá "Revalidar" o vinculalo manualmente.', 'entre-redes-campeones' ), 'type' => 'warning' ],
+            'fila_agregada_sin_vinculo_directorio' => [ 'message' => __( 'El jugador fue agregado al plantel, pero no se pudo evaluar su vínculo porque el directorio de jugadores no está disponible en este momento. Vinculalo manualmente o reintentá más tarde.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_actualizada' => [ 'message' => __( 'La fila fue actualizada.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'fila_actualizada_sin_vinculo' => [ 'message' => __( 'La fila fue actualizada, pero no se pudo re-evaluar su vínculo. Usá "Revalidar" o vinculalo manualmente.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_eliminada'   => [ 'message' => __( 'La fila fue eliminada del plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
@@ -502,6 +504,18 @@ class TitleEditorPage {
      * can tell "the row exists but its link needs attention" apart from
      * "nothing was saved at all". Telling an operator to retry when the row
      * already exists would create a duplicate (item 3).
+     *
+     * The resolve()/applyResolution() sequence runs AFTER the insert above
+     * has already committed, so a PlayerDirectoryQueryException thrown by
+     * resolve() (BLOCKER round-2 fix) is caught HERE, not left to propagate
+     * to handlePost()'s outer catch. That outer catch has no way to tell
+     * "nothing happened" apart from "the row is already durably saved" — it
+     * would report the same 'error_directorio' copy ("Intentá nuevamente")
+     * that a genuine no-op failure gets, and an operator following that
+     * advice on an add-row form resubmits and creates a duplicate row. The
+     * row stays in its plain `sin_candidato` state (visible and
+     * re-revalidatable later) and the caller is told the row was saved but
+     * its link could not be evaluated.
      */
     private function handleAddRow( int $tituloId, string $jugadorNombre, bool $esCapitan ): RowSaveResult {
         $title = $this->titles->find( $tituloId );
@@ -515,8 +529,18 @@ class TitleEditorPage {
             new SquadEntry( $tituloId, $orden, $jugadorNombre, $esCapitan, 'sin_candidato', null, NameNormalizer::normalize( $jugadorNombre ) )
         );
 
-        $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );
-        $linkResolved = $this->linkWriter->applyResolution( $id, $resolution );
+        try {
+            $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );
+            $linkResolved = $this->linkWriter->applyResolution( $id, $resolution );
+        } catch ( PlayerDirectoryQueryException $e ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: agregar_fila saved plantel_id=%d (titulo_id=%d) but could not evaluate its link — the player directory is unavailable. %s',
+                $id,
+                $tituloId,
+                $e->getMessage()
+            ) );
+            return RowSaveResult::savedDirectoryUnavailable( $id );
+        }
 
         return RowSaveResult::saved( $id, $linkResolved );
     }
