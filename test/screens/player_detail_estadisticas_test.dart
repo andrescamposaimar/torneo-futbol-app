@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/player_detail_screen.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
+import 'package:torneo_futbol_app/services/i_cache_service.dart';
 
 // ---------------------------------------------------------------------------
 // Stub
@@ -40,7 +41,20 @@ class _StubApiService implements IApiService {
       {'items': [], 'current_page': 1, 'total_pages': 0};
 
   @override
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) async =>
+      {'jugador_id': jugadorId, 'total': 0, 'titulos': []};
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// The titles fetch in _fetchInitialData now reads cacheServiceProvider —
+/// the real CacheService's shared_preferences call never resolves under
+/// flutter_test without a platform-channel mock, hanging pumpAndSettle. A
+/// deterministic cache-miss/no-op fake avoids that entirely.
+class _NoopCacheService implements ICacheService {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => Future.value(null);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +76,7 @@ Future<void> _pumpNarrow(
       overrides: [
         apiServiceProvider
             .overrideWithValue(_StubApiService(estadisticas: estadisticas)),
+        cacheServiceProvider.overrideWithValue(_NoopCacheService()),
       ],
       child: MaterialApp(
         home: PlayerDetailScreen(player: const {

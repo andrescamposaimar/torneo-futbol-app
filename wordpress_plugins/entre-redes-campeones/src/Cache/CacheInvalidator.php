@@ -46,8 +46,10 @@ final class CacheInvalidator {
     // PlayerTitlesController::CACHE_PREFIX respectively — whoever bumps one
     // side's version suffix and forgets this one leaves flush() unable to
     // ever delete the newly-shaped transient.
+    // PLAYER_TITLES_PREFIX bumped v1 -> v2 in slice 8 alongside
+    // PlayerTitlesController::CACHE_PREFIX (see that class for why).
     private const HISTORY_TRANSIENT    = 'campeones_historia_v2';
-    private const PLAYER_TITLES_PREFIX = 'campeones_titulos_jugador_v1_';
+    private const PLAYER_TITLES_PREFIX = 'campeones_titulos_jugador_v2_';
 
     public function __construct( private readonly \wpdb $wpdb ) {
     }

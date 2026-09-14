@@ -59,4 +59,13 @@ abstract class ICacheService {
   Future<void> cacheNoticias(List<dynamic> noticias);
   Future<List<dynamic>?> getCachedNoticias();
   Future<void> clearNoticiasCache();
+
+  // 🔹 Títulos por jugador (Copa Chaminade)
+  Future<void> cacheTitulosDeJugador(int jugadorId, List<dynamic> titulos);
+  Future<List<dynamic>?> getCachedTitulosDeJugador(int jugadorId);
+
+  /// Same as [getCachedTitulosDeJugador] but ignores the TTL, returning the
+  /// cached titles even if stale. Used as an offline fallback when the
+  /// network is unreachable and there is no fresh cache.
+  Future<List<dynamic>?> getCachedTitulosDeJugadorIgnoringTtl(int jugadorId);
 }

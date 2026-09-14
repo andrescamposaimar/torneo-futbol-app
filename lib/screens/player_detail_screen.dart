@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'team_detail_screen.dart';
 import '../providers/service_providers.dart';
 import '../models/jugador.dart';
+import '../models/campeon_titulo.dart';
 import '../utils/date_utils.dart';
 import '../utils/puntaje_utils.dart';
+import '../utils/campeones_copy.dart';
+import '../utils/error_reporting.dart';
+import '../services/i_api_service.dart';
+import '../services/i_cache_service.dart';
 import 'match_detail_screen.dart';
 import '../widgets/match_card.dart';
 
@@ -12,6 +19,11 @@ class PlayerDetailScreen extends ConsumerStatefulWidget {
   final Map<String, dynamic> player;
 
   const PlayerDetailScreen({super.key, required this.player});
+
+  /// Identifies the títulos panel's subtree so tests can scope finders to
+  /// it — e.g. asserting there is no [Icons.star_rounded] *inside the
+  /// panel* without also matching the unrelated hero star above it.
+  static const titulosPanelKey = Key('titulos-panel');
 
   @override
   ConsumerState<PlayerDetailScreen> createState() => _PlayerDetailScreenState();
@@ -24,6 +36,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
 
   List<dynamic> temporadas = [];
   List<dynamic> partidos = [];
+  List<JugadorTitulo> titulos = [];
   bool isLoading = true;
   bool isLoadingMore = false;
   bool hasMore = true;
@@ -67,16 +80,31 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     if (!mounted) return;
     setState(() => isLoading = true);
     try {
-      // Ambos fetches arrancan en paralelo
+      // The three fetches below all start in parallel.
       final api = ref.read(apiServiceProvider);
+      final cache = ref.read(cacheServiceProvider);
       final jugadorFuture = api.getJugadorPorId(jugador.id);
       final partidosFuture = api.getPartidosPorJugador(jugador.id, page: currentPage, perPage: perPage);
+
+      // Titles are an optional panel (APP-1's isNotEmpty guard already
+      // hides it on an empty result): a down endpoint, a tenant without the
+      // campeones plugin, or an un-updated test fake must never break or
+      // slow down the rest of the profile. _loadTitulos is declared `async`,
+      // so calling it here can never throw synchronously (Dart wraps every
+      // exception raised inside an async function body — even one raised
+      // before the first `await`, like a stale fake's synchronous
+      // noSuchMethod throw — into the returned Future's error channel
+      // instead of propagating it to the caller). It also never lets that
+      // Future settle with an error: every failure path inside it is
+      // already caught and reported.
+      final titulosFuture = _loadTitulos(api, cache);
 
       try {
         final data = await jugadorFuture;
         jugador = Jugador.fromJson(data);
       } catch (_) {}
       temporadas = jugador.temporadas;
+
       final res = await partidosFuture;
       if (!mounted) return;
       final nuevos = res['items'] ?? [];
@@ -87,11 +115,69 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         currentPage = currentPageFromApi + 1;
         hasMore = currentPageFromApi < totalPages;
       });
+
+      // Deliberately NOT awaited here: titulosFuture is attached to
+      // (created alongside) jugadorFuture/partidosFuture above, so it runs
+      // concurrently with them instead of serializing in front of them, and
+      // this `then` continuation — not an `await` — means a down or hanging
+      // campeones endpoint can never add to isLoading's gate below. Since
+      // _loadTitulos never lets its Future settle with an error, this chain
+      // needs no `.catchError`: it either resolves (usually well before
+      // this method returns, sometimes after) or simply never does, and
+      // either way the rest of the profile is unaffected.
+      unawaited(titulosFuture.then((value) {
+        if (!mounted) return;
+        setState(() => titulos = value);
+      }));
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
       if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  /// Loads this player's Copa Chaminade titles: cache-first, with a network
+  /// fallback and a stale-cache fallback if the network call fails.
+  ///
+  /// Never throws and never lets the returned [Future] settle with an
+  /// error — every failure is reported via [reportNonFatal] and resolved to
+  /// an empty list instead, so a down or missing campeones endpoint can
+  /// never break, block, or add error noise to the rest of the profile.
+  Future<List<JugadorTitulo>> _loadTitulos(
+    IApiService api,
+    ICacheService cache,
+  ) async {
+    try {
+      final cachedRaw = await cache.getCachedTitulosDeJugador(jugador.id);
+      List<dynamic> rawTitulos;
+      if (cachedRaw != null) {
+        rawTitulos = cachedRaw;
+      } else {
+        try {
+          final data = await api.getTitulosDeJugador(jugador.id);
+          rawTitulos = List<dynamic>.from(data['titulos'] ?? []);
+          await cache.cacheTitulosDeJugador(jugador.id, rawTitulos);
+        } catch (e, st) {
+          await reportNonFatal(
+            e,
+            st,
+            'PlayerDetailScreen: getTitulosDeJugador failed for player ${jugador.id}',
+          );
+          final stale = await cache.getCachedTitulosDeJugadorIgnoringTtl(jugador.id);
+          rawTitulos = stale ?? [];
+        }
+      }
+      return rawTitulos
+          .map((t) => JugadorTitulo.fromJson(Map<String, dynamic>.from(t as Map)))
+          .toList();
+    } catch (e, st) {
+      await reportNonFatal(
+        e,
+        st,
+        'PlayerDetailScreen: failed to load titulos for player ${jugador.id}',
+      );
+      return [];
     }
   }
 
@@ -205,45 +291,63 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
                   ),
                 ),
                 const SizedBox(height: 10),
-                // The rating is the one number that summarises a player, so it
-                // sits with the name rather than buried among the other facts.
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: sinPuntaje
-                        ? Colors.grey.withValues(alpha: 0.12)
-                        : primary.withValues(alpha: 0.09),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: sinPuntaje
-                          ? Colors.grey.withValues(alpha: 0.25)
-                          : primary.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.star_rounded,
-                        size: 17,
+                // The rating pill and the title stars share one row (product
+                // decision), wrapped so the stars drop to their own line on a
+                // narrow phone instead of squeezing or overflowing.
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    // The rating is the one number that summarises a player,
+                    // so it sits with the name rather than buried among the
+                    // other facts.
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
                         color: sinPuntaje
-                            ? Colors.grey.shade500
-                            : Colors.amber.shade700,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        sinPuntaje ? 'Sin puntaje' : puntaje,
-                        style: TextStyle(
-                          fontSize: sinPuntaje ? 12 : 15,
-                          fontWeight: FontWeight.w800,
+                            ? Colors.grey.withValues(alpha: 0.12)
+                            : primary.withValues(alpha: 0.09),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
                           color: sinPuntaje
-                              ? Colors.grey.shade600
-                              : Colors.black87,
+                              ? Colors.grey.withValues(alpha: 0.25)
+                              : primary.withValues(alpha: 0.18),
                         ),
                       ),
-                    ],
-                  ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            // Gold stars now mean championships (see
+                            // _tituloEstrella below) — a gold star for the
+                            // rating pill would put the same icon and colour
+                            // on two different meanings on one card. Gold is
+                            // reserved for titles; everything else uses the
+                            // brand colour.
+                            Icons.speed,
+                            size: 17,
+                            color: sinPuntaje
+                                ? Colors.grey.shade500
+                                : primary,
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            sinPuntaje ? 'Sin puntaje' : puntaje,
+                            style: TextStyle(
+                              fontSize: sinPuntaje ? 12 : 15,
+                              fontWeight: FontWeight.w800,
+                              color: sinPuntaje
+                                  ? Colors.grey.shade600
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    for (final t in _titulosVisibles) _tituloEstrella(t.zona),
+                  ],
                 ),
                 if (tieneEquipo) ...[
                   const SizedBox(height: 10),
@@ -302,6 +406,34 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// One gold star per title won, shown beside the puntaje pill in the hero
+  /// (product decision). The usable interior of a star glyph is roughly 40%
+  /// of its box, so at the puntaje icon's 17px a letter would be
+  /// unreadable — 28px keeps the zone letter legible.
+  Widget _tituloEstrella(String zona) {
+    return Semantics(
+      label: 'Campeón Zona $zona',
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(Icons.star_rounded, size: 28, color: Colors.amber.shade600),
+            Text(
+              zona,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -455,7 +587,6 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
   /// Seasons the player took part in, as chips. They used to occupy a whole tab
   /// of their own for what amounts to a handful of years.
   Widget _buildTemporadas() {
-    final primary = Theme.of(context).colorScheme.primary;
     final anios = temporadas.map((t) => t.toString()).toList();
 
     return _panel(
@@ -469,26 +600,130 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         child: Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: anios
-              .map((a) => Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: primary.withValues(alpha: 0.07),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: primary.withValues(alpha: 0.15)),
-                    ),
-                    child: Text(
-                      a,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: primary.withValues(alpha: 0.9),
-                      ),
-                    ),
-                  ))
-              .toList(),
+          children: anios.map(_yearPill).toList(),
         ),
+      ),
+    );
+  }
+
+  /// A small pill styled the same everywhere a year stands alone in this
+  /// screen: the TEMPORADAS chips and the year pill in each título row are
+  /// the same visual, so they share this one widget instead of two
+  /// independently maintained copies of the same styling.
+  Widget _yearPill(String label) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: primary.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: primary.withValues(alpha: 0.15)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: primary.withValues(alpha: 0.9),
+        ),
+      ),
+    );
+  }
+
+  /// A title is only rendered — as a hero star or as a panel row — when it
+  /// carries both the zone letter and the team name. Either one missing
+  /// would render dangling text instead of useful information (a star with
+  /// no letter inside, the label "Campeón Zona " with a trailing space, or
+  /// an empty bold headline), so it is simply omitted from both places.
+  bool _esTituloVisible(JugadorTitulo t) =>
+      t.zona.isNotEmpty && t.equipoNombre.isNotEmpty;
+
+  List<JugadorTitulo> get _titulosVisibles =>
+      titulos.where(_esTituloVisible).toList();
+
+  /// Copa Chaminade titles this player is linked to (API-2). Rendered only
+  /// when there is at least one displayable title — the isNotEmpty guard in
+  /// _buildDetalles is structural, so there is nothing to forget to hide
+  /// (APP-1).
+  Widget _buildTitulos() {
+    final titulosVisibles = _titulosVisibles;
+
+    return KeyedSubtree(
+      key: PlayerDetailScreen.titulosPanelKey,
+      child: _panel(
+        header: _seccionHeader(
+          Icons.emoji_events,
+          'TÍTULOS',
+          trailing: etiquetaTitulos(titulosVisibles.length),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: titulosVisibles.map((t) => _tituloRow(t)).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// One title row: year pill (reusing _buildTemporadas()'s chip styling),
+  /// team name, and "Campeón Zona {X}" underneath. No star, no captain
+  /// marker — both were explicitly removed from this panel by the product
+  /// owner (they still travel on the wire for the history screen).
+  ///
+  /// [onTapEquipo] is injected so a future slice can wire navigation to the
+  /// championship history screen for that year without changing this row:
+  /// null (this slice) renders plain, non-tappable text with no chevron and
+  /// no ripple — no dead tap target.
+  Widget _tituloRow(JugadorTitulo t, {VoidCallback? onTapEquipo}) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final esTappable = onTapEquipo != null;
+
+    final contenido = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          t.equipoNombre,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: esTappable ? primary : Colors.black87,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          'Campeón Zona ${t.zona}',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          _yearPill('${t.anio}'),
+          const SizedBox(width: 12),
+          Expanded(
+            child: esTappable
+                ? InkWell(
+                    onTap: onTapEquipo,
+                    child: Row(
+                      children: [
+                        Expanded(child: contenido),
+                        Icon(Icons.chevron_right,
+                            size: 18, color: primary.withValues(alpha: 0.8)),
+                      ],
+                    ),
+                  )
+                : contenido,
+          ),
+        ],
       ),
     );
   }
@@ -591,6 +826,10 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         if (temporadas.isNotEmpty) ...[
           const SizedBox(height: 16),
           _buildTemporadas(),
+        ],
+        if (_titulosVisibles.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildTitulos(),
         ],
       ],
     );

@@ -475,4 +475,17 @@ class ApiService implements IApiService {
       throw Exception('Error al obtener noticias');
     }
   }
+
+  @override
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) async {
+    final uri = Uri.parse('$baseUrl/campeones/jugador/$jugadorId/titulos');
+    final res = await http.get(uri).timeout(_requestTimeout);
+    _logRequest(uri, res);
+
+    if (res.statusCode == 200) {
+      return json.decode(res.body);
+    } else {
+      throw Exception('Error al obtener títulos del jugador $jugadorId');
+    }
+  }
 }

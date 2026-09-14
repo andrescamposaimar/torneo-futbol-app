@@ -359,6 +359,41 @@ class CacheService implements ICacheService {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // 🔹 Títulos por jugador (Copa Chaminade)
+  // ─────────────────────────────────────────────────────────────
+
+  static String _titulosJugadorKey(int jugadorId) =>
+      'cached_titulos_jugador_$jugadorId';
+
+  @override
+  Future<void> cacheTitulosDeJugador(int jugadorId, List<dynamic> titulos) async {
+    final prefs = await _sharedPrefs;
+    final cacheData = {
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'titulos': titulos,
+    };
+    await prefs.setString(_titulosJugadorKey(jugadorId), jsonEncode(cacheData));
+  }
+
+  @override
+  Future<List<dynamic>?> getCachedTitulosDeJugador(int jugadorId) async {
+    return _readCachedList(
+      _titulosJugadorKey(jugadorId),
+      ttl: await _effectiveCacheDuration,
+      extract: (decoded) => List<dynamic>.from(decoded['titulos']),
+    );
+  }
+
+  @override
+  Future<List<dynamic>?> getCachedTitulosDeJugadorIgnoringTtl(int jugadorId) {
+    return _readCachedList(
+      _titulosJugadorKey(jugadorId),
+      ttl: null,
+      extract: (decoded) => List<dynamic>.from(decoded['titulos']),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // 🔹 Clear all caches
   // ─────────────────────────────────────────────────────────────
 
@@ -386,7 +421,8 @@ class CacheService implements ICacheService {
           key.startsWith('cache_tablas_') ||
           key.startsWith('cached_partidos_jugados_') ||
           key.startsWith('cached_players_equipo_') ||
-          key.startsWith('cached_players_current_')) {
+          key.startsWith('cached_players_current_') ||
+          key.startsWith('cached_titulos_jugador_')) {
         await prefs.remove(key);
       }
     }
@@ -494,7 +530,8 @@ class CacheService implements ICacheService {
             key.startsWith('cache_tablas_') ||
             key.startsWith('cached_partidos_jugados_') ||
             key.startsWith('cached_players_equipo_') ||
-            key.startsWith('cached_players_current_')) {
+            key.startsWith('cached_players_current_') ||
+            key.startsWith('cached_titulos_jugador_')) {
           await prefs.remove(key);
         }
       }

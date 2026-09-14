@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,6 +15,7 @@ import 'providers/config_provider.dart';
 import 'screens/matches_screen.dart';
 import 'screens/noticias_screen.dart';
 import 'theme.dart';
+import 'utils/error_reporting.dart';
 
 class EntreRedesApp extends ConsumerWidget {
   const EntreRedesApp({super.key});
@@ -124,7 +124,7 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
             await _checkSeasonAnnouncement(config.seasonAnnouncement);
           }
         } catch (e, st) {
-          await _reportNonFatal(
+          await reportNonFatal(
             e,
             st,
             'MainNavigation advisory startup checks failed',
@@ -132,35 +132,13 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
         }
       }
     } catch (e, st) {
-      await _reportNonFatal(
+      await reportNonFatal(
         e,
         st,
         'MainNavigation._initScreens failed to load startup data',
       );
       if (!mounted) return;
       setState(() => _startupError = e);
-    }
-  }
-
-  /// Reports [error] to Crashlytics without ever throwing.
-  ///
-  /// Crashlytics may be unavailable (Firebase.initializeApp failed during
-  /// bootstrap, or this is a test environment with no Firebase app at all),
-  /// so reporting an error must never raise a new, unhandled one.
-  Future<void> _reportNonFatal(
-    Object error,
-    StackTrace stack,
-    String reason,
-  ) async {
-    try {
-      await FirebaseCrashlytics.instance.recordError(
-        error,
-        stack,
-        reason: reason,
-        fatal: false,
-      );
-    } catch (reportingError) {
-      debugPrint('❌ $reason ($error) — not reported: $reportingError');
     }
   }
 

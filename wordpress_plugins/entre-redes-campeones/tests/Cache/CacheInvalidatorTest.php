@@ -57,20 +57,20 @@ class CacheInvalidatorTest extends TestCase {
         global $wpdb;
         $p = $wpdb->prefix;
 
-        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_campeones_titulos_jugador_v1_5078', 'option_value' => 'a' ] );
-        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_timeout_campeones_titulos_jugador_v1_5078', 'option_value' => '123' ] );
-        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_campeones_titulos_jugador_v1_2225', 'option_value' => 'b' ] );
-        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_timeout_campeones_titulos_jugador_v1_2225', 'option_value' => '456' ] );
+        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_campeones_titulos_jugador_v2_5078', 'option_value' => 'a' ] );
+        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_timeout_campeones_titulos_jugador_v2_5078', 'option_value' => '123' ] );
+        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_campeones_titulos_jugador_v2_2225', 'option_value' => 'b' ] );
+        $wpdb->insert( $p . 'options', [ 'option_name' => '_transient_timeout_campeones_titulos_jugador_v2_2225', 'option_value' => '456' ] );
         $wpdb->insert( $p . 'options', [ 'option_name' => 'unrelated_option', 'option_value' => 'keep' ] );
 
         ( new CacheInvalidator( $wpdb ) )->flush();
 
         $remaining = array_column( $wpdb->get_results( "SELECT option_name FROM {$p}options", ARRAY_A ), 'option_name' );
 
-        $this->assertNotContains( '_transient_campeones_titulos_jugador_v1_5078', $remaining );
-        $this->assertNotContains( '_transient_timeout_campeones_titulos_jugador_v1_5078', $remaining );
-        $this->assertNotContains( '_transient_campeones_titulos_jugador_v1_2225', $remaining );
-        $this->assertNotContains( '_transient_timeout_campeones_titulos_jugador_v1_2225', $remaining );
+        $this->assertNotContains( '_transient_campeones_titulos_jugador_v2_5078', $remaining );
+        $this->assertNotContains( '_transient_timeout_campeones_titulos_jugador_v2_5078', $remaining );
+        $this->assertNotContains( '_transient_campeones_titulos_jugador_v2_2225', $remaining );
+        $this->assertNotContains( '_transient_timeout_campeones_titulos_jugador_v2_2225', $remaining );
         $this->assertContains( 'unrelated_option', $remaining, 'flush() must not touch an unrelated option row.' );
     }
 
