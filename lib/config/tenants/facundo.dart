@@ -28,6 +28,7 @@ const facundoTenant = TenantConfig(
     newsTab: true,
     ads: false,
     prode: false,
+    campeones: false,
   ),
   // appsScriptUrl is null because waitingLists=false for Facundo
   // prodeAuth is null because prode=false for Facundo

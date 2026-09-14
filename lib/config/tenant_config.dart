@@ -32,11 +32,19 @@ class TenantFeatures {
   /// Defaults to false — tenants must explicitly opt in.
   final bool prode;
 
+  /// Whether the Copa Chaminade championship history feature is enabled for
+  /// this tenant. Defaults to false, exactly mirroring [prode]: the history
+  /// is the Marianista league's own trophy, and a tenant without the
+  /// entre-redes-campeones WordPress plugin would 404 on
+  /// `/campeones/historia`.
+  final bool campeones;
+
   const TenantFeatures({
     this.waitingLists = false,
     this.newsTab = true,
     this.ads = true,
     this.prode = false,
+    this.campeones = false,
   });
 }
 
