@@ -559,6 +559,7 @@ class CacheService implements ICacheService {
       await prefs.remove(_playersHistoricosCacheKey);
       await prefs.remove(_temporadasCacheKey);
       await prefs.remove(_noticiasCacheKey);
+      await prefs.remove(_campeonesHistoriaCacheKey);
 
       final keys = prefs.getKeys();
       for (final key in keys) {
