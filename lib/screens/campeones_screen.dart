@@ -141,9 +141,30 @@ class _CampeonesScreenState extends ConsumerState<CampeonesScreen> {
     if (cached != null) {
       return _parseTitulos(cached);
     }
+
     final raw = await api.getCampeonesHistoria();
-    await cache.cacheCampeonesHistoria(raw);
-    return _parseTitulos(raw);
+    // Parse BEFORE caching: a payload that fails to parse must never reach
+    // disk under `cached_campeones_historia_v1` — that would poison every
+    // future load (including the stale-cache fallback above, which reads
+    // the very same key) instead of only this one.
+    final titulos = _parseTitulos(raw);
+
+    // Best-effort and isolated: a cache-write failure (disk full, corrupt
+    // prefs, a platform-channel hiccup) must never discard an
+    // already-successful fetch+parse by throwing out to _load()'s outer
+    // catch, which would show the full error state over perfectly good
+    // server data.
+    try {
+      await cache.cacheCampeonesHistoria(raw);
+    } catch (e, st) {
+      await reportNonFatal(
+        e,
+        st,
+        'CampeonesScreen: cacheCampeonesHistoria failed',
+      );
+    }
+
+    return titulos;
   }
 
   List<CampeonTitulo> _parseTitulos(List<dynamic> raw) => raw

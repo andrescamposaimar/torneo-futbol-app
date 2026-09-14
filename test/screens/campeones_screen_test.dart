@@ -55,6 +55,88 @@ class _StaleCacheService implements ICacheService {
   dynamic noSuchMethod(Invocation invocation) => Future.value(null);
 }
 
+/// A fresh-cache miss that records every write instead of merely
+/// accepting it — used to prove a payload is only ever cached AFTER it
+/// parses successfully (fix 1's parse-before-cache ordering).
+class _RecordingCacheService implements ICacheService {
+  int writeCallCount = 0;
+  List<dynamic>? written;
+
+  @override
+  Future<List<dynamic>?> getCachedCampeonesHistoria() async => null;
+
+  @override
+  Future<List<dynamic>?> getCachedCampeonesHistoriaIgnoringTtl() async => null;
+
+  @override
+  Future<void> cacheCampeonesHistoria(List<dynamic> titulos) async {
+    writeCallCount++;
+    written = titulos;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => Future.value(null);
+}
+
+/// A fresh-cache miss whose write always throws — a disk-full or corrupt
+/// shared_preferences write, or a platform-channel hiccup. Used to prove a
+/// cache-write failure can never discard an already-successful
+/// fetch+parse (fix 1's best-effort, isolated write).
+class _ThrowingCacheWriteCacheService implements ICacheService {
+  @override
+  Future<List<dynamic>?> getCachedCampeonesHistoria() async => null;
+
+  @override
+  Future<List<dynamic>?> getCachedCampeonesHistoriaIgnoringTtl() async => null;
+
+  @override
+  Future<void> cacheCampeonesHistoria(List<dynamic> titulos) async {
+    throw Exception('disk full');
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => Future.value(null);
+}
+
+/// Always throws, after a delay long enough for a second tap to land
+/// while the first fetch is still in flight, and counts how many times it
+/// was actually invoked — used to prove a double-tap on "Reintentar" runs
+/// only one fetch (fix 5's reentrancy guard), not two concurrent ones. The
+/// delay matters: without it, `tester.tap()`'s own awaits drain every
+/// pending microtask (this stub has no real I/O, so the whole fetch
+/// resolves inside a single `tap()` call), and the guard would already be
+/// released by the time the second tap fires — passing even without the
+/// fix.
+class _CountingThrowingApiService implements IApiService {
+  int callCount = 0;
+
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() async {
+    callCount++;
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    throw Exception('campeones historia endpoint down');
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// An API stub whose raw response is handed through verbatim (unlike
+/// [_StubApiService], which is typed to a `List<Map<String, dynamic>>?` and
+/// so cannot carry a malformed, non-map top-level entry) — used to prove a
+/// year entry that fails to parse at all never reaches the cache write.
+class _MixedRawApiService implements IApiService {
+  final List<dynamic> raw;
+
+  _MixedRawApiService(this.raw);
+
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() async => raw;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -369,6 +451,221 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Detalles'), findsOneWidget); // PlayerDetailScreen tab
+    });
+  });
+
+  group(
+      'CampeonesScreen · accordion state survives scrolling out of the '
+      'ListView build range (fix 3)', () {
+    List<Map<String, dynamic>> manyYears() => [
+          for (var i = 0; i < 40; i++)
+            _titulo(
+              anio: 2040 - i,
+              equipo: 'EQUIPO_$i',
+              plantel: [_entry(nombre: 'JUGADOR_$i')],
+            ),
+        ];
+
+    testWidgets(
+        'expanding a card, scrolling it far out of the build range (it '
+        'genuinely leaves the element tree), and scrolling back preserves '
+        'its expanded state', (tester) async {
+      tester.view.physicalSize = const Size(360, 500);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiServiceProvider.overrideWithValue(
+              _StubApiService(historia: manyYears()),
+            ),
+            cacheServiceProvider.overrideWithValue(_NoopCacheService()),
+          ],
+          child: const MaterialApp(home: CampeonesScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Index 0 (EQUIPO_0) starts expanded (most recent year) — scroll
+      // down and open a different card instead, so its distance from the
+      // top when we scroll away is unambiguous.
+      await tester.dragUntilVisible(
+        find.text('EQUIPO_10'),
+        find.byType(ListView),
+        const Offset(0, -300),
+      );
+      await tester.tap(find.text('EQUIPO_10'));
+      await tester.pumpAndSettle();
+
+      expect(_notOffstage('JUGADOR_10'), findsOneWidget);
+
+      // Scroll far past it, well beyond the ListView's cache extent, so
+      // its ExpansionTile element (and the `ExpansionTile`'s own default
+      // `maintainState: false` subtree) is actually disposed — not merely
+      // scrolled offstage.
+      for (var i = 0; i < 10; i++) {
+        await tester.drag(find.byType(ListView).first, const Offset(0, -600));
+        await tester.pumpAndSettle();
+      }
+
+      // Prove we genuinely left its build range before trusting the
+      // assertion below: with `skipOffstage` at its default (true), a
+      // widget that was merely scrolled offstage (not disposed) would
+      // ALSO read as "not found" here, so this alone wouldn't discriminate
+      // the two cases — but combined with the scroll-back assertion below
+      // (using `skipOffstage: false`), the pair proves a real dispose
+      // occurred and the state making it back is not just "it was never
+      // removed to begin with".
+      expect(find.text('EQUIPO_10'), findsNothing);
+
+      // Scroll back up to the same card.
+      await tester.dragUntilVisible(
+        find.text('EQUIPO_10'),
+        find.byType(ListView),
+        const Offset(0, 300),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        _notOffstage('JUGADOR_10'),
+        findsOneWidget,
+        reason: 'the card was disposed and rebuilt from scratch by '
+            'ListView.builder on the way back — its expanded state must '
+            'have come from the persistent _controllers[index] field in '
+            'State, not from the (disposed) ExpansionTile element itself',
+      );
+    });
+  });
+
+  group('CampeonesScreen · cache-write safety (fix 1)', () {
+    testWidgets(
+        'a year entry that fails to parse throws before the cache write — '
+        'the raw payload is never persisted', (tester) async {
+      final cache = _RecordingCacheService();
+      final api = _MixedRawApiService([
+        _titulo(anio: 2016, equipo: 'CHELSEA'),
+        // The whole entry is malformed (not just one of its fields) — a
+        // top-level cast failure in `_parseTitulos`, thrown before
+        // `cache.cacheCampeonesHistoria` is ever reached.
+        'not-a-year-object',
+      ]);
+
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiServiceProvider.overrideWithValue(api),
+            cacheServiceProvider.overrideWithValue(cache),
+          ],
+          child: const MaterialApp(home: CampeonesScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        cache.writeCallCount,
+        0,
+        reason:
+            'a payload that fails to parse must never reach cacheCampeonesHistoria '
+            '— it would poison cached_campeones_historia_v1 for every future load',
+      );
+      // No stale cache to fall back on, so this ends in the error state —
+      // not the point of the assertion above, but confirms the throw
+      // actually propagated instead of being silently eaten somewhere.
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+    });
+
+    testWidgets(
+        'a cache-write failure never discards an already-successful fetch: '
+        'the data still renders and no error state is shown', (tester) async {
+      final messages = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) messages.add(message);
+      };
+
+      try {
+        await _pump(
+          tester,
+          historia: [_titulo(anio: 2023, equipo: 'LIVERPOOL')],
+          cache: _ThrowingCacheWriteCacheService(),
+        );
+
+        expect(find.byIcon(Icons.error_outline), findsNothing);
+        expect(find.text('LIVERPOOL'), findsOneWidget);
+        expect(
+          messages.any(
+            (m) => m.contains('CampeonesScreen: cacheCampeonesHistoria failed'),
+          ),
+          isTrue,
+          reason: 'expected the cache-write failure to be reported with its '
+              'own accurate reason, distinct from a fetch failure; got: $messages',
+        );
+      } finally {
+        debugPrint = originalDebugPrint;
+      }
+    });
+  });
+
+  group('CampeonesScreen · reentrancy guard (fix 5)', () {
+    testWidgets(
+        'a double-tap on Reintentar runs only one fetch, not two concurrent '
+        'ones', (tester) async {
+      final api = _CountingThrowingApiService();
+
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiServiceProvider.overrideWithValue(api),
+            cacheServiceProvider.overrideWithValue(_NoopCacheService()),
+          ],
+          child: const MaterialApp(home: CampeonesScreen()),
+        ),
+      );
+      // Advance the fake clock past the stub's delay so the initial load
+      // (fired from initState) resolves to the error state.
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+      expect(api.callCount, 1);
+
+      // Two taps with NO time-advancing pump between them: the first tap
+      // starts a fetch that is still awaiting its (fake-clock) delay, so
+      // `_isFetching` is still held when the second tap's `_load()` call
+      // runs — exactly the window the brief describes ("the button only
+      // disappears on the next frame"). `tester.tap()` alone does not
+      // advance fake time, so the in-flight fetch cannot resolve between
+      // the two taps.
+      await tester.tap(find.text('Reintentar'));
+      await tester.tap(find.text('Reintentar'));
+
+      expect(
+        api.callCount,
+        2,
+        reason: 'both taps landed before the first retry could resolve; '
+            'expected the second tap to be rejected by the reentrancy '
+            'guard while the first fetch is still in flight',
+      );
+
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      expect(
+        api.callCount,
+        2,
+        reason: 'expected exactly one retry fetch to have run in total '
+            'despite the double tap; a missing reentrancy guard would let '
+            'both run (callCount would be 3)',
+      );
     });
   });
 }
