@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -82,6 +84,42 @@ class _UnimplementedTitulosApiService implements IApiService {
     int? perPage,
   }) async =>
       {'items': [], 'current_page': 1, 'total_pages': 0};
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// A titles fetch that never resolves — the campeones endpoint hanging, or
+/// a very slow network. Proves the fetch runs concurrently with the rest of
+/// the profile instead of gating it: awaiting this future before
+/// `partidosFuture` (the deserialization bug the loading fix guards
+/// against) would leave `isLoading` stuck forever, so the profile would
+/// never render.
+class _NeverCompletingTitulosApiService implements IApiService {
+  @override
+  Future<Map<String, dynamic>> getJugadorPorId(int id) async => {
+        'id': id,
+        'title': {'rendered': 'Juan Pérez'},
+        'featured_image': null,
+        'posicion': 'Mediocampista',
+        'equipo': 'Sin equipo',
+        'escudo': '',
+        'temporadas': [],
+        'metrics': {'puntaje': '7,5'},
+      };
+
+  @override
+  Future<Map<String, dynamic>> getPartidosPorJugador(
+    int jugadorId, {
+    int? page,
+    int? perPage,
+  }) async =>
+      {'items': [], 'current_page': 1, 'total_pages': 0};
+
+  @override
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) {
+    return Completer<Map<String, dynamic>>().future;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -336,6 +374,92 @@ void main() {
       // a completed getJugadorPorId round-trip, which the outer catch would
       // skip entirely if the titles fetch escaped past its own try/catch.
       expect(find.text('Mediocampista'), findsOneWidget);
+    });
+  });
+
+  group('PlayerDetailScreen · títulos fetch concurrency', () {
+    testWidgets(
+        'a títulos fetch that never completes does not block the rest of '
+        'the profile from loading',
+        (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            apiServiceProvider
+                .overrideWithValue(_NeverCompletingTitulosApiService()),
+            cacheServiceProvider.overrideWithValue(_NoopCacheService()),
+          ],
+          child: MaterialApp(
+            home: PlayerDetailScreen(player: const {
+              'id': 4321,
+              'title': {'rendered': 'Juan Pérez'},
+              'equipo': 'Sin equipo',
+              'escudo': '',
+              'temporadas': [],
+              'metrics': {},
+            }),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      // If the títulos fetch were awaited before the rest of the profile
+      // (serialized instead of concurrent), isLoading would never clear —
+      // the spinner tested below would still be on screen, forever, since
+      // this fake's future never resolves.
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Juan Pérez'), findsWidgets);
+      // Stronger signal than the name: 'Mediocampista' only reaches the
+      // screen via a completed getJugadorPorId round-trip inside the same
+      // _fetchInitialData call — proving the whole method actually ran to
+      // completion (hit its `finally`) rather than getting stuck awaiting
+      // the títulos future.
+      expect(find.text('Mediocampista'), findsOneWidget);
+    });
+  });
+
+  group('PlayerDetailScreen · títulos fetch failure reporting', () {
+    testWidgets(
+        'a títulos fetch failure is reported through the shared non-fatal '
+        'error path instead of being silently swallowed',
+        (tester) async {
+      final messages = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) messages.add(message);
+      };
+
+      // Restored before the test body returns (not via addTearDown): the
+      // test binding asserts foundation debug variables are back to their
+      // defaults as soon as the test body completes, before tearDowns run.
+      try {
+        await _pump(tester,
+            size: const Size(320, 568), titulosShouldThrow: true);
+        await _scrollToTitulos(tester);
+
+        // No Firebase app is initialized in the widget-test environment, so
+        // reportNonFatal()'s own internal try/catch (lib/utils/error_reporting.dart)
+        // takes its debugPrint fallback branch. Asserting on that fallback
+        // message is the cheapest seam available to prove the títulos-fetch
+        // failure actually reaches reportNonFatal() with a recognisable
+        // reason, rather than being swallowed by a bare `catch (_) {}` with
+        // no trace at all.
+        expect(
+          messages.any(
+            (m) => m.contains('getTitulosDeJugador failed for player 4321'),
+          ),
+          isTrue,
+          reason: 'expected reportNonFatal\'s debugPrint fallback to fire '
+              'with the títulos-fetch failure reason; got: $messages',
+        );
+      } finally {
+        debugPrint = originalDebugPrint;
+      }
     });
   });
 }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'team_detail_screen.dart';
@@ -7,6 +9,9 @@ import '../models/campeon_titulo.dart';
 import '../utils/date_utils.dart';
 import '../utils/puntaje_utils.dart';
 import '../utils/campeones_copy.dart';
+import '../utils/error_reporting.dart';
+import '../services/i_api_service.dart';
+import '../services/i_cache_service.dart';
 import 'match_detail_screen.dart';
 import '../widgets/match_card.dart';
 
@@ -70,47 +75,30 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     if (!mounted) return;
     setState(() => isLoading = true);
     try {
-      // Ambos fetches arrancan en paralelo
+      // The three fetches below all start in parallel.
       final api = ref.read(apiServiceProvider);
+      final cache = ref.read(cacheServiceProvider);
       final jugadorFuture = api.getJugadorPorId(jugador.id);
       final partidosFuture = api.getPartidosPorJugador(jugador.id, page: currentPage, perPage: perPage);
+
+      // Titles are an optional panel (APP-1's isNotEmpty guard already
+      // hides it on an empty result): a down endpoint, a tenant without the
+      // campeones plugin, or an un-updated test fake must never break or
+      // slow down the rest of the profile. _loadTitulos is declared `async`,
+      // so calling it here can never throw synchronously (Dart wraps every
+      // exception raised inside an async function body — even one raised
+      // before the first `await`, like a stale fake's synchronous
+      // noSuchMethod throw — into the returned Future's error channel
+      // instead of propagating it to the caller). It also never lets that
+      // Future settle with an error: every failure path inside it is
+      // already caught and reported.
+      final titulosFuture = _loadTitulos(api, cache);
 
       try {
         final data = await jugadorFuture;
         jugador = Jugador.fromJson(data);
       } catch (_) {}
       temporadas = jugador.temporadas;
-
-      // Los títulos son un panel opcional (APP-1's isNotEmpty guard already
-      // hides it on an empty result): un endpoint caído, un tenant sin el
-      // plugin de campeones, o un fake de test sin actualizar nunca deben
-      // romper el perfil del jugador. La llamada Y su await viven en el
-      // MISMO try/catch, a diferencia de jugadorFuture arriba — ese future
-      // se crea FUERA de su try, y un stub desactualizado lanza de forma
-      // SINCRÓNICA en el momento en que se invoca el método (no al hacer
-      // await). Si titulosFuture se creara del mismo modo, ese throw
-      // escaparía al catch externo y renderizaría el estado de error de
-      // toda la pantalla en lugar de simplemente omitir este panel.
-      try {
-        final cache = ref.read(cacheServiceProvider);
-        final cachedRaw = await cache.getCachedTitulosDeJugador(jugador.id);
-        List<dynamic> rawTitulos;
-        if (cachedRaw != null) {
-          rawTitulos = cachedRaw;
-        } else {
-          try {
-            final data = await api.getTitulosDeJugador(jugador.id);
-            rawTitulos = List<dynamic>.from(data['titulos'] ?? []);
-            await cache.cacheTitulosDeJugador(jugador.id, rawTitulos);
-          } catch (_) {
-            final stale = await cache.getCachedTitulosDeJugadorIgnoringTtl(jugador.id);
-            rawTitulos = stale ?? [];
-          }
-        }
-        titulos = rawTitulos
-            .map((t) => JugadorTitulo.fromJson(Map<String, dynamic>.from(t as Map)))
-            .toList();
-      } catch (_) {}
 
       final res = await partidosFuture;
       if (!mounted) return;
@@ -122,11 +110,69 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
         currentPage = currentPageFromApi + 1;
         hasMore = currentPageFromApi < totalPages;
       });
+
+      // Deliberately NOT awaited here: titulosFuture is attached to
+      // (created alongside) jugadorFuture/partidosFuture above, so it runs
+      // concurrently with them instead of serializing in front of them, and
+      // this `then` continuation — not an `await` — means a down or hanging
+      // campeones endpoint can never add to isLoading's gate below. Since
+      // _loadTitulos never lets its Future settle with an error, this chain
+      // needs no `.catchError`: it either resolves (usually well before
+      // this method returns, sometimes after) or simply never does, and
+      // either way the rest of the profile is unaffected.
+      unawaited(titulosFuture.then((value) {
+        if (!mounted) return;
+        setState(() => titulos = value);
+      }));
     } catch (e) {
       if (!mounted) return;
       setState(() => error = e.toString());
     } finally {
       if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  /// Loads this player's Copa Chaminade titles: cache-first, with a network
+  /// fallback and a stale-cache fallback if the network call fails.
+  ///
+  /// Never throws and never lets the returned [Future] settle with an
+  /// error — every failure is reported via [reportNonFatal] and resolved to
+  /// an empty list instead, so a down or missing campeones endpoint can
+  /// never break, block, or add error noise to the rest of the profile.
+  Future<List<JugadorTitulo>> _loadTitulos(
+    IApiService api,
+    ICacheService cache,
+  ) async {
+    try {
+      final cachedRaw = await cache.getCachedTitulosDeJugador(jugador.id);
+      List<dynamic> rawTitulos;
+      if (cachedRaw != null) {
+        rawTitulos = cachedRaw;
+      } else {
+        try {
+          final data = await api.getTitulosDeJugador(jugador.id);
+          rawTitulos = List<dynamic>.from(data['titulos'] ?? []);
+          await cache.cacheTitulosDeJugador(jugador.id, rawTitulos);
+        } catch (e, st) {
+          await reportNonFatal(
+            e,
+            st,
+            'PlayerDetailScreen: getTitulosDeJugador failed for player ${jugador.id}',
+          );
+          final stale = await cache.getCachedTitulosDeJugadorIgnoringTtl(jugador.id);
+          rawTitulos = stale ?? [];
+        }
+      }
+      return rawTitulos
+          .map((t) => JugadorTitulo.fromJson(Map<String, dynamic>.from(t as Map)))
+          .toList();
+    } catch (e, st) {
+      await reportNonFatal(
+        e,
+        st,
+        'PlayerDetailScreen: failed to load titulos for player ${jugador.id}',
+      );
+      return [];
     }
   }
 
