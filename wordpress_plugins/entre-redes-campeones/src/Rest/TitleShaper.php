@@ -15,13 +15,15 @@ use EntreRedes\Campeones\Titles\TitleRecord;
  *
  * VERSION-SKEW OBLIGATION: the response shapes below are cached for up to
  * 30 days as opaque values (HistoryController::CACHE_KEY /
- * PlayerTitlesController::CACHE_PREFIX, both suffixed `_v2`/`_v1`, and
+ * PlayerTitlesController::CACHE_PREFIX, both currently suffixed `_v2`, and
  * mirrored in CacheInvalidator's own key constants). Whoever changes this
  * class's output shape — adds, removes, or renames a field, changes a
  * field's type — MUST bump the version suffix on the affected key in ALL
  * THREE files, or a live transient written under the old shape will keep
  * serving stale-shaped data to the app for up to 30 days after deploy. This
- * has already happened once (the history key is on `_v2`).
+ * rule has now been exercised twice: the history key went to `_v2` first,
+ * and the per-player key followed in slice 8 when `shapePlayerTitulo()`
+ * gained the `zona` field (v1 -> v2).
  */
 final class TitleShaper {
 
@@ -84,11 +86,16 @@ final class TitleShaper {
      * feeds is text-only and the profile already shows that player's own
      * photo at the top of the screen).
      *
-     * @param array<string, mixed> $row {anio, equipo_nombre, es_capitan}
+     * `zona` was added in slice 8: it already exists on the record (REC-1)
+     * but did not travel on this payload. The Flutter titles panel renders
+     * "Campeón Zona {X}" per title, so the zone is now required output.
+     *
+     * @param array<string, mixed> $row {anio, zona, equipo_nombre, es_capitan}
      */
     public static function shapePlayerTitulo( array $row ): array {
         return [
             'anio'          => (int) $row['anio'],
+            'zona'          => (string) $row['zona'],
             'equipo_nombre' => (string) $row['equipo_nombre'],
             'es_capitan'    => (bool) $row['es_capitan'],
         ];

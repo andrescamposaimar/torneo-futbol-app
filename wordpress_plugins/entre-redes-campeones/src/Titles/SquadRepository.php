@@ -175,7 +175,7 @@ class SquadRepository {
      * re-deriving the order itself (the same reasoning as API-2's spec-level
      * requirement).
      *
-     * @return array<int, array{anio:int, equipo_nombre:string, es_capitan:bool}>
+     * @return array<int, array{anio:int, zona:string, equipo_nombre:string, es_capitan:bool}>
      */
     public function findTitleSummariesByJugadorId( int $jugadorId ): array {
         $wpdb = $this->wpdb;
@@ -183,7 +183,7 @@ class SquadRepository {
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                "SELECT t.anio AS anio, t.equipo_nombre AS equipo_nombre, sp.es_capitan AS es_capitan
+                "SELECT t.anio AS anio, t.zona AS zona, t.equipo_nombre AS equipo_nombre, sp.es_capitan AS es_capitan
                    FROM {$p}campeones_plantel sp
                    INNER JOIN {$p}campeones_titulo t ON t.id = sp.titulo_id
                   WHERE sp.jugador_id = %d
@@ -196,6 +196,7 @@ class SquadRepository {
         return array_map(
             static fn ( array $row ): array => [
                 'anio'          => (int) $row['anio'],
+                'zona'          => (string) $row['zona'],
                 'equipo_nombre' => (string) $row['equipo_nombre'],
                 'es_capitan'    => (bool) $row['es_capitan'],
             ],

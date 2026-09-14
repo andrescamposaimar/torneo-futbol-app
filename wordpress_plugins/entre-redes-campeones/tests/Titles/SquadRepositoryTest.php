@@ -41,8 +41,8 @@ class SquadRepositoryTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
     }
 
-    private function makeTitle( int $anio = 2016 ): int {
-        $title = $this->titles->createOrConflict( $anio, 'A', 'campeon', 'CHELSEA' );
+    private function makeTitle( int $anio = 2016, string $zona = 'A' ): int {
+        $title = $this->titles->createOrConflict( $anio, $zona, 'campeon', 'CHELSEA' );
         $this->assertNotNull( $title );
         return $title->id;
     }
@@ -247,6 +247,18 @@ class SquadRepositoryTest extends TestCase {
         $rows = $this->repository->findTitleSummariesByJugadorId( 999 );
 
         $this->assertCount( 1, $rows );
+    }
+
+    public function test_find_title_summaries_carries_zona(): void {
+        // The player-detail titles panel (slice 8) needs the zone to render
+        // "Campeón Zona {X}" — it exists in the DB but did not travel until
+        // now. Zone B proves the value is read, not hardcoded to 'A'.
+        $tituloId = $this->makeTitle( 2016, 'B' );
+        $this->repository->insert( new SquadEntry( $tituloId, 0, 'BASSO, A.', true, 'auto', 999 ) );
+
+        $rows = $this->repository->findTitleSummariesByJugadorId( 999 );
+
+        $this->assertSame( 'B', $rows[0]['zona'] );
     }
 
     public function test_find_title_summaries_for_a_player_with_no_titles_is_an_empty_array(): void {

@@ -44,8 +44,8 @@ class PlayerTitlesControllerTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
-        delete_transient( 'campeones_titulos_jugador_v1_5078' );
-        delete_transient( 'campeones_titulos_jugador_v1_999999' );
+        delete_transient( 'campeones_titulos_jugador_v2_5078' );
+        delete_transient( 'campeones_titulos_jugador_v2_999999' );
         $GLOBALS['_campeones_test_force_transient_write_failure'] = false;
         $GLOBALS['_campeones_test_error_log'] = [];
     }
@@ -82,6 +82,18 @@ class PlayerTitlesControllerTest extends TestCase {
         $data = $response->get_data();
         $this->assertSame( 0, $data['total'] );
         $this->assertSame( [], $data['titulos'] );
+    }
+
+    public function test_titles_carry_zona(): void {
+        // The Flutter titles panel (slice 8) renders "Campeón Zona {X}" —
+        // zone B proves the value travels end-to-end, not hardcoded to 'A'.
+        $title = $this->titles->createOrConflict( 2016, 'B', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        $controller = new PlayerTitlesController( $this->squads, $this->directory );
+        $response   = $controller->handle( $this->request( 5078 ) );
+
+        $this->assertSame( 'B', $response->get_data()['titulos'][0]['zona'] );
     }
 
     public function test_titles_never_carry_a_photo_field(): void {
@@ -142,7 +154,7 @@ class PlayerTitlesControllerTest extends TestCase {
         $this->assertSame( 4739, $b->get_data()['jugador_id'] );
         $this->assertSame( 1, $b->get_data()['total'] );
 
-        delete_transient( 'campeones_titulos_jugador_v1_4739' );
+        delete_transient( 'campeones_titulos_jugador_v2_4739' );
     }
 
     // -------------------------------------------------------------------------
@@ -158,7 +170,7 @@ class PlayerTitlesControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status(), 'API-4: an unknown id must still be HTTP 200.' );
         $this->assertSame( 0, $response->get_data()['total'] );
         $this->assertFalse(
-            get_transient( 'campeones_titulos_jugador_v1_999999' ),
+            get_transient( 'campeones_titulos_jugador_v2_999999' ),
             'An id with no matching registered player must never have a cache entry written — otherwise an anonymous caller walking every integer id grows wp_options without bound.'
         );
     }
@@ -173,7 +185,7 @@ class PlayerTitlesControllerTest extends TestCase {
 
         $this->assertSame( 0, $response->get_data()['total'] );
         $this->assertNotFalse(
-            get_transient( 'campeones_titulos_jugador_v1_5078' ),
+            get_transient( 'campeones_titulos_jugador_v2_5078' ),
             'A real registered player with zero titles is still a legitimate, cacheable response.'
         );
     }
@@ -190,7 +202,7 @@ class PlayerTitlesControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame( 0, $response->get_data()['total'] );
         $this->assertFalse(
-            get_transient( 'campeones_titulos_jugador_v1_5078' ),
+            get_transient( 'campeones_titulos_jugador_v2_5078' ),
             'A directory query failure must not result in a cached response.'
         );
     }
@@ -210,7 +222,7 @@ class PlayerTitlesControllerTest extends TestCase {
         $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
         $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
 
-        set_transient( 'campeones_titulos_jugador_v1_5078', [ 'unexpected' => 'shape' ], 2592000 );
+        set_transient( 'campeones_titulos_jugador_v2_5078', [ 'unexpected' => 'shape' ], 2592000 );
 
         $controller = new PlayerTitlesController( $this->squads, $this->directory );
         $response   = $controller->handle( $this->request( 5078 ) );
@@ -228,7 +240,7 @@ class PlayerTitlesControllerTest extends TestCase {
         $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
         $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
 
-        set_transient( 'campeones_titulos_jugador_v1_5078', [ 'jugador_id' => 5078, 'total' => 1, 'titulos' => 'not-an-array' ], 2592000 );
+        set_transient( 'campeones_titulos_jugador_v2_5078', [ 'jugador_id' => 5078, 'total' => 1, 'titulos' => 'not-an-array' ], 2592000 );
 
         $controller = new PlayerTitlesController( $this->squads, $this->directory );
         $response   = $controller->handle( $this->request( 5078 ) );

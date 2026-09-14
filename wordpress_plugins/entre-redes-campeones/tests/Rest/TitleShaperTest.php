@@ -146,18 +146,26 @@ class TitleShaperTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_shape_player_titulo_maps_anio_equipo_and_captain_flag(): void {
-        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => 2023, 'equipo_nombre' => 'LIVERPOOL', 'es_capitan' => true ] );
+        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => 2023, 'equipo_nombre' => 'LIVERPOOL', 'es_capitan' => true, 'zona' => 'A' ] );
 
         $this->assertSame( 2023, $shaped['anio'] );
         $this->assertSame( 'LIVERPOOL', $shaped['equipo_nombre'] );
         $this->assertTrue( $shaped['es_capitan'] );
     }
 
+    public function test_shape_player_titulo_carries_zona(): void {
+        // The Flutter titles panel (slice 8) renders "Campeón Zona {X}" —
+        // the zone must travel on this payload, not just the history one.
+        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => 2016, 'equipo_nombre' => 'CHELSEA', 'es_capitan' => false, 'zona' => 'B' ] );
+
+        $this->assertSame( 'B', $shaped['zona'] );
+    }
+
     public function test_shape_player_titulo_never_emits_a_photo_field(): void {
         // API-2 feeds the player-detail titles panel, which is text-only
         // (design §7's explicit decision) — a photo field here would be
         // silently redundant with the profile's own header photo.
-        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => 2016, 'equipo_nombre' => 'CHELSEA', 'es_capitan' => false ] );
+        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => 2016, 'equipo_nombre' => 'CHELSEA', 'es_capitan' => false, 'zona' => 'A' ] );
 
         $this->assertArrayNotHasKey( 'foto_url', $shaped );
     }
@@ -165,7 +173,7 @@ class TitleShaperTest extends TestCase {
     public function test_shape_player_titulo_casts_loosely_typed_row_values(): void {
         // Rows arrive from wpdb::get_results(ARRAY_A) as strings/ints
         // depending on the driver — the shaper must not trust the input type.
-        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => '2016', 'equipo_nombre' => 'CHELSEA', 'es_capitan' => '1' ] );
+        $shaped = TitleShaper::shapePlayerTitulo( [ 'anio' => '2016', 'equipo_nombre' => 'CHELSEA', 'es_capitan' => '1', 'zona' => 'A' ] );
 
         $this->assertSame( 2016, $shaped['anio'] );
         $this->assertTrue( $shaped['es_capitan'] );

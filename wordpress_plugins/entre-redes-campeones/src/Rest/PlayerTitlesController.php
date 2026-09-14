@@ -18,10 +18,13 @@ use EntreRedes\Campeones\Titles\SquadRepository;
 final class PlayerTitlesController {
 
     // VERSION-SKEW OBLIGATION (see TitleShaper's class docblock): bumping
-    // this `_v1` suffix is required whenever TitleShaper::shapePlayerTitulo()'s
+    // this suffix is required whenever TitleShaper::shapePlayerTitulo()'s
     // output shape changes — also update CacheInvalidator::PLAYER_TITLES_PREFIX
     // to match, or the LIKE-delete in flush() stops matching this key.
-    private const CACHE_PREFIX = 'campeones_titulos_jugador_v1_';
+    // Bumped v1 -> v2 in slice 8: shapePlayerTitulo() gained the `zona`
+    // field, and a live 30-day transient written under the old shape would
+    // otherwise keep serving payloads without it to the app.
+    private const CACHE_PREFIX = 'campeones_titulos_jugador_v2_';
     private const CACHE_TTL    = 30 * DAY_IN_SECONDS;
 
     public function __construct(
