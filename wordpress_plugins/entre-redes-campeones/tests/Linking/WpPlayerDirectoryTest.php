@@ -108,6 +108,53 @@ final class WpPlayerDirectoryTest extends TestCase {
         $this->assertSame( [], $directory->findBySurname( '' ) );
     }
 
+    // -------------------------------------------------------------------------
+    // findByIds() — batched id -> RegisteredPlayer lookup (SquadListTable's
+    // "Vinculado a" / "ID" columns need this without one query per row).
+    // -------------------------------------------------------------------------
+
+    public function test_find_by_ids_builds_the_index_once_even_when_it_is_the_first_call(): void {
+        $wpdb      = $this->wpdbForBucketingScenario();
+        $directory = new WpPlayerDirectory( $wpdb );
+
+        $players = $directory->findByIds( [ 100 ] );
+
+        $this->assertSame( 1, $wpdb->playerQueryCallCount );
+        $this->assertSame( 'Basso, Alejandro', $players[100]->displayName );
+    }
+
+    public function test_find_by_ids_reuses_the_index_already_built_by_an_earlier_call(): void {
+        $wpdb      = $this->wpdbForBucketingScenario();
+        $directory = new WpPlayerDirectory( $wpdb );
+
+        // Builds the index via an unrelated call first.
+        $directory->findBySurname( 'BASSO' );
+        $this->assertSame( 1, $wpdb->playerQueryCallCount );
+
+        $players = $directory->findByIds( [ 100, 200, 999 ] );
+
+        $this->assertSame(
+            1,
+            $wpdb->playerQueryCallCount,
+            'findByIds() must reuse the index already built by an earlier call, not issue a new query.'
+        );
+        $this->assertArrayHasKey( 100, $players );
+        $this->assertArrayHasKey( 200, $players );
+        $this->assertArrayNotHasKey(
+            999,
+            $players,
+            'An id with no matching sp_player must simply be absent from the result — the caller treats "requested but missing" as a dangling pointer, not a silent empty name.'
+        );
+    }
+
+    public function test_find_by_ids_throws_when_the_players_query_fails(): void {
+        $wpdb      = ( new FakeDirectoryWpdb() )->failingPlayersQuery();
+        $directory = new WpPlayerDirectory( $wpdb );
+
+        $this->expectException( PlayerDirectoryQueryException::class );
+        $directory->findByIds( [ 100 ] );
+    }
+
     private function wpdbForBucketingScenario(): FakeDirectoryWpdb {
         return ( new FakeDirectoryWpdb() )
             ->withPlayerRows( [

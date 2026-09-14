@@ -29,4 +29,17 @@ interface PlayerDirectoryInterface {
      * dangling reference (item 8).
      */
     public function existsById( int $id ): bool;
+
+    /**
+     * Batched id -> RegisteredPlayer lookup, used by SquadListTable to show
+     * the linked player's real name and id without one query per row.
+     *
+     * @param int[] $ids
+     * @return array<int, RegisteredPlayer> Keyed by id. An id in $ids with
+     *         no matching published sp_player is simply absent from the
+     *         result — the caller must treat "requested but missing" as a
+     *         dangling pointer (the player was deleted or unpublished), not
+     *         a silently empty name.
+     */
+    public function findByIds( array $ids ): array;
 }

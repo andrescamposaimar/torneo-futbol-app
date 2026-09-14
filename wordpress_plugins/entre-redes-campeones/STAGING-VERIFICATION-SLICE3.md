@@ -46,7 +46,50 @@ Steps, on a staging copy with real data:
    still completes in a reasonable time for a normal-sized squad (roughly
    20-30 rows).
 
-## 2. Task 3.5 — enter one real historical year end-to-end
+## 2. "Vinculado a" / "ID" columns — the linked player must be visible, not just the state
+
+Found in real use in production: the squad list's "Estado" column said a
+row was linked "Automático" but never said *to whom*. Two columns were
+added — `WpPlayerDirectory::findByIds()` resolves every linked row's real
+name in one batched lookup per page render, never one query per row.
+
+What `composer test` already proves (`SquadListTableTest`,
+`WpPlayerDirectoryTest`, `TitleEditorPageTest`): the dash-for-unlinked
+case, the dangling-pointer message, the directory-unavailable message,
+the id column always showing the raw id, and the batched lookup being
+reused instead of re-queried. What it cannot prove is what these actually
+look like rendered in wp-admin — check by hand:
+
+1. Open a title with at least one `auto`-linked row (e.g. from Task
+   3.4's own end-to-end year). Confirm **"Vinculado a"** shows the
+   registered player's real name (not the sheet abbreviation the squad
+   row itself was entered under), and **"ID"** shows that player's plain
+   numeric `sp_player` id.
+2. Confirm a `sin_candidato` row, and a `manual` row with no pointer,
+   both show a plain dash (`—`) in both columns — not a blank cell.
+3. **Dangling pointer check**: pick a linked row's id from step 1, then
+   on a **staging copy only**, unpublish (trash) that `sp_player` post.
+   Reload the squad list. Confirm "Vinculado a" now reads something like
+   *"ID {id} — jugador no encontrado"* (the id is still visible and
+   still copyable), not a blank cell — a blank cell here would look like
+   the link disappeared, when in fact it is still stored and simply
+   points at a player the directory can no longer see. Restore
+   (republish) the player afterward.
+4. Confirm the "ID" column keeps showing the numeric id even for that
+   dangling row from step 3 — the id column never depends on the name
+   lookup succeeding.
+5. In the row's "Vincular"/"Cambiar" action, paste the id you read from
+   the "ID" column of a *different* row into the "ID jugador" field and
+   submit. Confirm this is a workable way to relink a row by hand — that
+   copy/paste reuse is the reason the id column exists at all.
+
+A genuine directory-wide outage (every row showing "No se pudo verificar
+(directorio no disponible)" plus a page-level warning notice, never a
+per-row dangling-pointer message) is exercised by
+`TitleEditorPageTest::test_render_shows_an_honest_notice_when_the_directory_is_unavailable`
+and needs no manual check.
+
+## 3. Task 3.5 — enter one real historical year end-to-end
 
 Before slice 6's bulk importer exists, the editor built in this slice is
 the *only* way any real historical title reaches the database. Walking one

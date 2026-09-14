@@ -34,7 +34,9 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
     private ?array $flat = null;
 
     /**
-     * @var array<int, true>|null Presence-only lookup for existsById().
+     * @var array<int, RegisteredPlayer>|null Lookup by id, backing both
+     *                                          existsById() and
+     *                                          findByIds().
      */
     private ?array $byId = null;
 
@@ -58,6 +60,28 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
         $this->ensureIndexBuilt();
 
         return isset( $this->byId[ $id ] );
+    }
+
+    /**
+     * Reuses the index built once per request (ensureIndexBuilt()) — the
+     * same reason that index exists in the first place: resolving many ids
+     * (e.g. every linked row on a squad list) must never cost one query
+     * per id.
+     *
+     * @param int[] $ids
+     * @return array<int, RegisteredPlayer>
+     */
+    public function findByIds( array $ids ): array {
+        $this->ensureIndexBuilt();
+
+        $result = [];
+        foreach ( $ids as $id ) {
+            if ( isset( $this->byId[ $id ] ) ) {
+                $result[ $id ] = $this->byId[ $id ];
+            }
+        }
+
+        return $result;
     }
 
     private function ensureIndexBuilt(): void {
@@ -106,7 +130,7 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
             );
 
             $flat[]       = $player;
-            $byId[ $id ]  = true;
+            $byId[ $id ]  = $player;
 
             if ( null !== $key ) {
                 $bySurname[ $key->surname ][] = $player;

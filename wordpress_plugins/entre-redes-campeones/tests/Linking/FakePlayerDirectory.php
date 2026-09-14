@@ -64,4 +64,17 @@ final class FakePlayerDirectory implements PlayerDirectoryInterface {
 
         return false;
     }
+
+    public function findByIds( array $ids ): array {
+        $wanted = array_flip( $ids );
+        $result = [];
+
+        foreach ( $this->players as $player ) {
+            if ( isset( $wanted[ $player->id ] ) ) {
+                $result[ $player->id ] = $player;
+            }
+        }
+
+        return $result;
+    }
 }

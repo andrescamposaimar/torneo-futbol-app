@@ -72,8 +72,13 @@ final class ActionForm {
             ? sprintf( ' onsubmit="return confirm(\'%s\');"', esc_js( $confirmMessage ) )
             : '';
 
+        // The space before <button> is deliberate: $extraHtml can end in a
+        // visible element (e.g. the Capitán checkbox's own <label> text) and
+        // WordPress-admin-cramped-actions (found in real use) showed that
+        // gluing it directly to the button renders as e.g. "CapitánGuardar"
+        // in the browser, with no visual gap between the two controls.
         return sprintf(
-            '<form method="post" action="%s" style="display:inline;"%s>%s%s<button type="submit" class="%s">%s</button></form>',
+            '<form method="post" action="%s" style="display:inline;"%s>%s%s <button type="submit" class="%s">%s</button></form>',
             esc_url( $url ),
             $onsubmit,
             $hidden,

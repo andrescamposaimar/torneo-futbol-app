@@ -45,7 +45,7 @@ class AdminMenuWiringTest extends TestCase {
             new TitleDeletionService( $wpdb, $titles, $squads ),
             new RevalidationService( $titles, $squads, $resolver, $writer )
         );
-        $editorPage = new TitleEditorPage( $titles, $squads, $resolver, $writer );
+        $editorPage = new TitleEditorPage( $titles, $squads, $resolver, $writer, $directory );
 
         return new AdminMenu( $titlesPage, $editorPage );
     }
