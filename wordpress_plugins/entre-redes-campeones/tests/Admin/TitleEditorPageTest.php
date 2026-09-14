@@ -12,6 +12,7 @@ use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
 use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
 use EntreRedes\Campeones\Tests\Support\FailingResolutionApplyWpdb;
+use EntreRedes\Campeones\Tests\Support\FailingUpdateWpdb;
 use EntreRedes\Campeones\Tests\Support\RedirectTerminatedException;
 use EntreRedes\Campeones\Tests\Support\TestableTitleEditorPage;
 use EntreRedes\Campeones\Tests\Support\ThrowingPlayerDirectory;
@@ -957,6 +958,87 @@ class TitleEditorPageTest extends TestCase {
                 );
                 $row = $squads->find( $id );
                 $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'The field edit must still have landed.' );
+            }
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 4 (round 2) — RowSaveResult's third state (notSaved(), reported
+    // as 'error_fila') was dead code: a reviewer removed the
+    // `! $result->rowSaved => 'error_fila'` arm from BOTH
+    // dispatchAgregarFila() and dispatchEditarFila() and the suite stayed
+    // 226/226 green, because nothing forced notSaved() through either
+    // dispatch method. These two tests force it directly: a nonexistent
+    // titulo_id for add (handleAddRow()'s own title-not-found branch), and a
+    // squad-row update failure for edit (handleEditRow()'s field-update
+    // branch) — proving neither collapses into the "saved but unresolved"
+    // notice a real (but wrongly-reported) failure would otherwise get.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_agregar_fila_reports_error_fila_when_nothing_was_saved(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $missingTituloId = 999999;
+
+        $_POST['campeones_editor_action'] = 'agregar_fila';
+        $_POST['titulo_id']               = (string) $missingTituloId;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['campeones_editor_nonce']  = wp_create_nonce( 'campeones_agregar_fila_' . $missingTituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertStringEndsWith(
+                'campeones_notice=error_fila',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A row that was never saved (title not found) must report error_fila, never a "sin_vinculo" notice implying it exists.'
+            );
+            $this->assertCount( 0, $this->squads->findByTitle( $missingTituloId ), 'Nothing must have been inserted.' );
+        }
+    }
+
+    public function test_handle_post_editar_fila_reports_error_fila_when_the_field_update_fails(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingUpdateWpdb( $original->prefix . 'campeones_plantel' );
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $titles = new TitleRepository( $failing );
+            $squads = new SquadRepository( $failing );
+            $title  = $titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+            $id     = $squads->insert( new SquadEntry( $title->id, 0, 'ZUBIZARRETA, F.' ) );
+
+            $rows      = require __DIR__ . '/../Fixtures/players.php';
+            $directory = FakePlayerDirectory::fromFixtureRows( $rows );
+
+            $page = new TestableTitleEditorPage( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) );
+
+            $_POST['campeones_editor_action'] = 'editar_fila';
+            $_POST['titulo_id']               = (string) $title->id;
+            $_POST['plantel_id']              = (string) $id;
+            $_POST['jugador_nombre']          = 'BASSO, A.';
+            $_POST['orden']                   = '0';
+            $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+            $this->expectException( RedirectTerminatedException::class );
+            try {
+                $page->handlePost();
+            } finally {
+                $this->assertStringEndsWith(
+                    'campeones_notice=error_fila',
+                    (string) $GLOBALS['_campeones_test_last_redirect'],
+                    'A field-update failure must report error_fila (nothing changed), never a "sin_vinculo" notice implying the edit landed.'
+                );
+                $row = $squads->find( $id );
+                $this->assertSame( 'ZUBIZARRETA, F.', $row->jugadorNombre, 'The failed update must leave the row exactly as it was.' );
             }
         } finally {
             $wpdb = $original;
