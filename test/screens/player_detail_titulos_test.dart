@@ -377,6 +377,75 @@ void main() {
     });
   });
 
+  group('PlayerDetailScreen · incomplete títulos', () {
+    testWidgets(
+        'a title with an empty zona is omitted from the hero star and the panel',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 568),
+        titulos: [
+          {'anio': 2016, 'zona': '', 'equipo_nombre': 'CHELSEA', 'es_capitan': false},
+        ],
+      );
+      await _scrollToTitulos(tester);
+
+      // No dangling "Campeón Zona " label (trailing space, empty zone), and
+      // no star with an empty letter inside — the only title is incomplete,
+      // so nothing is rendered for it anywhere.
+      expect(find.byIcon(Icons.star_rounded), findsNothing);
+      expect(find.textContaining('Campeón Zona'), findsNothing);
+      expect(find.text('TÍTULOS'), findsNothing);
+      // The rest of the profile still works.
+      expect(find.text('Juan Pérez'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a title with an empty equipo_nombre is omitted from the hero star and the panel',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 568),
+        titulos: [
+          {'anio': 2016, 'zona': 'A', 'equipo_nombre': '', 'es_capitan': false},
+        ],
+      );
+      await _scrollToTitulos(tester);
+
+      // No empty bold headline, and no star for a title this incomplete.
+      expect(find.byIcon(Icons.star_rounded), findsNothing);
+      expect(find.text('TÍTULOS'), findsNothing);
+      expect(find.text('Juan Pérez'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a mix of one valid and one incomplete title renders only the valid '
+        'one, with a matching star count and header count',
+        (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 568),
+        titulos: [
+          _titulo(anio: 2023, zona: 'A', equipo: 'LIVERPOOL'),
+          {'anio': 2016, 'zona': '', 'equipo_nombre': 'CHELSEA', 'es_capitan': false},
+        ],
+      );
+
+      // The hero star is asserted BEFORE scrolling: _scrollToTitulos()'s
+      // drag unmounts the hero star's render object past the ListView's
+      // cache extent (see the panel-scoped star test in the títulos panel
+      // group above), so this assertion would read as "no star" for that
+      // unrelated reason if it ran after the scroll.
+      expect(find.byIcon(Icons.star_rounded), findsOneWidget);
+
+      await _scrollToTitulos(tester);
+
+      expect(find.text('1 título'), findsOneWidget);
+      expect(find.text('LIVERPOOL'), findsOneWidget);
+      expect(find.text('CHELSEA'), findsNothing);
+    });
+  });
+
   group('PlayerDetailScreen · títulos fetch concurrency', () {
     testWidgets(
         'a títulos fetch that never completes does not block the rest of '

@@ -341,7 +341,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
                         ],
                       ),
                     ),
-                    for (final t in titulos) _tituloEstrella(t.zona),
+                    for (final t in _titulosVisibles) _tituloEstrella(t.zona),
                   ],
                 ),
                 if (tieneEquipo) ...[
@@ -620,20 +620,34 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     );
   }
 
+  /// A title is only rendered — as a hero star or as a panel row — when it
+  /// carries both the zone letter and the team name. Either one missing
+  /// would render dangling text instead of useful information (a star with
+  /// no letter inside, the label "Campeón Zona " with a trailing space, or
+  /// an empty bold headline), so it is simply omitted from both places.
+  bool _esTituloVisible(JugadorTitulo t) =>
+      t.zona.isNotEmpty && t.equipoNombre.isNotEmpty;
+
+  List<JugadorTitulo> get _titulosVisibles =>
+      titulos.where(_esTituloVisible).toList();
+
   /// Copa Chaminade titles this player is linked to (API-2). Rendered only
-  /// when there is at least one — the isNotEmpty guard in _buildDetalles is
-  /// structural, so there is nothing to forget to hide (APP-1).
+  /// when there is at least one displayable title — the isNotEmpty guard in
+  /// _buildDetalles is structural, so there is nothing to forget to hide
+  /// (APP-1).
   Widget _buildTitulos() {
+    final titulosVisibles = _titulosVisibles;
+
     return _panel(
       header: _seccionHeader(
         Icons.emoji_events,
         'TÍTULOS',
-        trailing: etiquetaTitulos(titulos.length),
+        trailing: etiquetaTitulos(titulosVisibles.length),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
-          children: titulos.map((t) => _tituloRow(t)).toList(),
+          children: titulosVisibles.map((t) => _tituloRow(t)).toList(),
         ),
       ),
     );
@@ -814,7 +828,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
           const SizedBox(height: 16),
           _buildTemporadas(),
         ],
-        if (titulos.isNotEmpty) ...[
+        if (_titulosVisibles.isNotEmpty) ...[
           const SizedBox(height: 16),
           _buildTitulos(),
         ],
