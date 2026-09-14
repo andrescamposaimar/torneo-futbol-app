@@ -6,6 +6,7 @@ import '../providers/service_providers.dart';
 import '../services/i_api_service.dart';
 import '../services/i_cache_service.dart';
 import '../utils/error_reporting.dart';
+import '../widgets/campeon_avatar.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/year_pill.dart';
 import 'player_detail_screen.dart';
@@ -341,9 +342,17 @@ class _CampeonesScreenState extends ConsumerState<CampeonesScreen> {
     );
   }
 
-  /// One squad member row. No avatar in this slice (9a+9b) — avatars are
-  /// slice 9c's scope; [CampeonPlantelEntry.fotoUrl] is parsed and carried
-  /// on the model already so that slice does not need to touch it again.
+  /// One squad member row: [CampeonAvatar] leading, name, and — for a
+  /// linked entry only — a trailing chevron (slice 9c wires the avatar;
+  /// [CampeonPlantelEntry.fotoUrl] was already parsed onto the model in
+  /// slice 9a so this slice does not need to touch it again).
+  ///
+  /// APP-5: [CampeonAvatar] is never told whether [entry] is linked — it
+  /// only receives [entry.nombre] and [entry.fotoUrl] — so it renders
+  /// identically (same radius, same background alpha, same text style)
+  /// whether the row is linked or not. The avatar therefore carries zero
+  /// tappability signal; every affordance that distinguishes a linked row
+  /// from an unlinked one (ripple, chevron, name weight) lives outside it.
   ///
   /// APP-7 / APP-5: a linked entry (`jugadorId != null`) is an [InkWell]
   /// with a trailing chevron; an unlinked entry is plain, non-tappable text
@@ -365,6 +374,8 @@ class _CampeonesScreenState extends ConsumerState<CampeonesScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
+          CampeonAvatar(nombre: entry.nombre, fotoUrl: entry.fotoUrl),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               nombreMostrado,

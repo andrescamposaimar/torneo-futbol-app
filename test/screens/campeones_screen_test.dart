@@ -5,6 +5,7 @@ import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/campeones_screen.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
 import 'package:torneo_futbol_app/services/i_cache_service.dart';
+import 'package:torneo_futbol_app/widgets/campeon_avatar.dart';
 
 // ---------------------------------------------------------------------------
 // Stubs
@@ -325,6 +326,12 @@ void main() {
       // found and this assertion would correctly fail.
       expect(_notOffstage('JUGADOR_2019_A'), findsNothing);
       expect(_notOffstage('JUGADOR_2016_A'), findsNothing);
+      // Slice 9c: a collapsed year's squad rows carry no CampeonAvatar
+      // either — `ExpansionTile.maintainState: false` removes the whole
+      // subtree, avatar included, so a collapsed card triggers zero
+      // NetworkImage resolutions. Only the one expanded year's one player
+      // has an avatar in the tree at all.
+      expect(find.byType(CampeonAvatar), findsOneWidget);
     });
 
     testWidgets(
@@ -342,6 +349,9 @@ void main() {
       // (see the `skipOffstage: false` note above).
       expect(_notOffstage('JUGADOR_2023_A'), findsNothing);
       expect(_notOffstage('JUGADOR_2016_A'), findsNothing);
+      // Still exactly one avatar in the tree — the newly-collapsed 2023
+      // card's avatar left with it; it was not merely hidden.
+      expect(find.byType(CampeonAvatar), findsOneWidget);
     });
 
     testWidgets('tapping the open year closes it (no year open at all)',
@@ -451,6 +461,79 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Detalles'), findsOneWidget); // PlayerDetailScreen tab
+    });
+  });
+
+  group('CampeonesScreen · avatar wiring (slice 9c, ADR-C2)', () {
+    testWidgets(
+        'a squad row with a fotoUrl renders the photo avatar variant; one '
+        'without renders the initials variant', (tester) async {
+      await _pump(
+        tester,
+        historia: [
+          _titulo(
+            anio: 2016,
+            equipo: 'CHELSEA',
+            plantel: [
+              _entry(
+                nombre: 'BASSO, A.',
+                jugadorId: 42,
+                fotoUrl: 'https://example.com/basso.jpg',
+              ),
+              _entry(nombre: 'MAZZARA, M.'),
+            ],
+          ),
+        ],
+      );
+
+      expect(
+        find.byKey(const ValueKey('campeon_avatar_photo_BASSO, A.')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('campeon_avatar_initials_MAZZARA, M.')),
+        findsOneWidget,
+      );
+      // The initials text is derived, not a leftover raw name — no comma in
+      // the rendered glyphs.
+      expect(find.text('BA'), findsOneWidget);
+      expect(find.text('MM'), findsOneWidget);
+    });
+
+    testWidgets(
+        'link status and photo presence are independent — an UNLINKED '
+        'player with a fotoUrl still gets the photo avatar (APP-5: the '
+        'avatar never encodes link state)', (tester) async {
+      await _pump(
+        tester,
+        historia: [
+          _titulo(
+            anio: 2016,
+            equipo: 'CHELSEA',
+            plantel: [
+              _entry(
+                nombre: 'MAZZARA, M.',
+                // No jugadorId: unlinked, plain-text, non-tappable row —
+                // but it still has a fotoUrl.
+                fotoUrl: 'https://example.com/mazzara.jpg',
+              ),
+            ],
+          ),
+        ],
+      );
+
+      expect(
+        find.byKey(const ValueKey('campeon_avatar_photo_MAZZARA, M.')),
+        findsOneWidget,
+      );
+      expect(
+        find.ancestor(
+          of: find.text('MAZZARA, M.'),
+          matching: find.byType(InkWell),
+        ),
+        findsNothing,
+        reason: 'still unlinked: no InkWell, despite having a photo avatar',
+      );
     });
   });
 
