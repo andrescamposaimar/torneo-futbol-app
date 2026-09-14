@@ -33,6 +33,11 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
      */
     private ?array $flat = null;
 
+    /**
+     * @var array<int, true>|null Presence-only lookup for existsById().
+     */
+    private ?array $byId = null;
+
     public function __construct( private readonly \wpdb $wpdb ) {
     }
 
@@ -47,6 +52,12 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
         // and filtering land in slice 5's pure PlayerSearch class, which
         // this method will wire over the already-built flat index.
         return [];
+    }
+
+    public function existsById( int $id ): bool {
+        $this->ensureIndexBuilt();
+
+        return isset( $this->byId[ $id ] );
     }
 
     private function ensureIndexBuilt(): void {
@@ -79,6 +90,7 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
 
         $flat      = [];
         $bySurname = [];
+        $byId      = [];
 
         foreach ( $rows as $row ) {
             $id    = (int) $row['ID'];
@@ -93,7 +105,8 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
                 $key
             );
 
-            $flat[] = $player;
+            $flat[]       = $player;
+            $byId[ $id ]  = true;
 
             if ( null !== $key ) {
                 $bySurname[ $key->surname ][] = $player;
@@ -102,6 +115,7 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
 
         $this->flat      = $flat;
         $this->bySurname = $bySurname;
+        $this->byId      = $byId;
     }
 
     /**

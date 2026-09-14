@@ -6,6 +6,7 @@ namespace EntreRedes\Campeones\Tests\Titles;
 
 use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Tests\Support\FailingInsertWpdb;
+use EntreRedes\Campeones\Tests\Support\FailingUpdateWpdb;
 use EntreRedes\Campeones\Titles\TitleRepository;
 use EntreRedes\Campeones\Titles\WriteFailedException;
 use PHPUnit\Framework\TestCase;
@@ -139,6 +140,68 @@ class TitleRepositoryTest extends TestCase {
         } finally {
             $wpdb = $original;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // findAll() / update() / delete() — added slice 3 for the Titles admin
+    // list page (ADMIN-7: create/edit/delete individual title records).
+    // -------------------------------------------------------------------------
+
+    public function test_find_all_orders_by_anio_descending(): void {
+        $this->repository->createOrConflict( 2011, 'A', 'campeon', 'INDEPENDIENTE' );
+        $this->repository->createOrConflict( 2019, 'A', 'campeon', 'RIVER' );
+        $this->repository->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+        $all = $this->repository->findAll();
+
+        $this->assertCount( 3, $all );
+        $this->assertSame( [ 2019, 2016, 2011 ], array_map( static fn ( $t ) => $t->anio, $all ) );
+    }
+
+    public function test_find_all_is_empty_before_any_title_exists(): void {
+        $this->assertSame( [], $this->repository->findAll() );
+    }
+
+    public function test_update_changes_the_team_name(): void {
+        $created = $this->repository->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+        $this->assertTrue( $this->repository->update( $created->id, [ 'equipo_nombre' => 'BOCA' ] ) );
+
+        $reread = $this->repository->find( $created->id );
+        $this->assertSame( 'BOCA', $reread->equipoNombre );
+        // Identity fields (anio/zona/posicion) are untouched by a header edit.
+        $this->assertSame( 2016, $reread->anio );
+    }
+
+    public function test_update_reports_failure_when_the_write_fails(): void {
+        // Item 9: no test previously forced $wpdb->update() to return false
+        // for campeones_titulo — update() silently trusted it always
+        // succeeded.
+        global $wpdb;
+        $original = $wpdb;
+        $failing  = new FailingUpdateWpdb();
+
+        try {
+            $wpdb = $failing;
+            InitialSchema::up();
+
+            $repository = new TitleRepository( $failing );
+            $created    = $repository->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+            $this->assertFalse( $repository->update( $created->id, [ 'equipo_nombre' => 'BOCA' ] ) );
+
+            $reread = $repository->find( $created->id );
+            $this->assertSame( 'CHELSEA', $reread->equipoNombre, 'A failed update must leave the existing row unchanged.' );
+        } finally {
+            $wpdb = $original;
+        }
+    }
+
+    public function test_delete_removes_the_title_row(): void {
+        $created = $this->repository->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+        $this->assertTrue( $this->repository->delete( $created->id ) );
+        $this->assertNull( $this->repository->find( $created->id ) );
     }
 
     public function test_a_failed_insert_leaves_no_row_behind(): void {

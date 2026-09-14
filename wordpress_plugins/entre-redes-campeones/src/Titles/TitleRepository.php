@@ -131,4 +131,73 @@ class TitleRepository {
 
         return $this->find( $newId );
     }
+
+    /**
+     * Every recorded title, most recent year first — backs the Titles list
+     * page (ADMIN-7).
+     *
+     * @return TitleRecord[]
+     */
+    public function findAll(): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            "SELECT id, anio, zona, posicion, equipo_nombre, created_at, updated_at
+               FROM {$p}campeones_titulo
+              ORDER BY anio DESC, zona ASC, posicion ASC",
+            ARRAY_A
+        );
+
+        return array_map( [ TitleRecord::class, 'fromRow' ], $rows ?: [] );
+    }
+
+    /**
+     * Updates mutable fields of a title record (the editor's header edit —
+     * ADMIN-7). Deliberately does not accept anio/zona/posicion here: those
+     * are the record's identity (REC-7) and changing them is a delete +
+     * recreate, not an update.
+     *
+     * @param array<string, mixed> $data
+     */
+    public function update( int $id, array $data ): bool {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $data['updated_at'] = current_time( 'mysql' );
+
+        $result = $wpdb->update( $p . 'campeones_titulo', $data, [ 'id' => $id ] );
+
+        if ( false === $result ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to update campeones_titulo (id=%d). DB error: %s',
+                $id,
+                (string) $wpdb->last_error
+            ) );
+        }
+
+        return false !== $result;
+    }
+
+    /**
+     * Deletes a title row only. Callers that must also remove its squad
+     * (e.g. TitleDeletionService) are responsible for doing so in the same
+     * transaction — this method never cascades on its own.
+     */
+    public function delete( int $id ): bool {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->delete( $p . 'campeones_titulo', [ 'id' => $id ] );
+
+        if ( false === $result ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to delete campeones_titulo (id=%d). DB error: %s',
+                $id,
+                (string) $wpdb->last_error
+            ) );
+        }
+
+        return false !== $result;
+    }
 }

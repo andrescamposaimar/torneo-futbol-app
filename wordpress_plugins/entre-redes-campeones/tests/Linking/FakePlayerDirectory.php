@@ -54,4 +54,14 @@ final class FakePlayerDirectory implements PlayerDirectoryInterface {
         // to satisfy the interface for LinkResolverTest.
         return [];
     }
+
+    public function existsById( int $id ): bool {
+        foreach ( $this->players as $player ) {
+            if ( $player->id === $id ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

@@ -590,9 +590,34 @@ if ( ! function_exists( 'wp_nonce_field' ) ) {
     }
 }
 
+if ( ! function_exists( 'wp_create_nonce' ) ) {
+    function wp_create_nonce( string $action = '' ): string {
+        return 'test-nonce-' . md5( $action );
+    }
+}
+
 if ( ! function_exists( 'wp_verify_nonce' ) ) {
+    /**
+     * Ties verification to the same deterministic derivation wp_create_nonce()
+     * uses above, instead of returning truthy unconditionally.
+     *
+     * The previous shim returned 1 for ANY $nonce/$action pair, so no test
+     * could ever make a nonce check fail — every wp_verify_nonce() call in
+     * the plugin was decorative as far as the suite was concerned. Deriving
+     * the expected value from $action the same way wp_create_nonce() does
+     * means a nonce is only valid for the action it was actually created
+     * for: a wrong string, a nonce created for a different action, or a
+     * stale/forged value all correctly return false, with no extra
+     * test-only registry to keep in sync.
+     */
     function wp_verify_nonce( string $nonce, string $action ): int|false {
-        return 1;
+        return hash_equals( wp_create_nonce( $action ), $nonce ) ? 1 : false;
+    }
+}
+
+if ( ! function_exists( 'esc_js' ) ) {
+    function esc_js( string $text ): string {
+        return addslashes( $text );
     }
 }
 
@@ -609,14 +634,34 @@ if ( ! function_exists( 'wp_redirect' ) ) {
 }
 
 if ( ! function_exists( 'wp_safe_redirect' ) ) {
+    $GLOBALS['_campeones_test_last_redirect'] = null;
+
+    /**
+     * Records the final redirect location so a test can assert what URL a
+     * handlePost()-driven request actually redirected to (item 4's hidden
+     * titulo_id fix needs this: the redirect target must carry the real
+     * title id, not 0).
+     */
     function wp_safe_redirect( string $location, int $status = 302 ): bool {
+        $GLOBALS['_campeones_test_last_redirect'] = $location;
         return true;
     }
 }
 
 if ( ! function_exists( 'add_query_arg' ) ) {
+    /**
+     * Covers the one call shape this plugin uses: add_query_arg( $key,
+     * $value, $url ). The previous stub discarded every argument and always
+     * returned '', so wp_safe_redirect() above could never be told what URL
+     * a redirect actually carried.
+     */
     function add_query_arg( mixed ...$args ): string {
-        return '';
+        if ( 3 !== count( $args ) || ! is_string( $args[0] ) || ! is_string( $args[2] ) ) {
+            return '';
+        }
+        [ $key, $value, $url ] = $args;
+        $separator = str_contains( $url, '?' ) ? '&' : '?';
+        return $url . $separator . rawurlencode( $key ) . '=' . rawurlencode( (string) $value );
     }
 }
 
@@ -665,8 +710,19 @@ if ( ! function_exists( 'get_admin_page_title' ) ) {
 }
 
 if ( ! function_exists( 'current_user_can' ) ) {
+    /**
+     * Controllable via $GLOBALS['_campeones_test_current_user_can'], default
+     * false — most admin tests exercise the capability guard itself (via
+     * Reflection past the exit()-ing public entry point when they need the
+     * capability check bypassed). Tests that need to prove behaviour PAST
+     * the capability check (e.g. a nonce rejection) set the flag to true and
+     * must reset it to false afterwards so it never bleeds into another
+     * test.
+     */
+    $GLOBALS['_campeones_test_current_user_can'] = false;
+
     function current_user_can( string $capability ): bool {
-        return false;
+        return $GLOBALS['_campeones_test_current_user_can'];
     }
 }
 
@@ -717,7 +773,7 @@ if ( ! function_exists( 'add_menu_page' ) ) {
 }
 
 if ( ! function_exists( 'add_submenu_page' ) ) {
-    function add_submenu_page( string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, ?int $position = null ): string|false {
+    function add_submenu_page( ?string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, ?int $position = null ): string|false {
         return $menu_slug;
     }
 }

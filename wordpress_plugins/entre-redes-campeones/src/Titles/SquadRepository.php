@@ -166,4 +166,32 @@ class SquadRepository {
 
         return false !== $result;
     }
+
+    /**
+     * Deletes every squad row for one title — used by TitleDeletionService
+     * inside a transaction, before the title row itself is removed. A title
+     * with no squad rows is a successful no-op, not a failure.
+     */
+    public function deleteByTitle( int $tituloId ): bool {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM {$p}campeones_plantel WHERE titulo_id = %d",
+                $tituloId
+            )
+        );
+
+        if ( false === $result ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to delete campeones_plantel by titulo_id (titulo_id=%d). DB error: %s',
+                $tituloId,
+                (string) $wpdb->last_error
+            ) );
+            return false;
+        }
+
+        return true;
+    }
 }

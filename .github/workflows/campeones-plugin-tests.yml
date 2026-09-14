@@ -37,9 +37,9 @@ jobs:
         # toolchain cannot exercise a floor lower than 8.1 even where the
         # runtime would allow one. Do not declare a floor the suite cannot test.
         #
-        # composer.lock is gitignored, so every run resolves dependencies
-        # fresh. The prode plugin commits its lock for reproducibility; do the
-        # same here once that change reaches main.
+        # composer.lock is committed (mirroring the prode plugin), so every
+        # run resolves the exact same dependency tree instead of picking up
+        # whatever a transitive bump resolves to on the day CI happens to run.
         php: ['8.2', '8.5']
 
     steps:
