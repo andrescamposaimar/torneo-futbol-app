@@ -261,4 +261,51 @@ class RevalidationServiceTest extends TestCase {
         $brokenRow = $this->squads->find( $brokenId );
         $this->assertSame( LinkState::SIN_CANDIDATO, $brokenRow->estadoVinculo, 'The broken row must be left exactly as it was.' );
     }
+
+    public function test_directory_query_exceptions_for_two_or_more_rows_are_all_recorded_and_the_rest_of_the_year_still_processes(): void {
+        // Item 7 (round 2): PartiallyThrowingPlayerDirectory previously
+        // supported only ONE throwing surname, so directoryErrorRowIds
+        // accumulating across TWO OR MORE failing rows in the same pass was
+        // never actually exercised. Two independent broken rows, one
+        // healthy row.
+        $rows      = require __DIR__ . '/../Fixtures/players.php';
+        $directory = new PartiallyThrowingPlayerDirectory(
+            FakePlayerDirectory::fromFixtureRows( $rows ),
+            [ 'MAZZARA', 'ZUBIZARRETA' ]
+        );
+
+        $service = new RevalidationService(
+            $this->titles,
+            $this->squads,
+            new LinkResolver( $directory ),
+            new LinkWriteService( $this->squads, $directory )
+        );
+
+        $healthyId  = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+        $brokenId1  = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 1, 'MAZZARA, M.', false, LinkState::SIN_CANDIDATO )
+        );
+        $brokenId2  = $this->squads->insert(
+            new SquadEntry( $this->tituloId, 2, 'ZUBIZARRETA, F.', false, LinkState::SIN_CANDIDATO )
+        );
+
+        $result = $service->revalidateYear( $this->tituloId );
+
+        $this->assertSame( 1, $result->succeeded, 'The one row that did not throw must still be resolved.' );
+        $this->assertSame( 3, $result->total );
+        $this->assertSame(
+            [ $brokenId1, $brokenId2 ],
+            $result->directoryErrorRowIds,
+            'BOTH broken rows must be identified, not just the first one encountered.'
+        );
+
+        $healthyRow = $this->squads->find( $healthyId );
+        $this->assertSame( LinkState::AUTO, $healthyRow->estadoVinculo, 'Two directory failures in the same pass must not stop the rest of the year from being processed.' );
+
+        $brokenRow1 = $this->squads->find( $brokenId1 );
+        $this->assertSame( LinkState::SIN_CANDIDATO, $brokenRow1->estadoVinculo, 'The first broken row must be left exactly as it was.' );
+
+        $brokenRow2 = $this->squads->find( $brokenId2 );
+        $this->assertSame( LinkState::SIN_CANDIDATO, $brokenRow2->estadoVinculo, 'The second broken row must be left exactly as it was.' );
+    }
 }
