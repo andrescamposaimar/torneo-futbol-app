@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
+import 'package:torneo_futbol_app/screens/campeones_screen.dart';
 import 'package:torneo_futbol_app/screens/player_detail_screen.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
 import 'package:torneo_futbol_app/services/i_cache_service.dart';
@@ -54,6 +55,12 @@ class _StubApiService implements IApiService {
     };
   }
 
+  /// Explicitly stubbed (not left to `noSuchMethod`) because the wired
+  /// `onTapEquipo` navigation test below actually pushes [CampeonesScreen],
+  /// which calls this on mount.
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() async => [];
+
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
@@ -84,6 +91,32 @@ class _UnimplementedTitulosApiService implements IApiService {
     int? perPage,
   }) async =>
       {'items': [], 'current_page': 1, 'total_pages': 0};
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+/// getJugadorPorId throws; every other call behaves like [_StubApiService]
+/// with an empty títulos list. Used to prove the fetch failure is routed
+/// through [reportNonFatal] (fix 8) instead of a bare `catch (_) {}`, while
+/// the profile still renders from the constructor-supplied stub.
+class _ThrowingJugadorApiService implements IApiService {
+  @override
+  Future<Map<String, dynamic>> getJugadorPorId(int id) async {
+    throw Exception('jugador endpoint down');
+  }
+
+  @override
+  Future<Map<String, dynamic>> getPartidosPorJugador(
+    int jugadorId, {
+    int? page,
+    int? perPage,
+  }) async =>
+      {'items': [], 'current_page': 1, 'total_pages': 0};
+
+  @override
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) async =>
+      {'jugador_id': jugadorId, 'total': 0, 'titulos': []};
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -333,8 +366,9 @@ void main() {
       );
     });
 
-    testWidgets('the team name is plain, non-tappable text with no chevron',
-        (tester) async {
+    testWidgets(
+        'the team name is now a tappable chip with a chevron (wired to the '
+        'history screen)', (tester) async {
       await _pump(
         tester,
         size: const Size(320, 568),
@@ -344,9 +378,28 @@ void main() {
 
       expect(
         find.ancestor(of: find.text('CHELSEA'), matching: find.byType(InkWell)),
-        findsNothing,
+        findsOneWidget,
       );
-      expect(find.byIcon(Icons.chevron_right), findsNothing);
+      expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    });
+
+    testWidgets(
+        'tapping the team name navigates to CampeonesScreen opened on that '
+        "título's year and zone", (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 568),
+        titulos: [_titulo(anio: 2016, zona: 'B', equipo: 'CHELSEA')],
+      );
+      await _scrollToTitulos(tester);
+
+      await tester.tap(find.text('CHELSEA'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CampeonesScreen), findsOneWidget);
+      final pushed = tester.widget<CampeonesScreen>(find.byType(CampeonesScreen));
+      expect(pushed.initialAnio, 2016);
+      expect(pushed.initialZona, 'B');
     });
 
     testWidgets('a down campeones endpoint omits the panel without breaking the profile',
@@ -546,6 +599,71 @@ void main() {
           isTrue,
           reason: 'expected reportNonFatal\'s debugPrint fallback to fire '
               'with the títulos-fetch failure reason; got: $messages',
+        );
+      } finally {
+        debugPrint = originalDebugPrint;
+      }
+    });
+  });
+
+  group('PlayerDetailScreen · getJugadorPorId failure reporting (fix 8)', () {
+    testWidgets(
+        'a getJugadorPorId failure is reported through the shared non-fatal '
+        'error path, and the profile still renders from the widget.player '
+        'stub', (tester) async {
+      final messages = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) messages.add(message);
+      };
+
+      try {
+        tester.view.physicalSize = const Size(320, 568);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              apiServiceProvider
+                  .overrideWithValue(_ThrowingJugadorApiService()),
+              cacheServiceProvider.overrideWithValue(_NoopCacheService()),
+            ],
+            child: MaterialApp(
+              home: PlayerDetailScreen(player: const {
+                'id': 4321,
+                'title': {'rendered': 'Juan Pérez'},
+                'equipo': 'Sin equipo',
+                'escudo': '',
+                'temporadas': [],
+                'metrics': {},
+              }),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        // Renders from the constructor-supplied stub — 'posicion' is NOT
+        // present on it (only on the real getJugadorPorId payload), so its
+        // absence proves the profile never got a completed round-trip and
+        // fell back to the stub, exactly as before this fix.
+        expect(find.text('Juan Pérez'), findsWidgets);
+
+        // No Firebase app is initialized in the widget-test environment,
+        // so reportNonFatal()'s own internal try/catch takes its
+        // debugPrint fallback branch — the same seam the títulos-fetch
+        // failure test above uses.
+        expect(
+          messages.any(
+            (m) => m.contains(
+              'PlayerDetailScreen: getJugadorPorId failed for player 4321',
+            ),
+          ),
+          isTrue,
+          reason: 'expected reportNonFatal\'s debugPrint fallback to fire '
+              'with the getJugadorPorId failure reason instead of the '
+              'error being silently swallowed; got: $messages',
         );
       } finally {
         debugPrint = originalDebugPrint;

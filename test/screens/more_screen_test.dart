@@ -9,7 +9,10 @@ import 'package:torneo_futbol_app/config/tenant_provider.dart';
 import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/anuarios_screen.dart';
+import 'package:torneo_futbol_app/screens/campeones_screen.dart';
 import 'package:torneo_futbol_app/screens/more_screen.dart';
+import 'package:torneo_futbol_app/services/i_api_service.dart';
+import 'package:torneo_futbol_app/services/i_cache_service.dart';
 import 'package:torneo_futbol_app/services/notification_service.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_auth_controller.dart';
@@ -17,6 +20,24 @@ import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/services/prode_ranking_controller.dart';
 import 'package:torneo_futbol_app/widgets/prode_identity_card.dart';
+
+// ---------------------------------------------------------------------------
+// Minimal fakes so tapping into CampeonesScreen (pushed from the Historia
+// tile) never reaches a real network or shared_preferences call.
+// ---------------------------------------------------------------------------
+
+class _EmptyCampeonesApiService implements IApiService {
+  @override
+  Future<List<dynamic>> getCampeonesHistoria() async => [];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
+class _NoopCacheService implements ICacheService {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => Future.value(null);
+}
 
 // ---------------------------------------------------------------------------
 // Firebase setup (needed because MoreScreen.initState touches FirebaseMessaging
@@ -93,6 +114,7 @@ class _StubRankingController extends ProdeRankingController {
 
 TenantConfig _makeTenant({
   bool prode = true,
+  bool campeones = false,
   List<TenantAnuario> anuarios = const [],
   String? solicitudCambioUrl,
   bool waitingLists = false,
@@ -109,7 +131,11 @@ TenantConfig _makeTenant({
         accent: Colors.cyan,
         splashBackground: Colors.white,
       ),
-      features: TenantFeatures(prode: prode, waitingLists: waitingLists),
+      features: TenantFeatures(
+        prode: prode,
+        waitingLists: waitingLists,
+        campeones: campeones,
+      ),
       integrations: const TenantIntegrations(prodeAuth: _kProdeConfig),
       documents: TenantDocuments(
         anuarios: anuarios,
@@ -127,6 +153,7 @@ TenantConfig _makeTenant({
 Future<void> _pump(
   WidgetTester tester, {
   bool prode = true,
+  bool campeones = false,
   List<TenantAnuario> anuarios = const [],
   String? solicitudCambioUrl,
   bool waitingLists = false,
@@ -136,6 +163,7 @@ Future<void> _pump(
 }) async {
   final tenantCfg = _makeTenant(
     prode: prode,
+    campeones: campeones,
     anuarios: anuarios,
     solicitudCambioUrl: solicitudCambioUrl,
     waitingLists: waitingLists,
@@ -155,6 +183,8 @@ Future<void> _pump(
             .overrideWith((ref) => _StubAuthController(authState)),
         prodeRankingControllerProvider
             .overrideWith((ref) => _StubRankingController()),
+        apiServiceProvider.overrideWithValue(_EmptyCampeonesApiService()),
+        cacheServiceProvider.overrideWithValue(_NoopCacheService()),
       ],
       child: const MaterialApp(home: MoreScreen()),
     ),
@@ -346,6 +376,65 @@ void main() {
 
       expect(find.text('Goleadores'), findsOneWidget);
       expect(find.text('Imbatibles'), findsOneWidget);
+    });
+  });
+
+  group('MoreScreen · Historia (Copa Chaminade) entry point', () {
+    // campeones=false is the default for every tenant unless it opts in
+    // (facundo.dart) — the section must be fully absent, no crash.
+    testWidgets('campeones=false → Historia section and tile absent',
+        (tester) async {
+      await _pump(tester, campeones: false);
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Historia'), findsNothing);
+      expect(find.text('Copa Chaminade'), findsNothing);
+    });
+
+    // APP-3/APP-4: campeones=true → the entry point is present regardless of
+    // whether any year has loaded yet (a data-state concern the empty state
+    // inside CampeonesScreen — not this gate — is responsible for).
+    testWidgets('APP-4: campeones=true → Historia section and tile present',
+        (tester) async {
+      await _pump(tester, campeones: true);
+
+      expect(find.text('Historia'), findsOneWidget);
+      expect(find.text('Copa Chaminade'), findsOneWidget);
+    });
+
+    testWidgets(
+        'campeones=true → tapping the tile pushes CampeonesScreen',
+        (tester) async {
+      await _pump(tester, campeones: true);
+
+      await tester.tap(find.text('Copa Chaminade'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byType(CampeonesScreen), findsOneWidget);
+    });
+
+    // Placement: after Estadísticas, before Gestión Torneo — Notificaciones
+    // must still be last (existing AC-36/AC-37 convention).
+    testWidgets(
+        'campeones=true → Historia renders after Estadísticas and before '
+        'Notificaciones', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await _pump(tester, campeones: true, waitingLists: true);
+
+      double dyOf(String text) => tester.getTopLeft(find.text(text).first).dy;
+
+      final stats = dyOf('Goleadores');
+      final historia = dyOf('Copa Chaminade');
+      final gestion = dyOf('Lista de Espera');
+      final notificaciones = dyOf('Avisos del torneo');
+
+      expect(historia, greaterThan(stats));
+      expect(gestion, greaterThan(historia));
+      expect(notificaciones, greaterThan(historia));
     });
   });
 }
