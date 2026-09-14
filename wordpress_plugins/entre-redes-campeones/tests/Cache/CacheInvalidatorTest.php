@@ -27,14 +27,18 @@ use PHPUnit\Framework\TestCase;
 class CacheInvalidatorTest extends TestCase {
 
     protected function setUp(): void {
+        // wp_options is a real WP core table, created once for the whole
+        // suite in tests/wp-shim.php (it always exists in production) —
+        // clean rows here rather than dropping the table, the same
+        // DELETE-based fixture convention every other repository test in
+        // this plugin already uses for its own tables.
         global $wpdb;
-        $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}options" );
-        $wpdb->query( "CREATE TABLE {$wpdb->prefix}options (option_name TEXT, option_value TEXT)" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}options" );
     }
 
     protected function tearDown(): void {
         global $wpdb;
-        $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}options" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}options" );
         delete_transient( 'campeones_historia_v2' );
     }
 

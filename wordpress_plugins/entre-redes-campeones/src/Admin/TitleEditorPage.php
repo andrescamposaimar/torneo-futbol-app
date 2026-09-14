@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Campeones\Admin;
 
+use EntreRedes\Campeones\Cache\CacheInvalidator;
 use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
@@ -64,7 +65,8 @@ class TitleEditorPage {
         private readonly SquadRepository $squads,
         private readonly LinkResolver $resolver,
         private readonly LinkWriteService $linkWriter,
-        private readonly PlayerDirectoryInterface $directory
+        private readonly PlayerDirectoryInterface $directory,
+        private readonly CacheInvalidator $cache
     ) {
     }
 
@@ -158,6 +160,16 @@ class TitleEditorPage {
             ) );
             $notice = 'error_guardado';
         }
+
+        // Every recognized action reaching this point at least attempted a
+        // write (crear_titulo, actualizar_titulo, agregar_fila, editar_fila,
+        // eliminar_fila, vincular, cambiar, desvincular) — flush
+        // unconditionally rather than only on a fully-successful notice, so
+        // a partial write (e.g. a saved row whose link resolution failed,
+        // RowSaveResult's independent rowSaved/linkResolved outcome above)
+        // still invalidates the REST cache instead of leaving a stale
+        // transient for up to 30 days.
+        $this->cache->flush();
 
         $redirectUrl = admin_url( 'admin.php?page=campeones-titulo-edit&titulo_id=' . $redirectTituloId );
         wp_safe_redirect( add_query_arg( 'campeones_notice', $notice, $redirectUrl ) );

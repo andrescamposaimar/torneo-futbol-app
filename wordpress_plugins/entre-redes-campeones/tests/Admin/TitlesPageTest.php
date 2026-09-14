@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Campeones\Tests\Admin;
 
 use EntreRedes\Campeones\Admin\TitlesPage;
+use EntreRedes\Campeones\Cache\CacheInvalidator;
 use EntreRedes\Campeones\Linking\LinkResolver;
 use EntreRedes\Campeones\Linking\LinkState;
 use EntreRedes\Campeones\Linking\LinkWriteService;
@@ -37,6 +38,7 @@ class TitlesPageTest extends TestCase {
 
     private TitleRepository $titles;
     private SquadRepository $squads;
+    private CacheInvalidator $cache;
     private int $tituloId;
 
     protected function setUp(): void {
@@ -48,6 +50,7 @@ class TitlesPageTest extends TestCase {
 
         $this->titles = new TitleRepository( $wpdb );
         $this->squads = new SquadRepository( $wpdb );
+        $this->cache  = new CacheInvalidator( $wpdb );
 
         $title          = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
         $this->tituloId = $title->id;
@@ -59,6 +62,7 @@ class TitlesPageTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         $GLOBALS['_campeones_test_current_user_can'] = false;
         unset( $_GET['campeones_notice'] );
+        delete_transient( 'campeones_historia_v2' );
     }
 
     private function makePage(): TitlesPage {
@@ -75,7 +79,8 @@ class TitlesPageTest extends TestCase {
                 $this->squads,
                 new LinkResolver( $directory ),
                 new LinkWriteService( $this->squads, $directory )
-            )
+            ),
+            $this->cache
         );
     }
 
@@ -93,7 +98,8 @@ class TitlesPageTest extends TestCase {
                 $this->squads,
                 new LinkResolver( $directory ),
                 new LinkWriteService( $this->squads, $directory )
-            )
+            ),
+            $this->cache
         );
     }
 
@@ -162,6 +168,22 @@ class TitlesPageTest extends TestCase {
         }
     }
 
+    public function test_handle_post_eliminar_invalidates_the_history_transient(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+        set_transient( 'campeones_historia_v2', [ 'titulos' => [ 'stale' ] ], 2592000 );
+
+        $_POST['campeones_titulo_action'] = 'eliminar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_eliminar_titulo_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $this->makeTestablePage()->handlePost();
+        } finally {
+            $this->assertFalse( get_transient( 'campeones_historia_v2' ), 'Deleting a title must invalidate the history transient.' );
+        }
+    }
+
     public function test_handle_post_revalidar_re_resolves_the_year(): void {
         $GLOBALS['_campeones_test_current_user_can'] = true;
 
@@ -218,7 +240,8 @@ class TitlesPageTest extends TestCase {
             $page = new TestableTitlesPage(
                 $titles,
                 new TitleDeletionService( $failing, $titles, $squads ),
-                new RevalidationService( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) )
+                new RevalidationService( $titles, $squads, new LinkResolver( $directory ), new LinkWriteService( $squads, $directory ) ),
+                new CacheInvalidator( $failing )
             );
 
             $_POST['campeones_titulo_action'] = 'revalidar';
@@ -384,7 +407,8 @@ class TitlesPageTest extends TestCase {
         $page              = new TestableTitlesPage(
             $this->titles,
             new TitleDeletionService( $wpdb, $this->titles, $this->squads ),
-            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) )
+            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) ),
+            $this->cache
         );
 
         $_POST['campeones_titulo_action'] = 'revalidar';
@@ -423,7 +447,8 @@ class TitlesPageTest extends TestCase {
         $page              = new TestableTitlesPage(
             $this->titles,
             new TitleDeletionService( $wpdb, $this->titles, $this->squads ),
-            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) )
+            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) ),
+            $this->cache
         );
 
         $_POST['campeones_titulo_action'] = 'revalidar';

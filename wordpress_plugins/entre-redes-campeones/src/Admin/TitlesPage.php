@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Campeones\Admin;
 
+use EntreRedes\Campeones\Cache\CacheInvalidator;
 use EntreRedes\Campeones\Linking\PlayerDirectoryQueryException;
 use EntreRedes\Campeones\Linking\RevalidationResult;
 use EntreRedes\Campeones\Linking\RevalidationService;
@@ -26,7 +27,8 @@ class TitlesPage {
     public function __construct(
         private readonly TitleRepository $titles,
         private readonly TitleDeletionService $deletionService,
-        private readonly RevalidationService $revalidationService
+        private readonly RevalidationService $revalidationService,
+        private readonly CacheInvalidator $cache
     ) {
     }
 
@@ -100,6 +102,12 @@ class TitlesPage {
             ) );
             $notice = 'error_guardado';
         }
+
+        // eliminar and revalidar both reach this point having at least
+        // attempted a write (revalidar can partially succeed — see
+        // RevalidationResult above) — flush unconditionally so a partial
+        // revalidation still invalidates the REST cache.
+        $this->cache->flush();
 
         wp_safe_redirect( add_query_arg( 'campeones_notice', $notice, admin_url( 'admin.php?page=campeones' ) ) );
         $this->terminateAfterRedirect();

@@ -213,6 +213,20 @@ if ( ! class_exists( 'wpdb' ) ) {
 global $wpdb;
 if ( ! isset( $wpdb ) ) {
     $wpdb = new wpdb();
+
+    // wp_options is a WordPress core table — it always exists on a real
+    // site, created by WP core itself, never by this plugin. Production
+    // code (CacheInvalidator's per-player LIKE delete, design §7) issues raw
+    // SQL against it directly, bypassing the get_transient()/set_transient()
+    // static-array shim entirely (there is no fixed key to hand
+    // delete_transient() for a parametrized transient name). Creating it
+    // once here, exactly like a real WP install guarantees it, means that
+    // query behaves the same everywhere instead of only inside a test that
+    // remembers to create the table itself — and a query against a missing
+    // table would otherwise silently poison $wpdb->last_error (never reset
+    // on a successful query) for every later test in the same process,
+    // including ones that check it for unrelated reasons (MigrationRunner).
+    $wpdb->query( "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}options (option_name TEXT, option_value TEXT)" );
 }
 
 // ─── dbDelta shim ────────────────────────────────────────────────────────────
