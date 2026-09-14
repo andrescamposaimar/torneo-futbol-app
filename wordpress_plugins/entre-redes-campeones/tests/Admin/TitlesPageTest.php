@@ -402,4 +402,73 @@ class TitlesPageTest extends TestCase {
             );
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Item 3 (round 2) — RevalidationResult::$directoryErrorRowIds was
+    // computed and returned correctly by RevalidationService, but
+    // TitlesPage read only ->succeeded and ->total. A revalidation where the
+    // WHOLE directory was down (0 of N, every failure directory-side)
+    // rendered identically to N rows that simply had bad names — the
+    // distinction the field exists for was invisible to the operator.
+    // -------------------------------------------------------------------------
+
+    public function test_handle_post_revalidar_surfaces_the_directory_error_count_in_the_notice(): void {
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        global $wpdb;
+        $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'BASSO, A.' ) );
+
+        $throwingDirectory = new ThrowingPlayerDirectory();
+        $throwingResolver  = new LinkResolver( $throwingDirectory );
+        $page              = new TestableTitlesPage(
+            $this->titles,
+            new TitleDeletionService( $wpdb, $this->titles, $this->squads ),
+            new RevalidationService( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) )
+        );
+
+        $_POST['campeones_titulo_action'] = 'revalidar';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['campeones_titulo_nonce']  = wp_create_nonce( 'campeones_revalidar_' . $this->tituloId );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $page->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'campeones_notice=revalidado_0_1_1',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A revalidation where every failure was directory-side must carry that count in the notice, not just succeeded/total.'
+            );
+        }
+    }
+
+    public function test_render_distinguishes_a_directory_outage_from_plain_data_quality_failures(): void {
+        // Same succeeded/total pair (0 of 1), different directory-error
+        // count. The rendered copy must not read identically — one is "the
+        // directory was down", the other is "this row's name genuinely
+        // doesn't match anything".
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $_GET['campeones_notice'] = 'revalidado_0_1_1';
+        ob_start();
+        $this->makePage()->render();
+        $directoryOutageHtml = ob_get_clean();
+
+        $_GET['campeones_notice'] = 'revalidado_0_1_0';
+        ob_start();
+        $this->makePage()->render();
+        $dataQualityHtml = ob_get_clean();
+
+        $this->assertStringContainsString( 'notice-error', $directoryOutageHtml );
+        $this->assertStringContainsString(
+            'directorio de jugadores',
+            $directoryOutageHtml,
+            'A systemic directory outage must say so in the notice copy.'
+        );
+        $this->assertStringNotContainsString(
+            'directorio de jugadores',
+            $dataQualityHtml,
+            'A plain data-quality failure (zero directory errors) must not claim the directory was unavailable.'
+        );
+    }
 }

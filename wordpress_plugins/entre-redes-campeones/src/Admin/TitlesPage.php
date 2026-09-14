@@ -62,7 +62,19 @@ class TitlesPage {
                 $notice = $this->handleDelete( $tituloId ) ? 'eliminado' : 'error_eliminar';
             } else {
                 $result = $this->handleRevalidate( $tituloId );
-                $notice = sprintf( 'revalidado_%d_%d', $result->succeeded, $result->total );
+                // Item 3 (round 2): carry the directory-error count too, not
+                // just succeeded/total — otherwise a directory-wide outage
+                // (every failure directory-side) and N rows with plain
+                // data-quality problems produce the exact same
+                // succeeded/total pair and render identically, hiding the
+                // distinction RevalidationResult::$directoryErrorRowIds
+                // exists to preserve.
+                $notice = sprintf(
+                    'revalidado_%d_%d_%d',
+                    $result->succeeded,
+                    $result->total,
+                    count( $result->directoryErrorRowIds )
+                );
             }
         } catch ( PlayerDirectoryQueryException $e ) {
             // Neither exception is caught anywhere else in this class.
@@ -192,22 +204,44 @@ class TitlesPage {
             // and how many were attempted — a bare count let a 1-of-1
             // failure render as a green "0 fila(s)" success, indistinguishable
             // from a genuine 0-of-0 no-op.
-            $parts     = explode( '_', substr( $key, strlen( 'revalidado_' ) ), 2 );
-            $succeeded = (int) ( $parts[0] ?? 0 );
-            $total     = (int) ( $parts[1] ?? 0 );
+            //
+            // Item 3 (round 2): a third, optional segment carries how many
+            // of the failures were directory-side (RevalidationResult::
+            // $directoryErrorRowIds). Parsed with a default of 0 so an older
+            // 2-segment key (or a hand-typed one) still renders the plain
+            // message below instead of erroring.
+            $parts           = explode( '_', substr( $key, strlen( 'revalidado_' ) ), 3 );
+            $succeeded       = (int) ( $parts[0] ?? 0 );
+            $total           = (int) ( $parts[1] ?? 0 );
+            $directoryErrors = (int) ( $parts[2] ?? 0 );
 
             $type = 'success';
             if ( $total > 0 && $succeeded < $total ) {
                 $type = 0 === $succeeded ? 'error' : 'warning';
             }
 
-            return [
-                'message' => sprintf(
+            if ( $directoryErrors > 0 ) {
+                // A systemic directory outage must not read identically to
+                // N rows simply having bad names — tell the operator WHERE
+                // to look (an external dependency, not their own data).
+                $message = sprintf(
+                    /* translators: 1: succeeded rows, 2: attempted rows, 3: rows that could not be evaluated because the player directory itself was unreachable */
+                    __( 'Revalidación: %1$d de %2$d fila(s) del plantel fueron re-evaluadas correctamente. %3$d fila(s) no pudieron evaluarse porque el directorio de jugadores no estaba disponible — reintentá más tarde.', 'entre-redes-campeones' ),
+                    $succeeded,
+                    $total,
+                    $directoryErrors
+                );
+            } else {
+                $message = sprintf(
                     /* translators: 1: number of squad rows successfully re-evaluated, 2: number of squad rows attempted */
                     __( 'Revalidación: %1$d de %2$d fila(s) del plantel fueron re-evaluadas correctamente.', 'entre-redes-campeones' ),
                     $succeeded,
                     $total
-                ),
+                );
+            }
+
+            return [
+                'message' => $message,
                 'type'    => $type,
             ];
         }

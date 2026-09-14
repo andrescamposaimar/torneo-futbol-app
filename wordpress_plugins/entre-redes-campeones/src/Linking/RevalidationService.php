@@ -77,6 +77,25 @@ final class RevalidationService {
             }
         }
 
+        if ( [] !== $directoryErrorIds ) {
+            // Item 3 (round 2): $directoryErrorRowIds was computed and
+            // returned correctly, but nothing ever read it — a systemic
+            // directory outage (every failure directory-side) rendered
+            // identically to N rows with plain data-quality problems, with
+            // no aggregate trace of which kind of failure actually happened.
+            // One summary line here, in addition to the per-row lines
+            // above, so an operator or a log search can tell "the directory
+            // was down for this whole pass" apart from "these rows just
+            // have bad names" without correlating dozens of per-row lines.
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: revalidation for titulo_id=%d: %d of %d attempted row(s) failed because the player directory was unreachable (plantel ids: %s).',
+                $tituloId,
+                count( $directoryErrorIds ),
+                count( $entries ),
+                implode( ',', $directoryErrorIds )
+            ) );
+        }
+
         return new RevalidationResult( $succeeded, count( $entries ), $directoryErrorIds );
     }
 }

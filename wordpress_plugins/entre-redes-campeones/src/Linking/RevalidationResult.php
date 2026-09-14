@@ -18,8 +18,12 @@ namespace EntreRedes\Campeones\Linking;
  *
  * $directoryErrorRowIds (item 6) are the ids of rows whose resolution threw
  * PlayerDirectoryQueryException — a distinct failure mode from a plain
- * applyResolution() write failure, kept visible instead of silently folded
- * into "did not succeed" with no way to tell which rows broke and why.
+ * applyResolution() write failure. TitlesPage::resolveNotice() reads
+ * count($directoryErrorRowIds) (round-2 item 3 fix) and folds it into the
+ * revalidado_{succeeded}_{total}_{directoryErrors} notice, so a systemic
+ * directory outage renders a visibly different message from N rows that
+ * simply have bad names — this field is genuinely surfaced to the
+ * operator, not merely computed and returned.
  */
 final class RevalidationResult {
 
