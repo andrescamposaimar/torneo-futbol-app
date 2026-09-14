@@ -285,6 +285,7 @@ class TitleEditorPage {
 
         return match ( true ) {
             ! $result->rowSaved => 'error_fila',
+            $result->directoryUnavailable => 'fila_actualizada_sin_vinculo_directorio',
             ! $result->linkResolved => 'fila_actualizada_sin_vinculo',
             default => 'fila_actualizada',
         };
@@ -463,6 +464,7 @@ class TitleEditorPage {
             'fila_agregada_sin_vinculo_directorio' => [ 'message' => __( 'El jugador fue agregado al plantel, pero no se pudo evaluar su vínculo porque el directorio de jugadores no está disponible en este momento. Vinculalo manualmente o reintentá más tarde.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_actualizada' => [ 'message' => __( 'La fila fue actualizada.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'fila_actualizada_sin_vinculo' => [ 'message' => __( 'La fila fue actualizada, pero no se pudo re-evaluar su vínculo. Usá "Revalidar" o vinculalo manualmente.', 'entre-redes-campeones' ), 'type' => 'warning' ],
+            'fila_actualizada_sin_vinculo_directorio' => [ 'message' => __( 'La fila fue actualizada, pero no se pudo re-evaluar su vínculo porque el directorio de jugadores no está disponible en este momento. Vinculalo manualmente o reintentá más tarde.', 'entre-redes-campeones' ), 'type' => 'warning' ],
             'fila_eliminada'   => [ 'message' => __( 'La fila fue eliminada del plantel.', 'entre-redes-campeones' ), 'type' => 'success' ],
             'error_fila'       => [ 'message' => __( 'Error al guardar la fila. Intentá nuevamente.', 'entre-redes-campeones' ), 'type' => 'error' ],
             'error_nombre_requerido' => [ 'message' => __( 'Ingresá un nombre de jugador válido.', 'entre-redes-campeones' ), 'type' => 'error' ],
@@ -566,6 +568,13 @@ class TitleEditorPage {
      * succeeds but the follow-up re-resolution then fails, the edit DID
      * land — reporting the same generic failure a fully-failed edit gets
      * would tell the operator to retry an edit that already happened.
+     *
+     * A PlayerDirectoryQueryException from the re-resolution below (CRITICAL
+     * round-2 fix, same defect as handleAddRow()'s BLOCKER) is caught HERE,
+     * not left to propagate to handlePost()'s outer catch — the field edit
+     * already committed, so that generic "Intentá nuevamente en unos
+     * minutos" copy would tell the operator to wait as though nothing had
+     * happened, when the edit in fact landed.
      */
     private function handleEditRow( int $rowId, string $jugadorNombre, bool $esCapitan, int $orden ): RowSaveResult {
         $entry = $this->squads->find( $rowId );
@@ -596,8 +605,18 @@ class TitleEditorPage {
             return RowSaveResult::saved( $rowId, true );
         }
 
-        $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );
-        $linkResolved = $this->linkWriter->applyResolution( $rowId, $resolution );
+        try {
+            $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );
+            $linkResolved = $this->linkWriter->applyResolution( $rowId, $resolution );
+        } catch ( PlayerDirectoryQueryException $e ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: editar_fila saved plantel_id=%d (titulo_id=%d) but could not re-evaluate its link — the player directory is unavailable. %s',
+                $rowId,
+                $entry->tituloId,
+                $e->getMessage()
+            ) );
+            return RowSaveResult::savedDirectoryUnavailable( $rowId );
+        }
 
         return RowSaveResult::saved( $rowId, $linkResolved );
     }

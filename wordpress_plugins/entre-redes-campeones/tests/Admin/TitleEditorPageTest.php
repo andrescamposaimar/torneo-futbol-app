@@ -738,6 +738,46 @@ class TitleEditorPageTest extends TestCase {
         }
     }
 
+    public function test_handle_post_editar_fila_catches_a_directory_query_exception(): void {
+        // Same defect as agregar_fila's, CRITICAL rather than BLOCKER
+        // because there is no duplicate-row risk here — but the field
+        // update DID commit before the re-resolution threw, so telling the
+        // operator to "wait a few minutes" as though nothing happened is
+        // still a lie about what persisted.
+        $GLOBALS['_campeones_test_current_user_can'] = true;
+
+        $id = $this->squads->insert( new SquadEntry( $this->tituloId, 0, 'ZUBIZARRETA, F.' ) );
+
+        $throwingDirectory = new ThrowingPlayerDirectory();
+        $throwingResolver  = new LinkResolver( $throwingDirectory );
+        $page              = new TestableTitleEditorPage( $this->titles, $this->squads, $throwingResolver, new LinkWriteService( $this->squads, $throwingDirectory ) );
+
+        $_POST['campeones_editor_action'] = 'editar_fila';
+        $_POST['titulo_id']               = (string) $this->tituloId;
+        $_POST['plantel_id']              = (string) $id;
+        $_POST['jugador_nombre']          = 'BASSO, A.';
+        $_POST['orden']                   = '0';
+        $_POST['campeones_link_nonce']    = wp_create_nonce( 'campeones_link_' . $id );
+
+        $this->expectException( RedirectTerminatedException::class );
+        try {
+            $page->handlePost();
+        } finally {
+            $this->assertStringContainsString(
+                'campeones_notice=fila_actualizada_sin_vinculo_directorio',
+                (string) $GLOBALS['_campeones_test_last_redirect'],
+                'A directory query failure on an edit must report that the edit WAS saved, never the generic "try again" error_directorio notice.'
+            );
+            $this->assertStringNotContainsString(
+                'campeones_notice=error_directorio',
+                (string) $GLOBALS['_campeones_test_last_redirect']
+            );
+            // The field edit already committed before the resolver threw.
+            $row = $this->squads->find( $id );
+            $this->assertSame( 'BASSO, A.', $row->jugadorNombre, 'The field edit must still have landed even though re-resolution could not run.' );
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Item 1 — no handler verified a squad row belongs to the title being
     // edited. The per-row nonce is scoped to the ROW (campeones_link_{id}),
