@@ -41,6 +41,8 @@ class HistoryControllerTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_plantel" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         delete_transient( 'campeones_historia_v2' );
+        $GLOBALS['_campeones_test_force_transient_write_failure'] = false;
+        $GLOBALS['_campeones_test_error_log'] = [];
     }
 
     private function makeController( ?FakePlayerPhotoProvider $photos = null ): array {
@@ -150,5 +152,39 @@ class HistoryControllerTest extends TestCase {
         $second = $controller->handle( new \WP_REST_Request() );
 
         $this->assertCount( 1, $second->get_data()['titulos'], 'A cached response must not pick up a title created after it was cached.' );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 3 (CRITICAL) — set_transient() returning false (payload too large,
+    // a rejected write, an object-cache drop-in failure) went unchecked. The
+    // response must still be correct, but the failure must be logged instead
+    // of silently never populating the cache.
+    // -------------------------------------------------------------------------
+
+    public function test_a_failed_cache_write_still_returns_the_correct_payload(): void {
+        $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+        $GLOBALS['_campeones_test_force_transient_write_failure'] = true;
+
+        [ $controller ] = $this->makeController();
+        $response = $controller->handle( new \WP_REST_Request() );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertCount( 1, $response->get_data()['titulos'], 'A failed cache write must not affect the response payload — it is still built from the DB.' );
+    }
+
+    public function test_a_failed_cache_write_is_logged(): void {
+        $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+
+        $GLOBALS['_campeones_test_force_transient_write_failure'] = true;
+        $GLOBALS['_campeones_test_error_log'] = [];
+
+        [ $controller ] = $this->makeController();
+        $controller->handle( new \WP_REST_Request() );
+
+        $this->assertNotEmpty(
+            $GLOBALS['_campeones_test_error_log'],
+            'A failed cache write must be logged — otherwise the cache silently never populates and every request re-runs the full rebuild indefinitely, with nothing in any log saying when it started.'
+        );
     }
 }

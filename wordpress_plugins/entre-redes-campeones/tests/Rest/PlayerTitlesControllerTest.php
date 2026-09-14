@@ -46,6 +46,8 @@ class PlayerTitlesControllerTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}campeones_titulo" );
         delete_transient( 'campeones_titulos_jugador_v1_5078' );
         delete_transient( 'campeones_titulos_jugador_v1_999999' );
+        $GLOBALS['_campeones_test_force_transient_write_failure'] = false;
+        $GLOBALS['_campeones_test_error_log'] = [];
     }
 
     private function request( int $jugadorId ): \WP_REST_Request {
@@ -178,6 +180,40 @@ class PlayerTitlesControllerTest extends TestCase {
         $this->assertFalse(
             get_transient( 'campeones_titulos_jugador_v1_5078' ),
             'A directory query failure must not result in a cached response.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Item 3 (CRITICAL) — set_transient() returning false went unchecked.
+    // The response must still be correct, but the failure must be logged.
+    // -------------------------------------------------------------------------
+
+    public function test_a_failed_cache_write_still_returns_the_correct_payload(): void {
+        $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        $GLOBALS['_campeones_test_force_transient_write_failure'] = true;
+
+        $controller = new PlayerTitlesController( $this->squads, $this->directory );
+        $response   = $controller->handle( $this->request( 5078 ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame( 1, $response->get_data()['total'], 'A failed cache write must not affect the response payload.' );
+    }
+
+    public function test_a_failed_cache_write_is_logged(): void {
+        $title = $this->titles->createOrConflict( 2016, 'A', 'campeon', 'CHELSEA' );
+        $this->squads->insert( new SquadEntry( $title->id, 0, 'BASSO, A.', false, 'auto', 5078 ) );
+
+        $GLOBALS['_campeones_test_force_transient_write_failure'] = true;
+        $GLOBALS['_campeones_test_error_log'] = [];
+
+        $controller = new PlayerTitlesController( $this->squads, $this->directory );
+        $controller->handle( $this->request( 5078 ) );
+
+        $this->assertNotEmpty(
+            $GLOBALS['_campeones_test_error_log'],
+            'A failed cache write must be logged, distinguishing it from a plain cache miss.'
         );
     }
 }

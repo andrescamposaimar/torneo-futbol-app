@@ -429,12 +429,23 @@ if ( ! defined( 'DAY_IN_SECONDS' ) ) {
 
 if ( ! function_exists( 'get_transient' ) ) {
     $GLOBALS['_campeones_test_transients'] = [];
+    $GLOBALS['_campeones_test_force_transient_write_failure'] = false;
 
     function get_transient( string $key ): mixed {
         return $GLOBALS['_campeones_test_transients'][ $key ] ?? false;
     }
 
+    /**
+     * $GLOBALS['_campeones_test_force_transient_write_failure'] lets a test
+     * simulate set_transient() returning false — e.g. a payload too large
+     * for max_allowed_packet, a rejected write, an object-cache drop-in
+     * failure — without needing a real storage backend to actually reject
+     * anything (item 3).
+     */
     function set_transient( string $key, mixed $value, int $expiration = 0 ): bool {
+        if ( $GLOBALS['_campeones_test_force_transient_write_failure'] ?? false ) {
+            return false;
+        }
         $GLOBALS['_campeones_test_transients'][ $key ] = $value;
         return true;
     }

@@ -72,7 +72,19 @@ final class HistoryController {
             ),
         ];
 
-        set_transient( self::CACHE_KEY, $payload, self::CACHE_TTL );
+        // Item 3 (CRITICAL): set_transient() returns false on failure
+        // (payload too large for max_allowed_packet, a rejected write, an
+        // object-cache drop-in) and that was never checked. The response is
+        // still correct either way (built from the DB, not from the
+        // transient) — but a failed write must be logged, distinguishing it
+        // from a plain cache miss, or the cache silently never populates and
+        // every request re-runs the full rebuild indefinitely.
+        if ( ! set_transient( self::CACHE_KEY, $payload, self::CACHE_TTL ) ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to write the %s cache transient — every request will rebuild the full history until this succeeds. The response served here is still correct.',
+                self::CACHE_KEY
+            ) );
+        }
 
         return new \WP_REST_Response( $payload, 200 );
     }

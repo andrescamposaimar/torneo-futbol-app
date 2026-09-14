@@ -79,8 +79,16 @@ final class PlayerTitlesController {
             'titulos'    => $titulos,
         ];
 
-        if ( $playerExists ) {
-            set_transient( $cacheKey, $payload, self::CACHE_TTL );
+        // Item 3 (CRITICAL): set_transient() returning false went unchecked
+        // here too — same reasoning as HistoryController's fix above. Only
+        // logged when a write was actually attempted (a skipped write for a
+        // non-existent player is a deliberate no-op, not a failure).
+        if ( $playerExists && ! set_transient( $cacheKey, $payload, self::CACHE_TTL ) ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: failed to write the %s cache transient for jugador_id=%d — every request for this player will rebuild until this succeeds. The response served here is still correct.',
+                self::CACHE_PREFIX,
+                $jugadorId
+            ) );
         }
 
         return new \WP_REST_Response( $payload, 200 );
