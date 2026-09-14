@@ -104,7 +104,18 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
       try {
         final data = await jugadorFuture;
         jugador = Jugador.fromJson(data);
-      } catch (_) {}
+      } catch (e, st) {
+        // Keep rendering from the constructor-supplied stub (widget.player)
+        // on failure — but never silently: a squad row from the history
+        // screen can carry a jugador_id up to 17 years old, far more likely
+        // to point at a deleted or merged player record than any existing
+        // caller, so a 404 here needs a trace instead of vanishing.
+        await reportNonFatal(
+          e,
+          st,
+          'PlayerDetailScreen: getJugadorPorId failed for player ${jugador.id}',
+        );
+      }
       temporadas = jugador.temporadas;
 
       final res = await partidosFuture;

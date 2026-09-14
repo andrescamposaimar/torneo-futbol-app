@@ -96,6 +96,32 @@ class _UnimplementedTitulosApiService implements IApiService {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
+/// getJugadorPorId throws; every other call behaves like [_StubApiService]
+/// with an empty títulos list. Used to prove the fetch failure is routed
+/// through [reportNonFatal] (fix 8) instead of a bare `catch (_) {}`, while
+/// the profile still renders from the constructor-supplied stub.
+class _ThrowingJugadorApiService implements IApiService {
+  @override
+  Future<Map<String, dynamic>> getJugadorPorId(int id) async {
+    throw Exception('jugador endpoint down');
+  }
+
+  @override
+  Future<Map<String, dynamic>> getPartidosPorJugador(
+    int jugadorId, {
+    int? page,
+    int? perPage,
+  }) async =>
+      {'items': [], 'current_page': 1, 'total_pages': 0};
+
+  @override
+  Future<Map<String, dynamic>> getTitulosDeJugador(int jugadorId) async =>
+      {'jugador_id': jugadorId, 'total': 0, 'titulos': []};
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
 /// A titles fetch that never resolves — the campeones endpoint hanging, or
 /// a very slow network. Proves the fetch runs concurrently with the rest of
 /// the profile instead of gating it: awaiting this future before
@@ -573,6 +599,71 @@ void main() {
           isTrue,
           reason: 'expected reportNonFatal\'s debugPrint fallback to fire '
               'with the títulos-fetch failure reason; got: $messages',
+        );
+      } finally {
+        debugPrint = originalDebugPrint;
+      }
+    });
+  });
+
+  group('PlayerDetailScreen · getJugadorPorId failure reporting (fix 8)', () {
+    testWidgets(
+        'a getJugadorPorId failure is reported through the shared non-fatal '
+        'error path, and the profile still renders from the widget.player '
+        'stub', (tester) async {
+      final messages = <String>[];
+      final originalDebugPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) messages.add(message);
+      };
+
+      try {
+        tester.view.physicalSize = const Size(320, 568);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              apiServiceProvider
+                  .overrideWithValue(_ThrowingJugadorApiService()),
+              cacheServiceProvider.overrideWithValue(_NoopCacheService()),
+            ],
+            child: MaterialApp(
+              home: PlayerDetailScreen(player: const {
+                'id': 4321,
+                'title': {'rendered': 'Juan Pérez'},
+                'equipo': 'Sin equipo',
+                'escudo': '',
+                'temporadas': [],
+                'metrics': {},
+              }),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        // Renders from the constructor-supplied stub — 'posicion' is NOT
+        // present on it (only on the real getJugadorPorId payload), so its
+        // absence proves the profile never got a completed round-trip and
+        // fell back to the stub, exactly as before this fix.
+        expect(find.text('Juan Pérez'), findsWidgets);
+
+        // No Firebase app is initialized in the widget-test environment,
+        // so reportNonFatal()'s own internal try/catch takes its
+        // debugPrint fallback branch — the same seam the títulos-fetch
+        // failure test above uses.
+        expect(
+          messages.any(
+            (m) => m.contains(
+              'PlayerDetailScreen: getJugadorPorId failed for player 4321',
+            ),
+          ),
+          isTrue,
+          reason: 'expected reportNonFatal\'s debugPrint fallback to fire '
+              'with the getJugadorPorId failure reason instead of the '
+              'error being silently swallowed; got: $messages',
         );
       } finally {
         debugPrint = originalDebugPrint;
