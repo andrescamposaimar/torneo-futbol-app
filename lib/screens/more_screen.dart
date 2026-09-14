@@ -11,6 +11,7 @@ import '../utils/url_launcher_helper.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/prode_identity_card.dart';
 import 'anuarios_screen.dart';
+import 'campeones_screen.dart';
 import 'listas_screen.dart';
 import 'prode/prode_auth_gate.dart';
 import 'scorers_screen.dart';
@@ -216,6 +217,31 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             ],
           ),
           const SizedBox(height: 12),
+
+          // 3b. Historia (Copa Chaminade) — gated on the tenant flag exactly
+          // like the Prode section above. APP-4: for a tenant with the flag
+          // on, this entry is always visible regardless of whether any year
+          // has loaded yet — that is a data-state concern the empty state
+          // (APP-6) inside CampeonesScreen handles, not this gate.
+          if (features.campeones) ...[
+            _SectionCard(
+              title: 'Historia',
+              children: [
+                _tile(
+                  context,
+                  'Copa Chaminade',
+                  Icons.emoji_events,
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CampeonesScreen(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // 4. Gestión Torneo (card hidden when no tiles are visible — AC-28, AC-29)
           if (docs.solicitudCambioUrl != null || features.waitingLists) ...[
