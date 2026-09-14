@@ -48,6 +48,15 @@ class _CampeonesScreenState extends ConsumerState<CampeonesScreen> {
   /// Index of the year currently open, or null if every card is collapsed.
   int? _openIndex;
 
+  /// Guards [_load] against reentrancy. Distinct from [_isLoading] (which
+  /// starts `true` for the very first, initState-triggered call and drives
+  /// the spinner) — a `_isLoading`-based guard would reject that first call
+  /// too. A double-tap on "Reintentar" fires `_load()` twice before the
+  /// first frame removes the button; without this guard both runs would
+  /// call [_disposeControllers] and reassign [_controllers] concurrently
+  /// (last write wins) and report the same failure to Crashlytics twice.
+  bool _isFetching = false;
+
   @override
   void initState() {
     super.initState();
@@ -76,45 +85,51 @@ class _CampeonesScreenState extends ConsumerState<CampeonesScreen> {
   /// but the failure is always reported via [reportNonFatal] first, exactly
   /// once, never through a bare `catch (_) {}`.
   Future<void> _load() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    final cache = ref.read(cacheServiceProvider);
-    final api = ref.read(apiServiceProvider);
-
+    if (_isFetching) return;
+    _isFetching = true;
     try {
-      final titulos = await _fetchTitulos(api, cache);
-      if (!mounted) return;
-      _applyLoaded(titulos);
-    } catch (e, st) {
-      await reportNonFatal(
-        e,
-        st,
-        'CampeonesScreen: getCampeonesHistoria failed',
-      );
-
-      // A down/absent endpoint (or a corrupt fresh cache) still degrades
-      // gracefully if a stale cached copy exists.
-      try {
-        final stale = await cache.getCachedCampeonesHistoriaIgnoringTtl();
-        if (stale != null) {
-          final titulos = _parseTitulos(stale);
-          if (!mounted) return;
-          _applyLoaded(titulos);
-          return;
-        }
-      } catch (_) {
-        // Falls through to the error state below — the stale copy is
-        // itself unusable.
-      }
-
-      if (!mounted) return;
       setState(() {
-        _error = e;
-        _isLoading = false;
+        _isLoading = true;
+        _error = null;
       });
+
+      final cache = ref.read(cacheServiceProvider);
+      final api = ref.read(apiServiceProvider);
+
+      try {
+        final titulos = await _fetchTitulos(api, cache);
+        if (!mounted) return;
+        _applyLoaded(titulos);
+      } catch (e, st) {
+        await reportNonFatal(
+          e,
+          st,
+          'CampeonesScreen: getCampeonesHistoria failed',
+        );
+
+        // A down/absent endpoint (or a corrupt fresh cache) still degrades
+        // gracefully if a stale cached copy exists.
+        try {
+          final stale = await cache.getCachedCampeonesHistoriaIgnoringTtl();
+          if (stale != null) {
+            final titulos = _parseTitulos(stale);
+            if (!mounted) return;
+            _applyLoaded(titulos);
+            return;
+          }
+        } catch (_) {
+          // Falls through to the error state below — the stale copy is
+          // itself unusable.
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _error = e;
+          _isLoading = false;
+        });
+      }
+    } finally {
+      _isFetching = false;
     }
   }
 
