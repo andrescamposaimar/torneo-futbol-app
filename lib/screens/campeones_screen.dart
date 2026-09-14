@@ -11,8 +11,7 @@ import '../widgets/year_pill.dart';
 import 'player_detail_screen.dart';
 
 /// Copa Chaminade championship history: every year the tournament was
-/// played, its champion team, and the squad that won it (design §8, slice
-/// 9a+9b).
+/// played, its champion team, and the squad that won it (slice 9a+9b).
 ///
 /// Pushed with `MaterialPageRoute<void>` — this app has no named routes.
 class CampeonesScreen extends ConsumerStatefulWidget {
@@ -306,18 +305,21 @@ class _CampeonesScreenState extends ConsumerState<CampeonesScreen> {
     );
   }
 
-  /// One squad member row (ADR-C3). No avatar in this slice (9a+9b) —
-  /// avatars are slice 9c's scope; [CampeonPlantelEntry.fotoUrl] is parsed
-  /// and carried on the model already so that slice does not need to touch
-  /// it again.
+  /// One squad member row. No avatar in this slice (9a+9b) — avatars are
+  /// slice 9c's scope; [CampeonPlantelEntry.fotoUrl] is parsed and carried
+  /// on the model already so that slice does not need to touch it again.
   ///
   /// APP-7 / APP-5: a linked entry (`jugadorId != null`) is an [InkWell]
   /// with a trailing chevron; an unlinked entry is plain, non-tappable text
   /// with no ripple and no chevron — but the chevron's width is still
   /// reserved so both kinds of row have identical height and the names stay
   /// aligned down the card. The captain marker (`(C)`) stays here even
-  /// though it was removed from the player-detail titles panel — that is a
-  /// different surface (this design's ADR-C3 explicitly keeps it).
+  /// though it was removed from the player-detail titles panel: that panel
+  /// shows one row per título won by the single player being viewed, so a
+  /// captain badge there could only ever mark that same player and adds no
+  /// information. This screen instead lists every member of the squad for
+  /// the year, where the captain marker is the only way to tell who among
+  /// many names wore the armband.
   Widget _plantelRow(BuildContext context, CampeonPlantelEntry entry) {
     final primary = Theme.of(context).colorScheme.primary;
     final esVinculado = entry.jugadorId != null;
