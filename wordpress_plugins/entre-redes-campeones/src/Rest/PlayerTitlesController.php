@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace EntreRedes\Campeones\Rest;
 
+use EntreRedes\Campeones\Linking\PlayerDirectoryInterface;
+use EntreRedes\Campeones\Linking\PlayerDirectoryQueryException;
 use EntreRedes\Campeones\Titles\SquadRepository;
 
 /**
@@ -18,7 +20,10 @@ final class PlayerTitlesController {
     private const CACHE_PREFIX = 'campeones_titulos_jugador_v1_';
     private const CACHE_TTL    = 30 * DAY_IN_SECONDS;
 
-    public function __construct( private readonly SquadRepository $squads ) {
+    public function __construct(
+        private readonly SquadRepository $squads,
+        private readonly PlayerDirectoryInterface $directory
+    ) {
     }
 
     public function register_routes(): void {
@@ -42,21 +47,41 @@ final class PlayerTitlesController {
             return new \WP_REST_Response( $cached, 200 );
         }
 
-        $rows    = $this->squads->findTitleSummariesByJugadorId( $jugadorId );
+        // Item 1 (CRITICAL): an id with no matching registered player must
+        // never get a transient written for it — an anonymous caller
+        // walking every integer would otherwise grow wp_options without
+        // bound (two rows per miss, 30-day TTL). A directory outage must
+        // not turn this public, unauthenticated endpoint into a fatal error
+        // either (the same reasoning as
+        // TitleEditorPage::resolvePlayerNames()) — treat "cannot confirm"
+        // the same as "does not exist" for caching purposes: the response
+        // is still served correctly, it is simply not cached.
+        try {
+            $playerExists = $this->directory->existsById( $jugadorId );
+        } catch ( PlayerDirectoryQueryException $e ) {
+            error_log( sprintf( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+                'entre-redes-campeones: could not confirm jugador_id=%d against the player directory before caching campeones/jugador/titulos — the player directory is unavailable. %s',
+                $jugadorId,
+                $e->getMessage()
+            ) );
+            $playerExists = false;
+        }
+
+        $rows    = $playerExists ? $this->squads->findTitleSummariesByJugadorId( $jugadorId ) : [];
         $titulos = array_map( [ TitleShaper::class, 'shapePlayerTitulo' ], $rows );
 
         $payload = [
             'jugador_id' => $jugadorId,
             // API-4: a player with zero linked titles produces this same
             // shape with total = 0 and titulos = [] — HTTP 200, never a 404
-            // or an error. There is no existence check against the player
-            // directory here; any id, real or not, simply yields whatever
-            // rows reference it.
+            // or an error.
             'total'      => count( $titulos ),
             'titulos'    => $titulos,
         ];
 
-        set_transient( $cacheKey, $payload, self::CACHE_TTL );
+        if ( $playerExists ) {
+            set_transient( $cacheKey, $payload, self::CACHE_TTL );
+        }
 
         return new \WP_REST_Response( $payload, 200 );
     }

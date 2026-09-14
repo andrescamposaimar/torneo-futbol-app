@@ -51,13 +51,14 @@ final class Plugin {
         add_action( 'rest_api_init', static function (): void {
             global $wpdb;
 
-            $titles = new TitleRepository( $wpdb );
-            $squads = new SquadRepository( $wpdb );
-            $photos = new WpPlayerPhotoProvider( $wpdb );
+            $titles    = new TitleRepository( $wpdb );
+            $squads    = new SquadRepository( $wpdb );
+            $photos    = new WpPlayerPhotoProvider( $wpdb );
+            $directory = new WpPlayerDirectory( $wpdb );
 
             $restController = new RestController(
                 new HistoryController( $titles, $squads, $photos ),
-                new PlayerTitlesController( $squads )
+                new PlayerTitlesController( $squads, $directory )
             );
 
             $restController->register_routes();

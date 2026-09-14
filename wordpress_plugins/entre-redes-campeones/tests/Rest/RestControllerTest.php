@@ -8,6 +8,7 @@ use EntreRedes\Campeones\Migrations\InitialSchema;
 use EntreRedes\Campeones\Rest\HistoryController;
 use EntreRedes\Campeones\Rest\PlayerTitlesController;
 use EntreRedes\Campeones\Rest\RestController;
+use EntreRedes\Campeones\Tests\Linking\FakePlayerDirectory;
 use EntreRedes\Campeones\Titles\SquadRepository;
 use EntreRedes\Campeones\Titles\TitleRepository;
 use PHPUnit\Framework\TestCase;
@@ -26,13 +27,14 @@ class RestControllerTest extends TestCase {
 
     public function test_register_routes_runs_without_error_with_both_controllers_present(): void {
         global $wpdb;
-        $titles  = new TitleRepository( $wpdb );
-        $squads  = new SquadRepository( $wpdb );
-        $photos  = new FakePlayerPhotoProvider();
+        $titles    = new TitleRepository( $wpdb );
+        $squads    = new SquadRepository( $wpdb );
+        $photos    = new FakePlayerPhotoProvider();
+        $directory = new FakePlayerDirectory( [] );
 
         $controller = new RestController(
             new HistoryController( $titles, $squads, $photos ),
-            new PlayerTitlesController( $squads )
+            new PlayerTitlesController( $squads, $directory )
         );
 
         $controller->register_routes();
