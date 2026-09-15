@@ -8,6 +8,7 @@ import '../utils/date_utils.dart';
 import '../utils/text_utils.dart';
 import '../widgets/zocalo_publicitario.dart';
 import '../widgets/full_field_painter.dart';
+import '../widgets/loading_seccion.dart';
 import '../widgets/player_pod.dart';
 import 'player_detail_screen.dart';
 
@@ -485,9 +486,9 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   }
 
   Widget _buildEstadisticas() {
-    
+
   if (goleadores == null) {
-    return const LoadingSeccionConAd(
+    return const LoadingSeccion(
       texto: 'Cargando estadísticas...',
     );
   }
@@ -844,7 +845,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
 
 Widget _buildAlineaciones() {
   if (goleadores == null) {
-    return const LoadingSeccionConAd(
+    return const LoadingSeccion(
       texto: 'Cargando estadísticas...',
     );
   }
@@ -1185,7 +1186,7 @@ Widget _buildAlineaciones() {
                 _esFuturo
                     ? _buildPendiente()
                     : goleadores == null && isLoading
-                        ? const LoadingSeccionConAd(
+                        ? const LoadingSeccion(
                             texto: 'Cargando estadísticas...',
                           )
                         : SingleChildScrollView(
@@ -1195,7 +1196,7 @@ Widget _buildAlineaciones() {
                 _esFuturo
                     ? _buildPendiente()
                     : goleadores == null && isLoading
-                        ? const LoadingSeccionConAd(
+                        ? const LoadingSeccion(
                             texto: 'Cargando alineaciones...',
                           )
                         : SingleChildScrollView(
@@ -1217,26 +1218,3 @@ Widget _buildAlineaciones() {
     );
   }
 }
-
-  class LoadingSeccionConAd extends StatelessWidget {
-    final String texto;
-
-    const LoadingSeccionConAd({
-      super.key,
-      required this.texto,
-    });
-
-    @override
-    Widget build(BuildContext context) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 12),
-            Text(texto, style: const TextStyle(fontSize: 14)),
-          ],
-        ),
-      );
-    }
-  }
