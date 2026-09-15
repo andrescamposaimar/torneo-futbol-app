@@ -108,31 +108,8 @@ class ApiService implements IApiService {
   }
 
   @override
-  Future<List<dynamic>> getLigas({int? temporada}) async {
-    final queryParams = <String, String>{};
-    if (temporada != null) queryParams['temporada'] = temporada.toString();
-    return _fetchAllPages('$baseUrl/ligas', queryParams: queryParams);
-  }
-
-  @override
   Future<List<dynamic>> getTemporadas() async {
     return _fetchAllPages('$baseUrl/temporadas');
-  }
-
-  @override
-  Future<List<dynamic>> getZonas({int? liga}) async {
-    final queryParams = <String, String>{};
-    if (liga != null) queryParams['liga'] = liga.toString();
-
-    final uri = Uri.parse('$baseUrl/zonas').replace(queryParameters: queryParams);
-    final res = await http.get(uri).timeout(_requestTimeout);
-    _logRequest(uri, res);
-
-    if (res.statusCode == 200) {
-      return json.decode(res.body);
-    } else {
-      throw Exception('Error al obtener zonas');
-    }
   }
 
   @override
@@ -243,20 +220,6 @@ class ApiService implements IApiService {
     } else {
       throw Exception('Error al obtener jugadores');
     }
-  }
-
-  @override
-  Future<List<dynamic>> getJugadores({
-    int page = 1,
-    int perPage = 20,
-    int? equipoId,
-  }) async {
-    final res = await getJugadoresRaw(
-      page: page,
-      perPage: perPage,
-      equipoId: equipoId,
-    );
-    return res['items'] ?? [];
   }
 
   @override
@@ -378,12 +341,6 @@ class ApiService implements IApiService {
   @override
   Future<List<dynamic>> getJugadoresTemporadaActual(int temporadaId, {int page = 1, int perPage = 20}) async {
     final res = await getJugadoresRaw(temporada: temporadaId, page: page, perPage: perPage);
-    return res['items'] ?? [];
-  }
-
-  @override
-  Future<List<dynamic>> getJugadoresPorEquipoId(int equipoId) async {
-    final res = await getJugadoresRaw(equipoId: equipoId);
     return res['items'] ?? [];
   }
 

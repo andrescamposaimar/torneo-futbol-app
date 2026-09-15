@@ -13,11 +13,7 @@ abstract class IApiService {
     int? perPage,
   });
 
-  Future<List<dynamic>> getLigas({int? temporada});
-
   Future<List<dynamic>> getTemporadas();
-
-  Future<List<dynamic>> getZonas({int? liga});
 
   Future<List<dynamic>> getEquipos({int? liga, int? temporada});
 
@@ -37,12 +33,6 @@ abstract class IApiService {
     String? search,
     int? page,
     int? perPage,
-  });
-
-  Future<List<dynamic>> getJugadores({
-    int page = 1,
-    int perPage = 20,
-    int? equipoId,
   });
 
   Future<Map<String, dynamic>> getPartidosPorJugador(
@@ -69,8 +59,6 @@ abstract class IApiService {
     int page = 1,
     int perPage = 20,
   });
-
-  Future<List<dynamic>> getJugadoresPorEquipoId(int equipoId);
 
   Future<List<dynamic>> getPartidosPorEquipoId(int equipoId);
 

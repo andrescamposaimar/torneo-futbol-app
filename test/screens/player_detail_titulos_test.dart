@@ -380,13 +380,16 @@ void main() {
       // unrelated reason, regardless of what the panel itself renders.
       //
       // esCapitan is parsed onto JugadorTitulo (see campeon_titulo.dart) but
-      // deliberately never read by this screen — a future slice (the
-      // champion-squad history screen) reads it instead. There is therefore
-      // no '(C)' or similar captain marker produced anywhere in this
-      // screen's code for this test to assert the absence of; a
-      // `findsNothing` on a string that is never emitted regardless of
-      // whether the captain flag is honoured would pass for the wrong
-      // reason, so no such assertion is made here.
+      // has no reader and never will: the champion-squad screen
+      // (campeones_screen.dart) that renders a '(C)' captain marker reads
+      // CampeonPlantelEntry.esCapitan instead — a different class in the
+      // same file, fed by a different endpoint, sharing only the name and
+      // the es_capitan JSON key. There is therefore no '(C)' or similar
+      // captain marker produced anywhere in this screen's code for this
+      // test to assert the absence of; a `findsNothing` on a string that
+      // is never emitted regardless of whether the captain flag is
+      // honoured would pass for the wrong reason, so no such assertion is
+      // made here.
       expect(
         find.descendant(
           of: find.byKey(PlayerDetailScreen.titulosPanelKey),

@@ -25,9 +25,6 @@ abstract class ICacheService {
   Future<void> cachePlayers(List<dynamic> players);
   Future<List<dynamic>?> getCachedPlayers();
 
-  Future<void> cachePlayersTemporada(List<dynamic> players);
-  Future<List<dynamic>?> getCachedPlayersTemporada();
-
   Future<void> cachePlayersHistoricos(List<dynamic> players);
   Future<List<dynamic>?> getCachedPlayersHistoricos();
 
@@ -58,7 +55,6 @@ abstract class ICacheService {
 
   Future<void> cacheNoticias(List<dynamic> noticias);
   Future<List<dynamic>?> getCachedNoticias();
-  Future<void> clearNoticiasCache();
 
   // 🔹 Títulos por jugador (Copa Chaminade)
   Future<void> cacheTitulosDeJugador(int jugadorId, List<dynamic> titulos);

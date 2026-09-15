@@ -8,14 +8,12 @@ import '../providers/config_provider.dart';
 /// el espacio de leading queda vacío y el título de texto se muestra normalmente.
 class EntreRedesAppBar extends ConsumerWidget implements PreferredSizeWidget {
   final String title;
-  final List<Widget>? actions;
   final bool? centerTitle;
   final PreferredSizeWidget? bottom;
 
   const EntreRedesAppBar({
     super.key,
     required this.title,
-    this.actions,
     this.centerTitle,
     this.bottom,
   });
@@ -37,7 +35,6 @@ class EntreRedesAppBar extends ConsumerWidget implements PreferredSizeWidget {
       leadingWidth: hasLogo && !canPop ? 95.0 : null,
       title: Text(title),
       centerTitle: centerTitle,
-      actions: actions,
       bottom: bottom,
     );
   }

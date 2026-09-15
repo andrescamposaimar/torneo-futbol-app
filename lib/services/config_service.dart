@@ -30,7 +30,4 @@ class ConfigService {
     }
     return null;
   }
-
-  /// Limpia la caché en memoria (útil para tests y hot restart en dev).
-  static void resetSessionCache() => _sessionConfig = null;
 }
