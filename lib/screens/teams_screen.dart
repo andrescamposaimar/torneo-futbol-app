@@ -9,6 +9,7 @@ import '../providers/service_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../utils/text_utils.dart';
 import '../widgets/entre_redes_app_bar.dart';
+import '../widgets/loading_seccion.dart';
 import '../widgets/zocalo_publicitario.dart';
 
 
@@ -376,7 +377,7 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
                   error != null
                       ? Center(child: Text('Error: $error'))
                       : (initialLoading && equiposTemporada.isEmpty)
-                          ? const LoadingSeccionConAd(
+                          ? const LoadingSeccion(
                               texto: 'Cargando equipos...',
                             )
                           : _buildTeamsGrid(equiposTemporada),
@@ -408,28 +409,5 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
       ...(listas['espera'] ?? []),
       ...(listas['no_inscriptos'] ?? []),
     ];
-  }
-}
-
-class LoadingSeccionConAd extends StatelessWidget {
-  final String texto;
-
-  const LoadingSeccionConAd({
-    super.key,
-    required this.texto,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 12),
-          Text(texto, style: const TextStyle(fontSize: 14)),
-        ],
-      ),
-    );
   }
 }
