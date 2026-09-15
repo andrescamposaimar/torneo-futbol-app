@@ -451,9 +451,14 @@ void main() {
     });
   });
 
-  group('PlayerDetailScreen · incomplete títulos', () {
+  group('PlayerDetailScreen · títulos with an unknown zone', () {
+    // A title with no zone is still a title: the zone is an enrichment, the
+    // team+year is the trophy. These titles must still render — just
+    // without the "Campeón Zona {X}" line and without the star's letter
+    // overlay — rather than vanish the way the old (buggy) rule made them.
     testWidgets(
-        'a title with an empty zona is omitted from the hero star and the panel',
+        'an empty-string zona still renders the star, the panel row (year '
+        '+ team, no zone line), and the header count',
         (tester) async {
       await _pump(
         tester,
@@ -462,18 +467,102 @@ void main() {
           {'anio': 2016, 'zona': '', 'equipo_nombre': 'CHELSEA', 'es_capitan': false},
         ],
       );
+
+      // Asserted BEFORE scrolling: _scrollToTitulos()'s drag unmounts the
+      // hero star's render object past the ListView's cache extent (see the
+      // panel-scoped star test in the títulos panel group above), so this
+      // assertion would read as "no star" for that unrelated reason if it
+      // ran after the scroll.
+      expect(find.byIcon(Icons.star_rounded), findsOneWidget);
+      // No letter overlay on the star for an unknown zone — not even an
+      // empty-string Text widget standing in for the missing letter.
+      expect(find.text(''), findsNothing);
+
       await _scrollToTitulos(tester);
 
-      // No dangling "Campeón Zona " label (trailing space, empty zone), and
-      // no star with an empty letter inside — the only title is incomplete,
-      // so nothing is rendered for it anywhere.
-      expect(find.byIcon(Icons.star_rounded), findsNothing);
-      expect(find.textContaining('Campeón Zona'), findsNothing);
-      expect(find.text('TÍTULOS'), findsNothing);
-      // The rest of the profile still works.
-      expect(find.text('Juan Pérez'), findsOneWidget);
+      expect(find.text('TÍTULOS'), findsOneWidget);
+      expect(find.text('1 título'), findsOneWidget);
+      expect(find.text('2016'), findsOneWidget);
+      expect(find.text('CHELSEA'), findsOneWidget);
+      // No dangling "Campeón Zona " label (trailing space) for an unknown
+      // zone. Scoped to the panel's own subtree, and proven to discriminate
+      // real omission from an unmounted/off-screen widget by planting the
+      // team name — which the SAME subtree does render.
+      expect(
+        find.descendant(
+          of: find.byKey(PlayerDetailScreen.titulosPanelKey),
+          matching: find.textContaining('Campeón Zona'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(PlayerDetailScreen.titulosPanelKey),
+          matching: find.text('CHELSEA'),
+        ),
+        findsOneWidget,
+      );
     });
 
+    testWidgets(
+        'a zona key absent entirely — the exact shape the deployed plugin '
+        'returns pre-redeploy — still renders the star, the panel row, and '
+        'the header count', (tester) async {
+      await _pump(
+        tester,
+        size: const Size(320, 568),
+        titulos: const [
+          // No 'zona' key at all (not merely an empty string):
+          // JugadorTitulo.fromJson reads json['zona'] as null and defaults
+          // it to '', but this is the literal shape production sends —
+          // verified against player 2405: {"anio":2012,
+          // "equipo_nombre":"Barcelona","es_capitan":true}.
+          {'anio': 2012, 'equipo_nombre': 'Barcelona', 'es_capitan': true},
+          {'anio': 2009, 'equipo_nombre': 'PSG', 'es_capitan': true},
+        ],
+      );
+
+      expect(find.byIcon(Icons.star_rounded), findsNWidgets(2));
+      // Neither star carries a letter overlay for its (absent) zone.
+      expect(find.text(''), findsNothing);
+
+      await _scrollToTitulos(tester);
+
+      expect(find.text('TÍTULOS'), findsOneWidget);
+      // The count follows the (now non-empty) list — 2, not 0.
+      expect(find.text('2 títulos'), findsOneWidget);
+      expect(find.text('Barcelona'), findsOneWidget);
+      expect(find.text('PSG'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(PlayerDetailScreen.titulosPanelKey),
+          matching: find.textContaining('Campeón Zona'),
+        ),
+        findsNothing,
+      );
+      // Proves the absence above is real, not an unmounted/off-screen
+      // finder false-positive: the same subtree DOES render both rows.
+      expect(
+        find.descendant(
+          of: find.byKey(PlayerDetailScreen.titulosPanelKey),
+          matching: find.text('Barcelona'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(PlayerDetailScreen.titulosPanelKey),
+          matching: find.text('PSG'),
+        ),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('PlayerDetailScreen · títulos missing their team name', () {
+    // Unlike the zone, the team name is the trophy itself — a title with no
+    // equipo_nombre genuinely has nothing to display, so this case alone
+    // stays pinned as omitted.
     testWidgets(
         'a title with an empty equipo_nombre is omitted from the hero star and the panel',
         (tester) async {
@@ -493,15 +582,15 @@ void main() {
     });
 
     testWidgets(
-        'a mix of one valid and one incomplete title renders only the valid '
-        'one, with a matching star count and header count',
+        'a mix of one valid title and one with no equipo_nombre renders '
+        'only the valid one, with a matching star count and header count',
         (tester) async {
       await _pump(
         tester,
         size: const Size(320, 568),
         titulos: [
           _titulo(anio: 2023, zona: 'A', equipo: 'LIVERPOOL'),
-          {'anio': 2016, 'zona': '', 'equipo_nombre': 'CHELSEA', 'es_capitan': false},
+          {'anio': 2016, 'zona': 'B', 'equipo_nombre': '', 'es_capitan': false},
         ],
       );
 
@@ -516,7 +605,9 @@ void main() {
 
       expect(find.text('1 título'), findsOneWidget);
       expect(find.text('LIVERPOOL'), findsOneWidget);
-      expect(find.text('CHELSEA'), findsNothing);
+      // The incomplete title's row (anio 2016) is omitted entirely, not
+      // merely stripped of its team name.
+      expect(find.text('2016'), findsNothing);
     });
   });
 
