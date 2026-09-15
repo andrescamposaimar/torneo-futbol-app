@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/entre_redes_app_bar.dart';
+import '../widgets/loading_seccion.dart';
 import '../widgets/zocalo_publicitario.dart';
 import '../models/temporada.dart';
 import '../providers/service_providers.dart';
@@ -512,7 +513,7 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
     required bool isActual,
   }) {
     if (posiciones.isEmpty && isLoading) {
-      return const LoadingSeccionConAd(texto: 'Cargando tablas...');
+      return const LoadingSeccion(texto: 'Cargando tablas...');
     }
     return RefreshIndicator(
       onRefresh: () => _refreshTablas(isActual: isActual),
@@ -673,26 +674,6 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
         ],
       ),
       bottomNavigationBar: const ZocaloPublicitario(),
-    );
-  }
-}
-
-class LoadingSeccionConAd extends StatelessWidget {
-  final String texto;
-
-  const LoadingSeccionConAd({super.key, required this.texto});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 12),
-          Text(texto, style: const TextStyle(fontSize: 14)),
-        ],
-      ),
     );
   }
 }

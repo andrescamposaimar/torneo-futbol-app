@@ -10,6 +10,7 @@ import '../utils/date_utils.dart';
 import '../utils/posicion_utils.dart';
 import '../utils/puntaje_utils.dart';
 import '../widgets/entre_redes_app_bar.dart';
+import '../widgets/loading_seccion.dart';
 import '../widgets/zocalo_publicitario.dart';
 
 class PlayersScreen extends ConsumerStatefulWidget {
@@ -478,7 +479,7 @@ class _PlayersScreenState extends ConsumerState<PlayersScreen>
 
   Widget _buildCurrentTab() {
     if (isLoadingCurrent) {
-      return const LoadingSeccionConAd(
+      return const LoadingSeccion(
         texto: 'Cargando jugadores...',
       );
     }
@@ -745,33 +746,6 @@ class _HistoricLoadingWidget extends StatelessWidget {
             ],
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ───────────────────────────────────────────────
-// LoadingSeccionConAd (compartido con otras pantallas)
-// ───────────────────────────────────────────────
-
-class LoadingSeccionConAd extends StatelessWidget {
-  final String texto;
-
-  const LoadingSeccionConAd({
-    super.key,
-    required this.texto,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 12),
-          Text(texto, style: const TextStyle(fontSize: 14)),
-        ],
       ),
     );
   }

@@ -4,6 +4,7 @@ import '../providers/repository_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../models/temporada.dart';
 import '../widgets/entre_redes_app_bar.dart';
+import '../widgets/loading_seccion.dart';
 
 class ImbatiblesScreen extends ConsumerStatefulWidget {
   const ImbatiblesScreen({super.key});
@@ -107,7 +108,7 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: isLoading && arqueros.isEmpty
-                ? const LoadingSeccionConAd(
+                ? const LoadingSeccion(
                     texto: 'Cargando arqueros...',
                   )
                 : arqueros.isEmpty
@@ -192,26 +193,6 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
                         },
                       ),
           )
-        ],
-      ),
-    );
-  }
-}
-
-class LoadingSeccionConAd extends StatelessWidget {
-  final String texto;
-
-  const LoadingSeccionConAd({super.key, required this.texto});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 12),
-          Text(texto, style: const TextStyle(fontSize: 14)),
         ],
       ),
     );
