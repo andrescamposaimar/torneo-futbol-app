@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/service_providers.dart';
 import '../providers/repository_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../models/temporada.dart';
@@ -21,7 +20,6 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
   bool hasMore = true;
   int currentPage = 1;
   final int perPage = 10;
-  String? adImageUrl;
 
   final ScrollController _scrollController = ScrollController();
 
@@ -30,12 +28,6 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
     super.initState();
     _scrollController.addListener(_onScroll);
     _loadTemporadas();
-    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
-      if (!mounted) return;
-      setState(() {
-        adImageUrl = ads['imbatibles'];
-      });
-    });
   }
 
   @override
@@ -115,9 +107,8 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: isLoading && arqueros.isEmpty
-                ? LoadingSeccionConAd(
+                ? const LoadingSeccionConAd(
                     texto: 'Cargando arqueros...',
-                    adImageUrl: adImageUrl,
                   )
                 : arqueros.isEmpty
                     ? const Center(
@@ -209,9 +200,8 @@ class _ImbatiblesScreenState extends ConsumerState<ImbatiblesScreen> {
 
 class LoadingSeccionConAd extends StatelessWidget {
   final String texto;
-  final String? adImageUrl;
 
-  const LoadingSeccionConAd({super.key, required this.texto, this.adImageUrl});
+  const LoadingSeccionConAd({super.key, required this.texto});
 
   @override
   Widget build(BuildContext context) {
@@ -222,23 +212,6 @@ class LoadingSeccionConAd extends StatelessWidget {
           const CircularProgressIndicator(),
           const SizedBox(height: 12),
           Text(texto, style: const TextStyle(fontSize: 14)),
-          if (adImageUrl != null && adImageUrl!.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Image.network(
-                  adImageUrl!,
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                  width: double.infinity,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Text('No se pudo cargar la imagen publicitaria'),
-                ),
-              ),
-            ),
-          ]
         ],
       ),
     );

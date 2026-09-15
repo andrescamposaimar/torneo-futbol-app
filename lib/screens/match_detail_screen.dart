@@ -36,9 +36,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   late TabController _tabController;
   String equipoSeleccionado = 'local';
 
-  String? estadisticasAdUrl;
-  String? alineacionesAdUrl;
-
   MatchPopulares? populares;
   bool cargandoPopulares = false;
 
@@ -52,15 +49,6 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-
-    // Cargar publicidad
-    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
-      if (!mounted) return;
-      setState(() {
-       // estadisticasAdUrl = ads['estadisticas'];
-       // alineacionesAdUrl = ads['alineaciones'];
-      });
-    });
 
     // Solo cargar goleadores si el partido ya se disputó
     if (!_esFuturo) {
@@ -499,9 +487,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   Widget _buildEstadisticas() {
     
   if (goleadores == null) {
-    return LoadingSeccionConAd(
+    return const LoadingSeccionConAd(
       texto: 'Cargando estadísticas...',
-      //adImageUrl: estadisticasAdUrl,
     );
   }
 
@@ -857,9 +844,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
 
 Widget _buildAlineaciones() {
   if (goleadores == null) {
-    return LoadingSeccionConAd(
+    return const LoadingSeccionConAd(
       texto: 'Cargando estadísticas...',
-      //adImageUrl: alineacionesAdUrl,
     );
   }
 
@@ -1199,9 +1185,8 @@ Widget _buildAlineaciones() {
                 _esFuturo
                     ? _buildPendiente()
                     : goleadores == null && isLoading
-                        ? LoadingSeccionConAd(
+                        ? const LoadingSeccionConAd(
                             texto: 'Cargando estadísticas...',
-                            adImageUrl: estadisticasAdUrl,
                           )
                         : SingleChildScrollView(
                             padding: const EdgeInsets.all(16),
@@ -1210,7 +1195,7 @@ Widget _buildAlineaciones() {
                 _esFuturo
                     ? _buildPendiente()
                     : goleadores == null && isLoading
-                        ? LoadingSeccionConAd(
+                        ? const LoadingSeccionConAd(
                             texto: 'Cargando alineaciones...',
                           )
                         : SingleChildScrollView(
@@ -1235,12 +1220,10 @@ Widget _buildAlineaciones() {
 
   class LoadingSeccionConAd extends StatelessWidget {
     final String texto;
-    final String? adImageUrl;
 
     const LoadingSeccionConAd({
       super.key,
       required this.texto,
-      this.adImageUrl,
     });
 
     @override
@@ -1252,23 +1235,7 @@ Widget _buildAlineaciones() {
             const CircularProgressIndicator(),
             const SizedBox(height: 12),
             Text(texto, style: const TextStyle(fontSize: 14)),
-            if (adImageUrl != null && adImageUrl!.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: Image.network(
-                      adImageUrl!,
-                      fit: BoxFit.contain,
-                      alignment: Alignment.center,
-                      width: double.infinity,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Text('No se pudo cargar la imagen publicitaria'),
-                    ),
-                  ),
-              ),
-            ]          ],
+          ],
         ),
       );
     }
