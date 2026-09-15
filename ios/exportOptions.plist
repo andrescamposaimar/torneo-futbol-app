@@ -4,6 +4,13 @@
 <dict>
     <key>method</key>
     <string>app-store</string>
+    <!-- Xcode's default for method=app-store is to rewrite CFBundleVersion at
+         export time, asking App Store Connect for a number instead of using the
+         one that was archived. That silently divorces what ships from what
+         pubspec.yaml declares: an archive built at 32 exported as 33. The build
+         number is the repository's decision, so this turns that off. -->
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
     <key>uploadBitcode</key>
     <false/>
     <key>uploadSymbols</key>
