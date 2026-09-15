@@ -679,9 +679,8 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
 
 class LoadingSeccionConAd extends StatelessWidget {
   final String texto;
-  final String? adImageUrl;
 
-  const LoadingSeccionConAd({super.key, required this.texto, this.adImageUrl});
+  const LoadingSeccionConAd({super.key, required this.texto});
 
   @override
   Widget build(BuildContext context) {
@@ -692,23 +691,6 @@ class LoadingSeccionConAd extends StatelessWidget {
           const CircularProgressIndicator(),
           const SizedBox(height: 12),
           Text(texto, style: const TextStyle(fontSize: 14)),
-          if (adImageUrl != null && adImageUrl!.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Image.network(
-                  adImageUrl!,
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                  width: double.infinity,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Text('No se pudo cargar la imagen publicitaria'),
-                ),
-              ),
-            ),
-          ],
         ],
       ),
     );
