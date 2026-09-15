@@ -846,7 +846,7 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
 Widget _buildAlineaciones() {
   if (goleadores == null) {
     return const LoadingSeccion(
-      texto: 'Cargando estadísticas...',
+      texto: 'Cargando alineaciones...',
     );
   }
 
