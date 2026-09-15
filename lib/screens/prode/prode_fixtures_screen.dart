@@ -289,7 +289,6 @@ class _LoadedViewState extends ConsumerState<_LoadedView> {
     // evaluated). The locked ones reveal the populares percentages and tag each
     // match with an "En Juego" label. Evaluated fechas stay out — they belong
     // to the history list ("Anteriores"), which ProdeChamiScreen owns.
-    final hasFechaList = widget.fechas.isNotEmpty;
     final playableFechas = widget.fechas
         .where((f) =>
             f.state == ProdeFechaState.open ||
@@ -300,15 +299,6 @@ class _LoadedViewState extends ConsumerState<_LoadedView> {
     // the selector row (W-1: selector must appear above progress).
     final showProgress =
         totalCount > 0 && !widget.isFechaLoading && widget.fechaLoadError == null;
-
-    // No fecha summary list yet: fall back to the single-fecha card area
-    // (no selector). The Chami screen owns the stale banner and fecha badge.
-    if (!hasFechaList) {
-      return RefreshIndicator(
-        onRefresh: widget.onRefresh,
-        child: _buildLegacyCardArea(context, controller, isLocked),
-      );
-    }
 
     // Safety net: the controller normally selects the active fecha, but if it
     // landed on an evaluated one (which is excluded from "A Jugarse"), switch
@@ -348,119 +338,6 @@ class _LoadedViewState extends ConsumerState<_LoadedView> {
       totalCount: totalCount,
       showProgress: showProgress,
       showSelector: playableFechas.length > 1,
-    );
-  }
-
-  /// Legacy single-view card area — used when no fechas summary list is
-  /// available. Equivalent to the pre-T-13 [_buildCardArea] logic.
-  Widget _buildLegacyCardArea(
-    BuildContext context,
-    ProdeFixturesController controller,
-    bool isLocked,
-  ) {
-    if (widget.isFechaLoading) {
-      return const Center(
-        child: CircularProgressIndicator(key: Key('fecha_load_spinner')),
-      );
-    }
-
-    if (widget.fechaLoadError != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('No pudimos cargar esta fecha.'),
-              const SizedBox(height: 12),
-              TextButton(
-                key: const Key('fecha_load_retry'),
-                onPressed: () =>
-                    controller.selectFecha(widget.fechaLoadError!.fechaId),
-                child: const Text('Reintentar'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    final sectionTitle = isLocked ? 'PARTIDOS JUGADOS' : 'PRÓXIMOS PARTIDOS';
-
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Text(
-            sectionTitle,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ),
-        if (widget.fecha.matches.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: Text('Sin partidos en esta fecha.')),
-          )
-        else
-          ...widget.fecha.matches.map((m) {
-            final PredictionEntry? predEntry =
-                widget.fecha.userPredictions.cast<PredictionEntry?>().firstWhere(
-                      (p) => p!.matchId == m.matchId,
-                      orElse: () => null,
-                    );
-            return _MatchCard(
-              match: m,
-              draft: widget.drafts[m.matchId] ?? const PredictionDraft(),
-              isSaved: widget.savedMatchIds.contains(m.matchId),
-              isLocked: isLocked,
-              isEvaluated: widget.fecha.state == ProdeFechaState.evaluated,
-              predictionEntry: predEntry,
-              onTap: () => _openLegacySheet(
-                context,
-                match: m,
-                draft: widget.drafts[m.matchId] ?? const PredictionDraft(),
-                isLocked: isLocked,
-                controller: controller,
-              ),
-            );
-          }),
-        const SizedBox(height: 8),
-        Center(
-          child: TextButton.icon(
-            onPressed: widget.onLogout,
-            icon: const Icon(Icons.logout),
-            label: const Text('Cerrar sesión'),
-          ),
-        ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  void _openLegacySheet(
-    BuildContext context, {
-    required FechaMatch match,
-    required PredictionDraft draft,
-    required bool isLocked,
-    required ProdeFixturesController controller,
-  }) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => _PredictionSheet(
-        match: match,
-        initialDraft: draft,
-        isLocked: isLocked,
-        controller: controller,
-      ),
     );
   }
 }

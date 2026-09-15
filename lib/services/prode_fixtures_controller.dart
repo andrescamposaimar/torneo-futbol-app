@@ -178,7 +178,7 @@ final class ProdeFixturesLoaded extends ProdeFixturesState {
     this.fecha, {
     this.drafts = const {},
     this.savedMatchIds = const {},
-    this.fechas = const [],
+    required this.fechas,
     this.selectedFechaId = 0,
     this.isFechaLoading = false,
     this.fechaLoadError,
