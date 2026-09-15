@@ -24,7 +24,6 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
   List<dynamic> equiposHistoricos = [];
   bool isLoading = false;
   String? error;
-  String? equiposAdUrl;
   bool initialLoading = true;
   String searchQuery = '';
   late TabController _tabController;
@@ -36,13 +35,6 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
     super.initState();
 
     _tabController = TabController(length: 2, vsync: this);
-
-    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
-      if (!mounted) return;
-      setState(() {
-        //equiposAdUrl = ads['equipos'];
-      });
-    });
 
     _loadFromCacheThenFetch();
   }
@@ -384,9 +376,8 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
                   error != null
                       ? Center(child: Text('Error: $error'))
                       : (initialLoading && equiposTemporada.isEmpty)
-                          ? LoadingSeccionConAd(
+                          ? const LoadingSeccionConAd(
                               texto: 'Cargando equipos...',
-                              adImageUrl: equiposAdUrl,
                             )
                           : _buildTeamsGrid(equiposTemporada),
 
@@ -422,12 +413,10 @@ class _TeamsScreenState extends ConsumerState<TeamsScreen> with SingleTickerProv
 
 class LoadingSeccionConAd extends StatelessWidget {
   final String texto;
-  final String? adImageUrl;
 
   const LoadingSeccionConAd({
     super.key,
     required this.texto,
-    this.adImageUrl,
   });
 
   @override
@@ -439,23 +428,6 @@ class LoadingSeccionConAd extends StatelessWidget {
           const CircularProgressIndicator(),
           const SizedBox(height: 12),
           Text(texto, style: const TextStyle(fontSize: 14)),
-          if (adImageUrl != null && adImageUrl!.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Image.network(
-                  adImageUrl!,
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                  width: double.infinity,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Text('No se pudo cargar la imagen publicitaria'),
-                ),
-              ),
-            ),
-          ]
         ],
       ),
     );
