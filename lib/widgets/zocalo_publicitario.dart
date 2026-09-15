@@ -89,9 +89,15 @@ class _ZocaloPublicitarioState extends ConsumerState<ZocaloPublicitario> {
     if (!_visible || ads.isEmpty) return const SizedBox.shrink();
 
     final ad = ads[_currentIndex];
+    // Tappability is a property of the *currently displayed* ad, not the
+    // carousel as a whole — recomputed every build since `_currentIndex`
+    // advances on a timer. An ad with no link renders (the image is the
+    // content that matters) but must not carry a dead tap target.
+    final bool esTappable = ad.link.isNotEmpty;
 
     return GestureDetector(
-      onTap: _launchCurrentAdUrl,
+      key: const Key('zocalo_ad_tap_target'),
+      onTap: esTappable ? _launchCurrentAdUrl : null,
       child: SizedBox(
         height: 80,
         width: double.infinity,
@@ -113,6 +119,7 @@ class _ZocaloPublicitarioState extends ConsumerState<ZocaloPublicitario> {
               top: 4,
               right: 4,
               child: GestureDetector(
+                key: const Key('zocalo_ad_close_button'),
                 onTap: _closeAd,
                 child: Container(
                   padding: const EdgeInsets.all(4),

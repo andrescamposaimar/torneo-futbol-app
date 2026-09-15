@@ -103,7 +103,7 @@ class RemoteDataService {
                   imageUrl: item['image'] ?? '',
                   link: item['link'] ?? '',
                 ))
-            .where((ad) => ad.imageUrl.isNotEmpty && ad.link.isNotEmpty)
+            .where((ad) => ad.imageUrl.isNotEmpty)
             .toList();
       }
     } catch (e) {
