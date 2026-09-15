@@ -8,8 +8,6 @@ class BrandColors {
   final Color splashBackground;
   final Color background;
   final Color card;
-  final Color textPrimary;
-  final Color textSecondary;
 
   const BrandColors({
     required this.primary,
@@ -17,8 +15,6 @@ class BrandColors {
     required this.splashBackground,
     this.background = const Color(0xFFF9F9F9),
     this.card = Colors.white,
-    this.textPrimary = Colors.black,
-    this.textSecondary = Colors.grey,
   });
 }
 
