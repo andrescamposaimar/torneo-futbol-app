@@ -40,26 +40,6 @@ class DniHasher {
         return hash( 'sha256', $dni . $pepper );
     }
 
-    /**
-     * Returns the masked representation of a DNI for display in the audit log
-     * viewer in wp-admin.
-     *
-     * Format: first 2 digits + "***" + last 2 digits.
-     * Example: "12345678" → "12***78"
-     *
-     * For DNIs shorter than 5 characters the entire value is masked ("*****").
-     *
-     * @param string $dni Plain DNI
-     * @return string Masked string
-     */
-    public static function mask( string $dni ): string {
-        $len = strlen( $dni );
-        if ( $len < 5 ) {
-            return str_repeat( '*', $len );
-        }
-        return substr( $dni, 0, 2 ) . '***' . substr( $dni, -2 );
-    }
-
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
