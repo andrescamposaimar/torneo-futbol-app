@@ -79,18 +79,8 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
   Future<void> _loadGoleadores() async {
     try {
       final data = await ref.read(apiServiceProvider).getGoleadoresDelPartido(widget.partido['id']);
-      final cachedPlayers = await ref.read(cacheServiceProvider).getCachedPlayers();
 
-      Map<int, dynamic> cachedMap = {};
-      if (cachedPlayers != null) {
-        for (var player in cachedPlayers) {
-          if (player['id'] != null) {
-            cachedMap[player['id']] = player;
-          }
-        }
-      }
-
-      Future<void> enrich(List<dynamic> jugadores, String equipo) async {
+      void enrich(List<dynamic> jugadores, String equipo) {
         for (var j in jugadores) {
           j['goles'] = j['goles'] ?? 0;
           j['tarjeta_amarilla'] = j['tarjetaamarilla'] ?? j['tarjeta_amarilla'] ?? 0;
@@ -101,23 +91,11 @@ class _MatchDetailScreenState extends ConsumerState<MatchDetailScreen> with Sing
           j['capitan'] = j['capitan'] == true;
           j['reemplazo_alta'] = j['reemplazo_alta'] == true;
           j['reemplazo_baja'] = j['reemplazo_baja'] == true;
-
-
-          final jugadorId = j['id'];
-          if (jugadorId != null && cachedMap.containsKey(jugadorId)) {
-            final metrics = cachedMap[jugadorId]['metrics'];
-            if (metrics != null && metrics['puntaje'] != null) {
-              j['puntaje'] = metrics['puntaje'];
-              continue;
-            }
-          }
-
-          j['puntaje'] = '-';
         }
       }
 
-      await enrich(data['equipo_local']['goleadores'], 'local');
-      await enrich(data['equipo_visitante']['goleadores'], 'visitante');
+      enrich(data['equipo_local']['goleadores'], 'local');
+      enrich(data['equipo_visitante']['goleadores'], 'visitante');
 
       if (mounted) {
         setState(() {
