@@ -211,12 +211,13 @@ Set<int> _seedSavedMatchIds(FechaActiva fecha) {
 /// [fecha] — same `fechaId` and `state`.
 ///
 /// Production always seeds [ProdeFixturesLoaded.fechas] with a non-empty
-/// list (see [ProdeFixturesController._fetch]), so a [ProdeFixturesLoaded]
-/// built with `fechas: const []` — the constructor's default — describes a
-/// state the app can never reach. Pairing every [ProdeFixturesLoaded] in
-/// this file with a matching summary via this helper (plus
-/// `selectedFechaId: fecha.fechaId`) keeps every test on the live
-/// `_buildCardArea` render path instead of the legacy no-summary fallback.
+/// list (see [ProdeFixturesController._fetch]) — `fechas` is a required
+/// constructor argument precisely because a defaulted empty list once let
+/// tests build a state the app can never reach. Pairing every
+/// [ProdeFixturesLoaded] in this file with a matching summary via this
+/// helper (plus `selectedFechaId: fecha.fechaId`) keeps every test on the
+/// live `_buildCardArea` render path instead of the old no-summary
+/// fallback (`_buildLegacyCardArea`, removed).
 ///
 /// `lockedAt` and `matchCount` are not read by any rendering/lock logic
 /// (see [FechaSummary.matchCount] doc: "informational; not used for display
