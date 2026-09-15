@@ -962,7 +962,7 @@ void main() {
     late ProdeAuthRepository repo;
 
     // A minimal but valid fecha payload for 200 responses.
-    Map<String, dynamic> _validFechaBody({int fechaId = 42, int matchCount = 2}) {
+    Map<String, dynamic> validFechaBody({int fechaId = 42, int matchCount = 2}) {
       return {
         'fecha_id': fechaId,
         'season_id': 3,
@@ -974,7 +974,7 @@ void main() {
             'match_id': i + 1,
             'home_team': 'Home ${i + 1}',
             'away_team': 'Away ${i + 1}',
-            'kickoff': '2026-06-06 1${i}:00:00',
+            'kickoff': '2026-06-06 1$i:00:00',
           },
         ),
       };
@@ -986,7 +986,7 @@ void main() {
       repo = ProdeAuthRepository();
     });
 
-    Future<void> _seedToken() async {
+    Future<void> seedToken() async {
       await repo.write(
         accessToken: 'test-access-token',
         refreshToken: 'test-refresh-token',
@@ -996,7 +996,7 @@ void main() {
     }
 
     test('200 valid body → returns FechaActiva with expected fechaId and matches.length', () async {
-      await _seedToken();
+      await seedToken();
 
       String? capturedPath;
       String? capturedAuth;
@@ -1007,7 +1007,7 @@ void main() {
           capturedPath = req.url.path;
           capturedAuth = req.headers['Authorization'];
           return http.Response(
-            json.encode(_validFechaBody(fechaId: 42, matchCount: 3)),
+            json.encode(validFechaBody(fechaId: 42, matchCount: 3)),
             200,
             headers: {'content-type': 'application/json'},
           );
@@ -1028,7 +1028,7 @@ void main() {
     });
 
     test('404 → throws ProdeNoActiveFecha', () async {
-      await _seedToken();
+      await seedToken();
 
       final service = _makeService(
         repo,
@@ -1046,7 +1046,7 @@ void main() {
     });
 
     test('500 → throws ProdeSsoException(fetch_fecha_error), NOT ProdeNoActiveFecha', () async {
-      await _seedToken();
+      await seedToken();
 
       final service = _makeService(
         repo,
@@ -1264,7 +1264,7 @@ void main() {
     late Map<String, String> store;
     late ProdeAuthRepository repo;
 
-    String _rankingBody({
+    String rankingBody({
       List<Map<String, dynamic>> items = const [],
       int total = 0,
       int page = 1,
@@ -1278,7 +1278,7 @@ void main() {
       });
     }
 
-    Map<String, dynamic> _entryMap({
+    Map<String, dynamic> entryMap({
       int userId = 1,
       String displayName = 'User',
       int totalPoints = 5,
@@ -1306,7 +1306,7 @@ void main() {
       final client = MockClient((request) async {
         capturedAuthHeader = request.headers['Authorization'];
         return http.Response(
-          _rankingBody(items: [_entryMap()], total: 1),
+          rankingBody(items: [entryMap()], total: 1),
           200,
           headers: {'content-type': 'application/json'},
         );
@@ -1329,7 +1329,7 @@ void main() {
       final client = MockClient((request) async {
         capturedAuthHeader = request.headers['Authorization'];
         return http.Response(
-          _rankingBody(items: [_entryMap()], total: 1),
+          rankingBody(items: [entryMap()], total: 1),
           200,
           headers: {'content-type': 'application/json'},
         );
@@ -1360,7 +1360,7 @@ void main() {
         }
         secondCallAuth = request.headers['Authorization'];
         return http.Response(
-          _rankingBody(items: [_entryMap()], total: 1),
+          rankingBody(items: [entryMap()], total: 1),
           200,
           headers: {'content-type': 'application/json'},
         );
@@ -1424,7 +1424,7 @@ void main() {
       final client = MockClient((request) async {
         capturedUri = request.url;
         return http.Response(
-          _rankingBody(),
+          rankingBody(),
           200,
           headers: {'content-type': 'application/json'},
         );
@@ -1441,7 +1441,7 @@ void main() {
       final client = MockClient((request) async {
         capturedUri = request.url;
         return http.Response(
-          _rankingBody(),
+          rankingBody(),
           200,
           headers: {'content-type': 'application/json'},
         );
@@ -1482,7 +1482,7 @@ void main() {
     late Map<String, String> store;
     late ProdeAuthRepository repo;
 
-    Map<String, dynamic> _fechaSummaryEntry({
+    Map<String, dynamic> fechaSummaryEntry({
       int fechaId = 1,
       int seasonId = 10,
       String state = 'open',
@@ -1513,9 +1513,9 @@ void main() {
 
       final expectedBody = json.encode({
         'fechas': [
-          _fechaSummaryEntry(fechaId: 1, state: 'open'),
-          _fechaSummaryEntry(fechaId: 2, state: 'locked', lockedAt: '2026-06-01 18:00:00'),
-          _fechaSummaryEntry(fechaId: 3, state: 'evaluated'),
+          fechaSummaryEntry(fechaId: 1, state: 'open'),
+          fechaSummaryEntry(fechaId: 2, state: 'locked', lockedAt: '2026-06-01 18:00:00'),
+          fechaSummaryEntry(fechaId: 3, state: 'evaluated'),
         ],
       });
 
@@ -1607,7 +1607,7 @@ void main() {
           }
           // Second call without bearer
           return http.Response(
-            json.encode({'fechas': [_fechaSummaryEntry(fechaId: 1)]}),
+            json.encode({'fechas': [fechaSummaryEntry(fechaId: 1)]}),
             200,
             headers: {'content-type': 'application/json'},
           );
@@ -1630,7 +1630,7 @@ void main() {
     late Map<String, String> store;
     late ProdeAuthRepository repo;
 
-    Map<String, dynamic> _validFechaById({int fechaId = 5}) => {
+    Map<String, dynamic> validFechaById({int fechaId = 5}) => {
       'fecha_id': fechaId,
       'season_id': 10,
       'state': 'open',
@@ -1653,7 +1653,7 @@ void main() {
       // Pre-seed token
     });
 
-    Future<void> _seedToken() async {
+    Future<void> seedToken() async {
       await repo.write(
         accessToken: 'test-access',
         refreshToken: 'test-refresh',
@@ -1663,12 +1663,12 @@ void main() {
     }
 
     test('200 → returns FechaActiva with correct fechaId', () async {
-      await _seedToken();
+      await seedToken();
 
       final service = _makeService(
         repo,
         MockClient((_) async => http.Response(
-              json.encode(_validFechaById(fechaId: 5)),
+              json.encode(validFechaById(fechaId: 5)),
               200,
               headers: {'content-type': 'application/json'},
             )),
@@ -1682,7 +1682,7 @@ void main() {
     });
 
     test('404 → throws ProdeNoActiveFecha', () async {
-      await _seedToken();
+      await seedToken();
 
       final service = _makeService(
         repo,
@@ -1700,7 +1700,7 @@ void main() {
     });
 
     test('non-200 non-404 → throws ProdeSsoException', () async {
-      await _seedToken();
+      await seedToken();
 
       final service = _makeService(
         repo,
@@ -1718,7 +1718,7 @@ void main() {
     });
 
     test('401-degrade: token → 401 → retry without bearer → 200', () async {
-      await _seedToken();
+      await seedToken();
 
       var callCount = 0;
 
@@ -1734,7 +1734,7 @@ void main() {
             );
           }
           return http.Response(
-            json.encode(_validFechaById(fechaId: 5)),
+            json.encode(validFechaById(fechaId: 5)),
             200,
             headers: {'content-type': 'application/json'},
           );

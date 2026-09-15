@@ -147,7 +147,7 @@ class _ScorersScreenState extends ConsumerState<ScorersScreen> {
                 child: Text(t.name.isEmpty ? 'Temporada' : t.name),
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );

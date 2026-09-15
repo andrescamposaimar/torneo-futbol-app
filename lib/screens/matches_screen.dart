@@ -464,7 +464,7 @@ Widget _buildListaPorFecha() {
 
     return [
       _buildFechaHeader(fecha, partidos.length),
-      ...partidos.map((p) => _buildMatchCard(p)).toList(),
+      ...partidos.map((p) => _buildMatchCard(p)),
     ];
   }).toList();
 

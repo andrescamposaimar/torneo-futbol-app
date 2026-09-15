@@ -58,8 +58,9 @@ void initState() {
       if (!mounted) return;
       setState(() => errorPartidos = e.toString());
     } finally {
-      if (!mounted) return;
-      setState(() => isLoadingPartidos = false);
+      if (mounted) {
+        setState(() => isLoadingPartidos = false);
+      }
     }
   }
 
@@ -99,11 +100,12 @@ void initState() {
       if (!mounted) return;
       setState(() => errorJugadores = e.toString());
     } finally {
-      if (!mounted) return;
-      setState(() {
-        isLoadingJugadores = false;
-        _jugadoresCargados = true;
-      });
+      if (mounted) {
+        setState(() {
+          isLoadingJugadores = false;
+          _jugadoresCargados = true;
+        });
+      }
     }
   }
 
@@ -124,7 +126,7 @@ void initState() {
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 )
@@ -187,7 +189,7 @@ void initState() {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withValues(alpha: 0.2),
                       blurRadius: 6,
                       offset: const Offset(2, 2),
                     )

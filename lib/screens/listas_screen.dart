@@ -28,7 +28,7 @@ class _ListasScreenState extends ConsumerState<ListasScreen>
 
   // --- Filtro por puntaje ---
   static const List<double> _valoresPuntaje = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
-  List<double> _puntajesFiltro = [];
+  final List<double> _puntajesFiltro = [];
 
   // --- Ads ---
   String? adImageUrl;
