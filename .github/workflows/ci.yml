@@ -42,25 +42,35 @@ jobs:
         run: flutter test
 
   php-plugin:
-    name: Plugin tests (PHP ${{ matrix.php }})
+    name: Plugin tests (${{ matrix.plugin }}, PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     defaults:
       run:
-        working-directory: wordpress_plugins/entre-redes-prode
-
+        working-directory: wordpress_plugins/${{ matrix.plugin }}
     strategy:
       fail-fast: false
       matrix:
-        # 8.2 is the plugin's real floor and what production runs: brick/math
-        # 0.14.8, a production dependency pulled in by ramsey/uuid, requires
-        # ^8.2, and config.platform.php pins resolution there so the lock can
-        # never outrun the host. 8.5 is what the plugin is developed on;
-        # running both is what catches newer syntax slipping into code that
-        # has to execute on 8.2.
-        php: ['8.2', '8.5']
+        # Both plugins, both PHP versions — four jobs from one definition.
+        # They were two separate workflow files while campeones was still on
+        # a branch; the split was never the point, only the timing.
+        plugin: [entre-redes-prode, entre-redes-campeones]
 
+        # 8.2 is the floor for both: it is what the production WordPress host
+        # runs (8.2.33), and prode's brick/math 0.14.8 — a production
+        # dependency via ramsey/uuid — requires ^8.2. Each plugin's
+        # config.platform.php pins resolution there so a lock can never
+        # outrun the host. 8.5 is what they are developed on; running both
+        # catches newer syntax slipping into code that has to execute on 8.2.
+        #
+        # 8.0 was tried and removed: phpunit ^10.5 requires PHP >= 8.1, so
+        # the toolchain cannot exercise a floor lower than 8.1 even where the
+        # runtime would allow one. Do not declare a floor the suite cannot test.
+        #
+        # composer.lock is committed in both plugins, so every run resolves
+        # the exact same dependency tree instead of whatever a transitive
+        # bump happens to resolve to on the day CI runs.
+        php: ['8.2', '8.5']
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +78,9 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           # pdo_sqlite backs the in-memory wpdb shim in tests/wp-shim.php;
-          # openssl is used for JWT signing; dom/libxml/json are PHPUnit's.
+          # openssl is used for prode's JWT signing; dom/libxml/json are
+          # PHPUnit's. The union is declared for both plugins — an unused
+          # extension costs nothing, a missing one fails opaquely.
           extensions: mbstring, pdo_sqlite, dom, json, libxml, openssl
           coverage: none
 
@@ -76,4 +88,4 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Test
-        run: vendor/bin/phpunit
+        run: composer test
