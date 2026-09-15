@@ -58,8 +58,9 @@ void initState() {
       if (!mounted) return;
       setState(() => errorPartidos = e.toString());
     } finally {
-      if (!mounted) return;
-      setState(() => isLoadingPartidos = false);
+      if (mounted) {
+        setState(() => isLoadingPartidos = false);
+      }
     }
   }
 
@@ -99,11 +100,12 @@ void initState() {
       if (!mounted) return;
       setState(() => errorJugadores = e.toString());
     } finally {
-      if (!mounted) return;
-      setState(() {
-        isLoadingJugadores = false;
-        _jugadoresCargados = true;
-      });
+      if (mounted) {
+        setState(() {
+          isLoadingJugadores = false;
+          _jugadoresCargados = true;
+        });
+      }
     }
   }
 
