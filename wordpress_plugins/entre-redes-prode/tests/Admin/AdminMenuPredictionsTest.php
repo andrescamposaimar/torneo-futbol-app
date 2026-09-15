@@ -14,6 +14,7 @@ use EntreRedes\Prode\Admin\SettingsPage;
 use EntreRedes\Prode\Admin\SettingsRepository;
 use EntreRedes\Prode\Audit\AuditLogger;
 use EntreRedes\Prode\Audit\DniHasher;
+use EntreRedes\Prode\Auth\SessionManager;
 use EntreRedes\Prode\Fecha\BackfillMatchMetaService;
 use EntreRedes\Prode\Fecha\FechaResolver;
 use EntreRedes\Prode\Fecha\LockComputer;
@@ -60,7 +61,7 @@ class AdminMenuPredictionsTest extends TestCase {
 
         $backfillService = new BackfillMatchMetaService( $wpdb, static fn( string $d ): array => [] );
         $settingsPage    = new SettingsPage( $settingsRepo, $seedService, $this->makeRepairService( $wpdb ), $backfillService );
-        $registryPage    = new RegistryPage( $registryRepo, new AuditLogger(), new DniHasher() );
+        $registryPage    = new RegistryPage( $registryRepo, new AuditLogger(), new DniHasher(), new SessionManager() );
         $auditLogPage    = new AuditLogPage( $auditLogRepo );
         $predictionsPage = new PredictionsPage( $predRepo, $registryRepo, new FechaResolver( static fn() => [] ) );
 

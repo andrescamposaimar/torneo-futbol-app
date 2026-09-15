@@ -6,6 +6,7 @@ namespace EntreRedes\Prode\Admin;
 
 use EntreRedes\Prode\Audit\AuditLogger;
 use EntreRedes\Prode\Audit\DniHasher;
+use EntreRedes\Prode\Auth\SessionManager;
 
 /**
  * Renders and handles POST for the Registro de jugadores admin subpage
@@ -30,7 +31,8 @@ class RegistryPage {
     public function __construct(
         private RegistryRepository $registryRepo,
         private AuditLogger $auditLogger,
-        private DniHasher $dniHasher
+        private DniHasher $dniHasher,
+        private SessionManager $sessionManager
     ) {}
 
     // -------------------------------------------------------------------------
@@ -89,6 +91,9 @@ class RegistryPage {
             } elseif ( $key === 'unlinked_no_audit' ) {
                 $notice     = __( 'El usuario fue desvinculado, pero no se pudo registrar la entrada en la bitácora de auditoría. Verificá la configuración del plugin (pepper de auditoría).', 'entre-redes-prode' );
                 $noticeType = 'warning';
+            } elseif ( $key === 'unlinked_session_revoke_failed' ) {
+                $notice     = __( 'El usuario fue desvinculado, pero no se pudieron revocar sus sesiones activas. Es posible que conserve acceso hasta que expiren sus tokens. Reintentá la desvinculación o contactá al equipo técnico.', 'entre-redes-prode' );
+                $noticeType = 'error';
             } elseif ( $key === 'already_unlinked' ) {
                 $notice     = __( 'El usuario ya fue desvinculado.', 'entre-redes-prode' );
                 $noticeType = 'info';
@@ -193,6 +198,48 @@ class RegistryPage {
             exit;
         }
 
+        $noticeKey = $this->finalizeUnlink( $userId, $actorWpId, $playerName, $provider, $dni );
+
+        wp_safe_redirect( add_query_arg( 'prode_registry_notice', $noticeKey, $redirectBase ) );
+        exit;
+    }
+
+    /**
+     * Runs the post-soft-delete side effects of an admin unlink and returns
+     * the notice key to redirect with.
+     *
+     * Extracted out of handleUnlink() (which always ends in `exit;`) so it can
+     * be unit tested directly — PHPUnit cannot assert anything after a real
+     * `exit` executes in-process.
+     *
+     * Ordering (deliberate, do not reorder):
+     *   1. Session revocation runs FIRST, unconditionally, and is NOT inside
+     *      the audit log's try/catch. An admin unlink exists specifically to
+     *      cut a user's access; a revocation that can be skipped by an
+     *      unrelated audit-log failure would reopen the exact hole this
+     *      change closes. An unwritten audit row is a record-keeping gap —
+     *      recoverable. An unrevoked session is a live security hole.
+     *   2. Audit logging stays best-effort, as before: its own failure must
+     *      not roll back the unlink or suppress the revocation above.
+     *
+     * Notice priority: if revocation itself fails, that notice wins over
+     * 'unlinked_no_audit' even when the audit log also failed — silently
+     * downgrading a failed revocation to an audit warning would leave the
+     * admin believing access was cut when it was not.
+     *
+     * @param int    $userId     prode_users.id being unlinked.
+     * @param int    $actorWpId  WP user id of the admin performing the unlink.
+     * @param string $playerName Player identifier captured before soft-delete.
+     * @param string $provider   SSO provider captured before soft-delete.
+     * @param string $dni        Plain DNI captured before soft-delete (hashed below).
+     * @return string One of: 'unlinked', 'unlinked_no_audit', 'unlinked_session_revoke_failed'.
+     */
+    private function finalizeUnlink( int $userId, int $actorWpId, string $playerName, string $provider, string $dni ): string {
+        // REG-SEC-01: revoke the unlinked user's sessions before anything else.
+        // Bumps session_version (invalidates all active JWTs) and purges all
+        // refresh tokens, so a stale token cannot keep minting new sessions.
+        $revoked = $this->sessionManager->revokeAllSessions( $userId );
+
         // Hash DNI and log the admin unlink event (REG-06 step 4).
         // Only called when the soft-delete succeeded (REG-06: do NOT log if delete failed).
         $auditFailed = false;
@@ -200,13 +247,20 @@ class RegistryPage {
             $dniHash = $this->dniHasher->hash( $dni );
             $this->auditLogger->logAdminUnlink( $userId, $actorWpId, $playerName, $provider, $dniHash );
         } catch ( \Throwable ) {
-            // Audit log failure must NOT roll back the unlink.
+            // Audit log failure must NOT roll back the unlink, and must NOT
+            // have been able to suppress the revocation above.
             // Surface a warning notice so the operator knows the audit entry was not written.
             $auditFailed = true;
         }
 
-        $noticeKey = $auditFailed ? 'unlinked_no_audit' : 'unlinked';
-        wp_safe_redirect( add_query_arg( 'prode_registry_notice', $noticeKey, $redirectBase ) );
-        exit;
+        if ( ! $revoked ) {
+            // Session revocation failing leaves the exact gap this change
+            // exists to close, with the admin believing it is closed. Do not
+            // fail silently: surface a dedicated, higher-priority notice
+            // regardless of whether the audit log wrote successfully.
+            return 'unlinked_session_revoke_failed';
+        }
+
+        return $auditFailed ? 'unlinked_no_audit' : 'unlinked';
     }
 }

@@ -172,11 +172,12 @@ final class Plugin {
             add_action( 'admin_menu', static function () {
                 global $wpdb;
 
-                $settingsRepo = new Admin\SettingsRepository( $wpdb );
-                $registryRepo = new Admin\RegistryRepository( $wpdb );
-                $auditLogRepo = new Admin\AuditLogRepository( $wpdb );
-                $auditLogger  = new Audit\AuditLogger();
-                $hasher       = new Audit\DniHasher();
+                $settingsRepo    = new Admin\SettingsRepository( $wpdb );
+                $registryRepo    = new Admin\RegistryRepository( $wpdb );
+                $auditLogRepo    = new Admin\AuditLogRepository( $wpdb );
+                $auditLogger     = new Audit\AuditLogger();
+                $hasher          = new Audit\DniHasher();
+                $sessionManager  = new Auth\SessionManager();
 
                 $adminSettings    = new Fecha\Settings( $wpdb );
                 $adminLock        = new Fecha\LockComputer();
@@ -211,7 +212,7 @@ final class Plugin {
                 $predictionsPage = new Admin\PredictionsPage( $predRepo, $registryRepo, new Fecha\FechaResolver() );
 
                 $settingsPage = new Admin\SettingsPage( $settingsRepo, $seedService, $repairService, $backfillService );
-                $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher );
+                $registryPage = new Admin\RegistryPage( $registryRepo, $auditLogger, $hasher, $sessionManager );
                 $auditLogPage = new Admin\AuditLogPage( $auditLogRepo );
 
                 $adminMenu = new Admin\AdminMenu( $settingsPage, $registryPage, $auditLogPage, $predictionsPage );
