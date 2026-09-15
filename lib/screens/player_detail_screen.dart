@@ -427,9 +427,15 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
   /// (product decision). The usable interior of a star glyph is roughly 40%
   /// of its box, so at the puntaje icon's 17px a letter would be
   /// unreadable — 28px keeps the zone letter legible.
+  ///
+  /// A blank [zona] (an older plugin deploy predating `zona` on this
+  /// endpoint) still renders the star — it means "this person won a
+  /// championship", which is true regardless of whether the zone is known —
+  /// just without the overlaid letter, and with a Semantics label that
+  /// stands alone instead of reading as "Campeón Zona " to a screen reader.
   Widget _tituloEstrella(String zona) {
     return Semantics(
-      label: 'Campeón Zona $zona',
+      label: zona.isNotEmpty ? 'Campeón Zona $zona' : 'Campeón',
       child: SizedBox(
         width: 28,
         height: 28,
@@ -437,14 +443,15 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
           alignment: Alignment.center,
           children: [
             Icon(Icons.star_rounded, size: 28, color: Colors.amber.shade600),
-            Text(
-              zona,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
+            if (zona.isNotEmpty)
+              Text(
+                zona,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -619,13 +626,16 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     );
   }
 
-  /// A title is only rendered — as a hero star or as a panel row — when it
-  /// carries both the zone letter and the team name. Either one missing
-  /// would render dangling text instead of useful information (a star with
-  /// no letter inside, the label "Campeón Zona " with a trailing space, or
-  /// an empty bold headline), so it is simply omitted from both places.
-  bool _esTituloVisible(JugadorTitulo t) =>
-      t.zona.isNotEmpty && t.equipoNombre.isNotEmpty;
+  /// A title is rendered — as a hero star or as a panel row — as long as it
+  /// carries a team name. The zone is an enrichment, not the trophy: an
+  /// older plugin deploy (predating `zona` on this endpoint) omits the key
+  /// entirely, and a title with no zone still genuinely happened, so it
+  /// must still show. Only an empty team name leaves nothing worth
+  /// rendering (an empty bold headline), so that case alone is omitted.
+  /// _tituloRow and _tituloEstrella degrade gracefully when zona is empty —
+  /// they never render dangling text like "Campeón Zona " with a trailing
+  /// space.
+  bool _esTituloVisible(JugadorTitulo t) => t.equipoNombre.isNotEmpty;
 
   List<JugadorTitulo> get _titulosVisibles =>
       titulos.where(_esTituloVisible).toList();
@@ -669,9 +679,13 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
   }
 
   /// One title row: year pill (reusing _buildTemporadas()'s chip styling),
-  /// team name, and "Campeón Zona {X}" underneath. No star, no captain
-  /// marker — both were explicitly removed from this panel by the product
-  /// owner (they still travel on the wire for the history screen).
+  /// team name, and — when the zone is known — "Campeón Zona {X}"
+  /// underneath. A title whose `zona` is missing or empty (an older plugin
+  /// deploy predating `zona` on this endpoint) still renders the year and
+  /// team; it simply omits that second line instead of rendering it with a
+  /// dangling zone. No star, no captain marker — both were explicitly
+  /// removed from this panel by the product owner (they still travel on
+  /// the wire for the history screen).
   ///
   /// [onTapEquipo] navigates to the championship history screen
   /// ([CampeonesScreen]), opened on this title's year and zone — wired in
@@ -697,11 +711,16 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
             color: esTappable ? primary : Colors.black87,
           ),
         ),
-        const SizedBox(height: 2),
-        Text(
-          'Campeón Zona ${t.zona}',
-          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-        ),
+        // Omitted entirely when the zone is unknown (an older plugin deploy
+        // that predates `zona` on this endpoint) rather than rendering the
+        // dangling "Campeón Zona " with a trailing space.
+        if (t.zona.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            'Campeón Zona ${t.zona}',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+        ],
       ],
     );
 
