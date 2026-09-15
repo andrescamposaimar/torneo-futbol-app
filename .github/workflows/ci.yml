@@ -40,3 +40,40 @@ jobs:
 
       - name: Test
         run: flutter test
+
+  php-plugin:
+    name: Plugin tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: wordpress_plugins/entre-redes-prode
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 8.2 is the plugin's real floor and what production runs: brick/math
+        # 0.14.8, a production dependency pulled in by ramsey/uuid, requires
+        # ^8.2, and config.platform.php pins resolution there so the lock can
+        # never outrun the host. 8.5 is what the plugin is developed on;
+        # running both is what catches newer syntax slipping into code that
+        # has to execute on 8.2.
+        php: ['8.2', '8.5']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # pdo_sqlite backs the in-memory wpdb shim in tests/wp-shim.php;
+          # openssl is used for JWT signing; dom/libxml/json are PHPUnit's.
+          extensions: mbstring, pdo_sqlite, dom, json, libxml, openssl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Test
+        run: vendor/bin/phpunit

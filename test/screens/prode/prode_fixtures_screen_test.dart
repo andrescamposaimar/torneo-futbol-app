@@ -80,8 +80,7 @@ class _StubControllerWithCallback extends ProdeFixturesController {
 
 /// Stub controller that records draft updates and submit calls for assertion.
 class _StubControllerWithDraftTracking extends ProdeFixturesController {
-  final List<(int, int?, int?)> draftUpdates = [];
-  final List<(int, int?, int?)> submitCalls = [];
+  final List<(int, int, int)> submitCalls = [];
 
   // When set to true, submitPrediction succeeds and marks the match saved.
   bool submitSucceeds = false;
@@ -101,17 +100,10 @@ class _StubControllerWithDraftTracking extends ProdeFixturesController {
   Future<void> selectFecha(int fechaId) async {}
 
   @override
-  void updateDraft(int matchId, {int? scoreHome, int? scoreAway}) {
-    draftUpdates.add((matchId, scoreHome, scoreAway));
-    // Also update state so the widget sees the change
-    super.updateDraft(matchId, scoreHome: scoreHome, scoreAway: scoreAway);
-  }
-
-  @override
   Future<bool> submitPrediction(
     int matchId, {
-    int? scoreHome,
-    int? scoreAway,
+    required int scoreHome,
+    required int scoreAway,
   }) async {
     submitCalls.add((matchId, scoreHome, scoreAway));
     if (submitSucceeds) {
@@ -707,10 +699,10 @@ void main() {
         // Modal should be closed (stepper no longer visible)
         expect(find.byKey(const Key('stepper_home_plus_1')), findsNothing);
         // Submit was called with the score chosen in the sheet.
+        // FIX 1: the sheet cannot optimistically write the shared draft
+        // before submitting — the controller no longer exposes a way to,
+        // so the POST is the only path to the card's value.
         expect(stub.submitCalls, contains((1, 1, 1)));
-        // FIX 1: the sheet no longer optimistically writes the shared draft
-        // via updateDraft before submitting — the POST goes out first.
-        expect(stub.draftUpdates, isEmpty);
       });
     });
 
