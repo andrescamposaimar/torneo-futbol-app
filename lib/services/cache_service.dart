@@ -205,25 +205,6 @@ class CacheService implements ICacheService {
   // ─────────────────────────────────────────────────────────────
 
   @override
-  Future<void> cachePlayers(List<dynamic> players) async {
-    final prefs = await _sharedPrefs;
-    final cacheData = {
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-      'players': players,
-    };
-    await prefs.setString(_playersCacheKey, jsonEncode(cacheData));
-  }
-
-  @override
-  Future<List<dynamic>?> getCachedPlayers() async {
-    return _readCachedList(
-      _playersCacheKey,
-      ttl: await _effectiveCacheDuration,
-      extract: (decoded) => List<dynamic>.from(decoded['players']),
-    );
-  }
-
-  @override
   Future<void> cachePlayersHistoricos(List<dynamic> players) async {
     final prefs = await _sharedPrefs;
     final cacheData = {

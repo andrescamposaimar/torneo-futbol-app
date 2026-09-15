@@ -22,9 +22,6 @@ abstract class ICacheService {
   /// the network is unreachable and there is no fresh cache.
   Future<List<dynamic>?> getCachedTemporadasIgnoringTtl();
 
-  Future<void> cachePlayers(List<dynamic> players);
-  Future<List<dynamic>?> getCachedPlayers();
-
   Future<void> cachePlayersHistoricos(List<dynamic> players);
   Future<List<dynamic>?> getCachedPlayersHistoricos();
 
