@@ -352,14 +352,26 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
                                 : primary,
                           ),
                           const SizedBox(width: 5),
-                          Text(
-                            sinPuntaje ? 'Sin puntaje' : puntaje,
-                            style: TextStyle(
-                              fontSize: sinPuntaje ? 12 : 15,
-                              fontWeight: FontWeight.w800,
-                              color: sinPuntaje
-                                  ? Colors.grey.shade600
-                                  : Colors.black87,
+                          // Flexible + ellipsis: 'Sin puntaje' is a much
+                          // longer string than a bare rating number, and this
+                          // branch was unreachable until formatearPuntaje
+                          // started treating a zero rating as unrated — so
+                          // its width was never actually laid out before.
+                          // On a narrow phone the pill's available width
+                          // (bounded by the Wrap it sits in) can be less than
+                          // the label needs; without this the Row overflows
+                          // instead of the label truncating gracefully.
+                          Flexible(
+                            child: Text(
+                              sinPuntaje ? 'Sin puntaje' : puntaje,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: sinPuntaje ? 12 : 15,
+                                fontWeight: FontWeight.w800,
+                                color: sinPuntaje
+                                    ? Colors.grey.shade600
+                                    : Colors.black87,
+                              ),
                             ),
                           ),
                         ],

@@ -164,7 +164,7 @@ void initState() {
                 children: [
                   const Text('Pts.', style: TextStyle(fontSize: 11)),
                   Text(
-                    formatearPuntaje(jugador.puntaje == 0 ? null : jugador.puntaje),
+                    formatearPuntaje(jugador.puntaje),
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                 ],
