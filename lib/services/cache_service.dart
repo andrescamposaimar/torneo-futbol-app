@@ -216,25 +216,6 @@ class CacheService implements ICacheService {
   }
 
   @override
-  Future<void> cachePlayersTemporada(List<dynamic> players) async {
-    final prefs = await _sharedPrefs;
-    final cacheData = {
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-      'players': players,
-    };
-    await prefs.setString(_playersTemporadaCacheKey, jsonEncode(cacheData));
-  }
-
-  @override
-  Future<List<dynamic>?> getCachedPlayersTemporada() async {
-    return _readCachedList(
-      _playersTemporadaCacheKey,
-      ttl: await _effectiveCacheDuration,
-      extract: (decoded) => List<dynamic>.from(decoded['players']),
-    );
-  }
-
-  @override
   Future<void> cachePlayersHistoricos(List<dynamic> players) async {
     final prefs = await _sharedPrefs;
     final cacheData = {
@@ -350,12 +331,6 @@ class CacheService implements ICacheService {
       ttl: const Duration(hours: 1),
       extract: (decoded) => List<dynamic>.from(decoded['noticias']),
     );
-  }
-
-  @override
-  Future<void> clearNoticiasCache() async {
-    final prefs = await _sharedPrefs;
-    await prefs.remove(_noticiasCacheKey);
   }
 
   // ─────────────────────────────────────────────────────────────
