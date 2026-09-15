@@ -30,7 +30,6 @@ class _ZocaloPublicitarioState extends ConsumerState<ZocaloPublicitario> {
     if (!ref.read(tenantConfigProvider).features.ads) return;
     final prefs = await SharedPreferences.getInstance();
     //final lastClosed = prefs.getInt('zocalo_ad_closed_at');
-    final now = DateTime.now().millisecondsSinceEpoch;
     await prefs.remove('zocalo_ad_closed_at'); // Fuerza su visibilidad
 
     /*if (lastClosed != null && now - lastClosed < 3600000) {
