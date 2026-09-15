@@ -243,6 +243,27 @@ void main() {
     });
   });
 
+  group('PlayerDetailScreen · section order', () {
+    testWidgets('TÍTULOS sits above TEMPORADAS when the player has both',
+        (tester) async {
+      // Tall enough that both panels are laid out at once — the point of the
+      // test is their relative position, which a viewport that virtualises
+      // one of them away cannot show.
+      await _pump(
+        tester,
+        size: const Size(400, 2000),
+        titulos: [_titulo(anio: 2023)],
+      );
+
+      final titulosY = tester.getTopLeft(find.text('TÍTULOS')).dy;
+      final temporadasY = tester.getTopLeft(find.text('TEMPORADAS')).dy;
+
+      expect(titulosY, lessThan(temporadasY),
+          reason: 'a championship is the more significant fact about a player '
+              'than the list of seasons they appeared in');
+    });
+  });
+
   group('PlayerDetailScreen · hero title stars', () {
     testWidgets('a player with zero titles shows no stars', (tester) async {
       await _pump(tester, size: const Size(320, 568), titulos: const []);

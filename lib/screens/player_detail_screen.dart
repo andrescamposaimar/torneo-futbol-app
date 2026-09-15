@@ -869,13 +869,17 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
           const SizedBox(height: 16),
           _buildEstadisticas(),
         ],
-        if (temporadas.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          _buildTemporadas(),
-        ],
+        // TÍTULOS sits above TEMPORADAS: a championship is the more
+        // significant fact about a player than the list of seasons they
+        // appeared in, so it should not be the thing you have to scroll
+        // past the seasons to reach.
         if (_titulosVisibles.isNotEmpty) ...[
           const SizedBox(height: 16),
           _buildTitulos(),
+        ],
+        if (temporadas.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildTemporadas(),
         ],
       ],
     );
