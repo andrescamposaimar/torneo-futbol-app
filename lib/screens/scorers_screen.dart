@@ -4,6 +4,7 @@ import '../providers/repository_providers.dart';
 import '../providers/temporadas_provider.dart';
 import '../models/temporada.dart';
 import '../widgets/entre_redes_app_bar.dart';
+import '../widgets/loading_seccion.dart';
 
 class ScorersScreen extends ConsumerStatefulWidget {
   const ScorersScreen({super.key});
@@ -156,7 +157,7 @@ class _ScorersScreenState extends ConsumerState<ScorersScreen> {
           const SizedBox(height: 8),
           Expanded(
             child: isLoading && goleadores.isEmpty
-                ? const LoadingSeccionConAd(
+                ? const LoadingSeccion(
                     texto: 'Cargando goleadores...',
                   )
                 : goleadores.isEmpty
@@ -258,26 +259,6 @@ class _ScorersScreenState extends ConsumerState<ScorersScreen> {
                         },
                       ),
           )
-        ],
-      ),
-    );
-  }
-}
-
-class LoadingSeccionConAd extends StatelessWidget {
-  final String texto;
-
-  const LoadingSeccionConAd({super.key, required this.texto});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 12),
-          Text(texto, style: const TextStyle(fontSize: 14)),
         ],
       ),
     );
