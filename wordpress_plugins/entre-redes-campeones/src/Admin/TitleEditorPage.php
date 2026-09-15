@@ -703,9 +703,6 @@ class TitleEditorPage {
         }
 
         $title = $this->titles->find( $entry->tituloId );
-        if ( null === $title ) {
-            return RowSaveResult::saved( $rowId, true );
-        }
 
         try {
             $resolution   = $this->resolver->resolve( $jugadorNombre, $title->anio );

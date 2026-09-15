@@ -49,13 +49,6 @@ final class WpPlayerDirectory implements PlayerDirectoryInterface {
         return $this->bySurname[ $normalizedSurname ] ?? [];
     }
 
-    public function searchByName( string $query, int $limit ): array {
-        // Signature only in this slice (design §4/§9, task 2.8) — ranking
-        // and filtering land in slice 5's pure PlayerSearch class, which
-        // this method will wire over the already-built flat index.
-        return [];
-    }
-
     public function existsById( int $id ): bool {
         $this->ensureIndexBuilt();
 

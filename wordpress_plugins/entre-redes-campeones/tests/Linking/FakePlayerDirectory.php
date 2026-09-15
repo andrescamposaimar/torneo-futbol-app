@@ -49,12 +49,6 @@ final class FakePlayerDirectory implements PlayerDirectoryInterface {
         );
     }
 
-    public function searchByName( string $query, int $limit ): array {
-        // Not exercised until slice 5 (PlayerSearch); this seam only needs
-        // to satisfy the interface for LinkResolverTest.
-        return [];
-    }
-
     public function existsById( int $id ): bool {
         foreach ( $this->players as $player ) {
             if ( $player->id === $id ) {
