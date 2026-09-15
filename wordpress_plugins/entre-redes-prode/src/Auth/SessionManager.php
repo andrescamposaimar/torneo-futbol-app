@@ -142,12 +142,17 @@ class SessionManager {
      * Used by: admin unlink, user-initiated account deletion.
      *
      * @param int $user_id prode_users.id
+     * @return bool True if both the session_version bump and the refresh-token
+     *              purge completed without a driver-level error. False callers
+     *              (currently: admin unlink) MUST treat as "revocation is not
+     *              guaranteed" and surface it — a silent false here is the exact
+     *              hole this method exists to close.
      */
-    public function revokeAllSessions( int $user_id ): void {
+    public function revokeAllSessions( int $user_id ): bool {
         global $wpdb;
 
         // Increment session_version — any JWT carrying the old sv is now invalid.
-        $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+        $sv_result = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
             $wpdb->prepare(
                 "UPDATE {$wpdb->prefix}prode_users
                     SET session_version = session_version + 1
@@ -157,10 +162,15 @@ class SessionManager {
         );
 
         // Purge refresh tokens (hard delete; they are worthless after sv bump).
-        $wpdb->delete( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+        $purge_result = $wpdb->delete( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
             $wpdb->prefix . 'prode_refresh_tokens',
             [ 'user_id' => $user_id ]
         );
+
+        // wpdb::query()/delete() return int|false; false means a driver-level
+        // error (see $wpdb->last_error), NOT "0 rows affected" (a legitimate
+        // outcome, e.g. a user with no refresh tokens issued yet).
+        return false !== $sv_result && false !== $purge_result;
     }
 
     /**
