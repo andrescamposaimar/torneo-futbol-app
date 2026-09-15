@@ -33,17 +33,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # `flutter analyze` is deliberately NOT a step here yet.
-      #
-      # analysis_options.yaml includes `package:flutter_lints/flutter.yaml`,
-      # but flutter_lints is not a dependency of this project, so that include
-      # has never resolved and the lint suite has never actually run. Analysis
-      # currently reports 7 pre-existing findings and exits non-zero; wiring it
-      # up here would make this gate red on arrival and train everyone to
-      # ignore it. Installing flutter_lints raises that to 49 findings,
-      # including two `control_flow_in_finally` that can swallow exceptions.
-      #
-      # That cleanup is real work and belongs in its own reviewable PR. Until
-      # then this gate enforces what it can actually prove: the test suite.
+      # flutter_lints is now an installed dependency and analysis_options.yaml's
+      # include resolves, so this gate can enforce the lint suite, not just tests.
+      - name: Analyze
+        run: flutter analyze
+
       - name: Test
         run: flutter test
