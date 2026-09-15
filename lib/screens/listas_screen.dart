@@ -30,9 +30,6 @@ class _ListasScreenState extends ConsumerState<ListasScreen>
   static const List<double> _valoresPuntaje = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
   final List<double> _puntajesFiltro = [];
 
-  // --- Ads ---
-  String? adImageUrl;
-
   // --- IDs de equipos-contenedor (resueltos desde el JSON remoto) ---
   List<int> _esperaIds = [];
   List<int> _reservaIds = [];
@@ -63,21 +60,7 @@ class _ListasScreenState extends ConsumerState<ListasScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(_onTabChanged);
-    _loadAds();
     _loadEspera();
-  }
-
-  // ───────────────────────────────────────────────
-  // Ads
-  // ───────────────────────────────────────────────
-
-  Future<void> _loadAds() async {
-    ref.read(remoteDataServiceProvider).fetchAdImages().then((ads) {
-      if (!mounted) return;
-      setState(() {
-        adImageUrl = ads['jugadores'];
-      });
-    });
   }
 
   // ───────────────────────────────────────────────
@@ -402,9 +385,8 @@ class _ListasScreenState extends ConsumerState<ListasScreen>
 
   Widget _buildEsperaTab() {
     if (isLoadingEspera) {
-      return LoadingSeccionConAd(
+      return const LoadingSeccionConAd(
         texto: 'Cargando jugadores...',
-        adImageUrl: adImageUrl,
       );
     }
     if (errorEspera != null) {
@@ -680,12 +662,10 @@ class _ReservaLoadingWidget extends StatelessWidget {
 
 class LoadingSeccionConAd extends StatelessWidget {
   final String texto;
-  final String? adImageUrl;
 
   const LoadingSeccionConAd({
     super.key,
     required this.texto,
-    this.adImageUrl,
   });
 
   @override
@@ -697,23 +677,6 @@ class LoadingSeccionConAd extends StatelessWidget {
           const CircularProgressIndicator(),
           const SizedBox(height: 12),
           Text(texto, style: const TextStyle(fontSize: 14)),
-          if (adImageUrl != null && adImageUrl!.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Image.network(
-                  adImageUrl!,
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                  width: double.infinity,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const Text('No se pudo cargar la imagen publicitaria'),
-                ),
-              ),
-            ),
-          ]
         ],
       ),
     );
