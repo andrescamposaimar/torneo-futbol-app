@@ -219,6 +219,15 @@ Future<void> _scrollToTitulos(WidgetTester tester) async {
   }
 }
 
+/// Scoped to the hero's own subtree. Both the rating glyph (Icons.speed) and
+/// the rating number now also appear in the OTROS DATOS row below, so an
+/// unscoped finder would match twice and these assertions would be about the
+/// screen rather than about the hero.
+Finder _enHero(Finder matching) => find.descendant(
+      of: find.byKey(PlayerDetailScreen.heroKey),
+      matching: matching,
+    );
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -229,8 +238,29 @@ void main() {
         (tester) async {
       await _pump(tester, size: const Size(320, 568));
 
-      expect(find.byIcon(Icons.speed), findsOneWidget);
+      expect(_enHero(find.byIcon(Icons.speed)), findsOneWidget);
       expect(find.byIcon(Icons.star_rounded), findsNothing);
+    });
+  });
+
+  group('PlayerDetailScreen · section order', () {
+    testWidgets('TÍTULOS sits above TEMPORADAS when the player has both',
+        (tester) async {
+      // Tall enough that both panels are laid out at once — the point of the
+      // test is their relative position, which a viewport that virtualises
+      // one of them away cannot show.
+      await _pump(
+        tester,
+        size: const Size(400, 2000),
+        titulos: [_titulo(anio: 2023)],
+      );
+
+      final titulosY = tester.getTopLeft(find.text('TÍTULOS')).dy;
+      final temporadasY = tester.getTopLeft(find.text('TEMPORADAS')).dy;
+
+      expect(titulosY, lessThan(temporadasY),
+          reason: 'a championship is the more significant fact about a player '
+              'than the list of seasons they appeared in');
     });
   });
 
@@ -266,7 +296,7 @@ void main() {
       // Three stars plus the pill do not fit on 320px — the pill and the
       // first star or two may still share the pill's line, but the LAST
       // star is guaranteed to overflow onto its own wrapped line.
-      final pillTop = tester.getTopLeft(find.text('7.5')).dy;
+      final pillTop = tester.getTopLeft(_enHero(find.text('7.5'))).dy;
       final lastStarTop = tester.getTopLeft(find.byIcon(Icons.star_rounded).last).dy;
       expect(lastStarTop, greaterThan(pillTop + 10));
     });
@@ -284,7 +314,7 @@ void main() {
       // On a wide screen every star fits on the pill's own line — allow a
       // small tolerance for cross-axis centering between differently-sized
       // children on the same Wrap run.
-      final pillTop = tester.getTopLeft(find.text('7.5')).dy;
+      final pillTop = tester.getTopLeft(_enHero(find.text('7.5'))).dy;
       final lastStarTop = tester.getTopLeft(find.byIcon(Icons.star_rounded).last).dy;
       expect((lastStarTop - pillTop).abs(), lessThan(10));
     });

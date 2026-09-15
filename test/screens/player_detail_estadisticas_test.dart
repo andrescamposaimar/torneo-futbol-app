@@ -124,6 +124,37 @@ void main() {
       expect(find.text('Tranquilo'), findsNothing);
     });
 
+    testWidgets(
+        'OTROS DATOS names the rating, and names the same number the hero shows',
+        (tester) async {
+      await _pumpNarrow(tester);
+
+      // The stub's metrics carry puntaje '7,5', which formatearPuntaje
+      // renders as '7.5'.
+      final filaPuntaje =
+          find.ancestor(of: find.text('Puntaje'), matching: find.byType(Row)).first;
+
+      expect(find.descendant(of: filaPuntaje, matching: find.text('7.5')),
+          findsOneWidget);
+
+      // Exactly two: the hero's unlabelled pill and this labelled row. The
+      // whole point of the row is that it explains the pill, so if the two
+      // ever showed different numbers it would explain nothing.
+      expect(find.text('7.5'), findsNWidgets(2));
+    });
+
+    testWidgets(
+        'the Puntaje row repeats the hero glyph, which is what ties them together',
+        (tester) async {
+      await _pumpNarrow(tester);
+
+      final filaPuntaje =
+          find.ancestor(of: find.text('Puntaje'), matching: find.byType(Row)).first;
+
+      expect(find.descendant(of: filaPuntaje, matching: find.byIcon(Icons.speed)),
+          findsOneWidget);
+    });
+
     testWidgets('Posición is marked with a player-position glyph, not a ball',
         (tester) async {
       await _pumpNarrow(tester);
