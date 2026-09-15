@@ -305,18 +305,6 @@ class CacheService implements ICacheService {
     );
   }
 
-  @override
-  Future<void> clearScorersCache() async {
-    final prefs = await _sharedPrefs;
-    await prefs.remove(_scorersCacheKey);
-  }
-
-  @override
-  Future<void> clearScorersTemporadaCache(int temporadaId) async {
-    final prefs = await _sharedPrefs;
-    await prefs.remove(_scorersTemporadaKey(temporadaId));
-  }
-
   // ─────────────────────────────────────────────────────────────
   // 🔹 Noticias Cache (TTL corto: 1 hora)
   // ─────────────────────────────────────────────────────────────
