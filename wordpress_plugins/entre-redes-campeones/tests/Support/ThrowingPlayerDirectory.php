@@ -20,10 +20,6 @@ final class ThrowingPlayerDirectory implements PlayerDirectoryInterface {
         throw new PlayerDirectoryQueryException( 'Simulated player directory query failure for test' );
     }
 
-    public function searchByName( string $query, int $limit ): array {
-        return [];
-    }
-
     public function existsById( int $id ): bool {
         throw new PlayerDirectoryQueryException( 'Simulated player directory query failure for test' );
     }

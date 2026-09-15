@@ -45,10 +45,6 @@ final class PartiallyThrowingPlayerDirectory implements PlayerDirectoryInterface
         return $this->delegate->findBySurname( $normalizedSurname );
     }
 
-    public function searchByName( string $query, int $limit ): array {
-        return $this->delegate->searchByName( $query, $limit );
-    }
-
     public function existsById( int $id ): bool {
         return $this->delegate->existsById( $id );
     }
