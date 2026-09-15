@@ -27,6 +27,11 @@ class PlayerDetailScreen extends ConsumerStatefulWidget {
   /// panel* without also matching the unrelated hero star above it.
   static const titulosPanelKey = Key('titulos-panel');
 
+  /// The hero card's own subtree. The rating glyph and the rating number now
+  /// also appear in the OTROS DATOS row below, so a test that means "the hero's
+  /// rating" has to say so — an unscoped find.byIcon/find.text would match both.
+  static const heroKey = Key('player-detail-hero');
+
   @override
   ConsumerState<PlayerDetailScreen> createState() => _PlayerDetailScreenState();
 }
@@ -228,6 +233,7 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
     final sinPuntaje = puntaje == '-';
 
     return Container(
+      key: PlayerDetailScreen.heroKey,
       width: double.infinity,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -832,6 +838,12 @@ class _PlayerDetailScreenState extends ConsumerState<PlayerDetailScreen> with Si
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Column(
               children: [
+                // Deliberately the same value and the same glyph as the hero's
+                // rating pill. The pill shows the number without a word, which
+                // leaves a reader guessing what it measures; this row names it,
+                // and the repeated Icons.speed is what ties the two together.
+                _infoRow(_glifo(Icons.speed), 'Puntaje',
+                    formatearPuntaje(jugador.puntaje)),
                 _infoRow(_glifo(Icons.person_pin_circle), 'Posición', posicion),
                 _infoRow(_glifo(Icons.cake_outlined), 'Fecha de nacimiento',
                     formatFechaNacimiento(jugador.fechaNacimiento)),
