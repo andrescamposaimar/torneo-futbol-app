@@ -18,34 +18,6 @@ class RemoteDataService {
   String get _adsUrl => '$mediaBaseUrl/publicidades.json';
   String get _listasUrl => '$mediaBaseUrl/listas_jugadores.json';
 
-  Future<Map<String, String>> fetchAdImages() async {
-    try {
-      final res = await http.get(Uri.parse(_adsUrl));
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        return {
-          'estadisticas': data['estadisticas_ad'] ?? '',
-          'alineaciones': data['alineaciones_ad'] ?? '',
-          'jugadores': data['jugadores_ad'] ?? '',
-          'equipos': data['equipos_ad'] ?? '',
-          'tabla': data['tabla_ad'] ?? '',
-          'goleadores': data['goleadores_ad'] ?? '',
-          'imbatibles': data['imbatibles_ad'] ?? '',
-          'zocalo': data['zocalo_ad'] ?? '',
-        };
-      }
-    } catch (e) {
-      debugPrint('❌ Error al cargar publicidades: $e');
-    }
-    return {
-      'estadisticas': '',
-      'alineaciones': '',
-      'jugadores': '',
-      'equipos': '',
-      'tabla': ''
-    };
-  }
-
   Future<Map<String, List<int>>> fetchListasJugadores() async {
     try {
       final res = await http.get(Uri.parse(_listasUrl));
