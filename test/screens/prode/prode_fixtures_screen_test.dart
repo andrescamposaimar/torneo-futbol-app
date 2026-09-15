@@ -393,7 +393,7 @@ void main() {
       // Helper: a single open FechaSummary matching _makeFecha()'s fechaId=1 with 2 matches.
       // Required so _LoadedView renders _TabContent (which shows the progress header) instead
       // of falling back to the no-summary legacy path (which has no progress header).
-      FechaSummary _openSummary() => FechaSummary(
+      FechaSummary openSummary() => FechaSummary(
             fechaId: 1,
             seasonId: 10,
             state: ProdeFechaState.open,
@@ -407,7 +407,7 @@ void main() {
           tester,
           ProdeFixturesLoaded(
             fecha,
-            fechas: [_openSummary()],
+            fechas: [openSummary()],
             selectedFechaId: 1,
             savedMatchIds: const {},
           ),
@@ -426,7 +426,7 @@ void main() {
           tester,
           ProdeFixturesLoaded(
             fecha,
-            fechas: [_openSummary()],
+            fechas: [openSummary()],
             selectedFechaId: 1,
             drafts: drafts,
             savedMatchIds: savedMatchIds,
@@ -445,7 +445,7 @@ void main() {
           // 99 is not a match of this fecha — must not count toward progress
           ProdeFixturesLoaded(
             fecha,
-            fechas: [_openSummary()],
+            fechas: [openSummary()],
             selectedFechaId: 1,
             savedMatchIds: const {1, 99},
           ),
@@ -462,7 +462,7 @@ void main() {
           tester,
           ProdeFixturesLoaded(
             _makeFecha(),
-            fechas: [_openSummary()],
+            fechas: [openSummary()],
             selectedFechaId: 1,
           ),
         );
@@ -810,7 +810,7 @@ void main() {
 
     group('Fecha selector (G6-e)', () {
       // Helper: build a ProdeFixturesLoaded with multiple fechas for G6-e tests.
-      ProdeFixturesLoaded _loadedWithFechas({
+      ProdeFixturesLoaded loadedWithFechas({
         int selectedIndex = 0,
         int fechaCount = 3,
         bool isFechaLoading = false,
@@ -835,7 +835,7 @@ void main() {
       }
 
       testWidgets('selector row present when fechas >= 1', (tester) async {
-        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+        await _pumpScreen(tester, loadedWithFechas(fechaCount: 3, selectedIndex: 0));
         expect(find.byKey(const Key('fecha_selector_label')), findsOneWidget);
       });
 
@@ -849,7 +849,7 @@ void main() {
 
       testWidgets('label shows "Fecha N" where N = selectedIndex + 1', (tester) async {
         // selectedIndex=1 → N=2
-        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 1));
+        await _pumpScreen(tester, loadedWithFechas(fechaCount: 3, selectedIndex: 1));
         expect(find.byKey(const Key('fecha_selector_label')), findsOneWidget);
         expect(find.textContaining('Fecha 2'), findsAtLeastNWidgets(1));
       });
@@ -929,7 +929,7 @@ void main() {
       });
 
       testWidgets('prev arrow non-interactive when first fecha selected (AC5)', (tester) async {
-        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+        await _pumpScreen(tester, loadedWithFechas(fechaCount: 3, selectedIndex: 0));
 
         // The prev button should exist but be non-interactive (disabled/no onTap)
         final prevFinder = find.byKey(const Key('fecha_selector_prev'));
@@ -950,7 +950,7 @@ void main() {
       });
 
       testWidgets('next arrow non-interactive when last fecha selected (AC5)', (tester) async {
-        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 2));
+        await _pumpScreen(tester, loadedWithFechas(fechaCount: 3, selectedIndex: 2));
 
         final nextFinder = find.byKey(const Key('fecha_selector_next'));
         expect(nextFinder, findsOneWidget);
@@ -964,7 +964,7 @@ void main() {
       });
 
       testWidgets('tapping label opens bottom sheet with Fecha N entries (AC6)', (tester) async {
-        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+        await _pumpScreen(tester, loadedWithFechas(fechaCount: 3, selectedIndex: 0));
 
         await tester.tap(find.byKey(const Key('fecha_selector_label')));
         await tester.pumpAndSettle();
@@ -978,7 +978,7 @@ void main() {
 
       // W-1: selector row MUST appear above the progress header.
       testWidgets('selector row renders above progress header in loaded state (W-1)', (tester) async {
-        await _pumpScreen(tester, _loadedWithFechas(fechaCount: 3, selectedIndex: 0));
+        await _pumpScreen(tester, loadedWithFechas(fechaCount: 3, selectedIndex: 0));
 
         final selectorFinder = find.byKey(const Key('fecha_selector_label'));
         final progressFinder = find.byType(LinearProgressIndicator);
@@ -1096,7 +1096,7 @@ void main() {
       });
 
       testWidgets('isFechaLoading true → scoped spinner present, selector row still mounted (AC7)', (tester) async {
-        await _pumpScreen(tester, _loadedWithFechas(isFechaLoading: true));
+        await _pumpScreen(tester, loadedWithFechas(isFechaLoading: true));
 
         expect(find.byKey(const Key('fecha_load_spinner')), findsOneWidget);
         expect(find.byKey(const Key('fecha_selector_label')), findsOneWidget);
@@ -1104,7 +1104,7 @@ void main() {
 
       testWidgets('fechaLoadError set → inline error and Reintentar button present (AC8)', (tester) async {
         final error = ProdeFixturesFechaError(code: 'fetch_error', fechaId: 2);
-        await _pumpScreen(tester, _loadedWithFechas(fechaLoadError: error));
+        await _pumpScreen(tester, loadedWithFechas(fechaLoadError: error));
 
         expect(find.text('No pudimos cargar esta fecha.'), findsOneWidget);
         expect(find.byKey(const Key('fecha_load_retry')), findsOneWidget);
@@ -1268,7 +1268,7 @@ void main() {
     group('Evaluated fecha result rendering (T-12)', () {
       /// Builds a FechaActiva in evaluated state with one match that is final,
       /// and one user prediction with [points] and [evaluationMethod].
-      FechaActiva _evaluatedFecha({
+      FechaActiva evaluatedFecha({
         int? realScoreHome = 2,
         int? realScoreAway = 1,
         bool isFinal = true,
@@ -1306,7 +1306,7 @@ void main() {
       // --- badge rendering ---
 
       testWidgets('exact_score: green badge label "+3 Exacto" visible on card', (tester) async {
-        final fecha = _evaluatedFecha(
+        final fecha = evaluatedFecha(
           points: 3,
           evaluationMethod: 'exact_score',
           isFinal: true,
@@ -1323,7 +1323,7 @@ void main() {
       });
 
       testWidgets('result_only/1: amber badge label "+1 Ganador" visible on card', (tester) async {
-        final fecha = _evaluatedFecha(
+        final fecha = evaluatedFecha(
           points: 1,
           evaluationMethod: 'result_only',
           realScoreHome: 1,
@@ -1342,7 +1342,7 @@ void main() {
       });
 
       testWidgets('result_only/0: red badge label "0 pts" visible on card', (tester) async {
-        final fecha = _evaluatedFecha(
+        final fecha = evaluatedFecha(
           points: 0,
           evaluationMethod: 'result_only',
           realScoreHome: 3,
@@ -1363,7 +1363,7 @@ void main() {
       // --- real-score line ---
 
       testWidgets('isFinal=true: real-score line shows "Resultado: 2 - 1"', (tester) async {
-        final fecha = _evaluatedFecha(
+        final fecha = evaluatedFecha(
           realScoreHome: 2,
           realScoreAway: 1,
           isFinal: true,
@@ -1383,7 +1383,7 @@ void main() {
       });
 
       testWidgets('isFinal=false: no real-score line rendered', (tester) async {
-        final fecha = _evaluatedFecha(
+        final fecha = evaluatedFecha(
           realScoreHome: null,
           realScoreAway: null,
           isFinal: false,
@@ -1401,7 +1401,7 @@ void main() {
       // --- null real-score fallback (legacy evaluated fecha) ---
 
       testWidgets('legacy evaluated: points known but realScore null — badge shown, no real-score line, no crash', (tester) async {
-        final fecha = _evaluatedFecha(
+        final fecha = evaluatedFecha(
           realScoreHome: null,
           realScoreAway: null,
           isFinal: false, // pre-change: is_final was not set
@@ -1474,7 +1474,7 @@ void main() {
       // --- card border color reflects evaluation style ---
 
       testWidgets('evaluated isFinal=true card has colored border (not grey.shade200)', (tester) async {
-        final fecha = _evaluatedFecha(points: 3, evaluationMethod: 'exact_score', isFinal: true);
+        final fecha = evaluatedFecha(points: 3, evaluationMethod: 'exact_score', isFinal: true);
         final drafts = _seedDrafts(fecha);
         final savedMatchIds = _seedSavedMatchIds(fecha);
         await _pumpScreen(
@@ -1497,7 +1497,7 @@ void main() {
 
     group('Populares section (G6-f)', () {
       // Helper: pump screen and open the modal for a given match card.
-      Future<void> _openModal(
+      Future<void> openModal(
         WidgetTester tester,
         ProdeFixturesState state,
         int matchId,
@@ -1525,7 +1525,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.byKey(const Key('populares_section_1')), findsOneWidget);
         expect(find.byKey(const Key('populares_chip_1_1')), findsOneWidget);
@@ -1552,7 +1552,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.text('45%'), findsOneWidget);
         expect(find.text('30%'), findsOneWidget);
@@ -1577,7 +1577,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.text('0%'), findsOneWidget);
         expect(find.text('70%'), findsOneWidget);
@@ -1602,7 +1602,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         // All three chips should show "33%" — no crash, no normalization.
         expect(find.text('33%'), findsNWidgets(3));
@@ -1626,7 +1626,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.text('100%'), findsOneWidget);
         expect(find.text('0%'), findsNWidgets(2));
@@ -1652,7 +1652,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.text('100%'), findsOneWidget);
         expect(find.text('10000%'), findsNothing); // must never appear
@@ -1676,7 +1676,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.text('33%'), findsNWidgets(3));
       });
@@ -1698,7 +1698,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
         expect(find.textContaining('%'), findsNothing);
@@ -1721,7 +1721,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
         expect(find.textContaining('%'), findsNothing);
@@ -1744,7 +1744,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         expect(find.byKey(const Key('populares_locked_hint')), findsOneWidget);
         expect(find.textContaining('%'), findsNothing);
@@ -1799,7 +1799,7 @@ void main() {
         );
 
         // Open match 1 — should reveal percentages.
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
         expect(find.text('45%'), findsOneWidget);
         expect(find.byKey(const Key('populares_locked_hint')), findsNothing);
 
@@ -1831,7 +1831,7 @@ void main() {
             ),
           ],
         );
-        await _openModal(tester, ProdeFixturesLoaded(fecha), 1);
+        await openModal(tester, ProdeFixturesLoaded(fecha), 1);
 
         final semanticsWidget = find.bySemanticsLabel(
           RegExp('Información sobre pronósticos populares'),

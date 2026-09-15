@@ -1364,7 +1364,7 @@ Future<ProdeFixturesController> _makeControllerWithFecha(
   );
 
   // Build the fecha JSON body from the FechaActiva object.
-  Map<String, dynamic> _fechaJsonBody(FechaActiva f) => {
+  Map<String, dynamic> fechaJsonBody(FechaActiva f) => {
     'fecha_id': f.fechaId,
     'season_id': f.seasonId,
     'state': f.state.name,
@@ -1404,7 +1404,7 @@ Future<ProdeFixturesController> _makeControllerWithFecha(
 
     if (path.contains('fecha-activa')) {
       return http.Response(
-        json.encode(_fechaJsonBody(fecha)),
+        json.encode(fechaJsonBody(fecha)),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -1414,7 +1414,7 @@ Future<ProdeFixturesController> _makeControllerWithFecha(
     final fechaByIdMatch = RegExp(r'/fecha/(\d+)$').firstMatch(path);
     if (fechaByIdMatch != null) {
       return http.Response(
-        json.encode(_fechaJsonBody(fecha)),
+        json.encode(fechaJsonBody(fecha)),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -1560,7 +1560,7 @@ Future<ProdeFixturesController> _makeControllerWithFechaAndSubmit(
     tenantId: 'marianista',
   );
 
-  Map<String, dynamic> _fechaJsonBody2(FechaActiva f) => {
+  Map<String, dynamic> fechaJsonBody2(FechaActiva f) => {
     'fecha_id': f.fechaId,
     'season_id': f.seasonId,
     'state': f.state.name,
@@ -1600,7 +1600,7 @@ Future<ProdeFixturesController> _makeControllerWithFechaAndSubmit(
 
     if (path.contains('fecha-activa')) {
       return http.Response(
-        json.encode(_fechaJsonBody2(fecha)),
+        json.encode(fechaJsonBody2(fecha)),
         200,
         headers: {'content-type': 'application/json'},
       );
@@ -1610,7 +1610,7 @@ Future<ProdeFixturesController> _makeControllerWithFechaAndSubmit(
     final fechaByIdMatch = RegExp(r'/fecha/(\d+)$').firstMatch(path);
     if (fechaByIdMatch != null) {
       return http.Response(
-        json.encode(_fechaJsonBody2(fecha)),
+        json.encode(fechaJsonBody2(fecha)),
         200,
         headers: {'content-type': 'application/json'},
       );
