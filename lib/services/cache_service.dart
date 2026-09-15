@@ -133,14 +133,18 @@ class CacheService implements ICacheService {
   Future<void> clearPlayersCurrentSeasonAll() async {
     final prefs = await _sharedPrefs;
     final keys = prefs.getKeys().where((k) => k.startsWith('cached_players_current_')).toList();
-    for (final key in keys) await prefs.remove(key);
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
   }
 
   @override
   Future<void> clearStandingsCacheAll() async {
     final prefs = await _sharedPrefs;
     final keys = prefs.getKeys().where((k) => k.startsWith('cache_tablas_')).toList();
-    for (final key in keys) await prefs.remove(key);
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
   }
 
   @override
@@ -148,14 +152,18 @@ class CacheService implements ICacheService {
     final prefs = await _sharedPrefs;
     await prefs.remove(_scorersCacheKey);
     final keys = prefs.getKeys().where((k) => k.startsWith('cached_scorers_')).toList();
-    for (final key in keys) await prefs.remove(key);
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
   }
 
   @override
   Future<void> clearImbatiblesCacheAll() async {
     final prefs = await _sharedPrefs;
     final keys = prefs.getKeys().where((k) => k.startsWith('cached_imbatibles_')).toList();
-    for (final key in keys) await prefs.remove(key);
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────

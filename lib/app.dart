@@ -226,8 +226,12 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
         v.split('.').map((s) => int.tryParse(s) ?? 0).toList();
     final c = parse(current);
     final m = parse(minimum);
-    while (c.length < 3) c.add(0);
-    while (m.length < 3) m.add(0);
+    while (c.length < 3) {
+      c.add(0);
+    }
+    while (m.length < 3) {
+      m.add(0);
+    }
     for (int i = 0; i < 3; i++) {
       if (c[i] > m[i]) return true;
       if (c[i] < m[i]) return false;

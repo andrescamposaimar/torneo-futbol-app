@@ -126,8 +126,11 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
 
     final myGen = generation ?? (isActual ? _actGeneration : _histGeneration);
     setState(() {
-      if (isActual) _actIsLoading = true;
-      else _histIsLoading = true;
+      if (isActual) {
+        _actIsLoading = true;
+      } else {
+        _histIsLoading = true;
+      }
     });
 
     try {
@@ -187,8 +190,11 @@ class _StandingsScreenState extends ConsumerState<StandingsScreen> with TickerPr
       final currentGen = isActual ? _actGeneration : _histGeneration;
       if (myGen == currentGen && mounted) {
         setState(() {
-          if (isActual) _actIsLoading = false;
-          else _histIsLoading = false;
+          if (isActual) {
+            _actIsLoading = false;
+          } else {
+            _histIsLoading = false;
+          }
         });
       }
     }
