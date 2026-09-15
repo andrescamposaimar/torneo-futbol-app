@@ -71,13 +71,7 @@ class _StubPublicApiService implements IApiService {
       throw UnimplementedError();
 
   @override
-  Future<List<dynamic>> getLigas({int? temporada}) => throw UnimplementedError();
-
-  @override
   Future<List<dynamic>> getTemporadas() => throw UnimplementedError();
-
-  @override
-  Future<List<dynamic>> getZonas({int? liga}) => throw UnimplementedError();
 
   @override
   Future<List<dynamic>> getEquipos({int? liga, int? temporada}) =>
@@ -104,13 +98,6 @@ class _StubPublicApiService implements IApiService {
   }) => throw UnimplementedError();
 
   @override
-  Future<List<dynamic>> getJugadores({
-    int page = 1,
-    int perPage = 20,
-    int? equipoId,
-  }) => throw UnimplementedError();
-
-  @override
   Future<Map<String, dynamic>> getPartidosPorJugador(int jugadorId,
       {int? page, int? perPage}) =>
       throw UnimplementedError();
@@ -134,10 +121,6 @@ class _StubPublicApiService implements IApiService {
   @override
   Future<List<dynamic>> getJugadoresTemporadaActual(int temporadaId,
       {int page = 1, int perPage = 20}) =>
-      throw UnimplementedError();
-
-  @override
-  Future<List<dynamic>> getJugadoresPorEquipoId(int equipoId) =>
       throw UnimplementedError();
 
   @override
