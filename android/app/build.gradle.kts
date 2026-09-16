@@ -69,8 +69,14 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8 full mode: shrink, optimize and obfuscate the release DEX.
+            // The Flutter Gradle Plugin already turns both of these on and
+            // supplies proguard-android-optimize.txt plus its own
+            // flutter_proguard_rules.pro; they are repeated here so the
+            // release build does not depend on that plugin's apply order.
+            // Module-specific keep rules live in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
         }
     }
 }
