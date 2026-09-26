@@ -6,10 +6,12 @@ namespace EntreRedes\Cambios\Tests\Auth;
 
 use EntreRedes\Cambios\Auth\Exception\TokenExpiredException;
 use EntreRedes\Cambios\Auth\Exception\TokenMalformedException;
+use EntreRedes\Cambios\Auth\Exception\TokenNotYetValidException;
 use EntreRedes\Cambios\Auth\Exception\TokenSignatureInvalidException;
+use EntreRedes\Cambios\Auth\Exception\TokenVerificationException;
 use EntreRedes\Cambios\Auth\Exception\TokenWrongTypeException;
 use EntreRedes\Cambios\Auth\TokenVerifier;
-use Firebase\JWT\JWT;
+use EntreRedes\Cambios\Tests\Support\IssuesProdeTokens;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -20,16 +22,7 @@ use PHPUnit\Framework\TestCase;
  */
 class TokenVerifierTest extends TestCase {
 
-    /**
-     * A fixed instant as a Unix epoch, which is what TokenVerifier takes.
-     *
-     * The signature uses an epoch on purpose: `exp` in a JWT is an epoch, so
-     * comparing epoch to epoch leaves no timezone to misread. Tests spell the
-     * instant out in UTC here only for readability.
-     */
-    private static function utc( string $utcDatetime ): int {
-        return ( new \DateTimeImmutable( $utcDatetime, new \DateTimeZone( 'UTC' ) ) )->getTimestamp();
-    }
+    use IssuesProdeTokens;
 
     private string $privateKeyPem;
     private string $publicKeyPem;
@@ -44,27 +37,6 @@ class TokenVerifierTest extends TestCase {
         openssl_pkey_export( $resource, $privateKeyPem );
         $this->privateKeyPem = $privateKeyPem;
         $this->publicKeyPem  = openssl_pkey_get_details( $resource )['key'];
-    }
-
-    /**
-     * @param array<string, mixed> $overrides
-     */
-    private function issueToken( array $overrides = [], ?string $signingKey = null ): string {
-        $payload = array_merge(
-            [
-                'iss'       => 'http://example.com/wp-json/entre-redes/v1/prode',
-                'aud'       => 'tenant-1',
-                'sub'       => '42',
-                'typ'       => 'prode_access',
-                'sv'        => 3,
-                'player_id' => 777,
-                'iat'       => strtotime( '2026-09-26 12:00:00 UTC' ),
-                'exp'       => strtotime( '2026-09-26 12:15:00 UTC' ),
-            ],
-            $overrides
-        );
-
-        return JWT::encode( $payload, $signingKey ?? $this->privateKeyPem, 'RS256', 'test-kid' );
     }
 
     public function test_valid_token_returns_claims(): void {
@@ -112,6 +84,18 @@ class TokenVerifierTest extends TestCase {
         $verifier->verify( $jwt, self::utc( '2026-09-26 12:15:00' ) );
     }
 
+    public function test_token_valid_one_second_before_the_exp_boundary_is_accepted(): void {
+        // The only one of the three exp-boundary cases that proves ACCEPTANCE
+        // at the limit, rather than rejection — the exact and the one-second-
+        // after cases (above) both reject.
+        $verifier = new TokenVerifier( $this->publicKeyPem );
+        $jwt       = $this->issueToken();
+
+        $claims = $verifier->verify( $jwt, self::utc( '2026-09-26 12:14:59' ) );
+
+        $this->assertSame( 777, $claims['player_id'] );
+    }
+
     public function test_wrong_typ_is_rejected(): void {
         $verifier = new TokenVerifier( $this->publicKeyPem );
         $jwt       = $this->issueToken( [ 'typ' => 'prode_intent' ] );
@@ -137,5 +121,35 @@ class TokenVerifierTest extends TestCase {
 
         $this->expectException( TokenSignatureInvalidException::class );
         $verifier->verify( $tamperedJwt, self::utc( '2026-09-26 12:05:00' ) );
+    }
+
+    public function test_a_token_with_a_future_nbf_is_rejected_as_not_yet_valid(): void {
+        $verifier = new TokenVerifier( $this->publicKeyPem );
+        $jwt       = $this->issueToken( [ 'nbf' => strtotime( '2026-09-26 13:00:00 UTC' ) ] );
+
+        $this->expectException( TokenNotYetValidException::class );
+        $verifier->verify( $jwt, self::utc( '2026-09-26 12:05:00' ) );
+    }
+
+    public function test_an_empty_public_key_fails_closed(): void {
+        // A blank key must never be treated as "accept anything" — verify()
+        // has to reject rather than silently letting every signature through.
+        $verifier = new TokenVerifier( '' );
+        $jwt       = $this->issueToken();
+
+        $this->expectException( TokenVerificationException::class );
+        $verifier->verify( $jwt, self::utc( '2026-09-26 12:05:00' ) );
+    }
+
+    public function test_a_corrupt_public_key_fails_closed(): void {
+        // Well-formed PEM envelope, garbage key material inside — must reject,
+        // not warn-and-continue.
+        $corruptPem = "-----BEGIN PUBLIC KEY-----\n" . base64_encode( 'not actually a key' ) . "\n-----END PUBLIC KEY-----";
+
+        $verifier = new TokenVerifier( $corruptPem );
+        $jwt       = $this->issueToken();
+
+        $this->expectException( TokenVerificationException::class );
+        $verifier->verify( $jwt, self::utc( '2026-09-26 12:05:00' ) );
     }
 }

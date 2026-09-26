@@ -6,6 +6,7 @@ namespace EntreRedes\Cambios\Auth;
 
 use EntreRedes\Cambios\Auth\Exception\TokenExpiredException;
 use EntreRedes\Cambios\Auth\Exception\TokenMalformedException;
+use EntreRedes\Cambios\Auth\Exception\TokenNotYetValidException;
 use EntreRedes\Cambios\Auth\Exception\TokenSignatureInvalidException;
 use EntreRedes\Cambios\Auth\Exception\TokenWrongTypeException;
 use Firebase\JWT\BeforeValidException;
@@ -72,11 +73,12 @@ class TokenVerifier {
      *         player_id, iat, exp.
      *
      * @throws TokenMalformedException When the string is not a well-formed,
-     *         decodable JWS (wrong segment count, invalid base64/JSON,
-     *         unsupported algorithm, or a future `nbf`).
+     *         decodable JWS (wrong segment count, invalid base64/JSON, or an
+     *         unsupported algorithm).
      * @throws TokenSignatureInvalidException When the signature does not
      *         verify against the injected public key.
      * @throws TokenExpiredException When `exp` is at or before $now.
+     * @throws TokenNotYetValidException When `nbf` is in the future.
      * @throws TokenWrongTypeException When `typ` is not 'prode_access'.
      */
     public function verify( string $jwt, int $nowTimestamp ): array {
@@ -94,7 +96,7 @@ class TokenVerifier {
         } catch ( SignatureInvalidException $e ) {
             throw new TokenSignatureInvalidException( 'Access token signature is invalid.', 0, $e );
         } catch ( BeforeValidException $e ) {
-            throw new TokenMalformedException( 'Access token is not yet valid (nbf/iat in the future).', 0, $e );
+            throw new TokenNotYetValidException( 'Access token is not yet valid (nbf in the future).', 0, $e );
         } catch ( \Throwable $e ) {
             // Every other failure firebase/php-jwt raises for a broken JWS
             // (wrong segment count, invalid base64/JSON, unsupported

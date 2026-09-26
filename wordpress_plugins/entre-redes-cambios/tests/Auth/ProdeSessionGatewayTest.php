@@ -67,4 +67,17 @@ class ProdeSessionGatewayTest extends TestCase {
     public function test_nonexistent_prode_user_is_not_current(): void {
         $this->assertFalse( $this->gateway->isSessionCurrent( 999999, 1 ) );
     }
+
+    /**
+     * The class docblock promises this reads as "session not current", not
+     * as a fatal error, if entre-redes-prode is deactivated (or its table
+     * renamed) out from under this plugin. Verified by hand once already —
+     * this test is so nobody breaks that behavior again without noticing.
+     */
+    public function test_missing_prode_users_table_is_not_current(): void {
+        global $wpdb;
+        $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}prode_users" );
+
+        $this->assertFalse( $this->gateway->isSessionCurrent( 42, 3 ) );
+    }
 }
