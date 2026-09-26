@@ -51,12 +51,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Both plugins, both PHP versions — four jobs from one definition.
+        # Every plugin, both PHP versions — six jobs from one definition.
         # They were two separate workflow files while campeones was still on
         # a branch; the split was never the point, only the timing.
-        plugin: [entre-redes-prode, entre-redes-campeones]
+        #
+        # Add a plugin here the same commit that adds the plugin. An
+        # uncovered plugin does not announce itself: its suite simply never
+        # runs, and the first red build is whichever unrelated PR happens to
+        # break it months later.
+        plugin: [entre-redes-prode, entre-redes-campeones, entre-redes-cambios]
 
-        # 8.2 is the floor for both: it is what the production WordPress host
+        # 8.2 is the floor for all of them: it is what the production host
         # runs (8.2.33), and prode's brick/math 0.14.8 — a production
         # dependency via ramsey/uuid — requires ^8.2. Each plugin's
         # config.platform.php pins resolution there so a lock can never
@@ -67,7 +72,7 @@ jobs:
         # the toolchain cannot exercise a floor lower than 8.1 even where the
         # runtime would allow one. Do not declare a floor the suite cannot test.
         #
-        # composer.lock is committed in both plugins, so every run resolves
+        # composer.lock is committed in every plugin, so every run resolves
         # the exact same dependency tree instead of whatever a transitive
         # bump happens to resolve to on the day CI runs.
         php: ['8.2', '8.5']
@@ -79,7 +84,7 @@ jobs:
           php-version: ${{ matrix.php }}
           # pdo_sqlite backs the in-memory wpdb shim in tests/wp-shim.php;
           # openssl is used for prode's JWT signing; dom/libxml/json are
-          # PHPUnit's. The union is declared for both plugins — an unused
+          # PHPUnit's. The union is declared for every plugin — an unused
           # extension costs nothing, a missing one fails opaquely.
           extensions: mbstring, pdo_sqlite, dom, json, libxml, openssl
           coverage: none
