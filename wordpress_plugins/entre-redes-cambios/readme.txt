@@ -1,0 +1,30 @@
+=== Entre Redes — Cambios de Jugadores ===
+Contributors: entreredes
+Tags: football, roster, player-changes, calendar, tournament
+Requires at least: 6.2
+Tested up to: 6.7
+Stable tag: 0.1.0
+Requires PHP: 8.2
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
+Jornada calendar, plazo deadlines, and estado lifecycle for the Entre Redes player-change feature.
+
+== Description ==
+
+The Cambios plugin models the calendar of jornadas (matchdays) for a season — which does not exist as a first-class concept in SportsPress — along with the four operational deadlines (plazos) and the estado lifecycle (programada/jugada/dirimida/suspendida) each jornada goes through.
+
+**Requires**: the Entre Redes base plugin must be installed and active.
+
+== Installation ==
+
+1. Install and activate the Entre Redes base plugin.
+2. Upload `entre-redes-cambios/` to the `wp-content/plugins/` directory.
+3. Run `composer install` inside the plugin directory (dev-only; no runtime dependencies).
+4. Activate the plugin from the WordPress admin Plugins screen.
+5. Verify: `cambios_fecha`, `cambios_fecha_partido` and `cambios_settings` tables exist, and `cambios_settings` is seeded with default values.
+
+== Changelog ==
+
+= 0.1.0 =
+* Initial scaffold: plugin structure, 3-table schema (cambios_fecha, cambios_fecha_partido, cambios_settings), pure PlazosCalculator and EstadoDeriver, FechaRepository, SeedTemporadaService. No REST/admin/cron consumers yet (slice 0).
