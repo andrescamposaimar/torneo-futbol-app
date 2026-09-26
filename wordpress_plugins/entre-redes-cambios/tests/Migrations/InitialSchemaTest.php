@@ -8,7 +8,7 @@ use EntreRedes\Cambios\Migrations\InitialSchema;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Verifies that InitialSchema::up() creates all 3 cambios_ tables with the
+ * Verifies that InitialSchema::up() creates all 4 cambios_ tables with the
  * expected key columns, and that running it twice is idempotent.
  *
  * Uses the in-memory SQLite shim from tests/wp-shim.php (copied literally
@@ -31,6 +31,10 @@ class InitialSchemaTest extends TestCase {
                 'id', 'fecha_id', 'match_id', 'liga_id', 'zona', 'kickoff', 'tiene_resultado',
             ],
             'wp_cambios_settings' => [ 'setting_key', 'setting_value', 'updated_at' ],
+            'wp_cambios_capitan'  => [
+                'id', 'season_id', 'team_id', 'player_id',
+                'designado_por', 'designado_at', 'revocado_at',
+            ],
         ];
     }
 
@@ -40,9 +44,10 @@ class InitialSchemaTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_fecha_partido" );
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
         $wpdb->query( "DELETE FROM {$p}cambios_settings" );
+        $wpdb->query( "DELETE FROM {$p}cambios_capitan" );
     }
 
-    public function test_all_three_tables_are_created(): void {
+    public function test_all_four_tables_are_created(): void {
         InitialSchema::up();
 
         global $wpdb;
