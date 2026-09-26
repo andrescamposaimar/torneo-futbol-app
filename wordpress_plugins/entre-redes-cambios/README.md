@@ -17,7 +17,7 @@ WordPress plugin that models the jornada calendar, plazo deadlines, and estado l
 # 1. Install dev dependencies (PHPUnit)
 composer install
 
-# 2. Activate plugin in WP admin — creates the 3 cambios_ tables and seeds
+# 2. Activate plugin in WP admin — creates the 6 cambios_ tables and seeds
 #    cambios_settings with the default timezone, season_id and plazo offsets.
 
 # 3. Run the test suite
@@ -26,7 +26,7 @@ composer test
 
 ## Table structure
 
-The plugin creates 4 custom tables prefixed with `{wp_prefix}cambios_`:
+The plugin creates 6 custom tables prefixed with `{wp_prefix}cambios_`:
 
 | Table | Purpose |
 |-------|---------|
@@ -34,6 +34,8 @@ The plugin creates 4 custom tables prefixed with `{wp_prefix}cambios_`:
 | `cambios_fecha_partido` | Bridge to the `sp_event` matches that belong to a fecha |
 | `cambios_settings` | Operator-configurable parameters: timezone, season_id, and the four plazo offsets |
 | `cambios_capitan` | One row per captaincy DESIGNATION (history + current state) — see "Captaincy and authorization" below |
+| `cambios_plaza` | One row per PLAZA of a team's roster (the aggregate of the player-change model) — see "Plazas and ocupaciones" below |
+| `cambios_ocupacion` | One row per LINK in a plaza's chain of successive occupations — see "Plazas and ocupaciones" below |
 
 ## Identity: a fecha is its partidos, not its day
 
@@ -92,8 +94,37 @@ See `Migrations\InitialSchema::sqlCambiosCapitan()`'s docblock for why this cann
 
 `CapitanAuthorizer::authorize( $jwt, $seasonId, $teamId, $now )` is the single entry point later slices should call — see that class's docblock for why it composes `TokenVerifier`, `ProdeSessionGateway`, and `CapitanRepository` in that order, and for the generic-message-per-distinct-exception-type contract its rejections follow.
 
+## Plazas and ocupaciones (slice 2)
+
+Slice 2 models the domain data behind a player change: which plaza belongs to whom, and who is currently occupying it. It ships no dictamen engine, no REST routes, no admin UI, and no backfill — see "Scope of this slice" below.
+
+### The aggregate is the plaza, not the solicitud
+
+A team is a set of 11 `cambios_plaza` rows (9 `campo` + 2 `suplente`). Each plaza has a **permanent titular** (`titular_player_id`, never reassigned) and a **puntaje ceiling snapshotted at conformación** (`puntaje_techo`, which never moves for the plaza's lifetime — only who occupies it changes). See `Migrations\InitialSchema::sqlCambiosPlaza()`'s docblock for the column-level detail.
+
+### The cadena de ocupaciones
+
+Every change of occupant on a plaza — titular → suplente, suplente → another suplente, or the titular returning — is the SAME operation: close the currently vigent `cambios_ocupacion` link and open a new one. This is what `Plazas\PlazaRepository::succeedOcupacion()` and `::closeOcupacionByRegresoTitular()` do, and it is why "el cambio de cambio" needs no special-case branch anywhere in this model — see `Plazas\CadenaResolver`'s class docblock for the full reasoning. `PlazaRepository::openPlaza()` creates a plaza and its genesis (titular) ocupación together, in one transaction — this is the "conformación" moment.
+
+At most one ocupación per plaza is ever vigent (`fecha_hasta_id IS NULL`) — defended the same way `cambios_capitan`'s "one vigent captain" rule is: a code-level guard inside a transaction, asserted as a PROPERTY in tests rather than a DB constraint (see `Migrations\InitialSchema::sqlCambiosOcupacion()`'s docblock for why).
+
+### The plaza's liberation moment is derived, never stored
+
+The 3-fecha minimum (counted in RESOLVED fechas via `Calendario\FechaRepository::countResolvedFechasSince()`, never in matches played) is a **piso**, not a vencimiento: once cleared, an ocupación renews by silence, with no maximum duration, until something explicitly closes it. A plaza has exactly ONE liberation fecha, governing both when the titular may return and when EVERY ex-occupant who left 'trunca' (before clearing the minimo) unblocks — all of them, together. `Plazas\CadenaResolver::plazaLiberable()` recomputes this fresh from the vigent link on every call; storing it would mean rewriting it on every new link, which is exactly the stale-cache bug the derivation avoids. See that class's docblock for the full argument.
+
+### Puntaje: an integer, never a float
+
+`Plazas\Puntaje` is the only representation of a puntaje the rest of the feature should hold — 9 discrete values (1..5 in 0.5 steps), stored and compared as an integer ×2 (2..10), never as a float. See that class's docblock for the concrete parsing bug (a comma-decimal string silently truncated by a naive `(float)` cast) and the comparison risk this representation avoids. The "regla del 2,5" collapses into one expression, `techoEfectivo()`: `MAX(puntaje_techo, 5)` in half-points.
+
+### Explicitly out of scope
+
+- **The dictamen engine** — deciding whether a solicitud de cambio is approved — is slice 3's pure function, built on top of `CadenaResolver`'s derivations. This slice only models the data and the chain; it makes no approval decisions.
+- **Backfilling the in-progress season's real occupancy** — who occupies which plaza today lives only in the process owner's spreadsheet, not in any system this plugin can read. No importer is included; a later slice needs that data supplied by the process owner before it can seed real plazas.
+
 ## Scope of this slice (slice 0)
 
 This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registers no REST routes, no admin screens, and no cron jobs. It only runs migrations on activation. The calendar admin screen, the solicitud/regreso REST endpoints, and the seeding cron are later slices, built on top of the domain logic here once it is validated.
 
 Slice 1 (captaincy and authorization, above) keeps the same discipline: no REST routes, no admin UI, no cron. It is domain logic only, ready for the slices that will actually expose it.
+
+Slice 2 (plazas and ocupaciones, above) keeps it too: no REST routes, no admin UI, no cron, no dictamen engine, no backfill. It is domain logic only — the data model and the derivations a later slice's dictamen engine and endpoints will call.
