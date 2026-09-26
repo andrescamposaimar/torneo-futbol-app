@@ -19,7 +19,7 @@ namespace EntreRedes\Cambios\Calendario;
  * the standings would be wrong, since SportsPress computes the table from the
  * events. So a ruled fecha arrives here with every partido carrying a result
  * and derives to 'jugada'. And because the business rule counts RESOLVED
- * fechas — countFechasResueltasDesdeFecha() matches estado IN ('jugada',
+ * fechas — countResolvedFechasSince() matches estado IN ('jugada',
  * 'dirimida') — a ruled fecha counts correctly without anybody marking
  * anything. 'dirimida' is an informational label, not an input the counter
  * depends on. Do NOT build a manual-entry flow for it believing the count is

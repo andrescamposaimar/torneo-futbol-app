@@ -18,6 +18,16 @@ declare(strict_types=1);
  * adjusted to make the script pass.
  */
 
+// CLI only. This file lives under the plugin directory, so if tools/ ever ships
+// to a server that executes PHP anywhere in the plugin tree, it would be
+// reachable over HTTP. Nothing here writes to a real database — it runs against
+// the in-memory SQLite shim and reads an API that is already public — but a
+// diagnostic script has no business answering web requests.
+if ( 'cli' !== PHP_SAPI ) {
+    http_response_code( 404 );
+    exit( 1 );
+}
+
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\LigaResolver;
 use EntreRedes\Cambios\Calendario\PartidosApiClient;
@@ -53,6 +63,28 @@ const SEASON_ID = 359;
 const DRY_RUN_NOW = '2026-09-26 12:00:00'; // injected clock; this script never reads the real one
 const BASE_URL  = 'https://entreredespadres.com.ar/wp-json/entre-redes/v1';
 
+// The expected shape of SEASON_ID's fixture, verified against the live API on
+// 2026-09-26. Named here, together, so "what does correct look like" reads at
+// a glance instead of being reconstructed from five separate literals spread
+// across the validations below.
+const EXPECTED_TOTAL_FECHAS       = 23;
+const EXPECTED_PARTIDOS_POR_FECHA = 15;
+const EXPECTED_PHASE_COUNTS       = [ 'Clasificacion' => 5, 'Apertura' => 9, 'Clausura' => 9 ];
+
+/**
+ * COUNT(*) of a fecha's partido rows, optionally restricted to ones with a
+ * loaded result. Replaces three near-identical inline queries that used to
+ * differ only by this one WHERE clause fragment.
+ */
+function countPartidosDeFecha( \wpdb $wpdb, int $fechaId, bool $soloConResultado = false ): int {
+    $sql = "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_fecha_partido WHERE fecha_id = %d";
+    if ( $soloConResultado ) {
+        $sql .= ' AND tiene_resultado = 1';
+    }
+
+    return (int) $wpdb->get_var( $wpdb->prepare( $sql, $fechaId ) );
+}
+
 // ─── Production-style HTTP fetcher: file_get_contents, since this script runs
 // outside WordPress entirely (no wp_remote_get() available) ──────────────────
 
@@ -68,14 +100,31 @@ $httpGetFn = static function ( string $url ): array {
 
     $body = @file_get_contents( $url, false, $context );
 
+    // Throw, never return []. PartidosApiClient treats a fetch that comes back
+    // empty as a genuine empty page, so swallowing a failure here would make a
+    // truncated download look like a complete one.
     if ( false === $body ) {
-        fwrite( STDERR, "WARN: request failed for {$url}\n" );
-        return [];
+        throw new RuntimeException( "Request failed for {$url}" );
+    }
+
+    $status = 0;
+    foreach ( $http_response_header ?? [] as $header ) {
+        if ( 1 === preg_match( '#^HTTP/\S+\s+(\d{3})#', $header, $m ) ) {
+            $status = (int) $m[1];
+        }
+    }
+
+    if ( 200 !== $status ) {
+        throw new RuntimeException( "HTTP {$status} for {$url}" );
     }
 
     $decoded = json_decode( $body, true );
 
-    return is_array( $decoded ) ? $decoded : [];
+    if ( ! is_array( $decoded ) ) {
+        throw new RuntimeException( "Body of {$url} is not JSON: " . substr( $body, 0, 120 ) );
+    }
+
+    return $decoded;
 };
 
 $apiClient = new PartidosApiClient( $httpGetFn, BASE_URL );
@@ -134,12 +183,7 @@ printf(
 $partidosCountByFecha = [];
 foreach ( $fechas as $fecha ) {
     $fechaId = (int) $fecha['id'];
-    $count   = (int) $wpdb->get_var(
-        $wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_fecha_partido WHERE fecha_id = %d",
-            $fechaId
-        )
-    );
+    $count   = countPartidosDeFecha( $wpdb, $fechaId );
     $partidosCountByFecha[ $fechaId ] = $count;
 
     printf(
@@ -171,15 +215,18 @@ $check = static function ( string $label, bool $condition ) use ( &$failures ): 
 };
 
 $totalFechas = count( $fechas );
-$check( "23 fechas en total (encontradas: {$totalFechas})", 23 === $totalFechas );
+$check(
+    EXPECTED_TOTAL_FECHAS . " fechas en total (encontradas: {$totalFechas})",
+    EXPECTED_TOTAL_FECHAS === $totalFechas
+);
 
-$allHave15 = true;
-$offenders = [];
+$allHaveExpectedCount = true;
+$offenders            = [];
 foreach ( $fechas as $fecha ) {
     $fechaId = (int) $fecha['id'];
-    if ( 15 !== ( $partidosCountByFecha[ $fechaId ] ?? -1 ) ) {
-        $allHave15   = false;
-        $offenders[] = sprintf(
+    if ( EXPECTED_PARTIDOS_POR_FECHA !== ( $partidosCountByFecha[ $fechaId ] ?? -1 ) ) {
+        $allHaveExpectedCount = false;
+        $offenders[]          = sprintf(
             'orden %d (%s): %d partidos',
             (int) $fecha['orden'],
             (string) $fecha['play_date'],
@@ -188,8 +235,9 @@ foreach ( $fechas as $fecha ) {
     }
 }
 $check(
-    'todas las fechas tienen exactamente 15 partidos' . ( $allHave15 ? '' : ' -- ' . implode( '; ', $offenders ) ),
-    $allHave15
+    'todas las fechas tienen exactamente ' . EXPECTED_PARTIDOS_POR_FECHA . ' partidos'
+        . ( $allHaveExpectedCount ? '' : ' -- ' . implode( '; ', $offenders ) ),
+    $allHaveExpectedCount
 );
 
 $ordenes         = array_map( static fn( array $f ): int => (int) $f['orden'], $fechas );
@@ -214,10 +262,10 @@ foreach ( $fechas as $fecha ) {
     }
     $prevTorneo = $torneo;
 }
-$expectedPhaseCounts = [ 'Clasificacion' => 5, 'Apertura' => 9, 'Clausura' => 9 ];
 $check(
-    'numero_en_torneo reinicia en cada cambio de torneo, fases 5/9/9 (encontrado: ' . json_encode( $phaseCounts ) . ')',
-    $resetsOk && $expectedPhaseCounts === $phaseCounts
+    'numero_en_torneo reinicia en cada cambio de torneo, fases '
+        . implode( '/', EXPECTED_PHASE_COUNTS ) . ' (encontrado: ' . json_encode( $phaseCounts ) . ')',
+    $resetsOk && EXPECTED_PHASE_COUNTS === $phaseCounts
 );
 
 $primera = $fechas[0] ?? null;
@@ -247,15 +295,9 @@ $check(
 // Every fecha whose partidos all carry a result must have derived to 'jugada'.
 $derivacionOk = true;
 foreach ( $fechas as $f ) {
-    $total  = (int) $wpdb->get_var( $wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_fecha_partido WHERE fecha_id = %d",
-        (int) $f['id']
-    ) );
-    $conRes = (int) $wpdb->get_var( $wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_fecha_partido
-          WHERE fecha_id = %d AND tiene_resultado = 1",
-        (int) $f['id']
-    ) );
+    $fechaId  = (int) $f['id'];
+    $total    = countPartidosDeFecha( $wpdb, $fechaId );
+    $conRes   = countPartidosDeFecha( $wpdb, $fechaId, true );
     $esperado = ( $total > 0 && $total === $conRes ) ? 'jugada' : 'programada';
     if ( $esperado !== (string) $f['estado'] ) {
         $derivacionOk = false;
@@ -266,9 +308,9 @@ foreach ( $fechas as $f ) {
 $check( 'el estado de cada fecha coincide con sus partidos', $derivacionOk );
 
 // End-to-end check of the rule the whole feature hangs on.
-$resueltasDesdeLaPrimera = $repository->countFechasResueltasDesdeFecha( SEASON_ID, (int) $primera['id'] );
+$resueltasDesdeLaPrimera = $repository->countResolvedFechasSince( SEASON_ID, (int) $primera['id'] );
 $check(
-    'countFechasResueltasDesdeFecha() desde la fecha 1 cuenta las ' . count( $jugadas ) . ' resueltas'
+    'countResolvedFechasSince() desde la fecha 1 cuenta las ' . count( $jugadas ) . ' resueltas'
         . ' (devolvio: ' . $resueltasDesdeLaPrimera . ')',
     $resueltasDesdeLaPrimera === count( $jugadas )
 );
@@ -318,9 +360,9 @@ foreach ( $fechasAfter as $fecha ) {
         $ordenUnchanged = false;
     }
 }
-$dirtyOnRecalc = $repository->recalcularOrden( SEASON_ID );
+$dirtyOnRecalc = $repository->recalculateOrden( SEASON_ID );
 $check(
-    "recalcularOrden() no movio nada la segunda vez (orden estable: " . ( $ordenUnchanged ? 'si' : 'no' ) . ", filas modificadas en una tercera pasada: {$dirtyOnRecalc})",
+    "recalculateOrden() no movio nada la segunda vez (orden estable: " . ( $ordenUnchanged ? 'si' : 'no' ) . ", filas modificadas en una tercera pasada: {$dirtyOnRecalc})",
     $ordenUnchanged && 0 === $dirtyOnRecalc
 );
 

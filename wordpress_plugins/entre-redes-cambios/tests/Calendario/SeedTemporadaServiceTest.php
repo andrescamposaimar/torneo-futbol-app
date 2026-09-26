@@ -275,7 +275,7 @@ class SeedTemporadaServiceTest extends TestCase {
 
         $this->assertSame(
             1,
-            $this->repo->countFechasResueltasDesdeFecha( 359, $created[0]['fecha_id'] )
+            $this->repo->countResolvedFechasSince( 359, $created[0]['fecha_id'] )
         );
     }
 
@@ -375,7 +375,7 @@ class SeedTemporadaServiceTest extends TestCase {
      *
      * A dry run against the live 2026 fixture exposed it — all 23 fechas came back
      * 'programada', including the 18 already played with 270 results loaded. The
-     * consequence was silent and total: countFechasResueltasDesdeFecha() would
+     * consequence was silent and total: countResolvedFechasSince() would
      * always return 0, no ocupacion would ever reach the 3-fecha minimum, and no
      * titular could ever return to their plaza.
      */
@@ -410,6 +410,47 @@ class SeedTemporadaServiceTest extends TestCase {
         );
 
         $this->assertSame( 'programada', $estado );
+    }
+
+    /**
+     * THE Saturday-night race (see PartidosApiClient::fetchAll()'s docblock
+     * for the full scenario): a partido's result gets loaded into SportsPress
+     * while a fetch is mid-flight, so the same match_id comes back twice in
+     * one `$fetcherFn` result — once resolved, once not. If the last one in
+     * the array wins (a plain overwrite in FechaRepository::syncPartidos()),
+     * the fecha is left with `tiene_resultado = 0` for an actually-played
+     * match and never derives to 'jugada' — the same bug commit 1ed1e6a7
+     * closed, entering through duplicate match_ids instead of a stale re-seed.
+     */
+    public function test_duplicate_match_id_with_conflicting_tiene_resultado_does_not_downgrade_the_fecha(): void {
+        $partidos = $this->buildMatchday( '2026-05-30', [ 373, 374, 375 ], 8000 );
+        foreach ( $partidos as &$p ) {
+            $p['tiene_resultado'] = true;
+        }
+        unset( $p );
+
+        // Duplicate the last partido with tiene_resultado = false, appended
+        // LAST — simulating a stale /partidos-programados copy that hasn't
+        // caught up with the result yet.
+        $duplicate                    = $partidos[ count( $partidos ) - 1 ];
+        $duplicate['tiene_resultado'] = false;
+        $partidos[]                   = $duplicate;
+
+        $this->service( fn() => $partidos )->seed( 359, self::NOW );
+
+        global $wpdb;
+        $p     = $wpdb->prefix;
+        $fecha = $wpdb->get_row(
+            "SELECT id, estado FROM {$p}cambios_fecha WHERE play_date = '2026-05-30'",
+            ARRAY_A
+        );
+
+        $this->assertSame( 'jugada', $fecha['estado'], 'A stale duplicate must never downgrade an already-resolved fecha.' );
+
+        $partidoCount = (int) $wpdb->get_var(
+            $wpdb->prepare( "SELECT COUNT(*) FROM {$p}cambios_fecha_partido WHERE fecha_id = %d", (int) $fecha['id'] )
+        );
+        $this->assertSame( 15, $partidoCount, 'The duplicate match_id must collapse into one row, not sixteen.' );
     }
 
     /**

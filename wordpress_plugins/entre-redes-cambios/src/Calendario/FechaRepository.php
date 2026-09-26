@@ -25,7 +25,7 @@ namespace EntreRedes\Cambios\Calendario;
  *
  * *** INVARIANT A FUTURE SLICE MUST NOT BREAK ***
  * fecha_id is the stable identity; `orden` is NOT. `orden` is recomputed
- * from scratch by recalcularOrden() on every seed run, purely as a derived
+ * from scratch by recalculateOrden() on every seed run, purely as a derived
  * 1..N ordering by `play_date` — nobody references it from outside this
  * class. This is exactly what makes it SAFE to recompute: any future
  * consumer that needs to remember "which fecha" (e.g. slice 2's
@@ -34,14 +34,14 @@ namespace EntreRedes\Cambios\Calendario;
  * `orden` can and will change value under a `fecha_id` that is loaded late
  * or reordered by a postponement; an ocupacion that stored an `orden`
  * snapshot would silently point at the wrong fecha the next time the
- * calendar reflows. countFechasResueltasDesdeFecha() exists specifically so
+ * calendar reflows. countResolvedFechasSince() exists specifically so
  * callers never need to touch `orden` directly — they pass a `fecha_id` and
  * this class resolves its current `orden` internally, on every call.
  *
  * MERGE DETECTION: if the incoming match_ids resolve to MORE THAN ONE
  * existing fecha_id, upsertFecha() throws. Two jornadas colliding into one
  * is not something this class can safely resolve on its own — it is safer
- * to fail loud than to silently corrupt countFechasResueltasDesdeFecha()'s
+ * to fail loud than to silently corrupt countResolvedFechasSince()'s
  * counter.
  *
  * Idempotency strategy (mirrors entre-redes-prode's FechaRepository):
@@ -63,6 +63,19 @@ namespace EntreRedes\Cambios\Calendario;
  * 'programada'.
  */
 class FechaRepository {
+
+    /**
+     * The only 4 values `cambios_fecha.estado` may ever hold. MySQL's
+     * ENUM('programada','jugada','dirimida','suspendida') is not a reliable
+     * enough guard on its own: in non-strict mode MySQL silently TRUNCATES an
+     * out-of-range value to '' instead of erroring, and the SQLite test shim
+     * translates every ENUM column to TEXT (see InitialSchema's class
+     * docblock), so a typo like 'sospendida' passes in tests every single
+     * time. setEstadoManual() is the ONLY human-facing entry point into this
+     * column, so this whitelist is the actual defense against a typo reaching
+     * the value that countResolvedFechasSince() counts against.
+     */
+    private const VALID_ESTADOS = [ 'programada', 'jugada', 'dirimida', 'suspendida' ];
 
     private \wpdb $wpdb;
 
@@ -214,19 +227,13 @@ class FechaRepository {
      * Recomputes `orden` (1..N by play_date ASC, tie-broken by id ASC for
      * determinism) and `numero_en_torneo` (resets to 1 whenever
      * `torneo_label` differs from the previous row's) for every fecha of a
-     * season. fecha_id values are NEVER touched — see class docblock's
-     * INVARIANT section.
-     *
-     * Safe to call on every seed run: with identity now anchored to
-     * fecha_id (not `orden`), nothing outside this class may reference
-     * `orden` across calls, so recomputing it from scratch every time is the
-     * mechanism that keeps a late-arriving or postponed fecha correctly
-     * ordered without ever renumbering a foreign key.
+     * season. `fecha_id` values are NEVER touched. Safe to call on every seed
+     * run — see class docblock's INVARIANT section for why that is safe.
      *
      * @return int Number of cambios_fecha rows whose orden or
      *         numero_en_torneo actually changed value.
      */
-    public function recalcularOrden( int $seasonId ): int {
+    public function recalculateOrden( int $seasonId ): int {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -285,25 +292,49 @@ class FechaRepository {
         // So: park every moving row in a disjoint high range first, then
         // write the final values.
         //
-        // The test harness CANNOT catch this. tests/wp-shim.php strips every
-        // UNIQUE KEY when translating the DDL to SQLite, so a single-pass
-        // implementation passes green here and fails on real MySQL. Do not
-        // "simplify" this back into one pass.
-        $park = $this->nextFreeOrden( $seasonId );
+        // The test harness CANNOT catch a single-pass regression on its own.
+        // tests/wp-shim.php strips every UNIQUE KEY when translating the DDL
+        // to SQLite, so a single-pass implementation passes green here and
+        // fails on real MySQL. Do not "simplify" this back into one pass.
+        //
+        // The two passes are also not durable on their own: if the process
+        // dies between the parking pass and the final-values pass, every
+        // dirty row is left sitting at a parked `orden` and a stale
+        // `numero_en_torneo`. That state is self-healing — the NEXT seed run
+        // recomputes everything from `play_date`, the actual source of truth
+        // — but the window is invisible in the meantime, and nothing in this
+        // slice schedules that next run (no cron yet — see README's "Scope of
+        // this slice"). START TRANSACTION/COMMIT below does not change the
+        // recovery story; it makes the atomicity of the two passes a fact the
+        // code enforces, not just prose the docblock asserts. On any
+        // exception, ROLLBACK restores every dirty row to its pre-call value
+        // instead of leaving it parked. Both tables are InnoDB (transactional
+        // in production), and tests/wp-shim.php maps START TRANSACTION to
+        // SQLite's BEGIN, so this is exercised here too.
+        $wpdb->query( 'START TRANSACTION' );
 
-        foreach ( $dirty as $i => $t ) {
-            $wpdb->update( $p . 'cambios_fecha', [ 'orden' => $park + $i ], [ 'id' => $t['id'] ] );
-        }
+        try {
+            $park = $this->nextFreeOrden( $seasonId );
 
-        foreach ( $dirty as $t ) {
-            $wpdb->update(
-                $p . 'cambios_fecha',
-                [
-                    'orden'            => $t['orden'],
-                    'numero_en_torneo' => $t['numero'],
-                ],
-                [ 'id' => $t['id'] ]
-            );
+            foreach ( $dirty as $i => $t ) {
+                $wpdb->update( $p . 'cambios_fecha', [ 'orden' => $park + $i ], [ 'id' => $t['id'] ] );
+            }
+
+            foreach ( $dirty as $t ) {
+                $wpdb->update(
+                    $p . 'cambios_fecha',
+                    [
+                        'orden'            => $t['orden'],
+                        'numero_en_torneo' => $t['numero'],
+                    ],
+                    [ 'id' => $t['id'] ]
+                );
+            }
+
+            $wpdb->query( 'COMMIT' );
+        } catch ( \Throwable $e ) {
+            $wpdb->query( 'ROLLBACK' );
+            throw $e;
         }
 
         return count( $dirty );
@@ -316,9 +347,9 @@ class FechaRepository {
      * Used for two things, both of which exist to respect
      * UNIQUE(season_id, orden) on MySQL:
      *   - the provisional `orden` of a freshly inserted fecha, before
-     *     recalcularOrden() assigns the real one. A fixed placeholder (0, say)
+     *     recalculateOrden() assigns the real one. A fixed placeholder (0, say)
      *     would collide on the second insert of a season.
-     *   - the base of the parking range in recalcularOrden()'s first pass.
+     *   - the base of the parking range in recalculateOrden()'s first pass.
      *
      * Not concurrency-safe by itself, and deliberately so: the seeder runs
      * single-threaded from cron or WP-CLI, never from two requests at once.
@@ -341,8 +372,19 @@ class FechaRepository {
      * Mark a fecha's estado by human decision. This is the ONLY way
      * 'dirimida' or 'suspendida' ever enter the table — EstadoDeriver never
      * produces them (see its class docblock).
+     *
+     * @throws \InvalidArgumentException When $estado is not one of
+     *         self::VALID_ESTADOS — see that constant's docblock for why this
+     *         check cannot be delegated to the column's MySQL ENUM.
      */
     public function setEstadoManual( int $fechaId, string $estado, ?int $userId, string $now ): bool {
+        if ( ! in_array( $estado, self::VALID_ESTADOS, true ) ) {
+            throw new \InvalidArgumentException(
+                "setEstadoManual(): '{$estado}' is not a valid estado. "
+                . 'Valid values are: ' . implode( ', ', self::VALID_ESTADOS ) . '.'
+            );
+        }
+
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -420,7 +462,7 @@ class FechaRepository {
      * @throws \InvalidArgumentException When fechaId does not exist, or
      *         does not belong to seasonId.
      */
-    public function countFechasResueltasDesdeFecha( int $seasonId, int $fechaId ): int {
+    public function countResolvedFechasSince( int $seasonId, int $fechaId ): int {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -437,7 +479,7 @@ class FechaRepository {
 
         if ( empty( $row ) ) {
             throw new \InvalidArgumentException(
-                "countFechasResueltasDesdeFecha(): fecha_id {$fechaId} does not exist in season {$seasonId}."
+                "countResolvedFechasSince(): fecha_id {$fechaId} does not exist in season {$seasonId}."
             );
         }
 
@@ -480,11 +522,52 @@ class FechaRepository {
      * @param array<int, array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int}> $partidos
      */
     private function syncPartidos( int $fechaId, array $partidos ): void {
+        $partidos = $this->dedupeByMatchId( $partidos );
+
         foreach ( $partidos as $partido ) {
             $this->upsertPartido( $fechaId, $partido );
         }
 
         $this->removeStalePartidos( $fechaId, $this->extractMatchIds( $partidos ) );
+    }
+
+    /**
+     * Defends the same invariant PartidosApiClient::fetchAll() enforces at
+     * fetch time — see its docblock for the Saturday-night scenario in full:
+     * a partido's result can get loaded into SportsPress between the
+     * `/partidos` and `/partidos-programados` calls, so its `match_id` comes
+     * back twice in one `$fetcherFn` result, once resolved and once not.
+     * upsertPartido() below is a plain SELECT-then-update keyed by `match_id`,
+     * so without this guard the loop in syncPartidos() would simply apply
+     * both rows in array order and let whichever one is LAST win — silently
+     * downgrading an already-played partido back to `tiene_resultado = 0` if
+     * the stale duplicate happened to be appended after the resolved one.
+     *
+     * This guard exists here, not only in PartidosApiClient, because
+     * `$fetcherFn` is an injected seam: any future fetcher (a different REST
+     * client, a direct-from-`sp_results` implementation, a test stub) could
+     * reintroduce the same duplicate, and this is the point where the
+     * duplicate is actually persisted. `tiene_resultado = true` always wins,
+     * never downgraded by a later duplicate, regardless of array order.
+     *
+     * @param array<int, array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int}> $partidos
+     * @return array<int, array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int}>
+     */
+    private function dedupeByMatchId( array $partidos ): array {
+        $byMatchId = [];
+
+        foreach ( $partidos as $partido ) {
+            $matchId  = (int) $partido['match_id'];
+            $existing = $byMatchId[ $matchId ] ?? null;
+
+            if ( null !== $existing && ! empty( $existing['tiene_resultado'] ) ) {
+                continue;
+            }
+
+            $byMatchId[ $matchId ] = $partido;
+        }
+
+        return array_values( $byMatchId );
     }
 
     /**

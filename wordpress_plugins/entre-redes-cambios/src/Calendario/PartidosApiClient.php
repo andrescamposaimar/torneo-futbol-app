@@ -60,9 +60,14 @@ final class PartidosApiClient {
 
     /**
      * @param callable $httpGetFn `function( string $url ): array` — returns
-     *        the response body already JSON-decoded into an array. Must
-     *        return an empty array (never throw) on a request failure; this
-     *        class treats an empty/missing `items` key as "no more pages".
+     *        the response body already JSON-decoded into an array, and MUST
+     *        THROW on any transport failure (non-200, timeout, unparseable
+     *        body). It must never swallow a failure and return [].
+     *
+     *        That rule is the whole point: an earlier version of this contract
+     *        asked the closure to return [] on failure, which made a 500, a
+     *        timeout and an HTML error page indistinguishable from the end of
+     *        the pagination. See fetchPage() for what that cost.
      * @param string $baseUrl e.g. 'https://entreredespadres.com.ar/wp-json/entre-redes/v1'
      */
     public function __construct( callable $httpGetFn, string $baseUrl ) {
@@ -80,10 +85,20 @@ final class PartidosApiClient {
      * @return array<string, array{id:int, torneo_label:string}>
      */
     public function fetchLigasIndex(): array {
-        $body  = ( $this->httpGetFn )( $this->buildUrl( '/ligas', [] ) );
-        $ligas = is_array( $body ) ? $body : [];
+        $body = ( $this->httpGetFn )( $this->buildUrl( '/ligas', [] ) );
 
-        return LigaResolver::index( $ligas );
+        // An empty index is never legitimate: the tournament always has ligas.
+        // Accepting one would be the quietest failure in the system — every
+        // partido would resolve to an unknown liga, every one would be skipped,
+        // and seed() would receive an empty list and cheerfully do nothing,
+        // looking exactly like a week with no new fixture.
+        if ( ! is_array( $body ) || [] === $body ) {
+            throw new \RuntimeException(
+                'Unexpected response from /ligas: expected a non-empty array of ligas.'
+            );
+        }
+
+        return LigaResolver::index( $body );
     }
 
     /**
@@ -109,13 +124,13 @@ final class PartidosApiClient {
         $totalPages = 1;
 
         do {
-            $body = ( $this->httpGetFn )( $this->buildUrl( '/partidos', [
+            $pageData = $this->fetchPage( $this->buildUrl( '/partidos', [
                 'temporada' => $seasonId,
                 'per_page'  => self::PER_PAGE,
                 'page'      => $page,
             ] ) );
 
-            foreach ( (array) ( $body['items'] ?? [] ) as $item ) {
+            foreach ( $pageData['items'] as $item ) {
                 $normalized = $this->normalizePartido( (array) $item, $ligasIndex, true );
 
                 if ( null === $normalized ) {
@@ -127,7 +142,7 @@ final class PartidosApiClient {
                 $result[] = $normalized;
             }
 
-            $totalPages = (int) ( $body['total_pages'] ?? 1 );
+            $totalPages = $pageData['total_pages'];
             $page++;
         } while ( $page <= $totalPages );
 
@@ -160,12 +175,12 @@ final class PartidosApiClient {
         $totalPages = 1;
 
         do {
-            $body = ( $this->httpGetFn )( $this->buildUrl( '/partidos-programados', [
+            $pageData = $this->fetchPage( $this->buildUrl( '/partidos-programados', [
                 'per_page' => self::PER_PAGE,
                 'page'     => $page,
             ] ) );
 
-            foreach ( (array) ( $body['items'] ?? [] ) as $item ) {
+            foreach ( $pageData['items'] as $item ) {
                 $normalized = $this->normalizePartido( (array) $item, $ligasIndex, false );
 
                 if ( null === $normalized ) {
@@ -177,7 +192,7 @@ final class PartidosApiClient {
                 $result[] = $normalized;
             }
 
-            $totalPages = (int) ( $body['total_pages'] ?? 1 );
+            $totalPages = $pageData['total_pages'];
             $page++;
         } while ( $page <= $totalPages );
 
@@ -191,6 +206,24 @@ final class PartidosApiClient {
      * and returns the combined list, ready to be wrapped in a closure and
      * handed to SeedTemporadaService's constructor as `$fetcherFn`.
      *
+     * DEDUPLICATION — THE SATURDAY-NIGHT RACE: fetchPartidos() and
+     * fetchProgramados() are two separate HTTP calls, made back to back but
+     * not atomically. If a partido's result gets loaded into SportsPress
+     * between the two — the exact moment a committee member is entering
+     * Saturday night's scores while this fetch is still running — its
+     * `match_id` comes back from BOTH calls: `publish` with
+     * `tiene_resultado = true` (from fetchPartidos()) AND, because the
+     * `future` -> `publish` post-status transition hasn't propagated to
+     * `/partidos-programados` yet, `future` with `tiene_resultado = false`
+     * (from fetchProgramados()). A plain array_merge() with programados last
+     * lets the stale, unresolved copy win: FechaRepository::syncPartidos()
+     * would then persist `tiene_resultado = 0` for an actually-played match,
+     * the fecha would never derive to 'jugada', and countResolvedFechasSince()
+     * would silently under-count — the same business bug commit 1ed1e6a7
+     * closed, entering through the other endpoint. dedupeByMatchId() below
+     * closes this door: whichever copy carries `tiene_resultado = true` always
+     * wins, regardless of which call returned it or which one came last.
+     *
      * @return array<int, array{match_id:int, liga_id:int, zona:string, kickoff:string, tiene_resultado:bool}>
      */
     public function fetchAll( int $seasonId ): array {
@@ -198,7 +231,36 @@ final class PartidosApiClient {
         $partidos    = $this->fetchPartidos( $seasonId, $ligasIndex );
         $programados = $this->fetchProgramados( $ligasIndex );
 
-        return array_merge( $partidos, $programados );
+        return self::dedupeByMatchId( array_merge( $partidos, $programados ) );
+    }
+
+    /**
+     * Collapses duplicate `match_id`s into one entry, keeping whichever copy
+     * has `tiene_resultado = true` — see fetchAll()'s docblock for the race
+     * this guards against. A result loaded into SportsPress is never
+     * "un-loaded" by a later duplicate: once a match_id is seen with
+     * `tiene_resultado = true`, no subsequent copy (in either direction) can
+     * overwrite it back to `false`. Preserves the first-seen order of the
+     * winning entries.
+     *
+     * @param array<int, array{match_id:int, liga_id:int, zona:string, kickoff:string, tiene_resultado:bool}> $partidos
+     * @return array<int, array{match_id:int, liga_id:int, zona:string, kickoff:string, tiene_resultado:bool}>
+     */
+    private static function dedupeByMatchId( array $partidos ): array {
+        $byMatchId = [];
+
+        foreach ( $partidos as $partido ) {
+            $matchId  = (int) $partido['match_id'];
+            $existing = $byMatchId[ $matchId ] ?? null;
+
+            if ( null !== $existing && ! empty( $existing['tiene_resultado'] ) ) {
+                continue;
+            }
+
+            $byMatchId[ $matchId ] = $partido;
+        }
+
+        return array_values( $byMatchId );
     }
 
     /**
@@ -280,6 +342,37 @@ final class PartidosApiClient {
     /**
      * @param array<string, int|string> $query Scalar-only query params.
      */
+    /**
+     * One page of a paginated endpoint, with the envelope shape validated.
+     *
+     * WHY THIS IS NOT INLINE: the first version of this client read a missing
+     * `items` key as "no more pages" and asked its HTTP closure to return []
+     * on failure. A 500 on page 2 of 3 therefore ended the loop quietly and
+     * produced a partial fixture, and the seeder wrote an incomplete calendar
+     * without a single error. Since countResolvedFechasSince() counts
+     * rows in that calendar, a silently truncated download corrupts the rule
+     * the entire feature rests on — a titular could be told to wait for fechas
+     * that were simply never downloaded.
+     *
+     * A caller that cannot fetch must abort the seed, never half-seed it.
+     *
+     * @return array{items: array<int, mixed>, total_pages: int}
+     */
+    private function fetchPage( string $url ): array {
+        $body = ( $this->httpGetFn )( $url );
+
+        if ( ! is_array( $body ) || ! isset( $body['items'] ) || ! is_array( $body['items'] ) ) {
+            throw new \RuntimeException(
+                "Unexpected response shape from {$url}: expected an envelope with an 'items' array."
+            );
+        }
+
+        return [
+            'items'       => $body['items'],
+            'total_pages' => max( 1, (int) ( $body['total_pages'] ?? 1 ) ),
+        ];
+    }
+
     private function buildUrl( string $path, array $query ): string {
         $url = $this->baseUrl . $path;
 

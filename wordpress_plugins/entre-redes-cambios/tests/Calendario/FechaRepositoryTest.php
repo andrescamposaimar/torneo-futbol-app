@@ -290,6 +290,15 @@ class FechaRepositoryTest extends TestCase {
         $this->assertSame( 'derivado', $row['estado_origen'] );
     }
 
+    public function test_set_estado_manual_rejects_an_invalid_estado(): void {
+        $fechaId = $this->repo->upsertFecha( $this->sampleFecha(), $this->samplePartidos() );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessageMatches( '/programada, jugada, dirimida, suspendida/' );
+
+        $this->repo->setEstadoManual( $fechaId, 'sospendida', 7, '2026-06-01 10:30:00' );
+    }
+
     public function test_set_estado_manual_records_actor_and_timestamp(): void {
         $fechaId = $this->repo->upsertFecha( $this->sampleFecha(), $this->samplePartidos() );
 
@@ -312,10 +321,10 @@ class FechaRepositoryTest extends TestCase {
 
     public function test_find_by_orden_returns_the_row(): void {
         // The `orden` passed into upsertFecha() is ignored on purpose: the
-        // repository assigns a provisional value and recalcularOrden() writes
+        // repository assigns a provisional value and recalculateOrden() writes
         // the real one. So look the row up by the orden it actually got.
         $fechaId = $this->repo->upsertFecha( $this->sampleFecha( 359, 3 ), $this->samplePartidos() );
-        $this->repo->recalcularOrden( 359 );
+        $this->repo->recalculateOrden( 359 );
 
         $row = $this->repo->findByOrden( 359, 1 );
 
@@ -328,7 +337,7 @@ class FechaRepositoryTest extends TestCase {
         $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
         $this->repo->upsertFecha( $this->sampleFecha( 359, 3, '2026-06-13' ), [] );
 
-        $this->repo->recalcularOrden( 359 );
+        $this->repo->recalculateOrden( 359 );
 
         $list = $this->repo->listBySeason( 359 );
 
@@ -350,7 +359,7 @@ class FechaRepositoryTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
-    // countFechasResueltasDesdeFecha
+    // countResolvedFechasSince
     // -------------------------------------------------------------------------
 
     public function test_count_resueltas_counts_jugada_and_dirimida_only(): void {
@@ -364,7 +373,7 @@ class FechaRepositoryTest extends TestCase {
         $this->repo->setEstadoManual( $idC, 'suspendida', null, '2026-06-13 20:00:00' );
         // $idD stays 'programada'.
 
-        $this->assertSame( 2, $this->repo->countFechasResueltasDesdeFecha( 359, $idA ) );
+        $this->assertSame( 2, $this->repo->countResolvedFechasSince( 359, $idA ) );
     }
 
     public function test_count_resueltas_respects_the_floor_fechas_orden(): void {
@@ -375,20 +384,20 @@ class FechaRepositoryTest extends TestCase {
         $this->repo->setEstadoManual( $idB, 'jugada', null, '2026-06-06 20:00:00' );
 
         // Floor excludes idA's orden (1).
-        $this->assertSame( 1, $this->repo->countFechasResueltasDesdeFecha( 359, $idB ) );
+        $this->assertSame( 1, $this->repo->countResolvedFechasSince( 359, $idB ) );
     }
 
     public function test_count_resueltas_throws_when_fecha_id_does_not_belong_to_the_season(): void {
         $idA = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
 
         $this->expectException( \InvalidArgumentException::class );
-        $this->repo->countFechasResueltasDesdeFecha( 999, $idA );
+        $this->repo->countResolvedFechasSince( 999, $idA );
     }
 
     /**
-     * The reason countFechasResueltasDesdeFecha() resolves `orden` fresh on
+     * The reason countResolvedFechasSince() resolves `orden` fresh on
      * every call instead of accepting one: a postponement in the middle of
-     * the counted window reshuffles `orden` values via recalcularOrden(), and
+     * the counted window reshuffles `orden` values via recalculateOrden(), and
      * the count must still be correct afterwards.
      */
     public function test_count_resueltas_stays_correct_across_a_postponement_mid_window(): void {
@@ -414,12 +423,12 @@ class FechaRepositoryTest extends TestCase {
             $this->sampleFecha( 359, 2, '2026-06-20' ),
             [ [ 'match_id' => 301, 'liga_id' => 373, 'zona' => 'Zona A', 'kickoff' => '2026-06-20 13:00:00', 'tiene_resultado' => false ] ]
         );
-        $this->repo->recalcularOrden( 359 );
+        $this->repo->recalculateOrden( 359 );
 
         // fecha_id's are stable, so counting "resolved fechas from idA
         // onwards" must still see both idA and idC as resolved, regardless
         // of how `orden` was reshuffled by the postponement.
-        $this->assertSame( 2, $this->repo->countFechasResueltasDesdeFecha( 359, $idA ) );
+        $this->assertSame( 2, $this->repo->countResolvedFechasSince( 359, $idA ) );
     }
 
     // -------------------------------------------------------------------------
@@ -432,18 +441,18 @@ class FechaRepositoryTest extends TestCase {
      * fail on the constraint itself. This asserts the property the constraint
      * protects instead: after a reorder that shifts rows into slots their
      * neighbours still hold, every `orden` in the season is distinct — which
-     * is what recalcularOrden()'s two-pass park-then-write is for.
+     * is what recalculateOrden()'s two-pass park-then-write is for.
      */
     public function test_recalcular_orden_never_leaves_duplicate_orden_values(): void {
         $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
         $this->repo->upsertFecha( $this->sampleFecha( 359, 2, '2026-06-06' ), [] );
         $this->repo->upsertFecha( $this->sampleFecha( 359, 3, '2026-06-13' ), [] );
-        $this->repo->recalcularOrden( 359 );
+        $this->repo->recalculateOrden( 359 );
 
         // A chronologically earlier fecha arrives late — every existing row
         // has to shift up by one.
         $this->repo->upsertFecha( $this->sampleFecha( 359, 0, '2026-05-23' ), [] );
-        $this->repo->recalcularOrden( 359 );
+        $this->repo->recalculateOrden( 359 );
 
         $ordenes = array_map(
             static fn( $r ) => (int) $r['orden'],
@@ -457,9 +466,9 @@ class FechaRepositoryTest extends TestCase {
     public function test_recalcular_orden_is_idempotent(): void {
         $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
         $this->repo->upsertFecha( $this->sampleFecha( 359, 2, '2026-06-06' ), [] );
-        $this->repo->recalcularOrden( 359 );
+        $this->repo->recalculateOrden( 359 );
 
-        $this->assertSame( 0, $this->repo->recalcularOrden( 359 ), 'second run must move nothing' );
+        $this->assertSame( 0, $this->repo->recalculateOrden( 359 ), 'second run must move nothing' );
     }
 
 }

@@ -4,7 +4,7 @@ WordPress plugin that models the jornada calendar, plazo deadlines, and estado l
 
 ## Requirements
 
-- PHP 8.0+
+- PHP 8.2+
 - WordPress 6.2+
 - MySQL with InnoDB engine
 - Entre Redes base plugin (active)
@@ -48,9 +48,9 @@ If the incoming match_ids resolve to **more than one** existing fecha, `upsertFe
 - **`orden`** is a continuous integer, 1..N, spanning the WHOLE season — it does not reset between torneos (`Clasificacion` → `Apertura` → `Clausura`). This is the ONLY field valid for arithmetic: "how many resolved fechas have passed since a given fecha" is an `orden >= N` comparison, never a `numero_en_torneo >= N` one.
 - **`numero_en_torneo`** is what a human reads ("Fecha 3 del Apertura") and resets to 1 whenever `torneo_label` changes. It exists purely for display; using it in a date/count computation will silently produce wrong results the moment a season has more than one torneo (every season does).
 
-**`orden` is now fully recomputable — and it MUST stay that way.** Since fecha identity moved to `fecha_id` (stable, never reassigned), `orden` is no longer identity: `Calendario\FechaRepository::recalcularOrden()` recomputes `orden` and `numero_en_torneo` for the WHOLE season from scratch on every seed run (1..N by `play_date` ascending, tie-broken by `id`). This is exactly what keeps a late-arriving or postponed fecha correctly positioned without ever renumbering a foreign key.
+**`orden` is now fully recomputable — and it MUST stay that way.** Since fecha identity moved to `fecha_id` (stable, never reassigned), `orden` is no longer identity: `Calendario\FechaRepository::recalculateOrden()` recomputes `orden` and `numero_en_torneo` for the WHOLE season from scratch on every seed run (1..N by `play_date` ascending, tie-broken by `id`). This is exactly what keeps a late-arriving or postponed fecha correctly positioned without ever renumbering a foreign key.
 
-> **Invariant a future slice must not break:** anything that needs to remember "which fecha" — most notably slice 2's ocupaciones, which anchor the "minimum of 3 resolved fechas" business rule to a starting point — **MUST persist `fecha_id`, and MUST NEVER persist `orden`.** `orden` can and will change value under an unchanged `fecha_id` the next time the calendar reflows (a late Clasificacion fecha loaded after Apertura was already seeded, or a postponement). `FechaRepository::countFechasResueltasDesdeFecha(int $seasonId, int $fechaId)` exists specifically so callers never touch `orden` directly: it takes a `fecha_id`, resolves that fecha's current `orden` internally, and counts from there — fresh, on every call.
+> **Invariant a future slice must not break:** anything that needs to remember "which fecha" — most notably slice 2's ocupaciones, which anchor the "minimum of 3 resolved fechas" business rule to a starting point — **MUST persist `fecha_id`, and MUST NEVER persist `orden`.** `orden` can and will change value under an unchanged `fecha_id` the next time the calendar reflows (a late Clasificacion fecha loaded after Apertura was already seeded, or a postponement). `FechaRepository::countResolvedFechasSince(int $seasonId, int $fechaId)` exists specifically so callers never touch `orden` directly: it takes a `fecha_id`, resolves that fecha's current `orden` internally, and counts from there — fresh, on every call.
 
 ## `estado_origen`: why a reseed (or a postponement) can never overwrite a human decision
 

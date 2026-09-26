@@ -23,13 +23,15 @@ namespace EntreRedes\Cambios\Migrations;
  * (season+orden, match_id globally unique, fecha+match) is therefore defended
  * in application code via a SELECT-then-insert guard in
  * Calendario\FechaRepository, exactly like entre-redes-prode's FechaRepository.
+ * The same translator also rewrites every `ENUM(...)` column (e.g. `estado`,
+ * `estado_origen`) to `TEXT` — so a typo in an ENUM-backed value (like an
+ * invalid `estado`) is silently accepted in tests too, never just in
+ * non-strict MySQL. `Calendario\FechaRepository::setEstadoManual()` is what
+ * actually guards `estado` against that, in code, for the same reason.
  *
  * NOTE ON IDENTITY: there is deliberately NO `UNIQUE KEY (season_id,
- * play_date)`. A fecha's identity is its set of partidos (match_ids), never
- * its calendar day — see Calendario\FechaRepository's class docblock for the
- * full reasoning (a suspended jornada gets ALL its sp_event dates edited in
- * WordPress, so play_date is mutable and two fechas can transiently share a
- * day mid-postponement).
+ * play_date)` — see Calendario\FechaRepository's class docblock, IDENTITY
+ * MODEL, for why (play_date is mutable; a fecha's identity is its match_ids).
  */
 class InitialSchema {
 
@@ -99,14 +101,11 @@ class InitialSchema {
      * a single zone, so the suspension/state lifecycle is tracked once per
      * jornada, not three times.
      *
-     * IDENTITY: a fecha's identity is its set of partidos (match_ids), NOT
-     * `play_date` — see Calendario\FechaRepository's class docblock. `orden`
-     * is the only column valid for arithmetic (1..N continuous across every
-     * torneo of the season) — see the authoritative explanation in
-     * Calendario\FechaRepository's docblock and in README.md's "orden vs
-     * numero_en_torneo" section. Because identity now lives in fecha_id
-     * (stable) rather than in `orden`, `orden` is recomputed from scratch on
-     * every seed run — it is NEVER something a caller may persist elsewhere.
+     * IDENTITY and `orden`: see Calendario\FechaRepository's class docblock
+     * (IDENTITY MODEL, INVARIANT) and README.md's "orden vs numero_en_torneo"
+     * section — both authoritative. In short: identity lives in `fecha_id`,
+     * never in `orden` or `play_date`; `orden` is recomputed from scratch on
+     * every seed run and is the only column valid for arithmetic.
      *
      * `numero_en_torneo` is what a human reads ("Fecha 3 del Apertura") and
      * resets to 1 whenever `torneo_label` changes — NEVER use it for date

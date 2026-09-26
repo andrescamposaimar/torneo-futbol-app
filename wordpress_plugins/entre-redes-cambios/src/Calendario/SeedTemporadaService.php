@@ -25,6 +25,11 @@ namespace EntreRedes\Cambios\Calendario;
  *      kickoff) — this IS the jornada; SportsPress has no round taxonomy (see
  *      domain fact #1 in the slice task description).
  *   2. Sort play_dates ascending.
+ *   2a. Deduplicate each day group by match_id (see dedupeByMatchId()) before
+ *      anything else reads it — a duplicate can reach `$fetcherFn` if a
+ *      result is loaded mid-fetch (the Saturday-night race; see
+ *      PartidosApiClient::fetchAll()'s docblock), and EstadoDeriver::derive()
+ *      below reads this array directly, not a DB re-query.
  *   3. For each day group, resolve `torneo_label` (and `torneo_liga_ids`) from
  *      which liga_ids are present on that play_date, via an injected liga_id
  *      -> torneo_label map — never hardcoded term ids in this class (they
@@ -37,17 +42,14 @@ namespace EntreRedes\Cambios\Calendario;
  *      already belong to an existing fecha MOVES that fecha instead of
  *      creating a duplicate.
  *   5. Once every day group has been upserted, call
- *      FechaRepository::recalcularOrden() exactly once for the whole season.
- *      This class deliberately does NOT assign `orden` or `numero_en_torneo`
- *      itself anymore: with fecha_id (not `orden`) as the stable identity,
- *      recomputing `orden` from scratch on every run is what keeps a
- *      late-arriving or postponed fecha correctly ordered — see
- *      FechaRepository's class docblock, "INVARIANT A FUTURE SLICE MUST NOT
- *      BREAK".
+ *      FechaRepository::recalculateOrden() exactly once for the whole
+ *      season. This class deliberately does NOT assign `orden` or
+ *      `numero_en_torneo` itself — see FechaRepository's class docblock,
+ *      "INVARIANT A FUTURE SLICE MUST NOT BREAK", for why that is safe.
  *
  * Idempotent: re-running with the same (or a superset of) partidos re-derives
  * the exact same day groups and delegates persistence to
- * FechaRepository::upsertFecha() + recalcularOrden(), whose own
+ * FechaRepository::upsertFecha() + recalculateOrden(), whose own
  * SELECT-then-insert guards and estado_origen rule prevent duplicate rows and
  * protect manually-set estados.
  */
@@ -105,6 +107,16 @@ final class SeedTemporadaService {
         $pending = [];
 
         foreach ( $byDay as $playDate => $dayPartidos ) {
+            // Deduplicate BEFORE anything below reads $dayPartidos — see
+            // dedupeByMatchId()'s docblock. EstadoDeriver::derive() a few
+            // lines down reads this exact array directly (not a DB re-query),
+            // so a duplicate match_id has to be collapsed here, not only at
+            // FechaRepository::syncPartidos()'s persistence step: otherwise a
+            // stale unresolved copy still makes allPlayed() return false and
+            // the fecha derives to 'programada' even though the resolved copy
+            // is right there in the same array.
+            $dayPartidos = self::dedupeByMatchId( $dayPartidos );
+
             $ligaIds = array_values( array_unique( array_map(
                 static fn( array $m ): int => (int) $m['liga_id'],
                 $dayPartidos
@@ -127,12 +139,9 @@ final class SeedTemporadaService {
 
             $fecha = [
                 'season_id'        => $seasonId,
-                // Placeholders — recalcularOrden(), called once below after
-                // every day group in this run has been upserted, is the sole
-                // authority for these two columns. See class docblock.
-                // `orden` and `numero_en_torneo` are intentionally NOT set here:
-                // FechaRepository assigns a provisional, collision-free `orden`
-                // on insert and recalcularOrden() below writes the real values.
+                // `orden` / `numero_en_torneo` intentionally NOT set here —
+                // recalculateOrden() below is the sole authority. See class
+                // docblock, step 5.
                 'torneo_liga_ids'  => implode( ',', $ligaIds ),
                 'torneo_label'     => $torneoLabel,
                 'play_date'        => $playDate,
@@ -160,7 +169,7 @@ final class SeedTemporadaService {
             ];
         }
 
-        $this->repository->recalcularOrden( $seasonId );
+        $this->repository->recalculateOrden( $seasonId );
 
         $created = [];
         foreach ( $pending as $item ) {
@@ -177,6 +186,34 @@ final class SeedTemporadaService {
         }
 
         return $created;
+    }
+
+    /**
+     * Collapses duplicate `match_id`s within one day group, keeping whichever
+     * copy has `tiene_resultado = true` — the same rule, for the same
+     * Saturday-night race, as PartidosApiClient::fetchAll()'s dedupeByMatchId()
+     * and FechaRepository::syncPartidos()'s (see either's docblock for the
+     * full scenario). A result loaded into SportsPress is never un-loaded by
+     * a later duplicate, regardless of array order.
+     *
+     * @param array<int, array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int}> $partidos
+     * @return array<int, array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int}>
+     */
+    private static function dedupeByMatchId( array $partidos ): array {
+        $byMatchId = [];
+
+        foreach ( $partidos as $partido ) {
+            $matchId  = (int) $partido['match_id'];
+            $existing = $byMatchId[ $matchId ] ?? null;
+
+            if ( null !== $existing && ! empty( $existing['tiene_resultado'] ) ) {
+                continue;
+            }
+
+            $byMatchId[ $matchId ] = $partido;
+        }
+
+        return array_values( $byMatchId );
     }
 
     /**

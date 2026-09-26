@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Tests\Calendario;
 
+use EntreRedes\Cambios\Calendario\LigaResolver;
 use EntreRedes\Cambios\Calendario\PartidosApiClient;
 use PHPUnit\Framework\TestCase;
 
@@ -57,6 +58,29 @@ class PartidosApiClientTest extends TestCase {
         };
 
         return new PartidosApiClient( $httpGetFn, self::BASE_URL );
+    }
+
+    /**
+     * Builds one raw `/partidos` or `/partidos-programados` item, in the exact
+     * shape the stub `$httpGetFn` above returns it (before normalizePartido()
+     * touches it) — `hora` defaults to a fixed time since most callers only
+     * care about `id`/`fecha`/`liga`.
+     *
+     * @return array{id:int, fecha:string, hora:string, liga:string}
+     */
+    private static function partidoItem( int $id, string $fecha, string $liga, string $hora = '16:00' ): array {
+        return [ 'id' => $id, 'fecha' => $fecha, 'hora' => $hora, 'liga' => $liga ];
+    }
+
+    /**
+     * The ligasIndex a real fetchLigasIndex() call would build from
+     * self::LIGAS — used by tests that need an index but must not exercise the
+     * stub `$httpGetFn` for it (e.g. because that closure is built to fail).
+     *
+     * @return array<string, array{id:int, torneo_label:string}>
+     */
+    private static function ligasIndex(): array {
+        return LigaResolver::index( self::LIGAS );
     }
 
     // -------------------------------------------------------------------------
@@ -296,4 +320,98 @@ class PartidosApiClientTest extends TestCase {
         $this->assertTrue( $all[0]['tiene_resultado'] );
         $this->assertFalse( $all[1]['tiene_resultado'] );
     }
+
+    /**
+     * THE Saturday-night race — see fetchAll()'s class docblock. If a result
+     * is loaded into SportsPress between fetchPartidos() and
+     * fetchProgramados(), the same match_id comes back from both: resolved
+     * from /partidos, still-future from /partidos-programados. The resolved
+     * copy must win regardless of merge order.
+     */
+    public function test_fetch_all_deduplicates_a_match_id_seen_in_both_endpoints_and_keeps_the_resultado(): void {
+        $client = $this->client(
+            [
+                1 => [
+                    'items'       => [ self::partidoItem( 9001, '2026-05-30', '2026 - Apertura Zona A' ) ],
+                    'total_pages' => 1,
+                ],
+            ],
+            [
+                1 => [
+                    // Stale: /partidos-programados hasn't caught up yet with
+                    // the post-status transition, so it still lists the same
+                    // match_id as future/unresolved.
+                    'items'       => [ self::partidoItem( 9001, '2026-05-30', '2026 - Apertura Zona A' ) ],
+                    'total_pages' => 1,
+                ],
+            ]
+        );
+
+        $all = $client->fetchAll( 359 );
+
+        $this->assertCount( 1, $all, 'The duplicate match_id must collapse into a single entry.' );
+        $this->assertSame( 9001, $all[0]['match_id'] );
+        $this->assertTrue( $all[0]['tiene_resultado'], 'The resolved copy must win, never the stale future one.' );
+    }
+
+    // -------------------------------------------------------------------------
+    // Failures must abort, never look like the end of the pagination
+    // -------------------------------------------------------------------------
+
+    /**
+     * Regression tests for the contract this client was born with: the HTTP
+     * closure was asked to return [] on any failure, and a missing `items` key
+     * was read as "no more pages". A 500 on page 2 of 3 therefore ended the
+     * loop quietly and produced a partial fixture, which the seeder then wrote
+     * as an incomplete calendar with no error anywhere. Because
+     * countResolvedFechasSince() counts rows in that calendar, a silently
+     * truncated download corrupts the feature's central rule.
+     */
+    public function test_a_throwing_http_getter_propagates_instead_of_truncating(): void {
+        $client = new PartidosApiClient(
+            static function ( string $url ): array {
+                if ( str_contains( $url, 'page=2' ) ) {
+                    throw new \RuntimeException( 'HTTP 500' );
+                }
+
+                return [
+                    'items'       => [ self::partidoItem( 1, '2026-05-30', '2026 - Apertura Zona A' ) ],
+                    'total_pages' => 3,
+                ];
+            },
+            'https://example.test/v1'
+        );
+
+        $this->expectException( \RuntimeException::class );
+        $client->fetchPartidos( 359, self::ligasIndex() );
+    }
+
+    public function test_an_envelope_without_items_throws(): void {
+        $client = new PartidosApiClient(
+            static fn( string $url ): array => [ 'unexpected' => 'shape' ],
+            'https://example.test/v1'
+        );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessageMatches( '/items/' );
+        $client->fetchPartidos( 359, self::ligasIndex() );
+    }
+
+    /**
+     * The quietest failure of all: an empty ligas index makes every partido
+     * resolve to an unknown liga, so all of them are skipped and seed() gets an
+     * empty list — identical in every observable way to a week with no new
+     * fixture.
+     */
+    public function test_an_empty_ligas_response_throws(): void {
+        $client = new PartidosApiClient(
+            static fn( string $url ): array => [],
+            'https://example.test/v1'
+        );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessageMatches( '/ligas/' );
+        $client->fetchLigasIndex();
+    }
+
 }
