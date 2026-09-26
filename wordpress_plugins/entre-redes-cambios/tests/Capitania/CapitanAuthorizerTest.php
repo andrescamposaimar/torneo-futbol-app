@@ -12,7 +12,7 @@ use EntreRedes\Cambios\Capitania\Exception\InvalidTokenException;
 use EntreRedes\Cambios\Capitania\Exception\NotCaptainException;
 use EntreRedes\Cambios\Capitania\Exception\SessionRevokedException;
 use EntreRedes\Cambios\Migrations\InitialSchema;
-use Firebase\JWT\JWT;
+use EntreRedes\Cambios\Tests\Support\IssuesProdeTokens;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -23,16 +23,7 @@ use PHPUnit\Framework\TestCase;
  */
 class CapitanAuthorizerTest extends TestCase {
 
-    /**
-     * A fixed instant as a Unix epoch, which is what TokenVerifier takes.
-     *
-     * The signature uses an epoch on purpose: `exp` in a JWT is an epoch, so
-     * comparing epoch to epoch leaves no timezone to misread. Tests spell the
-     * instant out in UTC here only for readability.
-     */
-    private static function utc( string $utcDatetime ): int {
-        return ( new \DateTimeImmutable( $utcDatetime, new \DateTimeZone( 'UTC' ) ) )->getTimestamp();
-    }
+    use IssuesProdeTokens;
 
     private const SEASON_ID = 359;
     private const TEAM_A    = 100;
@@ -69,7 +60,7 @@ class CapitanAuthorizerTest extends TestCase {
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_capitan" );
 
         $this->capitanRepository = new CapitanRepository( $wpdb );
-        $this->capitanRepository->designar( self::SEASON_ID, self::TEAM_A, self::PLAYER_ID, null, '2026-09-01 10:00:00' );
+        $this->capitanRepository->designateCapitan( self::SEASON_ID, self::TEAM_A, self::PLAYER_ID, null, '2026-09-01 10:00:00' );
 
         $this->authorizer = new CapitanAuthorizer(
             new TokenVerifier( $this->publicKeyPem ),
@@ -82,27 +73,6 @@ class CapitanAuthorizerTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DROP TABLE IF EXISTS {$wpdb->prefix}prode_users" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_capitan" );
-    }
-
-    /**
-     * @param array<string, mixed> $overrides
-     */
-    private function issueToken( array $overrides = [], ?string $signingKey = null ): string {
-        $payload = array_merge(
-            [
-                'iss'       => 'http://example.com/wp-json/entre-redes/v1/prode',
-                'aud'       => 'tenant-1',
-                'sub'       => (string) self::PRODE_USER_ID,
-                'typ'       => 'prode_access',
-                'sv'        => 3,
-                'player_id' => self::PLAYER_ID,
-                'iat'       => strtotime( '2026-09-26 12:00:00 UTC' ),
-                'exp'       => strtotime( '2026-09-26 12:15:00 UTC' ),
-            ],
-            $overrides
-        );
-
-        return JWT::encode( $payload, $signingKey ?? $this->privateKeyPem, 'RS256', 'test-kid' );
     }
 
     public function test_happy_path_returns_the_claims(): void {
@@ -152,7 +122,7 @@ class CapitanAuthorizerTest extends TestCase {
      * be enough — the authorization is scoped to the exact team requested.
      */
     public function test_rejects_the_captain_of_team_a_acting_on_team_b(): void {
-        $this->capitanRepository->designar( self::SEASON_ID, self::TEAM_B, 888888, null, '2026-09-01 10:00:00' );
+        $this->capitanRepository->designateCapitan( self::SEASON_ID, self::TEAM_B, 888888, null, '2026-09-01 10:00:00' );
 
         $jwt = $this->issueToken(); // still carries PLAYER_ID, captain of TEAM_A only
 

@@ -211,7 +211,7 @@ class InitialSchema {
      * multiple simultaneously-vigent rows for the same team, defeating the
      * whole point. The invariant is therefore defended the same way
      * Calendario\FechaRepository defends `uq_season_orden`: a SELECT-then-
-     * insert guard in Capitania\CapitanRepository::designar() (find and
+     * insert guard in Capitania\CapitanRepository::designateCapitan() (find and
      * revoke the current vigent row, in a transaction, before inserting the
      * new one), verified by a test that asserts the PROPERTY ("never two
      * vigent rows for the same pair"), not a constraint. And — same as every

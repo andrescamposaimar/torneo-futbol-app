@@ -85,7 +85,7 @@ class CapitanAuthorizer {
             throw new SessionRevokedException();
         }
 
-        if ( ! $this->capitanRepository->esCapitanVigente( $seasonId, $teamId, $playerId ) ) {
+        if ( ! $this->capitanRepository->isCapitanVigente( $seasonId, $teamId, $playerId ) ) {
             throw new NotCaptainException();
         }
 

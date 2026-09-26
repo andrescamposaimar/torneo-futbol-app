@@ -78,21 +78,19 @@ Players authenticate through the `entre-redes-prode` plugin, which issues a shor
 
 ### Why this plugin reads `prode_users.session_version`
 
-A valid signature and an unexpired `exp` are **not** enough to know a session is still alive. Prode's `SessionManager::revokeAllSessions()` invalidates every outstanding token for a user by incrementing `prode_users.session_version`; the access token's own `sv` claim is a snapshot of that counter taken at issuance. Checking the signature alone would accept a token for up to 15 minutes after it was explicitly revoked.
-
-`Auth\ProdeSessionGateway` closes that gap by comparing the token's `sv` against the live value in `{$wpdb->prefix}prode_users`. **This is schema coupling, not code coupling** — the class never references a class from entre-redes-prode, only one column of one table, via a raw prepared query. The cost of that choice is explicit: if `entre-redes-prode` ever renames that table or drops the column, this plugin finds out at query time (a `null` read), not at deploy time. `isSessionCurrent()` fails **closed** in that scenario — a missing user or a missing table both read as "session not current" — rather than silently authorizing everyone.
+A signature and an `exp` check alone cannot see a revoked session — see `Auth\ProdeSessionGateway`'s class docblock for why `session_version` closes that gap, and why it fails closed on a missing user or a missing table.
 
 ### The `capitan` you see in `/jugadores` is not this
 
-`sp_position` term id 52 ("Capitan") is a **position tag** on a player — exactly like Arquero or Defensor — with no team, no season, and no authority attached. It is what the `capitan: true` flag on `/jugadores` reflects. **Nothing in this plugin authorizes anything from that flag.** The only source of truth for "who can act as captain of this team, this season" is a vigent row in `cambios_capitan`, created explicitly through `Capitania\CapitanRepository::designar()`. This is called out explicitly in code (see that class's docblock) so a future slice doesn't "discover" the taxonomy flag and wire it in by mistake.
+The `sp_position` taxonomy term is a player tag, unrelated to authorization — see `Capitania\CapitanRepository`'s class docblock ("NOTE ON THE `capitan` TAXONOMY TERM") for the full distinction and why it must stay that way.
 
 ### One vigent captain per team and season — defended in code, not by a UNIQUE key
 
-`cambios_capitan` is also the captaincy's audit history: every past designation stays in the table, marked `revocado_at`. Because of that, "at most one vigent captain per `(season_id, team_id)`" **cannot** be a `UNIQUE (season_id, team_id)` key — MySQL treats every `NULL` in a unique index as distinct, so a `UNIQUE (season_id, team_id, revocado_at)` key would allow any number of simultaneously-vigent rows. The rule is defended the same way `Calendario\FechaRepository` defends its own invariants: a SELECT-then-revoke-then-insert guard, inside a transaction, in `CapitanRepository::designar()` — verified by a test asserting the *property* ("never two vigent rows for the pair"), not a constraint. As with every other table in this plugin, the SQLite test shim used by the suite drops every `KEY`/`INDEX` line, so no test here could lean on a declarative constraint even if one existed.
+See `Migrations\InitialSchema::sqlCambiosCapitan()`'s docblock for why this cannot be a `UNIQUE` key and how `CapitanRepository::designateCapitan()` defends the invariant instead.
 
 ### Putting it together: `Capitania\CapitanAuthorizer`
 
-`CapitanAuthorizer::authorize( $jwt, $seasonId, $teamId, $now )` is the single entry point later slices should call. It composes `TokenVerifier`, `ProdeSessionGateway`, and `CapitanRepository`, in that order, and answers exactly one question: is the person holding this token the vigent captain of this team, this season? Every rejection reason — an invalid token, a revoked session, or simply not being that team's captain — raises a **different exception type**, but every one of those exceptions carries the **same generic message**. That is deliberate: whatever surfaces this externally (an HTTP 403, say) can never be used to enumerate which of the three conditions failed, while the exception's type still lets the server log the real reason.
+`CapitanAuthorizer::authorize( $jwt, $seasonId, $teamId, $now )` is the single entry point later slices should call — see that class's docblock for why it composes `TokenVerifier`, `ProdeSessionGateway`, and `CapitanRepository` in that order, and for the generic-message-per-distinct-exception-type contract its rejections follow.
 
 ## Scope of this slice (slice 0)
 
