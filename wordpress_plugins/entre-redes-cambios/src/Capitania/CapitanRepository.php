@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Capitania;
 
+use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
+
 /**
  * Encapsulates all wpdb persistence for cambios_capitan.
  *
  * See Migrations\InitialSchema::sqlCambiosCapitan() for the full identity
  * and history model this class defends: at most one VIGENT
  * (`revocado_at IS NULL`) row per `(season_id, team_id)`, enforced by a
- * SELECT-then-insert/revoke guard in designar() — never by a UNIQUE key, for
+ * SELECT-then-insert/revoke guard in designateCapitan() — never by a UNIQUE key, for
  * the reasons documented there (the table is also the audit history, and
  * MySQL treats every NULL in a UNIQUE index as distinct from every other
  * NULL). The SQLite test shim also drops every KEY/INDEX line from the
@@ -23,10 +25,10 @@ namespace EntreRedes\Cambios\Capitania;
  * is a POSITION TAG on a player — like Arquero or Defensor — with no team,
  * no temporada, and no authority attached. It is what `/jugadores`'s
  * `capitan: true` flag reflects. This class and everything built on it
- * (Auth\CapitanAuthorizer) NEVER read that flag; the only source of truth
+ * (Capitania\CapitanAuthorizer) NEVER read that flag; the only source of truth
  * for "who can act as captain of this team, this season" is a VIGENT row in
- * cambios_capitan, designated explicitly through designar(). Do not wire
- * the taxonomy term into authorization later — it means something else
+ * cambios_capitan, designated explicitly through designateCapitan(). Do not
+ * wire the taxonomy term into authorization later — it means something else
  * entirely.
  */
 class CapitanRepository {
@@ -47,8 +49,8 @@ class CapitanRepository {
      * captain of this team is a no-op — no new row is created and the
      * existing one is not revoked — and returns that row's existing id.
      *
-     * Not safe against two concurrent designar() calls for the same team
-     * racing past the initial capitanVigente() read before either's
+     * Not safe against two concurrent designateCapitan() calls for the same
+     * team racing past the initial findCapitanVigente() read before either's
      * transaction starts — the same class of gap
      * Calendario\FechaRepository::nextFreeOrden() accepts for its
      * single-operator seeding path. Today captains are designated by a
@@ -59,12 +61,18 @@ class CapitanRepository {
      * @return int The id of the vigent cambios_capitan row after this call —
      *         a freshly inserted row on a change of captain, or the existing
      *         row's id when re-designating the incumbent.
+     *
+     * @throws CapitanPersistenceException When the revoke of the previous
+     *         captain, or the insert of the new one, fails at the wpdb
+     *         level ($wpdb->insert()/update() returning `false` instead of
+     *         throwing) — thrown BEFORE the COMMIT so the transaction rolls
+     *         back instead of persisting a partial write.
      */
-    public function designar( int $seasonId, int $teamId, int $playerId, ?int $designadoPor, string $now ): int {
+    public function designateCapitan( int $seasonId, int $teamId, int $playerId, ?int $designadoPor, string $now ): int {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $vigente = $this->capitanVigente( $seasonId, $teamId );
+        $vigente = $this->findCapitanVigente( $seasonId, $teamId );
 
         if ( null !== $vigente && (int) $vigente['player_id'] === $playerId ) {
             return (int) $vigente['id'];
@@ -74,10 +82,10 @@ class CapitanRepository {
 
         try {
             if ( null !== $vigente ) {
-                $this->revocarRow( (int) $vigente['id'], $now );
+                $this->revokeRow( (int) $vigente['id'], $now );
             }
 
-            $wpdb->insert(
+            $result = $wpdb->insert(
                 $p . 'cambios_capitan',
                 [
                     'season_id'     => $seasonId,
@@ -88,7 +96,16 @@ class CapitanRepository {
                     'revocado_at'   => null,
                 ]
             );
+
+            if ( false === $result ) {
+                throw new CapitanPersistenceException( 'insert', $wpdb->last_error );
+            }
+
             $newId = (int) $wpdb->insert_id;
+
+            if ( $newId <= 0 ) {
+                throw new CapitanPersistenceException( 'insert', $wpdb->last_error );
+            }
 
             $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
@@ -104,15 +121,18 @@ class CapitanRepository {
      *
      * @return bool false when there was nothing vigent to revoke — a team
      *         without a captain is a valid state, not an error.
+     *
+     * @throws CapitanPersistenceException When the underlying wpdb update
+     *         fails (see revokeRow()).
      */
-    public function revocar( int $seasonId, int $teamId, string $now ): bool {
-        $vigente = $this->capitanVigente( $seasonId, $teamId );
+    public function revokeCapitan( int $seasonId, int $teamId, string $now ): bool {
+        $vigente = $this->findCapitanVigente( $seasonId, $teamId );
 
         if ( null === $vigente ) {
             return false;
         }
 
-        $this->revocarRow( (int) $vigente['id'], $now );
+        $this->revokeRow( (int) $vigente['id'], $now );
 
         return true;
     }
@@ -122,7 +142,7 @@ class CapitanRepository {
      *         row for ($seasonId, $teamId), or null when the team currently
      *         has no captain.
      */
-    public function capitanVigente( int $seasonId, int $teamId ): ?array {
+    public function findCapitanVigente( int $seasonId, int $teamId ): ?array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -140,8 +160,8 @@ class CapitanRepository {
         return empty( $row ) ? null : $row;
     }
 
-    public function esCapitanVigente( int $seasonId, int $teamId, int $playerId ): bool {
-        $vigente = $this->capitanVigente( $seasonId, $teamId );
+    public function isCapitanVigente( int $seasonId, int $teamId, int $playerId ): bool {
+        $vigente = $this->findCapitanVigente( $seasonId, $teamId );
 
         return null !== $vigente && (int) $vigente['player_id'] === $playerId;
     }
@@ -154,7 +174,7 @@ class CapitanRepository {
      *         once, and hiding that here would just move the surprise
      *         somewhere else.
      */
-    public function equiposDeCapitan( int $seasonId, int $playerId ): array {
+    public function listEquiposByCapitan( int $seasonId, int $playerId ): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -171,10 +191,19 @@ class CapitanRepository {
         return array_map( static fn( array $r ): int => (int) $r['team_id'], $rows ?: [] );
     }
 
-    private function revocarRow( int $id, string $now ): void {
+    /**
+     * @throws CapitanPersistenceException When $wpdb->update() returns
+     *         `false` (see wpdb's own contract — it never throws on
+     *         failure) instead of the number of affected rows.
+     */
+    private function revokeRow( int $id, string $now ): void {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $wpdb->update( $p . 'cambios_capitan', [ 'revocado_at' => $now ], [ 'id' => $id ] );
+        $result = $wpdb->update( $p . 'cambios_capitan', [ 'revocado_at' => $now ], [ 'id' => $id ] );
+
+        if ( false === $result ) {
+            throw new CapitanPersistenceException( 'revoke', $wpdb->last_error );
+        }
     }
 }

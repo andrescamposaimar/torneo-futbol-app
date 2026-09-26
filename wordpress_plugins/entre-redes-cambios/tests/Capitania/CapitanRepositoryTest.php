@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Tests\Capitania;
 
 use EntreRedes\Cambios\Capitania\CapitanRepository;
+use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use PHPUnit\Framework\TestCase;
 
@@ -60,29 +61,71 @@ class CapitanRepositoryTest extends TestCase {
         );
     }
 
+    /**
+     * Builds a \wpdb subclass that shares the SAME underlying PDO connection
+     * as the real (shim) $wpdb — via reflection into the parent's private
+     * $pdo property, rather than calling parent::__construct(), which would
+     * instead open a second, empty, disconnected in-memory database — but
+     * whose insert() or update() unconditionally returns false, exactly the
+     * way a real wpdb reports a failed write: no exception, just false and
+     * $wpdb->last_error (see wp-shim.php's wpdb::insert()/update()).
+     */
+    private function wpdbThatFailsOn( \wpdb $real, string $method ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return match ( $method ) {
+            'insert' => new class( $pdo, $real->prefix ) extends \wpdb {
+                public function __construct( \PDO $pdo, string $prefix ) {
+                    $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                    $ref->setValue( $this, $pdo );
+                    $this->prefix = $prefix;
+                }
+
+                public function insert( string $table, array $data, mixed $format = null ): int|false {
+                    $this->last_error = 'simulated insert failure for test';
+                    return false;
+                }
+            },
+            'update' => new class( $pdo, $real->prefix ) extends \wpdb {
+                public function __construct( \PDO $pdo, string $prefix ) {
+                    $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                    $ref->setValue( $this, $pdo );
+                    $this->prefix = $prefix;
+                }
+
+                public function update( string $table, array $data, array $where ): int|false {
+                    $this->last_error = 'simulated update failure for test';
+                    return false;
+                }
+            },
+            default => throw new \InvalidArgumentException( "Unsupported method: {$method}" ),
+        };
+    }
+
     // -------------------------------------------------------------------------
-    // designar — creates
+    // designateCapitan — creates
     // -------------------------------------------------------------------------
 
-    public function test_designar_creates_a_vigent_row(): void {
-        $id = $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+    public function test_designate_captain_creates_a_vigent_row(): void {
+        $id = $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
 
         $this->assertGreaterThan( 0, $id );
-        $this->assertTrue( $this->repo->esCapitanVigente( 359, 100, 777 ) );
+        $this->assertTrue( $this->repo->isCapitanVigente( 359, 100, 777 ) );
         $this->assertSame( 1, $this->countVigentesFor( 359, 100 ) );
     }
 
     // -------------------------------------------------------------------------
-    // designar — changing captain revokes the previous one
+    // designateCapitan — changing captain revokes the previous one
     // -------------------------------------------------------------------------
 
-    public function test_designar_a_different_player_revokes_the_previous_captain(): void {
-        $firstId  = $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
-        $secondId = $this->repo->designar( 359, 100, 888, 7, '2026-09-27 10:00:00' );
+    public function test_designate_captain_a_different_player_revokes_the_previous_captain(): void {
+        $firstId  = $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $secondId = $this->repo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
 
         $this->assertNotSame( $firstId, $secondId );
-        $this->assertFalse( $this->repo->esCapitanVigente( 359, 100, 777 ) );
-        $this->assertTrue( $this->repo->esCapitanVigente( 359, 100, 888 ) );
+        $this->assertFalse( $this->repo->isCapitanVigente( 359, 100, 777 ) );
+        $this->assertTrue( $this->repo->isCapitanVigente( 359, 100, 888 ) );
 
         // THE property test: exactly one vigent row, never zero, never two.
         $this->assertSame( 1, $this->countVigentesFor( 359, 100 ) );
@@ -90,76 +133,133 @@ class CapitanRepositoryTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
-    // designar — idempotent on the SAME player
+    // designateCapitan — idempotent on the SAME player
     // -------------------------------------------------------------------------
 
-    public function test_designar_the_same_incumbent_player_is_idempotent(): void {
-        $firstId  = $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
-        $secondId = $this->repo->designar( 359, 100, 777, 7, '2026-09-27 10:00:00' );
+    public function test_designate_captain_the_same_incumbent_player_is_idempotent(): void {
+        $firstId  = $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $secondId = $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-27 10:00:00' );
 
         $this->assertSame( $firstId, $secondId, 'Re-designating the incumbent must not create a new row.' );
         $this->assertSame( 1, $this->countRowsFor( 359, 100 ), 'No revocation and no new row for the incumbent.' );
-        $this->assertTrue( $this->repo->esCapitanVigente( 359, 100, 777 ) );
+        $this->assertTrue( $this->repo->isCapitanVigente( 359, 100, 777 ) );
     }
 
     // -------------------------------------------------------------------------
-    // revocar
+    // designateCapitan — rollback on a failed wpdb write (BLOCKER fix)
     // -------------------------------------------------------------------------
 
-    public function test_revocar_clears_the_vigent_captain(): void {
-        $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+    public function test_designate_captain_rolls_back_when_the_insert_fails(): void {
+        global $wpdb;
 
-        $result = $this->repo->revocar( 359, 100, '2026-09-27 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'insert' );
+        $failingRepo = new CapitanRepository( $failingWpdb );
+
+        try {
+            $failingRepo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
+            $this->fail( 'Expected CapitanPersistenceException.' );
+        } catch ( CapitanPersistenceException $e ) {
+            // expected — assert below, through the REAL repo, that the
+            // transaction actually rolled back.
+        }
+
+        $this->assertTrue(
+            $this->repo->isCapitanVigente( 359, 100, 777 ),
+            'The previous captain must remain vigent when the insert of the new one failed.'
+        );
+        $this->assertSame(
+            1,
+            $this->countRowsFor( 359, 100 ),
+            'No new row must have been committed when the insert failed.'
+        );
+    }
+
+    public function test_designate_captain_rolls_back_when_the_revoke_update_fails(): void {
+        global $wpdb;
+
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'update' );
+        $failingRepo = new CapitanRepository( $failingWpdb );
+
+        try {
+            $failingRepo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
+            $this->fail( 'Expected CapitanPersistenceException.' );
+        } catch ( CapitanPersistenceException $e ) {
+            // expected
+        }
+
+        $this->assertTrue(
+            $this->repo->isCapitanVigente( 359, 100, 777 ),
+            'The previous captain must remain vigent when revoking it failed.'
+        );
+        $this->assertSame(
+            1,
+            $this->countRowsFor( 359, 100 ),
+            'The insert for the new captain must not have been committed either.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // revokeCaptain
+    // -------------------------------------------------------------------------
+
+    public function test_revoke_captain_clears_the_vigent_captain(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $result = $this->repo->revokeCapitan( 359, 100, '2026-09-27 10:00:00' );
 
         $this->assertTrue( $result );
-        $this->assertNull( $this->repo->capitanVigente( 359, 100 ) );
-        $this->assertFalse( $this->repo->esCapitanVigente( 359, 100, 777 ) );
+        $this->assertNull( $this->repo->findCapitanVigente( 359, 100 ) );
+        $this->assertFalse( $this->repo->isCapitanVigente( 359, 100, 777 ) );
     }
 
-    public function test_revocar_returns_false_when_there_is_nothing_to_revoke(): void {
-        $this->assertFalse( $this->repo->revocar( 359, 100, '2026-09-27 10:00:00' ) );
-    }
-
-    // -------------------------------------------------------------------------
-    // capitanVigente / esCapitanVigente
-    // -------------------------------------------------------------------------
-
-    public function test_capitan_vigente_returns_null_when_no_captain_was_ever_designated(): void {
-        $this->assertNull( $this->repo->capitanVigente( 359, 100 ) );
-    }
-
-    public function test_capitan_vigente_returns_null_after_a_revoke(): void {
-        $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
-        $this->repo->revocar( 359, 100, '2026-09-27 10:00:00' );
-
-        $this->assertNull( $this->repo->capitanVigente( 359, 100 ) );
-    }
-
-    public function test_es_capitan_vigente_is_false_for_a_different_team(): void {
-        $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
-
-        $this->assertFalse( $this->repo->esCapitanVigente( 359, 200, 777 ) );
+    public function test_revoke_captain_returns_false_when_there_is_nothing_to_revoke(): void {
+        $this->assertFalse( $this->repo->revokeCapitan( 359, 100, '2026-09-27 10:00:00' ) );
     }
 
     // -------------------------------------------------------------------------
-    // equiposDeCapitan
+    // findCapitanVigente / isCapitanVigente
     // -------------------------------------------------------------------------
 
-    public function test_equipos_de_capitan_returns_the_team_this_player_captains(): void {
-        $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
-
-        $this->assertSame( [ 100 ], $this->repo->equiposDeCapitan( 359, 777 ) );
+    public function test_find_capitan_vigente_returns_null_when_no_captain_was_ever_designated(): void {
+        $this->assertNull( $this->repo->findCapitanVigente( 359, 100 ) );
     }
 
-    public function test_equipos_de_capitan_is_empty_when_the_player_captains_nothing(): void {
-        $this->assertSame( [], $this->repo->equiposDeCapitan( 359, 777 ) );
+    public function test_find_capitan_vigente_returns_null_after_a_revoke(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $this->repo->revokeCapitan( 359, 100, '2026-09-27 10:00:00' );
+
+        $this->assertNull( $this->repo->findCapitanVigente( 359, 100 ) );
     }
 
-    public function test_equipos_de_capitan_excludes_a_revoked_team(): void {
-        $this->repo->designar( 359, 100, 777, 7, '2026-09-26 10:00:00' );
-        $this->repo->revocar( 359, 100, '2026-09-27 10:00:00' );
+    public function test_is_capitan_vigente_is_false_for_a_different_team(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
 
-        $this->assertSame( [], $this->repo->equiposDeCapitan( 359, 777 ) );
+        $this->assertFalse( $this->repo->isCapitanVigente( 359, 200, 777 ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // listEquiposByCapitan
+    // -------------------------------------------------------------------------
+
+    public function test_list_equipos_by_capitan_returns_the_team_this_player_captains(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $this->assertSame( [ 100 ], $this->repo->listEquiposByCapitan( 359, 777 ) );
+    }
+
+    public function test_list_equipos_by_capitan_is_empty_when_the_player_captains_nothing(): void {
+        $this->assertSame( [], $this->repo->listEquiposByCapitan( 359, 777 ) );
+    }
+
+    public function test_list_equipos_by_capitan_excludes_a_revoked_team(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $this->repo->revokeCapitan( 359, 100, '2026-09-27 10:00:00' );
+
+        $this->assertSame( [], $this->repo->listEquiposByCapitan( 359, 777 ) );
     }
 
     // -------------------------------------------------------------------------
@@ -168,13 +268,13 @@ class CapitanRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_never_two_vigent_rows_for_the_same_pair_across_several_designations(): void {
-        $this->repo->designar( 359, 100, 1, null, '2026-09-01 10:00:00' );
-        $this->repo->designar( 359, 100, 2, null, '2026-09-08 10:00:00' );
-        $this->repo->designar( 359, 100, 2, null, '2026-09-09 10:00:00' ); // idempotent no-op
-        $this->repo->designar( 359, 100, 3, null, '2026-09-15 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 1, null, '2026-09-01 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 2, null, '2026-09-08 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 2, null, '2026-09-09 10:00:00' ); // idempotent no-op
+        $this->repo->designateCapitan( 359, 100, 3, null, '2026-09-15 10:00:00' );
 
         $this->assertSame( 1, $this->countVigentesFor( 359, 100 ) );
-        $this->assertTrue( $this->repo->esCapitanVigente( 359, 100, 3 ) );
+        $this->assertTrue( $this->repo->isCapitanVigente( 359, 100, 3 ) );
 
         global $wpdb;
         $total = (int) $wpdb->get_var(
@@ -188,11 +288,11 @@ class CapitanRepositoryTest extends TestCase {
     }
 
     public function test_designations_are_scoped_per_season(): void {
-        $this->repo->designar( 359, 100, 777, null, '2026-09-01 10:00:00' );
-        $this->repo->designar( 360, 100, 888, null, '2026-09-01 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 777, null, '2026-09-01 10:00:00' );
+        $this->repo->designateCapitan( 360, 100, 888, null, '2026-09-01 10:00:00' );
 
-        $this->assertTrue( $this->repo->esCapitanVigente( 359, 100, 777 ) );
-        $this->assertTrue( $this->repo->esCapitanVigente( 360, 100, 888 ) );
-        $this->assertFalse( $this->repo->esCapitanVigente( 359, 100, 888 ) );
+        $this->assertTrue( $this->repo->isCapitanVigente( 359, 100, 777 ) );
+        $this->assertTrue( $this->repo->isCapitanVigente( 360, 100, 888 ) );
+        $this->assertFalse( $this->repo->isCapitanVigente( 359, 100, 888 ) );
     }
 }
