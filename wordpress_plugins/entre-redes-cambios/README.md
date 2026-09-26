@@ -8,7 +8,8 @@ WordPress plugin that models the jornada calendar, plazo deadlines, and estado l
 - WordPress 6.2+
 - MySQL with InnoDB engine
 - Entre Redes base plugin (active)
-- Composer (dev dependencies only — this slice ships zero runtime Composer packages)
+- `entre-redes-prode` plugin (active) — slice 1 reads its `prode_users` table and its RSA public key; see "Captaincy and authorization" below
+- Composer — from slice 1 onward this plugin ships one runtime dependency, `firebase/php-jwt` (`^7.0`, the same major entre-redes-prode uses), to verify the JWTs prode issues. Slice 0 shipped zero runtime packages; that changed the moment authorization needed to read a signed token.
 
 ## Quick start
 
@@ -25,13 +26,14 @@ composer test
 
 ## Table structure
 
-The plugin creates 3 custom tables prefixed with `{wp_prefix}cambios_`:
+The plugin creates 4 custom tables prefixed with `{wp_prefix}cambios_`:
 
 | Table | Purpose |
 |-------|---------|
 | `cambios_fecha` | One row per jornada of the ENTIRE season (Apertura + Clausura together) — never per-zone |
 | `cambios_fecha_partido` | Bridge to the `sp_event` matches that belong to a fecha |
 | `cambios_settings` | Operator-configurable parameters: timezone, season_id, and the four plazo offsets |
+| `cambios_capitan` | One row per captaincy DESIGNATION (history + current state) — see "Captaincy and authorization" below |
 
 ## Identity: a fecha is its partidos, not its day
 
@@ -61,6 +63,39 @@ If the incoming match_ids resolve to **more than one** existing fecha, `upsertFe
 
 `estado_origen` (`derivado` | `manual`) tracks who last decided the value. `Calendario\FechaRepository::upsertFecha()` — which the nightly/on-demand reseed pipeline calls, and which is also what detects and applies a postponement — only touches `estado` when the existing row's `estado_origen` is still `derivado`. Once a human calls `setEstadoManual()`, that decision is sticky forever until another human changes it again; a reseed (or a postponement moving the fecha to a new day) can update the fecha's partidos, `play_date`, `veces_postergada`, `orden` and `numero_en_torneo`, but it will never silently flip a committee's ruling back to `programada`.
 
+## Captaincy and authorization (slice 1)
+
+Slice 1 adds the domain model and authorization logic a captain needs before this plugin can accept a request FROM one. It ships no REST routes or UI — see "Scope of this slice" below — only the pieces later slices will call.
+
+### Where the identity comes from: entre-redes-prode's JWT, reused without reusing its code
+
+Players authenticate through the `entre-redes-prode` plugin, which issues a short-lived (900s) RS256 access token (`Auth\JwtService`). This plugin's `Auth\TokenVerifier` verifies that same token — signature, expiry, and its `typ` claim — **without depending on a single class from entre-redes-prode**. The only things the two plugins share are:
+
+- **A value**: the RS256 public key, stored in plain text at `wp_options['prode_rsa_public_key']` (the key id is `wp_options['prode_rsa_key_id']`). There is no JWKS endpoint — the key is read directly from the option and injected into `TokenVerifier`'s constructor.
+- **A table**: see "Why this plugin reads `prode_users.session_version`" below.
+
+`TokenVerifier::verify()` deliberately does **not** validate the `iss` or `aud` claims. Replicating prode's audience check would require reading `prode_settings.tenant_id` — a strictly bigger cross-plugin coupling than the one already accepted for revocation. This is a conscious, revisable decision for a single-tenant deployment, documented in the class's own docblock, not an oversight.
+
+### Why this plugin reads `prode_users.session_version`
+
+A valid signature and an unexpired `exp` are **not** enough to know a session is still alive. Prode's `SessionManager::revokeAllSessions()` invalidates every outstanding token for a user by incrementing `prode_users.session_version`; the access token's own `sv` claim is a snapshot of that counter taken at issuance. Checking the signature alone would accept a token for up to 15 minutes after it was explicitly revoked.
+
+`Auth\ProdeSessionGateway` closes that gap by comparing the token's `sv` against the live value in `{$wpdb->prefix}prode_users`. **This is schema coupling, not code coupling** — the class never references a class from entre-redes-prode, only one column of one table, via a raw prepared query. The cost of that choice is explicit: if `entre-redes-prode` ever renames that table or drops the column, this plugin finds out at query time (a `null` read), not at deploy time. `isSessionCurrent()` fails **closed** in that scenario — a missing user or a missing table both read as "session not current" — rather than silently authorizing everyone.
+
+### The `capitan` you see in `/jugadores` is not this
+
+`sp_position` term id 52 ("Capitan") is a **position tag** on a player — exactly like Arquero or Defensor — with no team, no season, and no authority attached. It is what the `capitan: true` flag on `/jugadores` reflects. **Nothing in this plugin authorizes anything from that flag.** The only source of truth for "who can act as captain of this team, this season" is a vigent row in `cambios_capitan`, created explicitly through `Capitania\CapitanRepository::designar()`. This is called out explicitly in code (see that class's docblock) so a future slice doesn't "discover" the taxonomy flag and wire it in by mistake.
+
+### One vigent captain per team and season — defended in code, not by a UNIQUE key
+
+`cambios_capitan` is also the captaincy's audit history: every past designation stays in the table, marked `revocado_at`. Because of that, "at most one vigent captain per `(season_id, team_id)`" **cannot** be a `UNIQUE (season_id, team_id)` key — MySQL treats every `NULL` in a unique index as distinct, so a `UNIQUE (season_id, team_id, revocado_at)` key would allow any number of simultaneously-vigent rows. The rule is defended the same way `Calendario\FechaRepository` defends its own invariants: a SELECT-then-revoke-then-insert guard, inside a transaction, in `CapitanRepository::designar()` — verified by a test asserting the *property* ("never two vigent rows for the pair"), not a constraint. As with every other table in this plugin, the SQLite test shim used by the suite drops every `KEY`/`INDEX` line, so no test here could lean on a declarative constraint even if one existed.
+
+### Putting it together: `Capitania\CapitanAuthorizer`
+
+`CapitanAuthorizer::authorize( $jwt, $seasonId, $teamId, $now )` is the single entry point later slices should call. It composes `TokenVerifier`, `ProdeSessionGateway`, and `CapitanRepository`, in that order, and answers exactly one question: is the person holding this token the vigent captain of this team, this season? Every rejection reason — an invalid token, a revoked session, or simply not being that team's captain — raises a **different exception type**, but every one of those exceptions carries the **same generic message**. That is deliberate: whatever surfaces this externally (an HTTP 403, say) can never be used to enumerate which of the three conditions failed, while the exception's type still lets the server log the real reason.
+
 ## Scope of this slice (slice 0)
 
 This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registers no REST routes, no admin screens, and no cron jobs. It only runs migrations on activation. The calendar admin screen, the solicitud/regreso REST endpoints, and the seeding cron are later slices, built on top of the domain logic here once it is validated.
+
+Slice 1 (captaincy and authorization, above) keeps the same discipline: no REST routes, no admin UI, no cron. It is domain logic only, ready for the slices that will actually expose it.
