@@ -76,6 +76,28 @@ use EntreRedes\Cambios\Plazas\Exception\PlazaPersistenceException;
  * it against a season that does not contain it. assertFechaExistsInSeason()
  * below is the guard: openPlaza(), succeedOcupacion() and
  * closeOcupacionByRegresoTitular() all call it before writing anything.
+ *
+ * *** READ FAILURES MUST NEVER READ AS "NO ROWS" (slice 4b) ***
+ * `listOcupacionesVigentesDeJugador()` and `listPlazasConCierreTruncadoDeJugador()`
+ * feed `Dictamen\DictamenContext` (via `Dictamen\DictamenContextAssembler`),
+ * and `Dictamen\Reglas\EntranteDisponible` / `Dictamen\Reglas\EntranteNoBloqueado`
+ * both read an EMPTY collection from those accessors as "confirmado, sin
+ * conflicto" — see those two classes' docblocks. A `$wpdb->get_results()`
+ * call that fails at the wpdb level returns `null` (or, depending on the
+ * driver, an empty array while leaving `$wpdb->last_error` non-empty) —
+ * either way, indistinguishable from a genuine "no rows" result by return
+ * value alone. `assertReadSucceeded()` is the guard both new methods (and
+ * their private `listOcupacionesOrThrow()` helper) call immediately after
+ * every `get_results()`: it throws — logging `lectura.fallida` first — the
+ * instant either signal appears, so a broken query becomes a loud failure
+ * instead of a silent authorization. Every OTHER read in this class
+ * (`findPlaza()`, `listPlazasByEquipo()`, `listOcupaciones()`,
+ * `findOcupacionVigente()`) predates this guard and is unchanged — a query
+ * failure there still reads as "not found" / "no rows", exactly as before
+ * slice 4b. That is an accepted, narrower gap: none of those results feeds a
+ * Regla that reads an empty collection as "no objection" the way the two
+ * new methods do (see Dictamen\DictamenContextAssembler's class docblock,
+ * "WHY listOcupaciones() ITSELF WAS NOT CHANGED").
  */
 class PlazaRepository {
 
@@ -279,6 +301,113 @@ class PlazaRepository {
         );
 
         return $rows ?: [];
+    }
+
+    /**
+     * Every VIGENT ocupación (`fecha_hasta_id IS NULL`) $playerId currently
+     * holds anywhere in $seasonId, across every plaza — optionally excluding
+     * one plaza (typically the plaza a solicitud is being evaluated
+     * against, so a player is never reported as "already occupying" the
+     * very plaza the solicitud is for).
+     *
+     * Feeds `Dictamen\DictamenContext::entranteOcupacionesEnOtrasPlazas()`
+     * via `Dictamen\DictamenContextAssembler`. That accessor's own docblock
+     * describes receiving BOTH vigent and closed rows so
+     * `Dictamen\Reglas\EntranteDisponible` can filter for "vigent" itself —
+     * this method pre-filters to vigent rows only, which is sufficient for
+     * that rule's actual check ("does at least one vigent row exist
+     * elsewhere?") and cheaper than fetching closed rows nobody reads.
+     *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** See
+     * class docblock, "READ FAILURES MUST NEVER READ AS 'NO ROWS'".
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    public function listOcupacionesVigentesDeJugador( int $seasonId, int $playerId, ?int $excluyendoPlazaId = null ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $sql = "SELECT o.* FROM {$p}cambios_ocupacion o
+                  INNER JOIN {$p}cambios_plaza pl ON pl.id = o.plaza_id
+                 WHERE pl.season_id = %d
+                   AND o.player_id = %d
+                   AND o.fecha_hasta_id IS NULL";
+        $args = [ $seasonId, $playerId ];
+
+        if ( null !== $excluyendoPlazaId ) {
+            $sql   .= ' AND o.plaza_id != %d';
+            $args[] = $excluyendoPlazaId;
+        }
+
+        $sql .= ' ORDER BY o.plaza_id ASC, o.id ASC';
+
+        $rows = $wpdb->get_results( $wpdb->prepare( $sql, $args ), ARRAY_A );
+
+        $this->assertReadSucceeded( $rows, 'listOcupacionesVigentesDeJugador', [
+            'season_id'           => $seasonId,
+            'player_id'           => $playerId,
+            'excluyendo_plaza_id' => $excluyendoPlazaId,
+        ] );
+
+        return $rows;
+    }
+
+    /**
+     * Every OTHER plaza's FULL ocupaciones chain where $playerId left a
+     * link closed `cerrada_por = 'trunca'`, within $seasonId — one chain per
+     * distinct plaza, in this class's own `listOcupaciones()` shape, so
+     * `Plazas\CadenaResolver` can be handed each one directly to decide
+     * whether that plaza has liberated since (unblocking every trunca
+     * ex-occupant at once — see CadenaResolver's class docblock).
+     *
+     * Feeds `Dictamen\DictamenContext::entrantePlazasConCierreTruncado()`
+     * via `Dictamen\DictamenContextAssembler`; `Dictamen\Reglas\EntranteNoBloqueado`
+     * is the consumer.
+     *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** See
+     * class docblock. Uses `listOcupacionesOrThrow()`, NOT the public
+     * `listOcupaciones()`, for the per-plaza chain fetch below — that public
+     * method silently returns `[]` on a query failure (see class docblock,
+     * "READ FAILURES..."), which would let a broken chain fetch collapse
+     * into "this plaza has no trunca closures", exactly the silent
+     * authorization this method must never produce.
+     *
+     * @return array<int, array<int, array<string, mixed>>>
+     * @throws \RuntimeException When either the plaza-id lookup or any
+     *         individual chain fetch fails at the wpdb level.
+     */
+    public function listPlazasConCierreTruncadoDeJugador( int $seasonId, int $playerId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $plazaIdRows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT DISTINCT o.plaza_id AS plaza_id
+                   FROM {$p}cambios_ocupacion o
+                   INNER JOIN {$p}cambios_plaza pl ON pl.id = o.plaza_id
+                  WHERE pl.season_id = %d
+                    AND o.player_id = %d
+                    AND o.cerrada_por = 'trunca'
+                  ORDER BY o.plaza_id ASC",
+                $seasonId,
+                $playerId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $plazaIdRows, 'listPlazasConCierreTruncadoDeJugador', [
+            'season_id' => $seasonId,
+            'player_id' => $playerId,
+        ] );
+
+        $chains = [];
+
+        foreach ( $plazaIdRows as $row ) {
+            $chains[] = $this->listOcupacionesOrThrow( (int) $row['plaza_id'], 'listPlazasConCierreTruncadoDeJugador' );
+        }
+
+        return $chains;
     }
 
     /**
@@ -696,6 +825,74 @@ class PlazaRepository {
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Same query as listOcupaciones(), but FAILS LOUD on a wpdb-level query
+     * failure instead of silently returning `[]` — see
+     * listPlazasConCierreTruncadoDeJugador()'s docblock for why that method
+     * cannot use the public listOcupaciones() for its per-plaza chain fetch.
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    private function listOcupacionesOrThrow( int $plazaId, string $operacion ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}cambios_ocupacion
+                  WHERE plaza_id = %d
+                  ORDER BY fecha_desde_id ASC, id ASC",
+                $plazaId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, $operacion, [ 'plaza_id' => $plazaId ] );
+
+        return $rows;
+    }
+
+    /**
+     * The one place `listOcupacionesVigentesDeJugador()`,
+     * `listPlazasConCierreTruncadoDeJugador()` and `listOcupacionesOrThrow()`
+     * check whether their own `get_results()` call actually succeeded — see
+     * class docblock, "READ FAILURES MUST NEVER READ AS 'NO ROWS'".
+     *
+     * A genuine "no matching rows" result is `$rows === []` with
+     * `$wpdb->last_error` empty — that passes through untouched. Anything
+     * else (`$rows === null`, which is wpdb's own documented failure return,
+     * OR a non-empty `$wpdb->last_error` left over from THIS call) is a
+     * query failure: logged as `lectura.fallida` (mirroring every
+     * `escritura.fallida` write-failure event elsewhere in this class), then
+     * thrown, so the caller can never mistake it for "confirmado, sin
+     * conflicto".
+     *
+     * @param array<int, array<string, mixed>>|null $rows
+     * @param array<string, mixed>                  $contexto
+     * @throws \RuntimeException
+     */
+    private function assertReadSucceeded( ?array $rows, string $operacion, array $contexto ): void {
+        $lastError = (string) ( $this->wpdb->last_error ?? '' );
+
+        if ( null !== $rows && '' === $lastError ) {
+            return;
+        }
+
+        $this->eventLog->record( 'lectura.fallida', array_merge( $contexto, [
+            'operacion'  => $operacion,
+            'last_error' => $this->wpdb->last_error,
+        ] ) );
+
+        throw new \RuntimeException(
+            sprintf(
+                "PlazaRepository::%s(): the query failed at the wpdb level%s.",
+                $operacion,
+                '' !== $lastError ? " ({$lastError})" : ''
+            )
+        );
+    }
 
     /**
      * Guards every `fecha_desde_id` / `fecha_hasta_id` this class persists —
