@@ -27,7 +27,22 @@ final class DictamenContext {
 
     private ?Puntaje $entrantePuntaje;
 
-    /** @var array<int, array<string, mixed>> */
+    /**
+     * ONLY the entrante's VIGENT ocupaciones in OTHER plazas of this season —
+     * closed ones are deliberately not here.
+     *
+     * Stated precisely because the shape of this collection IS the contract:
+     * Reglas\EntranteDisponible reads an empty array as "no conflict", so a
+     * reader who assumes closed rows are included would conclude the wrong
+     * thing from an empty one. Whoever fills this (see
+     * DictamenContextAssembler) must throw rather than return [] on a query
+     * failure, for the same reason.
+     *
+     * A future rule that needs the closed ones has to widen both this
+     * contract and the query — it cannot just filter what arrives.
+     *
+     * @var array<int, array<string, mixed>>
+     */
     private array $entranteOcupacionesEnOtrasPlazas;
 
     /** @var array<int, array<int, array<string, mixed>>> */
@@ -50,11 +65,11 @@ final class DictamenContext {
      *        Null for a `regreso` — see SolicitudDeCambio's class docblock.
      *        For a `sustitucion`, the entrante's current puntaje.
      * @param array<int, array<string, mixed>>              $entranteOcupacionesEnOtrasPlazas
-     *        Every ocupación row (vigent or already closed) the entrante
-     *        holds in plazas OTHER than `$solicitud->plazaId()`, within
-     *        `$solicitud->seasonId()`. Used by Reglas\EntranteDisponible,
-     *        which itself decides which of these are vigent — this class
-     *        does no filtering.
+     *        ONLY the VIGENT ocupaciones the entrante holds in plazas OTHER
+     *        than `$solicitud->plazaId()`, within `$solicitud->seasonId()`.
+     *        Closed rows are filtered out by the query, NOT by the Regla —
+     *        see this property's own docblock above for why the shape is the
+     *        contract here.
      * @param array<int, array<int, array<string, mixed>>>  $entrantePlazasConCierreTruncado
      *        The FULL ocupaciones chain of every OTHER plaza where the
      *        entrante has a link closed `cerrada_por = 'trunca'` — one chain
