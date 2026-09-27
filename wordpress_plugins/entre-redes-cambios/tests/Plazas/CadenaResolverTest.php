@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Tests\Plazas;
 
 use EntreRedes\Cambios\Plazas\CadenaResolver;
+use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -40,35 +41,35 @@ class CadenaResolverTest extends TestCase {
             [
                 'fecha_hasta_id' => null,
                 'cerrada_por'    => null,
-                'es_titular'     => 0,
+                'es_genesis'     => 0,
             ],
             $overrides
         );
     }
 
     // -------------------------------------------------------------------------
-    // cumpleMinimo
+    // meetsMinimo
     // -------------------------------------------------------------------------
 
     public function test_cumple_minimo_is_false_below_the_threshold(): void {
         $resolver  = $this->resolverWithStub( [ 1 => 2 ] );
         $ocupacion = $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 777 ] );
 
-        $this->assertFalse( $resolver->cumpleMinimo( $ocupacion ) );
+        $this->assertFalse( $resolver->meetsMinimo( $ocupacion ) );
     }
 
     public function test_cumple_minimo_is_true_at_the_threshold(): void {
         $resolver  = $this->resolverWithStub( [ 1 => 3 ] );
         $ocupacion = $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 777 ] );
 
-        $this->assertTrue( $resolver->cumpleMinimo( $ocupacion ) );
+        $this->assertTrue( $resolver->meetsMinimo( $ocupacion ) );
     }
 
     public function test_cumple_minimo_is_true_above_the_threshold(): void {
         $resolver  = $this->resolverWithStub( [ 1 => 10 ] );
         $ocupacion = $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 777 ] );
 
-        $this->assertTrue( $resolver->cumpleMinimo( $ocupacion ) );
+        $this->assertTrue( $resolver->meetsMinimo( $ocupacion ) );
     }
 
     // -------------------------------------------------------------------------
@@ -82,19 +83,19 @@ class CadenaResolverTest extends TestCase {
         $vigente     = $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] );
         $ocupaciones = [ $vigente ];
 
-        $this->assertTrue( $resolver->plazaLiberable( $ocupaciones ) );
-        $this->assertSame( 0, $resolver->fechasFaltantesParaLiberar( $ocupaciones ) );
+        $this->assertTrue( $resolver->isPlazaLiberable( $ocupaciones ) );
+        $this->assertSame( 0, $resolver->countFechasUntilLiberacion( $ocupaciones ) );
 
         // No duration cap: even though the minimo was cleared long ago, the
         // link handed to the resolver is still the SAME open link (no
-        // fecha_hasta_id) — plazaLiberable() only reports that closing it
+        // fecha_hasta_id) — isPlazaLiberable() only reports that closing it
         // WOULD now be valid; it never closes anything itself.
         $this->assertNull( $vigente['fecha_hasta_id'] );
         $this->assertSame( 888, (int) $vigente['player_id'] );
     }
 
     // -------------------------------------------------------------------------
-    // fechasFaltantesParaLiberar corre hacia adelante con cada eslabón nuevo
+    // countFechasUntilLiberacion corre hacia adelante con cada eslabón nuevo
     // -------------------------------------------------------------------------
 
     public function test_a_new_link_pushes_the_liberation_forward_not_cached(): void {
@@ -113,17 +114,17 @@ class CadenaResolverTest extends TestCase {
         ] );
 
         $casiLiberable = [ array_merge( $primerSuplente, [ 'fecha_hasta_id' => null ] ) ];
-        $this->assertSame( 1, $resolver->fechasFaltantesParaLiberar( $casiLiberable ) );
+        $this->assertSame( 1, $resolver->countFechasUntilLiberacion( $casiLiberable ) );
 
         $segundoSuplente = $this->ocupacion( [ 'fecha_desde_id' => 9, 'player_id' => 999 ] );
         $conNuevoEslabon = [ $primerSuplente, $segundoSuplente ];
 
-        $this->assertSame( 3, $resolver->fechasFaltantesParaLiberar( $conNuevoEslabon ) );
-        $this->assertFalse( $resolver->plazaLiberable( $conNuevoEslabon ) );
+        $this->assertSame( 3, $resolver->countFechasUntilLiberacion( $conNuevoEslabon ) );
+        $this->assertFalse( $resolver->isPlazaLiberable( $conNuevoEslabon ) );
     }
 
     // -------------------------------------------------------------------------
-    // titularPuedeVolver
+    // canTitularReturn
     // -------------------------------------------------------------------------
 
     public function test_titular_puede_volver_is_false_before_the_minimo(): void {
@@ -131,7 +132,7 @@ class CadenaResolverTest extends TestCase {
         $plaza    = [ 'titular_player_id' => 777 ];
         $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] ) ];
 
-        $this->assertFalse( $resolver->titularPuedeVolver( $plaza, $ocupaciones ) );
+        $this->assertFalse( $resolver->canTitularReturn( $plaza, $ocupaciones ) );
     }
 
     public function test_titular_puede_volver_is_true_after_the_minimo(): void {
@@ -139,7 +140,7 @@ class CadenaResolverTest extends TestCase {
         $plaza    = [ 'titular_player_id' => 777 ];
         $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] ) ];
 
-        $this->assertTrue( $resolver->titularPuedeVolver( $plaza, $ocupaciones ) );
+        $this->assertTrue( $resolver->canTitularReturn( $plaza, $ocupaciones ) );
     }
 
     public function test_titular_puede_volver_is_false_when_titular_already_occupies_the_plaza(): void {
@@ -147,11 +148,11 @@ class CadenaResolverTest extends TestCase {
         $plaza    = [ 'titular_player_id' => 777 ];
         $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 777 ] ) ];
 
-        $this->assertFalse( $resolver->titularPuedeVolver( $plaza, $ocupaciones ) );
+        $this->assertFalse( $resolver->canTitularReturn( $plaza, $ocupaciones ) );
     }
 
     // -------------------------------------------------------------------------
-    // exOcupantesBloqueados — three links (titular -> S1 -> S2 -> S3): every
+    // listExOcupantesBloqueados — three links (titular -> S1 -> S2 -> S3): every
     // trunca ex-occupant stays blocked until the plaza liberates, then ALL
     // unblock together.
     // -------------------------------------------------------------------------
@@ -166,7 +167,7 @@ class CadenaResolverTest extends TestCase {
             'fecha_hasta_id' => 1,
             'player_id'      => 777,
             'cerrada_por'    => 'reemplazada',
-            'es_titular'     => 1,
+            'es_genesis'     => 1,
         ] );
         $s1 = $this->ocupacion( [
             'fecha_desde_id' => 1,
@@ -187,13 +188,170 @@ class CadenaResolverTest extends TestCase {
         // S3 has not cleared the minimo yet (only 1 resolved fecha since
         // fecha 9) — the plaza is NOT liberable, so both trunco ex-occupants
         // remain blocked.
-        $this->assertFalse( $resolver->plazaLiberable( $cadena ) );
-        $this->assertSame( [ 888, 999 ], $resolver->exOcupantesBloqueados( $cadena ) );
+        $this->assertFalse( $resolver->isPlazaLiberable( $cadena ) );
+        $this->assertSame( [ 888, 999 ], $resolver->listExOcupantesBloqueados( $cadena ) );
 
         // Now S3 has cleared the minimo: the plaza liberates, and BOTH
         // blocked ex-occupants unblock together — not one before the other.
         $resolverLiberado = $this->resolverWithStub( [ 1 => 10, 5 => 10, 9 => 3 ] );
-        $this->assertTrue( $resolverLiberado->plazaLiberable( $cadena ) );
-        $this->assertSame( [], $resolverLiberado->exOcupantesBloqueados( $cadena ) );
+        $this->assertTrue( $resolverLiberado->isPlazaLiberable( $cadena ) );
+        $this->assertSame( [], $resolverLiberado->listExOcupantesBloqueados( $cadena ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fail-closed: an uncountable resolved-fechas answer must never liberate
+    // a plaza, let the titular return, or unblock a trunco ex-occupant.
+    // -------------------------------------------------------------------------
+
+    private function resolverThatThrows( \Throwable $exception ): CadenaResolver {
+        return new CadenaResolver(
+            static function ( int $fechaId ) use ( $exception ): int {
+                throw $exception;
+            }
+        );
+    }
+
+    private function resolverThatReturnsNegative( int $negativeCount ): CadenaResolver {
+        return new CadenaResolver(
+            static function ( int $fechaId ) use ( $negativeCount ): int {
+                return $negativeCount;
+            }
+        );
+    }
+
+    public function test_meets_minimo_wraps_a_throwing_callable(): void {
+        $resolver  = $this->resolverThatThrows( new \RuntimeException( 'fecha_id no longer exists in season' ) );
+        $ocupacion = $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 777 ] );
+
+        $this->expectException( FechaCountUnavailableException::class );
+
+        $resolver->meetsMinimo( $ocupacion );
+    }
+
+    public function test_meets_minimo_rejects_a_negative_count(): void {
+        $resolver  = $this->resolverThatReturnsNegative( -1 );
+        $ocupacion = $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 777 ] );
+
+        $this->expectException( FechaCountUnavailableException::class );
+
+        $resolver->meetsMinimo( $ocupacion );
+    }
+
+    public function test_is_plaza_liberable_fails_closed_when_the_callable_throws(): void {
+        $resolver    = $this->resolverThatThrows( new \RuntimeException( 'boom' ) );
+        $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] ) ];
+
+        $this->assertFalse(
+            $resolver->isPlazaLiberable( $ocupaciones ),
+            'A broken counter must never be read as "0 fechas missing".'
+        );
+    }
+
+    public function test_is_plaza_liberable_fails_closed_when_the_callable_returns_a_negative_count(): void {
+        $resolver    = $this->resolverThatReturnsNegative( -5 );
+        $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] ) ];
+
+        $this->assertFalse( $resolver->isPlazaLiberable( $ocupaciones ) );
+    }
+
+    public function test_can_titular_return_fails_closed_when_the_callable_throws(): void {
+        $resolver    = $this->resolverThatThrows( new \RuntimeException( 'boom' ) );
+        $plaza       = [ 'titular_player_id' => 777 ];
+        $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] ) ];
+
+        $this->assertFalse(
+            $resolver->canTitularReturn( $plaza, $ocupaciones ),
+            'A broken counter must never let the titular return.'
+        );
+    }
+
+    public function test_can_titular_return_fails_closed_when_the_callable_returns_a_negative_count(): void {
+        $resolver    = $this->resolverThatReturnsNegative( -1 );
+        $plaza       = [ 'titular_player_id' => 777 ];
+        $ocupaciones = [ $this->ocupacion( [ 'fecha_desde_id' => 1, 'player_id' => 888 ] ) ];
+
+        $this->assertFalse( $resolver->canTitularReturn( $plaza, $ocupaciones ) );
+    }
+
+    public function test_list_ex_ocupantes_bloqueados_keeps_everyone_blocked_when_the_callable_throws(): void {
+        $resolver = $this->resolverThatThrows( new \RuntimeException( 'boom' ) );
+
+        $titular = $this->ocupacion( [
+            'fecha_desde_id' => 1,
+            'fecha_hasta_id' => 1,
+            'player_id'      => 777,
+            'cerrada_por'    => 'reemplazada',
+            'es_genesis'     => 1,
+        ] );
+        $s1 = $this->ocupacion( [
+            'fecha_desde_id' => 1,
+            'fecha_hasta_id' => 5,
+            'player_id'      => 888,
+            'cerrada_por'    => 'trunca',
+        ] );
+        // The vigent link — its count is what makes the callable throw.
+        $s2 = $this->ocupacion( [ 'fecha_desde_id' => 5, 'player_id' => 999 ] );
+
+        $cadena = [ $titular, $s1, $s2 ];
+
+        $this->assertSame(
+            [ 888 ],
+            $resolver->listExOcupantesBloqueados( $cadena ),
+            'Never liberate because the count could not be verified — every trunco ex-occupant must stay blocked.'
+        );
+    }
+
+    public function test_list_ex_ocupantes_bloqueados_keeps_everyone_blocked_when_the_callable_returns_a_negative_count(): void {
+        $resolver = $this->resolverThatReturnsNegative( -3 );
+
+        $titular = $this->ocupacion( [
+            'fecha_desde_id' => 1,
+            'fecha_hasta_id' => 1,
+            'player_id'      => 777,
+            'cerrada_por'    => 'reemplazada',
+            'es_genesis'     => 1,
+        ] );
+        $s1 = $this->ocupacion( [
+            'fecha_desde_id' => 1,
+            'fecha_hasta_id' => 5,
+            'player_id'      => 888,
+            'cerrada_por'    => 'trunca',
+        ] );
+        $s2 = $this->ocupacion( [ 'fecha_desde_id' => 5, 'player_id' => 999 ] );
+
+        $cadena = [ $titular, $s1, $s2 ];
+
+        $this->assertSame( [ 888 ], $resolver->listExOcupantesBloqueados( $cadena ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // Empty chain: a plaza structurally cannot have zero ocupaciones —
+    // PlazaRepository::openPlaza() always creates the genesis link in the
+    // same transaction as the plaza. An empty array reaching this class is a
+    // CALLER BUG (wrong plaza_id, or a plaza never persisted correctly), not
+    // a legitimately liberable plaza — see countFechasUntilLiberacion()'s
+    // docblock for why this is a HARD failure (\InvalidArgumentException)
+    // rather than something isPlazaLiberable() swallows into `false` like it
+    // does for an unavailable count.
+    // -------------------------------------------------------------------------
+
+    public function test_count_fechas_until_liberacion_rejects_an_empty_chain(): void {
+        $resolver = $this->resolverWithStub( [] );
+
+        $this->expectException( \InvalidArgumentException::class );
+
+        $resolver->countFechasUntilLiberacion( [] );
+    }
+
+    public function test_is_plaza_liberable_rejects_an_empty_chain_instead_of_vacuously_true(): void {
+        $resolver = $this->resolverWithStub( [] );
+
+        // Before this guard existed, an empty chain read as "0 fechas
+        // missing" (nothing to count) and isPlazaLiberable([]) returned
+        // `true` vacuously — exactly the kind of silent "yes" this class
+        // must never produce. It is now a hard failure instead.
+        $this->expectException( \InvalidArgumentException::class );
+
+        $resolver->isPlazaLiberable( [] );
     }
 }

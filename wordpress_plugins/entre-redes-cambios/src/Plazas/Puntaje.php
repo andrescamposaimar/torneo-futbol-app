@@ -133,7 +133,7 @@ final class Puntaje {
      * i.e. $entrante does not exceed this techo's effective ceiling. Compares
      * half-points (exact integers), never decimals — see class docblock.
      */
-    public function admite( Puntaje $entrante ): bool {
+    public function allows( Puntaje $entrante ): bool {
         return $entrante->halfPoints() <= $this->techoEfectivo()->halfPoints();
     }
 

@@ -52,6 +52,34 @@ class PuntajeTest extends TestCase {
         Puntaje::fromDecimal( 2.3 );
     }
 
+    /**
+     * fromDecimal()'s own guard against a non-discrete value (`abs(...) >
+     * 1e-6`) only catches values that land BETWEEN two half-points steps
+     * (like 2.3). A value below the minimum (0, or negative) is still
+     * perfectly ALIGNED to the half-points grid — 0 * 2 = 0, an exact
+     * integer — so that guard alone lets it through; only the range check
+     * inside fromHalfPoints() actually rejects it. These tests exercise that
+     * real entry path (fromDecimal(), not fromHalfPoints() directly) to
+     * prove the two guards compose correctly end to end.
+     */
+    public function test_from_decimal_rejects_zero(): void {
+        $this->expectException( \InvalidArgumentException::class );
+
+        Puntaje::fromDecimal( 0.0 );
+    }
+
+    public function test_from_decimal_rejects_a_negative_value(): void {
+        $this->expectException( \InvalidArgumentException::class );
+
+        Puntaje::fromDecimal( -1.0 );
+    }
+
+    public function test_from_decimal_rejects_a_value_above_the_maximum(): void {
+        $this->expectException( \InvalidArgumentException::class );
+
+        Puntaje::fromDecimal( 5.5 );
+    }
+
     public function test_from_half_points_rejects_below_the_minimum(): void {
         $this->expectException( \InvalidArgumentException::class );
 
@@ -91,25 +119,25 @@ class PuntajeTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
-    // admite() — borde exacto
+    // allows() — borde exacto
     // -------------------------------------------------------------------------
 
     public function test_admite_is_true_at_the_exact_boundary(): void {
         $techo = Puntaje::fromDecimal( 2.5 );
 
-        $this->assertTrue( $techo->admite( Puntaje::fromDecimal( 2.5 ) ) );
+        $this->assertTrue( $techo->allows( Puntaje::fromDecimal( 2.5 ) ) );
     }
 
     public function test_admite_is_true_below_the_boundary(): void {
         $techo = Puntaje::fromDecimal( 3.0 );
 
-        $this->assertTrue( $techo->admite( Puntaje::fromDecimal( 2.5 ) ) );
+        $this->assertTrue( $techo->allows( Puntaje::fromDecimal( 2.5 ) ) );
     }
 
     public function test_admite_is_false_above_the_boundary(): void {
         $techo = Puntaje::fromDecimal( 2.5 );
 
-        $this->assertFalse( $techo->admite( Puntaje::fromDecimal( 3.0 ) ) );
+        $this->assertFalse( $techo->allows( Puntaje::fromDecimal( 3.0 ) ) );
     }
 
     public function test_admite_applies_the_2_5_floor_even_for_a_lower_techo(): void {
@@ -117,8 +145,8 @@ class PuntajeTest extends TestCase {
         // still be admitted even though the RAW techo is only 2.0.
         $techo = Puntaje::fromDecimal( 2.0 );
 
-        $this->assertTrue( $techo->admite( Puntaje::fromDecimal( 2.5 ) ) );
-        $this->assertFalse( $techo->admite( Puntaje::fromDecimal( 3.0 ) ) );
+        $this->assertTrue( $techo->allows( Puntaje::fromDecimal( 2.5 ) ) );
+        $this->assertFalse( $techo->allows( Puntaje::fromDecimal( 3.0 ) ) );
     }
 
     /**
@@ -136,7 +164,7 @@ class PuntajeTest extends TestCase {
         $this->assertSame( $fromDecimal->halfPoints(), $fromComma->halfPoints() );
         $this->assertSame( $fromDecimal->halfPoints(), $fromHalf->halfPoints() );
         $this->assertTrue( $fromDecimal->halfPoints() <= $fromComma->halfPoints() );
-        $this->assertTrue( $fromHalf->admite( $fromDecimal ) );
+        $this->assertTrue( $fromHalf->allows( $fromDecimal ) );
     }
 
     public function test_to_string_renders_without_trailing_zero(): void {

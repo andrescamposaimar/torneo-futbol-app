@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Plazas;
 
+use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
+
 /**
  * Pure reader of a plaza's CADENA DE OCUPACIONES — zero DB, zero clock, zero
  * globals. Everything it needs is passed in: the plaza row, its ocupaciones
@@ -45,10 +47,25 @@ namespace EntreRedes\Cambios\Plazas;
  * liberates. Storing that fecha would require rewriting it on every new
  * link (a later suplente's minimum pushes it forward again), which is
  * exactly the kind of stale-cache bug a derived value avoids by
- * construction. `plazaLiberable()` recomputes it fresh from the VIGENT
+ * construction. `isPlazaLiberable()` recomputes it fresh from the VIGENT
  * link's `fecha_desde_id` every time it is called — see that method's
  * docblock for why "vigent link" is the only one that matters for this
  * computation, regardless of how many prior links are 'trunca'.
+ *
+ * THIS CLASS DECIDES WHETHER A PERSON MAY RETURN TO PLAY FOR THEIR TEAM — so
+ * it FAILS CLOSED. Every call to the injected callable goes through the
+ * private countResolvedFechasSince() helper, which rejects a negative count
+ * (impossible — the counter itself would be broken) and wraps ANY exception
+ * the callable throws into Exception\FechaCountUnavailableException. The
+ * plaza-liberation decision methods — isPlazaLiberable(), canTitularReturn(),
+ * listExOcupantesBloqueados() — catch that exception and answer
+ * conservatively (not liberable, titular cannot return, every ex-occupant
+ * stays blocked) rather than let an uncountable fecha silently read as "0
+ * missing" and liberate a plaza no one actually verified. See
+ * isPlazaLiberable()'s docblock for the exact contract, and
+ * Exception\FechaCountUnavailableException's docblock for why an INFLATED
+ * count (the opposite failure — the callable lying that MORE fechas passed
+ * than really did) is explicitly NOT this class's problem to detect.
  */
 final class CadenaResolver {
 
@@ -75,11 +92,20 @@ final class CadenaResolver {
      *
      * @param array<string, mixed> $ocupacion One row shaped like
      *        `PlazaRepository::listOcupaciones()`'s output.
+     *
+     * @throws FechaCountUnavailableException When the injected callable
+     *         cannot produce a trustworthy count for this ocupación's
+     *         `fecha_desde_id` (it threw, or returned a negative count) —
+     *         propagated as-is, NOT swallowed into `false` here. This method
+     *         answers a single link's own history, not "may this plaza
+     *         liberate" (that fail-closed boundary is isPlazaLiberable() and
+     *         its callers), so a broken counter must surface loudly to
+     *         whoever calls this directly rather than be silently guessed.
      */
-    public function cumpleMinimo( array $ocupacion, int $minimo = 3 ): bool {
+    public function meetsMinimo( array $ocupacion, int $minimo = 3 ): bool {
         $fechaDesdeId = (int) $ocupacion['fecha_desde_id'];
 
-        return ( $this->countResolvedFechasSinceFn )( $fechaDesdeId ) >= $minimo;
+        return $this->countResolvedFechasSince( $fechaDesdeId ) >= $minimo;
     }
 
     /**
@@ -90,9 +116,35 @@ final class CadenaResolver {
      * moment they closed).
      *
      * @param array<int, array<string, mixed>> $ocupaciones The full chain,
-     *        as returned by `PlazaRepository::listOcupaciones()`.
+     *        as returned by `PlazaRepository::listOcupaciones()`. MUST NOT be
+     *        empty — see the `\InvalidArgumentException` below.
+     *
+     * @throws \InvalidArgumentException When $ocupaciones is empty. An empty
+     *         chain is not a state a real plaza can ever be in —
+     *         `PlazaRepository::openPlaza()` always creates the genesis
+     *         ocupación in the same transaction as the plaza itself — so an
+     *         empty array here means the caller passed the wrong plaza (or
+     *         one that was never persisted correctly), never a legitimately
+     *         liberable one. Before this check existed,
+     *         `isPlazaLiberable( [] )` returned `true` VACUOUSLY (0 fechas
+     *         missing from a count of nothing), which is exactly the kind of
+     *         silent "yes" this class's fail-closed contract exists to
+     *         prevent — a caller bug should surface loudly, not be read as
+     *         "go ahead, liberate". This is deliberately a HARD failure, not
+     *         one isPlazaLiberable() swallows into `false`: it signals a
+     *         programming error in the caller's data assembly, not an
+     *         external counting failure (see FechaCountUnavailableException
+     *         for that distinct, fail-closed-to-`false` case).
      */
-    public function fechasFaltantesParaLiberar( array $ocupaciones, int $minimo = 3 ): int {
+    public function countFechasUntilLiberacion( array $ocupaciones, int $minimo = 3 ): int {
+        if ( empty( $ocupaciones ) ) {
+            throw new \InvalidArgumentException(
+                'CadenaResolver::countFechasUntilLiberacion(): an empty ocupaciones chain is not a valid plaza '
+                . 'state — every plaza is created with a genesis ocupación by PlazaRepository::openPlaza(). '
+                . 'Treating an empty chain as vacuously liberable would silently hide that bug.'
+            );
+        }
+
         $vigente = $this->vigente( $ocupaciones );
 
         if ( null === $vigente ) {
@@ -101,7 +153,7 @@ final class CadenaResolver {
             return 0;
         }
 
-        $resueltas = ( $this->countResolvedFechasSinceFn )( (int) $vigente['fecha_desde_id'] );
+        $resueltas = $this->countResolvedFechasSince( (int) $vigente['fecha_desde_id'] );
 
         return max( 0, $minimo - $resueltas );
     }
@@ -113,22 +165,43 @@ final class CadenaResolver {
      * NEVER STORED" section — so a caller must never cache this result
      * across a new link being appended to the chain.
      *
+     * FAIL-CLOSED: when the injected callable cannot produce a trustworthy
+     * count (it threw, or returned a negative value — see
+     * countResolvedFechasSince()), this method catches
+     * FechaCountUnavailableException and returns `false` — NEVER liberate a
+     * plaza because a count could not be verified. An empty $ocupaciones
+     * chain is a DIFFERENT failure (a caller bug, not a counting problem —
+     * see countFechasUntilLiberacion()'s docblock) and is deliberately NOT
+     * caught here: it propagates as `\InvalidArgumentException` instead of
+     * being swallowed into `false`.
+     *
      * @param array<int, array<string, mixed>> $ocupaciones
+     *
+     * @throws \InvalidArgumentException When $ocupaciones is empty — see
+     *         countFechasUntilLiberacion().
      */
-    public function plazaLiberable( array $ocupaciones, int $minimo = 3 ): bool {
-        return 0 === $this->fechasFaltantesParaLiberar( $ocupaciones, $minimo );
+    public function isPlazaLiberable( array $ocupaciones, int $minimo = 3 ): bool {
+        try {
+            return 0 === $this->countFechasUntilLiberacion( $ocupaciones, $minimo );
+        } catch ( FechaCountUnavailableException $e ) {
+            return false;
+        }
     }
 
     /**
      * Whether the plaza's PERMANENT titular (`cambios_plaza.titular_player_id`)
      * may return right now — false when the titular already occupies it
-     * (nothing to return FROM), otherwise exactly `plazaLiberable()`.
+     * (nothing to return FROM), otherwise exactly `isPlazaLiberable()`.
+     *
+     * FAIL-CLOSED: inherited by delegation — `isPlazaLiberable()` already
+     * catches an unavailable/invalid count and returns `false`, so this
+     * method never needs its own catch to return the conservative answer.
      *
      * @param array<string, mixed>             $plaza       As returned by
      *        `PlazaRepository::findPlaza()`.
      * @param array<int, array<string, mixed>> $ocupaciones
      */
-    public function titularPuedeVolver( array $plaza, array $ocupaciones, int $minimo = 3 ): bool {
+    public function canTitularReturn( array $plaza, array $ocupaciones, int $minimo = 3 ): bool {
         $vigente = $this->vigente( $ocupaciones );
 
         if ( null === $vigente ) {
@@ -139,7 +212,7 @@ final class CadenaResolver {
             return false;
         }
 
-        return $this->plazaLiberable( $ocupaciones, $minimo );
+        return $this->isPlazaLiberable( $ocupaciones, $minimo );
     }
 
     /**
@@ -149,11 +222,17 @@ final class CadenaResolver {
      * them AT ONCE — there is no per-player liberation moment, only the
      * plaza's single one.
      *
+     * FAIL-CLOSED: inherited by delegation — when `isPlazaLiberable()`
+     * cannot verify the count, it returns `false`, which routes this method
+     * into the branch that keeps EVERY 'trunca' ex-occupant blocked. "We
+     * could not verify the liberation count" therefore never unblocks
+     * anyone; it behaves exactly like "the plaza is not liberable yet".
+     *
      * @param array<int, array<string, mixed>> $ocupaciones
      * @return array<int, int>
      */
-    public function exOcupantesBloqueados( array $ocupaciones ): array {
-        if ( $this->plazaLiberable( $ocupaciones ) ) {
+    public function listExOcupantesBloqueados( array $ocupaciones ): array {
+        if ( $this->isPlazaLiberable( $ocupaciones ) ) {
             return [];
         }
 
@@ -171,6 +250,39 @@ final class CadenaResolver {
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * The ONLY place this class invokes the injected callable — every public
+     * method that needs a resolved-fechas count goes through here, so the
+     * fail-closed defense (negative-count rejection, exception wrapping) is
+     * applied exactly once, never duplicated per call site.
+     *
+     * @throws FechaCountUnavailableException When the callable throws (the
+     *         original exception is chained as $previous), or when it
+     *         returns a negative count — impossible for a real "resolved
+     *         fechas since X" answer, so a negative value can only mean the
+     *         counter itself is broken. An INFLATED count is NOT detected
+     *         here — see FechaCountUnavailableException's docblock for why
+     *         that is out of this class's reach.
+     */
+    private function countResolvedFechasSince( int $fechaId ): int {
+        try {
+            $count = ( $this->countResolvedFechasSinceFn )( $fechaId );
+        } catch ( \Throwable $e ) {
+            throw new FechaCountUnavailableException(
+                "the injected callable threw for fecha_id {$fechaId}: " . $e->getMessage(),
+                $e
+            );
+        }
+
+        if ( $count < 0 ) {
+            throw new FechaCountUnavailableException(
+                "the injected callable returned a negative count ({$count}) for fecha_id {$fechaId}"
+            );
+        }
+
+        return $count;
+    }
 
     /**
      * @param array<int, array<string, mixed>> $ocupaciones
