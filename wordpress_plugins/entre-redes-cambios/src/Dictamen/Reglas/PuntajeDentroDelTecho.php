@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Dictamen\Reglas;
 
-use EntreRedes\Cambios\Dictamen\ContextoDeDictamen;
+use EntreRedes\Cambios\Dictamen\DictamenContext;
 use EntreRedes\Cambios\Dictamen\Motivo;
 use EntreRedes\Cambios\Dictamen\Regla;
 use EntreRedes\Cambios\Plazas\Puntaje;
@@ -18,6 +18,20 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  * Does not apply to a `regreso` — the titular's own puntaje already fixed
  * the plaza's techo when Plazas\PlazaRepository::openPlaza() created it, and
  * a return is never re-evaluated against it.
+ *
+ * *** A MISSING PUNTAJE IS NEVER READ AS "NO OBJECTION" ***
+ * `DictamenContext::entrantePuntaje()` is `null` in TWO situations that must
+ * NOT be treated the same. For a `regreso` it is null by the type's own
+ * guarantee (SolicitudDeCambio::regreso() cannot carry an entrante — see that
+ * class's docblock), exactly like EntranteDisponible/EntranteNoEsElSaliente
+ * gate on `entrantePlayerId() === null`. But for a `sustitucion`, a null
+ * puntaje means the caller failed to resolve the entrante's actual score —
+ * an external-data gap, not a fact the type system promises. Letting THAT
+ * case fall through to "no objection" would mean a corrupted lookup (a
+ * `?? null` upstream, a JOIN that misses) silently lets any player into any
+ * plaza, defeating the exact ceiling this rule exists to enforce. So a
+ * `sustitucion` with no resolvable puntaje is reported as its own motivo
+ * instead — fail closed, never fail open.
  *
  * *** KNOWN GAP, DELIBERATELY NOT IMPLEMENTED: EL ARQUERO QUE PASA AL CAMPO
  * ***
@@ -43,13 +57,26 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  */
 final class PuntajeDentroDelTecho implements Regla {
 
-    private const CODE = 'puntaje_excede_techo';
+    private const CODE               = 'puntaje_excede_techo';
+    private const CODE_INDETERMINADO = 'entrante_puntaje_indeterminado';
 
-    public function evaluar( ContextoDeDictamen $ctx ): ?Motivo {
+    public function evaluate( DictamenContext $ctx ): ?Motivo {
         $entrantePuntaje = $ctx->entrantePuntaje();
 
         if ( null === $entrantePuntaje ) {
-            return null;
+            if ( $ctx->solicitud()->isRegreso() ) {
+                // Legitimate: a `regreso` never carries an entrante (see
+                // class docblock and SolicitudDeCambio's own guarantee).
+                return null;
+            }
+
+            // A `sustitucion` with no resolvable puntaje is a data gap, not
+            // an absence of objection — see class docblock, "A MISSING
+            // PUNTAJE IS NEVER READ AS 'NO OBJECTION'".
+            return new Motivo(
+                self::CODE_INDETERMINADO,
+                'No se pudo determinar el puntaje del entrante: la solicitud no puede evaluarse contra el techo de la plaza.'
+            );
         }
 
         $techo = Puntaje::fromHalfPoints( (int) $ctx->plaza()['puntaje_techo'] );
