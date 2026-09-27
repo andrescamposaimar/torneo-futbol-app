@@ -162,9 +162,36 @@ Slice 3 is the pure-function decision layer on top of slice 2's data model: give
 
 ### Contracts for slice 4 — written here, not yet implemented
 
-1. **Every query that fills `DictamenContext` must throw on failure, never return `[]`.** An empty `entranteOcupacionesEnOtrasPlazas()` or `entrantePlazasConCierreTruncado()` reads as "confirmado, sin conflicto" to `Reglas\EntranteDisponible` and `Reglas\EntranteNoBloqueado` — a query that fails silently becomes a silent approval, not a rejection.
-2. **The wrapper that invokes `DictamenEngine` must catch `\Throwable`, log it with the solicitud's identifiers (seasonId, teamId, plazaId, fechaId), and only then decide what to answer the caller.** Without that, "the subcomisión rejected it" and "the dictamen engine crashed" are indistinguishable to whoever reads the response. `Observability\EventLog` (see "Guardrails" below) is the channel that wrapper should log through once it exists — nothing invokes `DictamenEngine` from a real caller yet.
 3. **When CC5b is resolved, remove `BloqueoReemplazoPolicy`'s default** (`EntranteNoBloqueado`'s constructor currently defaults to `topeTresFechas()` when no policy is injected) — whoever wires `DictamenEngineFactory::create()` for real must pass the confirmed policy explicitly, so a future ambiguity cannot silently fall back to a guess again.
+
+Points 1 and 2 above are implemented — see "Assembling the dictamen context (slice 4b)" below.
+
+## Assembling the dictamen context (slice 4b)
+
+Slice 4b builds `Dictamen\DictamenContext` from the real database and wires the complete evaluation pipeline — the piece slice 3 explicitly left out. It ships no REST routes, no admin UI, no cron (see "Scope of this slice" below); exposing this is the next slice's job.
+
+### Every context-filling query throws on failure, never returns `[]`
+
+`Plazas\PlazaRepository::listOcupacionesVigentesDeJugador()` and `::listPlazasConCierreTruncadoDeJugador()` feed `DictamenContext::entranteOcupacionesEnOtrasPlazas()` / `::entrantePlazasConCierreTruncado()`. An empty result from either reads to `Reglas\EntranteDisponible` / `Reglas\EntranteNoBloqueado` as "confirmado, sin conflicto" — so both new methods (and their internal chain fetch) distinguish a genuine empty result from a wpdb-level query failure (`$wpdb->get_results()` returning `null`, or leaving `$wpdb->last_error` non-empty) and throw — logging `lectura.fallida` first — rather than let a broken query silently approve a solicitud. `Dictamen\DictamenContextAssembler::assemble()` extends the same discipline to the plaza and fecha lookups themselves: neither existing is a hard requirement, never a "no conflict".
+
+The plaza's OWN ocupaciones chain (`PlazaRepository::listOcupaciones()`, unchanged since slice 2) is deliberately NOT covered by this same discipline — an empty chain already fails closed by construction of the existing ruleset (`Reglas\PlazaConOcupacionVigente` rejects a plaza with no vigent link). See `DictamenContextAssembler`'s class docblock for the full argument.
+
+### The entrante's puntaje: two keys, never a silent zero
+
+The entrante's puntaje lives in `sp_metrics` postmeta on the player's post, read via raw `$wpdb` (never `get_post_meta()`, consistent with every other query in this feature). `entre-redes-api.php` itself reads this same value under two different keys depending on the endpoint (`'puntaje'` and `'Puntaje'`) — `DictamenContextAssembler::resolveEntrantePuntaje()` tries both. A puntaje of `0` is never a valid torneo score (1..5 in 0.5 steps), so a missing value is never defaulted to it: when neither key resolves to a usable value, this returns `null` — the same legitimate missing-data signal `Reglas\PuntajeDentroDelTecho` already converts into its own blocking motivo — and logs `entrante.puntaje_no_encontrado` for an operator to fix the data. A value that IS present but is not one of the 9 valid puntajes is a different problem (corrupted data, not a gap): `Plazas\Puntaje::fromDecimal()` throws for it, uncaught.
+
+### The sanity cap on the injected resolved-fechas counter
+
+`Plazas\CadenaResolver`'s own class docblock says an INFLATED resolved-fechas count is not something that class can detect — it has no season total to compare against, and bounding it is "the responsibility of whoever provides the callable". `DictamenContextAssembler` is that provider: it wraps `Calendario\FechaRepository::countResolvedFechasSince()` with the season's own total of resolved fechas and throws `Plazas\Exception\FechaCountUnavailableException` the instant a count exceeds that total — an answer that is, by construction, impossible. `CadenaResolver` and `Reglas\EntranteNoBloqueado` already translate that exception into a fail-closed answer.
+
+### `Dictamen\DictamenPipeline` — the one thing a future caller needs to call
+
+`DictamenPipeline::evaluate( SolicitudDeCambio $solicitud ): Dictamen` composes `DictamenContextAssembler::assemble()` and `DictamenEngineFactory::create()->evaluate()` — using `DictamenEngineFactory` is meant to be the path of least resistance, not a discipline someone has to remember. It also catches `\Throwable`, logs `dictamen.fallido` with the solicitud's own identifiers (season, team, plaza, fecha, tipo), and re-throws — so "the subcomisión rejected it" and "the pipeline crashed" are never indistinguishable to whoever reads the log, even though no REST layer exists yet to decide the HTTP answer.
+
+### Explicitly out of scope
+
+- **REST routes, admin UI, cron.** This slice is domain wiring only — see "Scope of this slice" below.
+- **CC5b's confirmed policy** — see point 3 above, still open.
 
 ## Guardrails (slice 4)
 
@@ -195,3 +222,5 @@ This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registe
 Slice 1 (captaincy and authorization, above) keeps the same discipline: no REST routes, no admin UI, no cron. It is domain logic only, ready for the slices that will actually expose it.
 
 Slice 2 (plazas and ocupaciones, above) keeps it too: no REST routes, no admin UI, no cron, no dictamen engine, no backfill. It is domain logic only — the data model and the derivations a later slice's dictamen engine and endpoints will call.
+
+Slice 4b (assembling the dictamen context, above) keeps it too: no REST routes, no admin UI, no cron. `Dictamen\DictamenPipeline` is ready for a future endpoint to call, but nothing calls it yet.
