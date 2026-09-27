@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Tests\Plazas;
 
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Plazas\Exception\PlazaPersistenceException;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
@@ -21,7 +22,11 @@ use PHPUnit\Framework\TestCase;
  */
 class PlazaRepositoryTest extends TestCase {
 
+    private const SEASON_ID = 359;
+    private const OTHER_SEASON_ID = 999;
+
     private PlazaRepository $repo;
+    private InMemoryEventLog $eventLog;
 
     protected function setUp(): void {
         InitialSchema::up();
@@ -29,14 +34,50 @@ class PlazaRepositoryTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_plaza" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_fecha" );
 
-        $this->repo = new PlazaRepository( $wpdb );
+        // Every fecha_id this test file passes to openPlaza() / succeedOcupacion() /
+        // closeOcupacionByRegresoTitular() must exist in cambios_fecha (see
+        // PlazaRepository::assertFechaExistsInSeason()) — seed them all here,
+        // once, rather than scattering fixture rows through individual tests.
+        foreach ( [ 1, 4, 5, 7, 9, 11, 13 ] as $fechaId ) {
+            $this->seedFecha( $fechaId, self::SEASON_ID );
+        }
+        $this->seedFecha( 900, self::OTHER_SEASON_ID );
+
+        $this->eventLog = new InMemoryEventLog();
+        $this->repo     = new PlazaRepository( $wpdb, $this->eventLog );
     }
 
     protected function tearDown(): void {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_plaza" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_fecha" );
+    }
+
+    /**
+     * Minimal cambios_fecha fixture row — only the columns
+     * assertFechaExistsInSeason() and NOT NULL constraints require.
+     */
+    private function seedFecha( int $fechaId, int $seasonId ): void {
+        global $wpdb;
+
+        $wpdb->insert(
+            $wpdb->prefix . 'cambios_fecha',
+            [
+                'id'                 => $fechaId,
+                'season_id'          => $seasonId,
+                'orden'              => $fechaId,
+                'torneo_liga_ids'    => '1',
+                'torneo_label'       => 'Apertura',
+                'numero_en_torneo'   => $fechaId,
+                'play_date'          => '2026-01-01',
+                'play_date_original' => '2026-01-01',
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+            ]
+        );
     }
 
     private function countVigentesFor( int $plazaId ): int {
@@ -220,7 +261,7 @@ class PlazaRepositoryTest extends TestCase {
         global $wpdb;
 
         $failingWpdb = $this->wpdbThatFailsInsertOnTable( $wpdb, 'cambios_plaza' );
-        $failingRepo = new PlazaRepository( $failingWpdb );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
@@ -277,7 +318,7 @@ class PlazaRepositoryTest extends TestCase {
         global $wpdb;
 
         $failingWpdb = $this->wpdbThatReturnsZeroInsertIdForTable( $wpdb, 'cambios_plaza' );
-        $failingRepo = new PlazaRepository( $failingWpdb );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
@@ -369,7 +410,7 @@ class PlazaRepositoryTest extends TestCase {
         $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
 
         $racingWpdb = $this->wpdbThatRacesToCloseConcurrently( $wpdb );
-        $racingRepo = new PlazaRepository( $racingWpdb );
+        $racingRepo = new PlazaRepository( $racingWpdb, new InMemoryEventLog() );
 
         try {
             $racingRepo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
@@ -533,7 +574,7 @@ class PlazaRepositoryTest extends TestCase {
         global $wpdb;
 
         $failingWpdb = $this->wpdbThatFailsInsertOnTable( $wpdb, 'cambios_ocupacion' );
-        $failingRepo = new PlazaRepository( $failingWpdb );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
@@ -555,7 +596,7 @@ class PlazaRepositoryTest extends TestCase {
         $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'insert' );
-        $failingRepo = new PlazaRepository( $failingWpdb );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
@@ -576,7 +617,7 @@ class PlazaRepositoryTest extends TestCase {
         $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsCloseOcupacion( $wpdb );
-        $failingRepo = new PlazaRepository( $failingWpdb );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
@@ -656,6 +697,263 @@ class PlazaRepositoryTest extends TestCase {
             $chain[ count( $chain ) - 1 ]['fecha_hasta_id'],
             'only the vigent link is open-ended'
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fecha id validation — openPlaza / succeedOcupacion / closeOcupacionByRegresoTitular
+    // -------------------------------------------------------------------------
+
+    public function test_open_plaza_rejects_a_nonexistent_fecha_desde_id(): void {
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessage( 'fecha_desde_id 99999 does not exist in cambios_fecha' );
+
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 99999, '2026-03-01 10:00:00' );
+    }
+
+    public function test_open_plaza_rejects_a_fecha_desde_id_from_another_season(): void {
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessage( 'fecha_desde_id 900 belongs to season ' . self::OTHER_SEASON_ID );
+
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 900, '2026-03-01 10:00:00' );
+    }
+
+    public function test_succeed_ocupacion_rejects_a_nonexistent_fecha_id(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessage( 'fecha_id 99999 does not exist in cambios_fecha' );
+
+        $this->repo->succeedOcupacion( $plazaId, 888, 99999, 'reemplazada', '2026-04-01 10:00:00' );
+    }
+
+    public function test_succeed_ocupacion_rejects_a_fecha_id_from_another_season(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessage( 'fecha_id 900 belongs to season ' . self::OTHER_SEASON_ID );
+
+        $this->repo->succeedOcupacion( $plazaId, 888, 900, 'reemplazada', '2026-04-01 10:00:00' );
+    }
+
+    public function test_close_by_regreso_titular_rejects_a_nonexistent_fecha_id(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessage( 'fecha_id 99999 does not exist in cambios_fecha' );
+
+        $this->repo->closeOcupacionByRegresoTitular( $plazaId, 99999, '2026-05-01 10:00:00' );
+    }
+
+    public function test_close_by_regreso_titular_rejects_a_fecha_id_from_another_season(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessage( 'fecha_id 900 belongs to season ' . self::OTHER_SEASON_ID );
+
+        $this->repo->closeOcupacionByRegresoTitular( $plazaId, 900, '2026-05-01 10:00:00' );
+    }
+
+    // -------------------------------------------------------------------------
+    // EventLog — audit events on every successful write
+    // -------------------------------------------------------------------------
+
+    public function test_open_plaza_records_an_audit_event(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $this->assertTrue( $this->eventLog->has( 'plaza.abierta' ) );
+        $event = $this->eventLog->last();
+        $this->assertSame( 'plaza.abierta', $event['evento'] );
+        $this->assertSame( $plazaId, $event['contexto']['plaza_id'] );
+        $this->assertSame( self::SEASON_ID, $event['contexto']['season_id'] );
+        $this->assertSame( 777, $event['contexto']['titular_player_id'] );
+    }
+
+    public function test_succeed_ocupacion_records_an_audit_event(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $newId   = $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->assertTrue( $this->eventLog->has( 'ocupacion.sucedida' ) );
+        $event = $this->eventLog->last();
+        $this->assertSame( 'ocupacion.sucedida', $event['evento'] );
+        $this->assertSame( $plazaId, $event['contexto']['plaza_id'] );
+        $this->assertSame( 777, $event['contexto']['saliente_player_id'] );
+        $this->assertSame( 888, $event['contexto']['entrante_player_id'] );
+        $this->assertSame( $newId, $event['contexto']['ocupacion_nueva_id'] );
+    }
+
+    public function test_close_by_regreso_titular_records_an_audit_event_on_a_real_change(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->repo->closeOcupacionByRegresoTitular( $plazaId, 9, '2026-05-01 10:00:00' );
+
+        $this->assertTrue( $this->eventLog->has( 'ocupacion.regreso_titular' ) );
+        $event = $this->eventLog->last();
+        $this->assertSame( 777, $event['contexto']['titular_player_id'] );
+        $this->assertSame( 888, $event['contexto']['suplente_player_id'] );
+    }
+
+    public function test_close_by_regreso_titular_records_no_event_on_the_idempotent_no_op(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $this->repo->closeOcupacionByRegresoTitular( $plazaId, 5, '2026-04-01 10:00:00' );
+
+        $this->assertFalse(
+            $this->eventLog->has( 'ocupacion.regreso_titular' ),
+            'No write happened on the idempotent no-op branch, so nothing should be logged as one.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // EventLog — failure events recorded BEFORE the exception propagates
+    // -------------------------------------------------------------------------
+
+    public function test_open_plaza_records_the_failure_event_before_throwing_on_an_invalid_tipo(): void {
+        try {
+            $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'banco', 1, '2026-03-01 10:00:00' );
+            $this->fail( 'Expected InvalidArgumentException.' );
+        } catch ( \InvalidArgumentException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $this->eventLog->has( 'escritura.fallida' ) );
+        $this->assertSame( 'openPlaza', $this->eventLog->last()['contexto']['operacion'] );
+    }
+
+    public function test_succeed_ocupacion_records_the_failure_event_before_throwing_when_no_vigente(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->closeEveryVigenteRawSql( $plazaId );
+
+        try {
+            $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected — the event must already be there.
+        }
+
+        $this->assertTrue( $this->eventLog->has( 'escritura.fallida' ) );
+        $last = $this->eventLog->last();
+        $this->assertSame( 'succeedOcupacion', $last['contexto']['operacion'] );
+        $this->assertSame( $plazaId, $last['contexto']['plaza_id'] );
+    }
+
+    public function test_open_plaza_records_the_failure_event_before_throwing_when_the_insert_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsInsertOnTable( $wpdb, 'cambios_plaza' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo = new PlazaRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $this->fail( 'Expected PlazaPersistenceException.' );
+        } catch ( PlazaPersistenceException $e ) {
+            // expected
+        }
+
+        $this->assertTrue(
+            $failingEventLog->has( 'escritura.fallida' ),
+            'The failure must be recorded even though the wpdb-level exception propagates.'
+        );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
+    }
+
+    // -------------------------------------------------------------------------
+    // undoLastOcupacion — correction primitive
+    // -------------------------------------------------------------------------
+
+    public function test_undo_last_ocupacion_deletes_the_last_link_and_reopens_the_previous_one(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $newId   = $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->repo->undoLastOcupacion( $plazaId, '2026-04-02 10:00:00' );
+
+        $this->assertSame( 1, $this->countOcupacionesFor( $plazaId ), 'The undone link must be gone entirely, not just closed.' );
+
+        $vigente = $this->repo->findOcupacionVigente( $plazaId );
+        $this->assertSame( 777, (int) $vigente['player_id'], 'The previous occupant must be vigent again.' );
+        $this->assertNull( $vigente['fecha_hasta_id'] );
+        $this->assertNull( $vigente['cerrada_por'] );
+
+        $this->assertTrue( $this->eventLog->has( 'ocupacion.deshecha' ) );
+        $event = $this->eventLog->last();
+        $this->assertSame( $newId, $event['contexto']['ocupacion_deshecha_id'] );
+        $this->assertSame( (int) $vigente['id'], $event['contexto']['ocupacion_reabierta_id'] );
+    }
+
+    public function test_undo_last_ocupacion_refuses_a_chain_of_a_single_genesis_link(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( 'has only its genesis ocupación' );
+
+        $this->repo->undoLastOcupacion( $plazaId, '2026-04-01 10:00:00' );
+    }
+
+    public function test_undo_last_ocupacion_rolls_back_when_the_reopen_write_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $failingWpdb = new class( $this->pdoOf( $wpdb ), $wpdb->prefix ) extends \wpdb {
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function update( string $table, array $data, array $where ): int|false {
+                $this->last_error = 'simulated reopen failure for test';
+                return false;
+            }
+        };
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        try {
+            $failingRepo->undoLastOcupacion( $plazaId, '2026-04-02 10:00:00' );
+            $this->fail( 'Expected PlazaPersistenceException.' );
+        } catch ( PlazaPersistenceException $e ) {
+            // expected
+        }
+
+        $this->assertSame(
+            2,
+            $this->countOcupacionesFor( $plazaId ),
+            'The delete of the last link must have rolled back too — both links must still exist.'
+        );
+        $vigente = $this->repo->findOcupacionVigente( $plazaId );
+        $this->assertSame( 888, (int) $vigente['player_id'], 'The successor must remain vigent when the undo failed.' );
+    }
+
+    private function pdoOf( \wpdb $wpdb ): \PDO {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        return $ref->getValue( $wpdb );
+    }
+
+    // -------------------------------------------------------------------------
+    // closePlaza — correction primitive
+    // -------------------------------------------------------------------------
+
+    public function test_close_plaza_sets_closed_at(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $this->repo->closePlaza( $plazaId, '2026-04-01 10:00:00' );
+
+        $plaza = $this->repo->findPlaza( $plazaId );
+        $this->assertSame( '2026-04-01 10:00:00', (string) $plaza['closed_at'] );
+
+        $this->assertTrue( $this->eventLog->has( 'plaza.cerrada' ) );
+        $this->assertSame( $plazaId, $this->eventLog->last()['contexto']['plaza_id'] );
+    }
+
+    public function test_close_plaza_throws_when_the_plaza_does_not_exist(): void {
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( 'plaza 999999 does not exist' );
+
+        $this->repo->closePlaza( 999999, '2026-04-01 10:00:00' );
     }
 
 }

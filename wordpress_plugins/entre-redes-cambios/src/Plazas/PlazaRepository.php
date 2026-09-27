@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Plazas;
 
+use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\Exception\PlazaPersistenceException;
 
 /**
@@ -53,6 +54,28 @@ use EntreRedes\Cambios\Plazas\Exception\PlazaPersistenceException;
  * `LIMIT 1` either: it throws if it ever finds more than one vigent row,
  * because a caller's business decision must never depend on row storage
  * order when the invariant is supposed to guarantee at most one.
+ *
+ * *** OBSERVABILITY (slice 4) ***
+ * The EventLog is a MANDATORY constructor dependency, with no null-object
+ * default — see Observability\EventLog's class docblock for why a silent
+ * default would reproduce the exact problem this slice exists to fix. Every
+ * successful write that matters to an operator (openPlaza, succeedOcupacion,
+ * closeOcupacionByRegresoTitular's actual change, undoLastOcupacion,
+ * closePlaza) records an audit event AFTER its COMMIT. Every failure this
+ * class can throw is recorded BEFORE the throw — see each method below for
+ * the exact event codes and context.
+ *
+ * *** FECHA ID VALIDATION (slice 4) ***
+ * `fecha_desde_id` / `fecha_hasta_id` are LOGICAL foreign keys into
+ * Calendario\FechaRepository's `cambios_fecha` table — nothing in this
+ * schema enforces them (see InitialSchema's class docblock: the SQLite test
+ * shim drops every KEY, and even in real MySQL these columns carry no FK
+ * constraint). Before this slice, an id typo — or an id copied from the
+ * wrong season — was written silently and only surfaced much later, when
+ * Calendario\FechaRepository::countResolvedFechasSince() tried to resolve
+ * it against a season that does not contain it. assertFechaExistsInSeason()
+ * below is the guard: openPlaza(), succeedOcupacion() and
+ * closeOcupacionByRegresoTitular() all call it before writing anything.
  */
 class PlazaRepository {
 
@@ -74,9 +97,11 @@ class PlazaRepository {
     private const VALID_CERRADA_POR = [ 'regreso_titular', 'reemplazada', 'trunca' ];
 
     private \wpdb $wpdb;
+    private EventLog $eventLog;
 
-    public function __construct( \wpdb $wpdb ) {
-        $this->wpdb = $wpdb;
+    public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
+        $this->wpdb     = $wpdb;
+        $this->eventLog = $eventLog;
     }
 
     /**
@@ -88,7 +113,8 @@ class PlazaRepository {
      * Migrations\InitialSchema::sqlCambiosPlaza()'s docblock.
      *
      * @throws \InvalidArgumentException When $tipo is not one of
-     *         self::VALID_TIPOS.
+     *         self::VALID_TIPOS, or $fechaDesdeId does not exist in
+     *         cambios_fecha or belongs to a different season.
      * @throws PlazaPersistenceException When either insert fails at the wpdb
      *         level — thrown BEFORE the COMMIT, so the transaction rolls
      *         back instead of persisting a plaza with no ocupación (or vice
@@ -104,11 +130,21 @@ class PlazaRepository {
         string $now
     ): int {
         if ( ! in_array( $tipo, self::VALID_TIPOS, true ) ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'openPlaza',
+                'motivo'     => 'tipo invalido',
+                'season_id'  => $seasonId,
+                'team_id'    => $teamId,
+                'tipo'       => $tipo,
+            ] );
+
             throw new \InvalidArgumentException(
                 "PlazaRepository::openPlaza(): '{$tipo}' is not a valid tipo. "
                 . 'Valid values are: ' . implode( ', ', self::VALID_TIPOS ) . '.'
             );
         }
+
+        $this->assertFechaExistsInSeason( $fechaDesdeId, $seasonId, 'openPlaza', 'fecha_desde_id' );
 
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
@@ -130,12 +166,28 @@ class PlazaRepository {
             );
 
             if ( false === $plazaResult ) {
+                $this->eventLog->record( 'escritura.fallida', [
+                    'operacion'  => 'openPlaza',
+                    'motivo'     => 'insert cambios_plaza fallo',
+                    'season_id'  => $seasonId,
+                    'team_id'    => $teamId,
+                    'last_error' => $wpdb->last_error,
+                ] );
+
                 throw new PlazaPersistenceException( 'insert cambios_plaza', $wpdb->last_error );
             }
 
             $plazaId = (int) $wpdb->insert_id;
 
             if ( $plazaId <= 0 ) {
+                $this->eventLog->record( 'escritura.fallida', [
+                    'operacion'  => 'openPlaza',
+                    'motivo'     => 'insert cambios_plaza devolvio insert_id <= 0',
+                    'season_id'  => $seasonId,
+                    'team_id'    => $teamId,
+                    'last_error' => $wpdb->last_error,
+                ] );
+
                 throw new PlazaPersistenceException( 'insert cambios_plaza', $wpdb->last_error );
             }
 
@@ -152,6 +204,15 @@ class PlazaRepository {
             $wpdb->query( 'ROLLBACK' );
             throw $e;
         }
+
+        $this->eventLog->record( 'plaza.abierta', [
+            'plaza_id'           => $plazaId,
+            'season_id'          => $seasonId,
+            'team_id'            => $teamId,
+            'titular_player_id'  => $titularPlayerId,
+            'tipo'               => $tipo,
+            'fecha_desde_id'     => $fechaDesdeId,
+        ] );
 
         return $plazaId;
     }
@@ -253,6 +314,13 @@ class PlazaRepository {
         }
 
         if ( count( $rows ) > 1 ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'          => 'findOcupacionVigente',
+                'motivo'             => 'mas de una ocupacion vigente para la misma plaza',
+                'plaza_id'           => $plazaId,
+                'ocupaciones_vigentes' => count( $rows ),
+            ] );
+
             throw new \RuntimeException(
                 "PlazaRepository::findOcupacionVigente(): plaza {$plazaId} has "
                 . count( $rows ) . ' vigent ocupaciones — invariant broken, expected at most 1.'
@@ -276,24 +344,56 @@ class PlazaRepository {
      *        NOT accepted here — see closeOcupacionByRegresoTitular().
      *
      * @throws \InvalidArgumentException When $cerradaPor is not 'reemplazada'
-     *         or 'trunca'.
-     * @throws \RuntimeException When $plazaId has no vigent ocupación to
-     *         succeed.
+     *         or 'trunca', or $fechaId does not exist in cambios_fecha or
+     *         belongs to a different season than the plaza.
+     * @throws \RuntimeException When $plazaId does not exist, or has no
+     *         vigent ocupación to succeed.
      * @throws PlazaPersistenceException When either write fails at the wpdb
      *         level — thrown BEFORE the COMMIT, so neither the close nor the
      *         new link is left partially applied.
      */
     public function succeedOcupacion( int $plazaId, int $newPlayerId, int $fechaId, string $cerradaPor, string $now ): int {
         if ( ! in_array( $cerradaPor, [ 'reemplazada', 'trunca' ], true ) ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'   => 'succeedOcupacion',
+                'motivo'      => 'cerrada_por invalido',
+                'plaza_id'    => $plazaId,
+                'cerrada_por' => $cerradaPor,
+            ] );
+
             throw new \InvalidArgumentException(
                 "PlazaRepository::succeedOcupacion(): '{$cerradaPor}' is not a valid cerrada_por for this method. "
                 . "Valid values are: 'reemplazada', 'trunca'."
             );
         }
 
+        $plaza = $this->findPlaza( $plazaId );
+
+        if ( null === $plaza ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => 'succeedOcupacion',
+                'motivo'    => 'la plaza no existe',
+                'plaza_id'  => $plazaId,
+            ] );
+
+            throw new \RuntimeException(
+                "PlazaRepository::succeedOcupacion(): plaza {$plazaId} does not exist."
+            );
+        }
+
+        $this->assertFechaExistsInSeason( $fechaId, (int) $plaza['season_id'], 'succeedOcupacion', 'fecha_id', $plazaId );
+
         $vigente = $this->findOcupacionVigente( $plazaId );
 
         if ( null === $vigente ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => 'succeedOcupacion',
+                'motivo'    => 'la plaza no tiene ocupacion vigente',
+                'plaza_id'  => $plazaId,
+                'season_id' => (int) $plaza['season_id'],
+                'team_id'   => (int) $plaza['team_id'],
+            ] );
+
             throw new \RuntimeException(
                 "PlazaRepository::succeedOcupacion(): plaza {$plazaId} has no vigent ocupación to succeed."
             );
@@ -313,6 +413,18 @@ class PlazaRepository {
             throw $e;
         }
 
+        $this->eventLog->record( 'ocupacion.sucedida', [
+            'plaza_id'             => $plazaId,
+            'season_id'            => (int) $plaza['season_id'],
+            'team_id'              => (int) $plaza['team_id'],
+            'ocupacion_cerrada_id' => (int) $vigente['id'],
+            'saliente_player_id'   => (int) $vigente['player_id'],
+            'entrante_player_id'   => $newPlayerId,
+            'ocupacion_nueva_id'   => $newId,
+            'fecha_id'             => $fechaId,
+            'cerrada_por'          => $cerradaPor,
+        ] );
+
         return $newId;
     }
 
@@ -329,9 +441,12 @@ class PlazaRepository {
      * no-op — there is nothing to return from — and the existing vigent
      * ocupación's id is returned unchanged, mirroring
      * CapitanRepository::designateCapitan()'s idempotency on the incumbent.
+     * No audit event is recorded for this no-op branch: nothing was written.
      *
      * @throws \RuntimeException When $plazaId does not exist, or has no
      *         vigent ocupación to close.
+     * @throws \InvalidArgumentException When $fechaId does not exist in
+     *         cambios_fecha or belongs to a different season than the plaza.
      * @throws PlazaPersistenceException When either write fails at the wpdb
      *         level — thrown BEFORE the COMMIT.
      */
@@ -339,14 +454,30 @@ class PlazaRepository {
         $plaza = $this->findPlaza( $plazaId );
 
         if ( null === $plaza ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => 'closeOcupacionByRegresoTitular',
+                'motivo'    => 'la plaza no existe',
+                'plaza_id'  => $plazaId,
+            ] );
+
             throw new \RuntimeException(
                 "PlazaRepository::closeOcupacionByRegresoTitular(): plaza {$plazaId} does not exist."
             );
         }
 
+        $this->assertFechaExistsInSeason( $fechaId, (int) $plaza['season_id'], 'closeOcupacionByRegresoTitular', 'fecha_id', $plazaId );
+
         $vigente = $this->findOcupacionVigente( $plazaId );
 
         if ( null === $vigente ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => 'closeOcupacionByRegresoTitular',
+                'motivo'    => 'la plaza no tiene ocupacion vigente',
+                'plaza_id'  => $plazaId,
+                'season_id' => (int) $plaza['season_id'],
+                'team_id'   => (int) $plaza['team_id'],
+            ] );
+
             throw new \RuntimeException(
                 "PlazaRepository::closeOcupacionByRegresoTitular(): plaza {$plazaId} has no vigent ocupación to close."
             );
@@ -372,12 +503,253 @@ class PlazaRepository {
             throw $e;
         }
 
+        $this->eventLog->record( 'ocupacion.regreso_titular', [
+            'plaza_id'             => $plazaId,
+            'season_id'            => (int) $plaza['season_id'],
+            'team_id'              => (int) $plaza['team_id'],
+            'ocupacion_cerrada_id' => (int) $vigente['id'],
+            'suplente_player_id'   => (int) $vigente['player_id'],
+            'titular_player_id'    => $titularPlayerId,
+            'ocupacion_nueva_id'   => $newId,
+            'fecha_id'             => $fechaId,
+        ] );
+
         return $newId;
+    }
+
+    /**
+     * *** CORRECTION PRIMITIVE — NOT PART OF THE NORMAL FLOW ***
+     * Undoes the LAST link of a plaza's chain: deletes it and reopens the
+     * link before it (`fecha_hasta_id = NULL`, `cerrada_por = NULL`), inside
+     * one transaction.
+     *
+     * This exists because, before this slice, the only way to fix "a
+     * plaza opened with the wrong titular" or "an ocupación succeeded by
+     * mistake" was raw SQL against a production database — and the person
+     * operating this plugin day to day is a parents' committee, not a
+     * developer. This is a correction tool for that committee's operator to
+     * use through a future admin action, not something the domain logic
+     * (Dictamen\DictamenEngine, CadenaResolver) ever calls as part of a
+     * normal solicitud/regreso — a normal chain only ever grows via
+     * succeedOcupacion() / closeOcupacionByRegresoTitular(), never shrinks.
+     *
+     * Refuses to touch the plaza's GENESIS link — a chain with exactly one
+     * ocupación has nothing to "undo back to"; closePlaza() is the correct
+     * tool for a plaza that was opened by mistake entirely.
+     *
+     * @throws \RuntimeException When the plaza has only its genesis
+     *         ocupación (nothing to undo), or when its chain is corrupted
+     *         (the last link is not the vigent one — should never happen
+     *         through this class's own API, but this method refuses to
+     *         guess which link to undo rather than silently picking one).
+     * @throws PlazaPersistenceException When either write fails at the wpdb
+     *         level — thrown BEFORE the COMMIT, so neither the delete nor
+     *         the reopen is left partially applied.
+     */
+    public function undoLastOcupacion( int $plazaId, string $now ): void {
+        $chain = $this->listOcupaciones( $plazaId );
+
+        if ( count( $chain ) < 2 ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => 'undoLastOcupacion',
+                'motivo'    => 'la plaza solo tiene su ocupacion genesis, nada para deshacer',
+                'plaza_id'  => $plazaId,
+                'eslabones' => count( $chain ),
+            ] );
+
+            throw new \RuntimeException(
+                "PlazaRepository::undoLastOcupacion(): plaza {$plazaId} has only its genesis ocupación — "
+                . 'there is nothing to undo. Use closePlaza() to close a plaza opened by mistake.'
+            );
+        }
+
+        $last     = $chain[ count( $chain ) - 1 ];
+        $previous = $chain[ count( $chain ) - 2 ];
+
+        if ( null !== $last['fecha_hasta_id'] ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'    => 'undoLastOcupacion',
+                'motivo'       => 'el ultimo eslabon de la cadena no esta vigente, cadena corrupta',
+                'plaza_id'     => $plazaId,
+                'ocupacion_id' => (int) $last['id'],
+            ] );
+
+            throw new \RuntimeException(
+                "PlazaRepository::undoLastOcupacion(): plaza {$plazaId}'s last ocupación (id="
+                . (int) $last['id'] . ') is not vigent — the chain is corrupted; refusing to guess which link to undo.'
+            );
+        }
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $wpdb->query( 'START TRANSACTION' );
+
+        try {
+            $deleted = $wpdb->delete( $p . 'cambios_ocupacion', [ 'id' => (int) $last['id'] ] );
+
+            if ( 1 !== $deleted ) {
+                $this->eventLog->record( 'escritura.fallida', [
+                    'operacion'    => 'undoLastOcupacion',
+                    'motivo'       => 'delete cambios_ocupacion fallo',
+                    'plaza_id'     => $plazaId,
+                    'ocupacion_id' => (int) $last['id'],
+                    'last_error'   => $wpdb->last_error,
+                ] );
+
+                throw new PlazaPersistenceException( 'delete cambios_ocupacion (undo)', $wpdb->last_error );
+            }
+
+            $reopened = $wpdb->update(
+                $p . 'cambios_ocupacion',
+                [
+                    'fecha_hasta_id' => null,
+                    'cerrada_por'    => null,
+                ],
+                [ 'id' => (int) $previous['id'] ]
+            );
+
+            if ( 1 !== $reopened ) {
+                $this->eventLog->record( 'escritura.fallida', [
+                    'operacion'    => 'undoLastOcupacion',
+                    'motivo'       => 'reopen cambios_ocupacion fallo',
+                    'plaza_id'     => $plazaId,
+                    'ocupacion_id' => (int) $previous['id'],
+                    'last_error'   => $wpdb->last_error,
+                ] );
+
+                throw new PlazaPersistenceException( 'reopen cambios_ocupacion (undo)', $wpdb->last_error );
+            }
+
+            $wpdb->query( 'COMMIT' );
+        } catch ( \Throwable $e ) {
+            $wpdb->query( 'ROLLBACK' );
+            throw $e;
+        }
+
+        $this->eventLog->record( 'ocupacion.deshecha', [
+            'plaza_id'               => $plazaId,
+            'ocupacion_deshecha_id'  => (int) $last['id'],
+            'ocupacion_reabierta_id' => (int) $previous['id'],
+            'now'                    => $now,
+        ] );
+    }
+
+    /**
+     * *** CORRECTION PRIMITIVE — NOT PART OF THE NORMAL FLOW ***
+     * Marks a plaza as closed (`closed_at`) — for a plaza opened entirely by
+     * mistake (wrong team, wrong titular, duplicate conformación). This is
+     * NOT how an ocupación record ends (that is `cambios_ocupacion`'s
+     * `fecha_hasta_id` — see InitialSchema's docblock); it is how the PLAZA
+     * itself stops existing. Same rationale as undoLastOcupacion(): the
+     * alternative, absent this method, is raw SQL run by a parents'
+     * committee against production.
+     *
+     * @throws \RuntimeException When $plazaId does not exist.
+     * @throws PlazaPersistenceException When the wpdb update fails.
+     */
+    public function closePlaza( int $plazaId, string $now ): void {
+        $plaza = $this->findPlaza( $plazaId );
+
+        if ( null === $plaza ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => 'closePlaza',
+                'motivo'    => 'la plaza no existe',
+                'plaza_id'  => $plazaId,
+            ] );
+
+            throw new \RuntimeException(
+                "PlazaRepository::closePlaza(): plaza {$plazaId} does not exist."
+            );
+        }
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->update(
+            $p . 'cambios_plaza',
+            [ 'closed_at' => $now ],
+            [ 'id' => $plazaId ]
+        );
+
+        if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'closePlaza',
+                'motivo'     => 'update cambios_plaza fallo',
+                'plaza_id'   => $plazaId,
+                'season_id'  => (int) $plaza['season_id'],
+                'team_id'    => (int) $plaza['team_id'],
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new PlazaPersistenceException( 'close cambios_plaza', $wpdb->last_error );
+        }
+
+        $this->eventLog->record( 'plaza.cerrada', [
+            'plaza_id'  => $plazaId,
+            'season_id' => (int) $plaza['season_id'],
+            'team_id'   => (int) $plaza['team_id'],
+            'now'       => $now,
+        ] );
     }
 
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Guards every `fecha_desde_id` / `fecha_hasta_id` this class persists —
+     * see class docblock, "FECHA ID VALIDATION". Read-only; called before
+     * any write starts, so a rejected id never begins a transaction that
+     * would only be rolled back.
+     *
+     * @throws \InvalidArgumentException When $fechaId does not exist in
+     *         cambios_fecha, or exists but belongs to a different season.
+     */
+    private function assertFechaExistsInSeason( int $fechaId, int $seasonId, string $operacion, string $campo, ?int $plazaId = null ): void {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT season_id FROM {$p}cambios_fecha WHERE id = %d LIMIT 1",
+                $fechaId
+            ),
+            ARRAY_A
+        );
+
+        if ( empty( $row ) ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => $operacion,
+                'motivo'    => "{$campo} inexistente en cambios_fecha",
+                'plaza_id'  => $plazaId,
+                'season_id' => $seasonId,
+                $campo      => $fechaId,
+            ] );
+
+            throw new \InvalidArgumentException(
+                "PlazaRepository::{$operacion}(): {$campo} {$fechaId} does not exist in cambios_fecha."
+            );
+        }
+
+        $fechaSeasonId = (int) $row['season_id'];
+
+        if ( $fechaSeasonId !== $seasonId ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'          => $operacion,
+                'motivo'             => "{$campo} pertenece a otra temporada",
+                'plaza_id'           => $plazaId,
+                'season_id_esperado' => $seasonId,
+                'season_id_real'     => $fechaSeasonId,
+                $campo               => $fechaId,
+            ] );
+
+            throw new \InvalidArgumentException(
+                "PlazaRepository::{$operacion}(): {$campo} {$fechaId} belongs to season {$fechaSeasonId}, "
+                . "not season {$seasonId}."
+            );
+        }
+    }
 
     /**
      * Closes exactly ONE vigent ocupación via a compare-and-swap UPDATE — the
@@ -405,6 +777,13 @@ class PlazaRepository {
      */
     private function closeOcupacion( int $ocupacionId, int $fechaHastaId, string $cerradaPor ): void {
         if ( ! in_array( $cerradaPor, self::VALID_CERRADA_POR, true ) ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'    => 'closeOcupacion',
+                'motivo'       => 'cerrada_por invalido',
+                'ocupacion_id' => $ocupacionId,
+                'cerrada_por'  => $cerradaPor,
+            ] );
+
             throw new \InvalidArgumentException(
                 "PlazaRepository: '{$cerradaPor}' is not a valid cerrada_por. "
                 . 'Valid values are: ' . implode( ', ', self::VALID_CERRADA_POR ) . '.'
@@ -426,6 +805,16 @@ class PlazaRepository {
         );
 
         if ( 1 !== $affected ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'    => 'closeOcupacion',
+                'motivo'       => 'CAS UPDATE no afecto exactamente 1 fila (concurrencia o ya cerrada)',
+                'ocupacion_id' => $ocupacionId,
+                'fecha_hasta_id' => $fechaHastaId,
+                'cerrada_por'  => $cerradaPor,
+                'affected'     => $affected,
+                'last_error'   => $wpdb->last_error,
+            ] );
+
             throw new PlazaPersistenceException(
                 "close cambios_ocupacion (id={$ocupacionId}, affected="
                     . var_export( $affected, true )
@@ -461,12 +850,30 @@ class PlazaRepository {
         );
 
         if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'      => 'insertOcupacion',
+                'motivo'         => 'insert cambios_ocupacion fallo',
+                'plaza_id'       => $plazaId,
+                'player_id'      => $playerId,
+                'fecha_desde_id' => $fechaDesdeId,
+                'last_error'     => $wpdb->last_error,
+            ] );
+
             throw new PlazaPersistenceException( 'insert cambios_ocupacion', $wpdb->last_error );
         }
 
         $id = (int) $wpdb->insert_id;
 
         if ( $id <= 0 ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'      => 'insertOcupacion',
+                'motivo'         => 'insert cambios_ocupacion devolvio insert_id <= 0',
+                'plaza_id'       => $plazaId,
+                'player_id'      => $playerId,
+                'fecha_desde_id' => $fechaDesdeId,
+                'last_error'     => $wpdb->last_error,
+            ] );
+
             throw new PlazaPersistenceException( 'insert cambios_ocupacion', $wpdb->last_error );
         }
 

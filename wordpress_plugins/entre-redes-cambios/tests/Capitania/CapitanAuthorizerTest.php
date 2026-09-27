@@ -12,6 +12,7 @@ use EntreRedes\Cambios\Capitania\Exception\InvalidTokenException;
 use EntreRedes\Cambios\Capitania\Exception\NotCaptainException;
 use EntreRedes\Cambios\Capitania\Exception\SessionRevokedException;
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Tests\Support\IssuesProdeTokens;
 use PHPUnit\Framework\TestCase;
 
@@ -59,7 +60,7 @@ class CapitanAuthorizerTest extends TestCase {
         InitialSchema::up();
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_capitan" );
 
-        $this->capitanRepository = new CapitanRepository( $wpdb );
+        $this->capitanRepository = new CapitanRepository( $wpdb, new InMemoryEventLog() );
         $this->capitanRepository->designateCapitan( self::SEASON_ID, self::TEAM_A, self::PLAYER_ID, null, '2026-09-01 10:00:00' );
 
         $this->authorizer = new CapitanAuthorizer(
