@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Dictamen\Reglas;
 
 use EntreRedes\Cambios\Calendario\PlazosCalculator;
-use EntreRedes\Cambios\Dictamen\ContextoDeDictamen;
+use EntreRedes\Cambios\Dictamen\DictamenContext;
 use EntreRedes\Cambios\Dictamen\Motivo;
 use EntreRedes\Cambios\Dictamen\Regla;
 
@@ -22,7 +22,7 @@ use EntreRedes\Cambios\Dictamen\Regla;
  * is a Unix epoch — an absolute instant, not a civil reading — so the ONLY
  * frame it can be compared against without silently reintroducing the
  * three-hour bug PlazosCalculator's own class docblock describes is
- * `computeUtc()`'s. `ContextoDeDictamen::plazosUtc()`'s docblock says so
+ * `computeUtc()`'s. `DictamenContext::plazosUtc()`'s docblock says so
  * explicitly and this rule trusts that contract rather than re-deriving a
  * timezone here: it converts the epoch to a UTC civil string via `gmdate()`
  * and compares it directly against `plazosUtc()`, never against
@@ -47,11 +47,29 @@ final class SolicitudEnPlazo implements Regla {
 
     private const CODE = 'fuera_de_plazo';
 
-    public function evaluar( ContextoDeDictamen $ctx ): ?Motivo {
+    /**
+     * Every key this rule (directly, or via PlazosCalculator::isWithinSolicitudWindow())
+     * reads off DictamenContext::plazosUtc(). A caller-assembled $plazos
+     * missing one of these is a context bug, not a business fact this rule
+     * can evaluate — PHP would otherwise compare against `null`, and the
+     * verdict would depend on string/null juggling instead of a contract.
+     */
+    private const REQUIRED_KEYS = [ 'apertura_solicitudes', 'cierre_regresos', 'cierre_solicitudes' ];
+
+    public function evaluate( DictamenContext $ctx ): ?Motivo {
         $plazos = $ctx->plazosUtc();
+
+        foreach ( self::REQUIRED_KEYS as $key ) {
+            if ( ! array_key_exists( $key, $plazos ) ) {
+                throw new \InvalidArgumentException(
+                    "DictamenContext::plazosUtc() is missing the required key '{$key}'."
+                );
+            }
+        }
+
         $nowUtc = gmdate( 'Y-m-d H:i:s', $ctx->solicitud()->instanteEpoch() );
 
-        if ( $ctx->solicitud()->esRegreso() ) {
+        if ( $ctx->solicitud()->isRegreso() ) {
             $dentroDePlazo = $nowUtc >= $plazos['apertura_solicitudes'] && $nowUtc <= $plazos['cierre_regresos'];
             $cierre        = $plazos['cierre_regresos'];
             $etiqueta      = 'de regreso';

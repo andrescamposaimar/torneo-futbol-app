@@ -15,7 +15,7 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  *
  * @phpstan-type OcupacionRow array<string, mixed>
  */
-final class ContextoDeDictamen {
+final class DictamenContext {
 
     private SolicitudDeCambio $solicitud;
 
@@ -59,7 +59,7 @@ final class ContextoDeDictamen {
      *        The FULL ocupaciones chain of every OTHER plaza where the
      *        entrante has a link closed `cerrada_por = 'trunca'` — one chain
      *        per such plaza. Used by Reglas\EntranteNoBloqueado, which reads
-     *        each chain to apply whichever PoliticaBloqueoReemplazo it was
+     *        each chain to apply whichever BloqueoReemplazoPolicy it was
      *        constructed with. An entrante with no trunca closures anywhere
      *        passes an empty array.
      * @param array<string, string>                          $plazosUtc
@@ -78,7 +78,7 @@ final class ContextoDeDictamen {
      *        since it, inclusive. Reglas\RegresoSoloConMinimoCumplido wraps
      *        this in its own Plazas\CadenaResolver instance;
      *        Reglas\EntranteNoBloqueado calls it directly when evaluating
-     *        PoliticaBloqueoReemplazo::topeTresFechas().
+     *        BloqueoReemplazoPolicy::topeTresFechas().
      */
     public function __construct(
         SolicitudDeCambio $solicitud,

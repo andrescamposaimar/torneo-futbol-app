@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Tests\Dictamen\Reglas;
 
-use EntreRedes\Cambios\Dictamen\PoliticaBloqueoReemplazo;
+use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Tests\Support\BuildsDictamenFixtures;
 use PHPUnit\Framework\TestCase;
@@ -15,7 +15,7 @@ class EntranteNoBloqueadoTest extends TestCase {
     public function test_passes_with_no_trunca_closures_anywhere(): void {
         $ctx = $this->ctxFavorableSustitucion( [ 'entrantePlazasConCierreTruncado' => [] ] );
 
-        $this->assertNull( ( new EntranteNoBloqueado() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoBloqueado() )->evaluate( $ctx ) );
     }
 
     // -------------------------------------------------------------------------
@@ -36,7 +36,7 @@ class EntranteNoBloqueadoTest extends TestCase {
             ]
         );
 
-        $motivo = ( new EntranteNoBloqueado() )->evaluar( $ctx );
+        $motivo = ( new EntranteNoBloqueado() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'entrante_bloqueado_por_cierre_truncado', $motivo->codigo() );
@@ -56,7 +56,7 @@ class EntranteNoBloqueadoTest extends TestCase {
             ]
         );
 
-        $this->assertNull( ( new EntranteNoBloqueado() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoBloqueado() )->evaluate( $ctx ) );
     }
 
     public function test_default_policy_fails_closed_when_the_counter_throws(): void {
@@ -74,7 +74,7 @@ class EntranteNoBloqueadoTest extends TestCase {
             ]
         );
 
-        $motivo = ( new EntranteNoBloqueado() )->evaluar( $ctx );
+        $motivo = ( new EntranteNoBloqueado() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo, 'An uncountable answer must never read as "already unblocked".' );
     }
@@ -87,7 +87,7 @@ class EntranteNoBloqueadoTest extends TestCase {
 
         $ctx = $this->ctxFavorableSustitucion( [ 'entrantePlazasConCierreTruncado' => [ $otraPlaza ] ] );
 
-        $this->assertNull( ( new EntranteNoBloqueado() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoBloqueado() )->evaluate( $ctx ) );
     }
 
     public function test_does_not_apply_to_a_regreso(): void {
@@ -99,7 +99,7 @@ class EntranteNoBloqueadoTest extends TestCase {
             ]
         );
 
-        $this->assertNull( ( new EntranteNoBloqueado() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoBloqueado() )->evaluate( $ctx ) );
     }
 
     // -------------------------------------------------------------------------
@@ -135,10 +135,10 @@ class EntranteNoBloqueadoTest extends TestCase {
             ]
         );
 
-        $regla = new EntranteNoBloqueado( PoliticaBloqueoReemplazo::topeTresFechas() );
+        $regla = new EntranteNoBloqueado( BloqueoReemplazoPolicy::topeTresFechas() );
 
         $this->assertNull(
-            $regla->evaluar( $ctx ),
+            $regla->evaluate( $ctx ),
             'TOPE_TRES_FECHAS only counts from the entrante\'s OWN departure (fecha 7), long cleared.'
         );
     }
@@ -151,14 +151,44 @@ class EntranteNoBloqueadoTest extends TestCase {
             ]
         );
 
-        $regla = new EntranteNoBloqueado( PoliticaBloqueoReemplazo::hastaLiberacionDePlaza() );
+        $regla = new EntranteNoBloqueado( BloqueoReemplazoPolicy::hastaLiberacionDePlaza() );
 
-        $motivo = $regla->evaluar( $ctx );
+        $motivo = $regla->evaluate( $ctx );
 
         $this->assertNotNull(
             $motivo,
             'HASTA_LIBERACION_DE_PLAZA anchors to the PLAZA\'s own liberation (fecha 9), not yet cleared.'
         );
         $this->assertSame( 'entrante_bloqueado_por_cierre_truncado', $motivo->codigo() );
+    }
+
+    /**
+     * THE test that protects the CC5b traceability fix: the dictamen must
+     * record WHICH reading decided a bloqueo motivo, not just that one
+     * fired — the process owner's eventual CC5b answer needs to be checked
+     * against what was actually applied.
+     */
+    public function test_motivo_datos_records_which_cc5b_policy_produced_it(): void {
+        $otraPlaza = [
+            $this->ocupacion( [ 'plaza_id' => 2, 'player_id' => 500, 'fecha_desde_id' => 1, 'fecha_hasta_id' => 5, 'cerrada_por' => 'reemplazada' ] ),
+            $this->ocupacion( [ 'plaza_id' => 2, 'id' => 2, 'player_id' => 888, 'es_genesis' => 0, 'fecha_desde_id' => 5, 'fecha_hasta_id' => 7, 'cerrada_por' => 'trunca' ] ),
+            $this->ocupacion( [ 'plaza_id' => 2, 'id' => 3, 'player_id' => 999, 'es_genesis' => 0, 'fecha_desde_id' => 7, 'fecha_hasta_id' => null ] ),
+        ];
+
+        $ctx = $this->ctxFavorableSustitucion(
+            [
+                'entrantePlazasConCierreTruncado' => [ $otraPlaza ],
+                'countResolvedFechasSinceFn'       => static fn ( int $fechaId ): int => 7 === $fechaId ? 2 : 10,
+            ]
+        );
+
+        $tope    = ( new EntranteNoBloqueado( BloqueoReemplazoPolicy::topeTresFechas() ) )->evaluate( $ctx );
+        $hastaLb = ( new EntranteNoBloqueado( BloqueoReemplazoPolicy::hastaLiberacionDePlaza() ) )->evaluate( $ctx );
+
+        $this->assertNotNull( $tope );
+        $this->assertSame( [ 'politica' => 'tope_tres_fechas' ], $tope->datos() );
+
+        $this->assertNotNull( $hastaLb );
+        $this->assertSame( [ 'politica' => 'hasta_liberacion_de_plaza' ], $hastaLb->datos() );
     }
 }

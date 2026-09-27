@@ -24,7 +24,7 @@ namespace EntreRedes\Cambios\Dictamen;
  * Auth\TokenVerifier::verify()'s `$nowTimestamp`: an epoch has no timezone to
  * misread. `Dictamen\Reglas\SolicitudEnPlazo` is the one rule that reads this
  * value, and it does so by converting it to a UTC civil string with
- * `gmdate()` before comparing against `ContextoDeDictamen::plazosUtc()` — see
+ * `gmdate()` before comparing against `DictamenContext::plazosUtc()` — see
  * that rule's docblock for why the comparison frame must be UTC on both
  * sides.
  */
@@ -121,11 +121,11 @@ final class SolicitudDeCambio {
         return $this->tipo;
     }
 
-    public function esSustitucion(): bool {
+    public function isSustitucion(): bool {
         return self::TIPO_SUSTITUCION === $this->tipo;
     }
 
-    public function esRegreso(): bool {
+    public function isRegreso(): bool {
         return self::TIPO_REGRESO === $this->tipo;
     }
 

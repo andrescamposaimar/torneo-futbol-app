@@ -15,7 +15,7 @@ class EntranteNoEsElSalienteTest extends TestCase {
         // Favorable fixture: vigente is 777 (titular), entrante is 888.
         $ctx = $this->ctxFavorableSustitucion();
 
-        $this->assertNull( ( new EntranteNoEsElSaliente() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoEsElSaliente() )->evaluate( $ctx ) );
     }
 
     public function test_fails_when_entrante_is_the_vigent_occupant(): void {
@@ -25,7 +25,7 @@ class EntranteNoEsElSalienteTest extends TestCase {
             ]
         );
 
-        $motivo = ( new EntranteNoEsElSaliente() )->evaluar( $ctx );
+        $motivo = ( new EntranteNoEsElSaliente() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'entrante_es_el_saliente', $motivo->codigo() );
@@ -53,7 +53,7 @@ class EntranteNoEsElSalienteTest extends TestCase {
             ]
         );
 
-        $motivo = ( new EntranteNoEsElSaliente() )->evaluar( $ctx );
+        $motivo = ( new EntranteNoEsElSaliente() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'entrante_es_el_saliente', $motivo->codigo() );
@@ -62,7 +62,7 @@ class EntranteNoEsElSalienteTest extends TestCase {
     public function test_does_not_apply_to_a_regreso(): void {
         $ctx = $this->ctxFavorableRegreso();
 
-        $this->assertNull( ( new EntranteNoEsElSaliente() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoEsElSaliente() )->evaluate( $ctx ) );
     }
 
     public function test_passes_when_the_plaza_has_no_vigent_occupation(): void {
@@ -74,6 +74,6 @@ class EntranteNoEsElSalienteTest extends TestCase {
             ]
         );
 
-        $this->assertNull( ( new EntranteNoEsElSaliente() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteNoEsElSaliente() )->evaluate( $ctx ) );
     }
 }

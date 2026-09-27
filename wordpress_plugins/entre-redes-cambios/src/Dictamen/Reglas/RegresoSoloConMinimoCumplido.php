@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Dictamen\Reglas;
 
-use EntreRedes\Cambios\Dictamen\ContextoDeDictamen;
+use EntreRedes\Cambios\Dictamen\DictamenContext;
 use EntreRedes\Cambios\Dictamen\Motivo;
 use EntreRedes\Cambios\Dictamen\Regla;
 use EntreRedes\Cambios\Plazas\CadenaResolver;
@@ -31,8 +31,8 @@ final class RegresoSoloConMinimoCumplido implements Regla {
 
     private const CODE = 'regreso_antes_del_minimo';
 
-    public function evaluar( ContextoDeDictamen $ctx ): ?Motivo {
-        if ( ! $ctx->solicitud()->esRegreso() ) {
+    public function evaluate( DictamenContext $ctx ): ?Motivo {
+        if ( ! $ctx->solicitud()->isRegreso() ) {
             return null;
         }
 

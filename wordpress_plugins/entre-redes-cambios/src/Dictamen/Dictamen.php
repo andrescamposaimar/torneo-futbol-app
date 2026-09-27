@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Dictamen;
 
 /**
- * The engine's output: a DICTAMEN, never an approval — see MotorDeDictamen's
+ * The engine's output: a DICTAMEN, never an approval — see DictamenEngine's
  * class docblock for why `procede()` is named that way and what it does NOT
  * authorize.
  *
@@ -33,17 +33,17 @@ final class Dictamen {
     }
 
     /**
-     * @param Motivo[] $motivos Every motivo MotorDeDictamen's rules produced,
+     * @param Motivo[] $motivos Every motivo DictamenEngine's rules produced,
      *        already joined — never truncated to the first one. An empty
      *        array yields a favorable dictamen.
      */
-    public static function desde( array $motivos ): self {
+    public static function from( array $motivos ): self {
         return new self( $motivos );
     }
 
     /**
      * True exactly when there are zero motivos. THIS IS A DICTAMEN, NOT AN
-     * APPROVAL — see MotorDeDictamen's class docblock. `true` here means
+     * APPROVAL — see DictamenEngine's class docblock. `true` here means
      * "nothing in the ruleset objects", never "go ahead and apply this
      * automatically".
      */

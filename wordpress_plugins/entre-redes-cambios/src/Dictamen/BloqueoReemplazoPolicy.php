@@ -26,7 +26,7 @@ namespace EntreRedes\Cambios\Dictamen;
  * play, never in the direction of benching them for months over a plain
  * ambiguity nobody has resolved yet.
  */
-final class PoliticaBloqueoReemplazo {
+final class BloqueoReemplazoPolicy {
 
     private const TOPE_TRES_FECHAS          = 'tope_tres_fechas';
     private const HASTA_LIBERACION_DE_PLAZA = 'hasta_liberacion_de_plaza';
@@ -57,11 +57,11 @@ final class PoliticaBloqueoReemplazo {
         return new self( self::HASTA_LIBERACION_DE_PLAZA );
     }
 
-    public function esTopeTresFechas(): bool {
+    public function isTopeTresFechas(): bool {
         return self::TOPE_TRES_FECHAS === $this->valor;
     }
 
-    public function esHastaLiberacionDePlaza(): bool {
+    public function isHastaLiberacionDePlaza(): bool {
         return self::HASTA_LIBERACION_DE_PLAZA === $this->valor;
     }
 }

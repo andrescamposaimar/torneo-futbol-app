@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Tests\Support;
 
-use EntreRedes\Cambios\Dictamen\ContextoDeDictamen;
+use EntreRedes\Cambios\Dictamen\DictamenContext;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Plazas\Puntaje;
 
@@ -136,7 +136,7 @@ trait BuildsDictamenFixtures {
      *        entrantePlazasConCierreTruncado, plazosUtc,
      *        countResolvedFechasSinceFn.
      */
-    private function ctxFavorableSustitucion( array $overrides = [] ): ContextoDeDictamen {
+    private function ctxFavorableSustitucion( array $overrides = [] ): DictamenContext {
         return $this->ctx(
             array_merge(
                 [
@@ -159,7 +159,7 @@ trait BuildsDictamenFixtures {
      *
      * @param array<string, mixed> $overrides
      */
-    private function ctxFavorableRegreso( array $overrides = [] ): ContextoDeDictamen {
+    private function ctxFavorableRegreso( array $overrides = [] ): DictamenContext {
         return $this->ctx(
             array_merge(
                 [
@@ -191,7 +191,7 @@ trait BuildsDictamenFixtures {
      *
      * @param array<string, mixed> $overrides
      */
-    private function ctx( array $overrides = [] ): ContextoDeDictamen {
+    private function ctx( array $overrides = [] ): DictamenContext {
         $defaults = [
             'solicitud'                       => $this->solicitudSustitucion(),
             'plaza'                           => $this->plaza(),
@@ -205,7 +205,7 @@ trait BuildsDictamenFixtures {
 
         $o = array_merge( $defaults, $overrides );
 
-        return new ContextoDeDictamen(
+        return new DictamenContext(
             $o['solicitud'],
             $o['plaza'],
             $o['ocupaciones'],

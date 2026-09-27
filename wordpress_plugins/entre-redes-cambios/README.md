@@ -132,6 +132,40 @@ The following are real gaps this slice leaves open. None of them is implemented 
 3. **No correction primitive.** There is no way to undo or repair a wrongly-loaded plaza or ocupación — no "delete this link", no "reopen this plaza" — short of a direct SQL fix. This is acceptable ONLY because no UI exists yet to make the mistake in the first place; it becomes a blocker the moment slice 3 (or any admin screen) lets a human load real data.
 4. **No check that the tables are actually InnoDB.** Every invariant this slice defends inside a transaction (at most one vigent ocupación, atomic close-then-insert) silently depends on `ENGINE=InnoDB` actually taking effect. If a hosting provider's `dbDelta()` run substitutes a non-transactional engine (some managed MySQL configurations do this transparently), `START TRANSACTION` / `ROLLBACK` become no-ops and every invariant in this README degrades without any error ever being raised.
 
+## The dictamen engine (slice 3)
+
+Slice 3 is the pure-function decision layer on top of slice 2's data model: given a `Dictamen\SolicitudDeCambio` and a fully-assembled `Dictamen\DictamenContext` (zero DB access, zero clock — see that class's docblock), `Dictamen\DictamenEngine` runs every `Dictamen\Regla` and joins every `Dictamen\Motivo` they report into one `Dictamen\Dictamen`. It ships no REST routes, no admin UI, no context assembly from the real database — see "Explicitly out of scope" below.
+
+### A dictamen is not an approval
+
+`Dictamen::procede()` is exactly "zero motivos" — never a stand-in for `aprobado()`. Per the reglamento, the subcomisión is never obligated to provide a reemplazo, and the process owner approves ALWAYS, even when a solicitud clears every rule. See `DictamenEngine`'s class docblock for the full reasoning.
+
+### Never short-circuits, never lets one rule's crash erase another's motivo
+
+`DictamenEngine::evaluate()` runs all seven rules unconditionally and collects every motivo — a captain reading a rejected solicitud sees every reason at once. A `Regla` that throws (corrupted business data it cannot evaluate at all, e.g. a `puntaje_techo` outside `Plazas\Puntaje`'s valid range) is caught per-rule and turned into its own fail-closed motivo (`error_al_evaluar_regla`, tagged with the offending rule's class name) — it does not abort the loop and does not discard the motivos other rules already found.
+
+### The ruleset has exactly one source of truth: `DictamenEngineFactory`
+
+`Dictamen\DictamenEngineFactory::create()` (and `::reglas()`) is the ONLY place, production or test, that lists the seven rules. `DictamenEngineFactoryTest` locks that list down; every other test builds its engine through the factory instead of keeping a parallel copy — the same shape of bug as `Calendario\EstadoDeriver` forgetting a state, closed by having exactly one enumeration to forget.
+
+### The seven rules
+
+`Reglas\PuntajeDentroDelTecho`, `Reglas\EntranteNoBloqueado`, `Reglas\EntranteDisponible`, `Reglas\EntranteNoEsElSaliente`, `Reglas\SolicitudEnPlazo`, `Reglas\PlazaConOcupacionVigente`, `Reglas\RegresoSoloConMinimoCumplido` — each a pure function of `DictamenContext`, independent of the others (see `Regla`'s class docblock). Two are worth calling out:
+
+- **`PuntajeDentroDelTecho`** treats a missing `entrantePuntaje` differently by `tipo`: null is the type's own guarantee for a `regreso` (no objection), but for a `sustitucion` it is an unresolved external lookup and is reported as its own motivo (`entrante_puntaje_indeterminado`) rather than silently read as "no objection" — see that class's docblock.
+- **`EntranteNoBloqueado`** takes CC5b's still-unconfirmed policy (`BloqueoReemplazoPolicy::topeTresFechas()` vs `::hastaLiberacionDePlaza()`) as a constructor parameter, defaulting to the less severe reading. The motivo it produces carries `datos()['politica']` naming which reading fired, so the process owner's eventual answer can be checked against what was actually applied to past solicitudes.
+
+### Explicitly out of scope
+
+- **Assembling `DictamenContext` from the real database** (`PlazaRepository`, `FechaRepository`, `Calendario\Settings` + `PlazosCalculator`) is slice 4's job — every test in this slice hands the context a hand-built fixture.
+- **REST routes, admin UI, wiring a caller.** This slice is domain logic only.
+
+### Contracts for slice 4 — written here, not yet implemented
+
+1. **Every query that fills `DictamenContext` must throw on failure, never return `[]`.** An empty `entranteOcupacionesEnOtrasPlazas()` or `entrantePlazasConCierreTruncado()` reads as "confirmado, sin conflicto" to `Reglas\EntranteDisponible` and `Reglas\EntranteNoBloqueado` — a query that fails silently becomes a silent approval, not a rejection.
+2. **The wrapper that invokes `DictamenEngine` must catch `\Throwable`, log it with the solicitud's identifiers (seasonId, teamId, plazaId, fechaId), and only then decide what to answer the caller.** Without that, "the subcomisión rejected it" and "the dictamen engine crashed" are indistinguishable to whoever reads the response.
+3. **When CC5b is resolved, remove `BloqueoReemplazoPolicy`'s default** (`EntranteNoBloqueado`'s constructor currently defaults to `topeTresFechas()` when no policy is injected) — whoever wires `DictamenEngineFactory::create()` for real must pass the confirmed policy explicitly, so a future ambiguity cannot silently fall back to a guess again.
+
 ## Scope of this slice (slice 0)
 
 This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registers no REST routes, no admin screens, and no cron jobs. It only runs migrations on activation. The calendar admin screen, the solicitud/regreso REST endpoints, and the seeding cron are later slices, built on top of the domain logic here once it is validated.

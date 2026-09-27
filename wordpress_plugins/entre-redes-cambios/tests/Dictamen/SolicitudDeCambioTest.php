@@ -12,8 +12,8 @@ class SolicitudDeCambioTest extends TestCase {
     public function test_sustitucion_carries_the_entrante(): void {
         $solicitud = SolicitudDeCambio::sustitucion( 1, 10, 100, 888, 5, 1000 );
 
-        $this->assertTrue( $solicitud->esSustitucion() );
-        $this->assertFalse( $solicitud->esRegreso() );
+        $this->assertTrue( $solicitud->isSustitucion() );
+        $this->assertFalse( $solicitud->isRegreso() );
         $this->assertSame( SolicitudDeCambio::TIPO_SUSTITUCION, $solicitud->tipo() );
         $this->assertSame( 888, $solicitud->entrantePlayerId() );
         $this->assertSame( 1, $solicitud->seasonId() );
@@ -26,8 +26,8 @@ class SolicitudDeCambioTest extends TestCase {
     public function test_regreso_never_carries_an_entrante(): void {
         $solicitud = SolicitudDeCambio::regreso( 1, 10, 100, 5, 1000 );
 
-        $this->assertTrue( $solicitud->esRegreso() );
-        $this->assertFalse( $solicitud->esSustitucion() );
+        $this->assertTrue( $solicitud->isRegreso() );
+        $this->assertFalse( $solicitud->isSustitucion() );
         $this->assertSame( SolicitudDeCambio::TIPO_REGRESO, $solicitud->tipo() );
         $this->assertNull( $solicitud->entrantePlayerId() );
     }

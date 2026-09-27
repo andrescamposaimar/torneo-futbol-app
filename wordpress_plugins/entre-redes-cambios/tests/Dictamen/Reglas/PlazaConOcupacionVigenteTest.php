@@ -14,7 +14,7 @@ class PlazaConOcupacionVigenteTest extends TestCase {
     public function test_passes_when_the_chain_has_a_vigent_link(): void {
         $ctx = $this->ctxFavorableSustitucion();
 
-        $this->assertNull( ( new PlazaConOcupacionVigente() )->evaluar( $ctx ) );
+        $this->assertNull( ( new PlazaConOcupacionVigente() )->evaluate( $ctx ) );
     }
 
     public function test_fails_when_every_link_is_closed(): void {
@@ -24,7 +24,7 @@ class PlazaConOcupacionVigenteTest extends TestCase {
             ]
         );
 
-        $motivo = ( new PlazaConOcupacionVigente() )->evaluar( $ctx );
+        $motivo = ( new PlazaConOcupacionVigente() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'plaza_sin_ocupacion_vigente', $motivo->codigo() );
@@ -33,7 +33,7 @@ class PlazaConOcupacionVigenteTest extends TestCase {
     public function test_fails_when_the_chain_is_empty(): void {
         $ctx = $this->ctxFavorableSustitucion( [ 'ocupaciones' => [] ] );
 
-        $motivo = ( new PlazaConOcupacionVigente() )->evaluar( $ctx );
+        $motivo = ( new PlazaConOcupacionVigente() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'plaza_sin_ocupacion_vigente', $motivo->codigo() );
@@ -46,7 +46,7 @@ class PlazaConOcupacionVigenteTest extends TestCase {
             ]
         );
 
-        $motivo = ( new PlazaConOcupacionVigente() )->evaluar( $ctx );
+        $motivo = ( new PlazaConOcupacionVigente() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
     }

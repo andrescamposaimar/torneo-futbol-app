@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * plazosUtc() fixture: apertura 2026-01-01 00:00:00, cierre_regresos
  * 2026-01-06 23:59:59, cierre_solicitudes 2026-01-08 23:59:59, publicacion
- * 2026-01-09 00:00:00 — all UTC, matching ContextoDeDictamen::plazosUtc()'s
+ * 2026-01-09 00:00:00 — all UTC, matching DictamenContext::plazosUtc()'s
  * contract.
  */
 class SolicitudEnPlazoTest extends TestCase {
@@ -20,7 +20,7 @@ class SolicitudEnPlazoTest extends TestCase {
     public function test_sustitucion_passes_inside_the_window(): void {
         $ctx = $this->ctxFavorableSustitucion();
 
-        $this->assertNull( ( new SolicitudEnPlazo() )->evaluar( $ctx ) );
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
     }
 
     public function test_sustitucion_fails_before_apertura(): void {
@@ -28,7 +28,7 @@ class SolicitudEnPlazoTest extends TestCase {
             [ 'solicitud' => $this->solicitudSustitucion( [ 'instanteEpoch' => $this->epoch( '2025-12-31 12:00:00' ) ] ) ]
         );
 
-        $motivo = ( new SolicitudEnPlazo() )->evaluar( $ctx );
+        $motivo = ( new SolicitudEnPlazo() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'fuera_de_plazo', $motivo->codigo() );
@@ -39,7 +39,7 @@ class SolicitudEnPlazoTest extends TestCase {
             [ 'solicitud' => $this->solicitudSustitucion( [ 'instanteEpoch' => $this->epoch( '2026-01-09 00:00:00' ) ] ) ]
         );
 
-        $motivo = ( new SolicitudEnPlazo() )->evaluar( $ctx );
+        $motivo = ( new SolicitudEnPlazo() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
     }
@@ -56,13 +56,13 @@ class SolicitudEnPlazoTest extends TestCase {
             [ 'solicitud' => $this->solicitudSustitucion( [ 'instanteEpoch' => $this->epoch( '2026-01-07 12:00:00' ) ] ) ]
         );
 
-        $this->assertNull( ( new SolicitudEnPlazo() )->evaluar( $ctx ) );
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
     }
 
     public function test_regreso_passes_inside_its_own_window(): void {
         $ctx = $this->ctxFavorableRegreso();
 
-        $this->assertNull( ( new SolicitudEnPlazo() )->evaluar( $ctx ) );
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
     }
 
     public function test_regreso_fails_before_apertura(): void {
@@ -70,7 +70,7 @@ class SolicitudEnPlazoTest extends TestCase {
             [ 'solicitud' => $this->solicitudRegreso( [ 'instanteEpoch' => $this->epoch( '2025-12-31 12:00:00' ) ] ) ]
         );
 
-        $motivo = ( new SolicitudEnPlazo() )->evaluar( $ctx );
+        $motivo = ( new SolicitudEnPlazo() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
     }
@@ -86,9 +86,80 @@ class SolicitudEnPlazoTest extends TestCase {
             [ 'solicitud' => $this->solicitudRegreso( [ 'instanteEpoch' => $this->epoch( '2026-01-07 12:00:00' ) ] ) ]
         );
 
-        $motivo = ( new SolicitudEnPlazo() )->evaluar( $ctx );
+        $motivo = ( new SolicitudEnPlazo() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'fuera_de_plazo', $motivo->codigo() );
+    }
+
+    // -------------------------------------------------------------------------
+    // Exact boundaries — the close is inclusive, both ends of the window.
+    // -------------------------------------------------------------------------
+
+    public function test_sustitucion_passes_at_the_exact_instant_of_cierre_solicitudes(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [ 'solicitud' => $this->solicitudSustitucion( [ 'instanteEpoch' => $this->epoch( '2026-01-08 23:59:59' ) ] ) ]
+        );
+
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
+    }
+
+    public function test_sustitucion_passes_at_the_exact_instant_of_apertura(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [ 'solicitud' => $this->solicitudSustitucion( [ 'instanteEpoch' => $this->epoch( '2026-01-01 00:00:00' ) ] ) ]
+        );
+
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
+    }
+
+    public function test_regreso_passes_at_the_exact_instant_of_cierre_regresos(): void {
+        $ctx = $this->ctxFavorableRegreso(
+            [ 'solicitud' => $this->solicitudRegreso( [ 'instanteEpoch' => $this->epoch( '2026-01-06 23:59:59' ) ] ) ]
+        );
+
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
+    }
+
+    public function test_regreso_passes_at_the_exact_instant_of_apertura(): void {
+        $ctx = $this->ctxFavorableRegreso(
+            [ 'solicitud' => $this->solicitudRegreso( [ 'instanteEpoch' => $this->epoch( '2026-01-01 00:00:00' ) ] ) ]
+        );
+
+        $this->assertNull( ( new SolicitudEnPlazo() )->evaluate( $ctx ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // A caller-assembled plazosUtc() missing a required key is a context
+    // bug, never a business fact — see class docblock's REQUIRED_KEYS guard.
+    // -------------------------------------------------------------------------
+
+    public function test_throws_when_apertura_solicitudes_is_missing(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [ 'plazosUtc' => [ 'cierre_regresos' => '2026-01-06 23:59:59', 'cierre_solicitudes' => '2026-01-08 23:59:59' ] ]
+        );
+
+        $this->expectException( \InvalidArgumentException::class );
+
+        ( new SolicitudEnPlazo() )->evaluate( $ctx );
+    }
+
+    public function test_throws_when_cierre_regresos_is_missing(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [ 'plazosUtc' => [ 'apertura_solicitudes' => '2026-01-01 00:00:00', 'cierre_solicitudes' => '2026-01-08 23:59:59' ] ]
+        );
+
+        $this->expectException( \InvalidArgumentException::class );
+
+        ( new SolicitudEnPlazo() )->evaluate( $ctx );
+    }
+
+    public function test_throws_when_cierre_solicitudes_is_missing(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [ 'plazosUtc' => [ 'apertura_solicitudes' => '2026-01-01 00:00:00', 'cierre_regresos' => '2026-01-06 23:59:59' ] ]
+        );
+
+        $this->expectException( \InvalidArgumentException::class );
+
+        ( new SolicitudEnPlazo() )->evaluate( $ctx );
     }
 }

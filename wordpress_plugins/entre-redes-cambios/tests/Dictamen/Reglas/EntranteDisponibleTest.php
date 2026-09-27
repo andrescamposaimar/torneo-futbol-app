@@ -14,7 +14,7 @@ class EntranteDisponibleTest extends TestCase {
     public function test_passes_with_no_other_occupations(): void {
         $ctx = $this->ctxFavorableSustitucion( [ 'entranteOcupacionesEnOtrasPlazas' => [] ] );
 
-        $this->assertNull( ( new EntranteDisponible() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteDisponible() )->evaluate( $ctx ) );
     }
 
     public function test_passes_when_the_other_occupations_are_all_closed(): void {
@@ -26,7 +26,7 @@ class EntranteDisponibleTest extends TestCase {
             ]
         );
 
-        $this->assertNull( ( new EntranteDisponible() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteDisponible() )->evaluate( $ctx ) );
     }
 
     public function test_fails_when_a_vigent_occupation_exists_elsewhere(): void {
@@ -38,7 +38,7 @@ class EntranteDisponibleTest extends TestCase {
             ]
         );
 
-        $motivo = ( new EntranteDisponible() )->evaluar( $ctx );
+        $motivo = ( new EntranteDisponible() )->evaluate( $ctx );
 
         $this->assertNotNull( $motivo );
         $this->assertSame( 'entrante_ocupa_otra_plaza_vigente', $motivo->codigo() );
@@ -53,6 +53,6 @@ class EntranteDisponibleTest extends TestCase {
             ]
         );
 
-        $this->assertNull( ( new EntranteDisponible() )->evaluar( $ctx ) );
+        $this->assertNull( ( new EntranteDisponible() )->evaluate( $ctx ) );
     }
 }
