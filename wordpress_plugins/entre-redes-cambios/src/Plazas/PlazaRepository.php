@@ -38,6 +38,21 @@ use EntreRedes\Cambios\Plazas\Exception\PlazaPersistenceException;
  * PlazaPersistenceException BEFORE the COMMIT, exactly like
  * CapitanRepository — the same class of blocker fixed there (a failed second
  * write silently falling through to COMMIT) applies here just as much.
+ *
+ * TWO CONCURRENT CALLERS CAN RACE ACROSS TRANSACTIONS, NOT JUST WITHIN ONE:
+ * the paragraph above covers atomicity WITHIN a single succeedOcupacion() /
+ * closeOcupacionByRegresoTitular() call. It does not by itself stop two
+ * SEPARATE calls (two different requests) from both reading the same vigent
+ * ocupación via findOcupacionVigente() before either closes it — a plain
+ * `UPDATE ... WHERE id = %d` would let both "succeed" (the loser's UPDATE
+ * matches the row unconditionally, even though it was already closed by the
+ * winner), producing two vigent ocupaciones. closeOcupacion() closes this gap
+ * with a compare-and-swap: the UPDATE's WHERE also requires
+ * `fecha_hasta_id IS NULL`, and the caller requires EXACTLY 1 affected row —
+ * see that method's docblock. findOcupacionVigente() no longer trusts
+ * `LIMIT 1` either: it throws if it ever finds more than one vigent row,
+ * because a caller's business decision must never depend on row storage
+ * order when the invariant is supposed to guarantee at most one.
  */
 class PlazaRepository {
 
@@ -66,7 +81,7 @@ class PlazaRepository {
 
     /**
      * Opens a brand-new plaza AND its genesis ocupación (the titular,
-     * `es_titular = 1`, occupying it from `$fechaDesdeId`) in one
+     * `es_genesis = 1`, occupying it from `$fechaDesdeId`) in one
      * transaction — this is the "conformación" moment described in the
      * class docblock. `$puntajeTecho` is snapshotted once, here, and never
      * moves again for the lifetime of the plaza — see
@@ -162,7 +177,7 @@ class PlazaRepository {
     /**
      * @return array<int, array<string, mixed>>
      */
-    public function listPlazasByTeam( int $seasonId, int $teamId ): array {
+    public function listPlazasByEquipo( int $seasonId, int $teamId ): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -210,22 +225,41 @@ class PlazaRepository {
      *         NULL`) ocupación of this plaza, or null when the plaza somehow
      *         has none open — should not happen once openPlaza() has run,
      *         but callers should not assume it.
+     *
+     * @throws \RuntimeException When MORE THAN ONE ocupación of this plaza is
+     *         vigent at once — this is a violation of the invariant this
+     *         class defends (see class docblock) and must never be silently
+     *         resolved by picking one at random via `LIMIT 1`. A caller's
+     *         business decision (who occupies a plaza right now) must never
+     *         depend on row storage order. If this ever fires, the fix is to
+     *         repair the corrupted `cambios_ocupacion` data for this
+     *         `plaza_id`, not to add `LIMIT 1` back.
      */
     public function findOcupacionVigente( int $plazaId ): ?array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $row = $wpdb->get_row(
+        $rows = $wpdb->get_results(
             $wpdb->prepare(
                 "SELECT * FROM {$p}cambios_ocupacion
-                  WHERE plaza_id = %d AND fecha_hasta_id IS NULL
-                  LIMIT 1",
+                  WHERE plaza_id = %d AND fecha_hasta_id IS NULL",
                 $plazaId
             ),
             ARRAY_A
         );
 
-        return empty( $row ) ? null : $row;
+        if ( empty( $rows ) ) {
+            return null;
+        }
+
+        if ( count( $rows ) > 1 ) {
+            throw new \RuntimeException(
+                "PlazaRepository::findOcupacionVigente(): plaza {$plazaId} has "
+                . count( $rows ) . ' vigent ocupaciones — invariant broken, expected at most 1.'
+            );
+        }
+
+        return $rows[0];
     }
 
     /**
@@ -238,7 +272,7 @@ class PlazaRepository {
      *        (the outgoing occupant was still within their rights, simply
      *        superseded) or 'trunca' (the outgoing occupant left before
      *        meeting the 3-fecha minimum, and is now blocked — see
-     *        CadenaResolver::exOcupantesBloqueados()). 'regreso_titular' is
+     *        CadenaResolver::listExOcupantesBloqueados()). 'regreso_titular' is
      *        NOT accepted here — see closeOcupacionByRegresoTitular().
      *
      * @throws \InvalidArgumentException When $cerradaPor is not 'reemplazada'
@@ -346,7 +380,28 @@ class PlazaRepository {
     // -------------------------------------------------------------------------
 
     /**
-     * @throws PlazaPersistenceException When $wpdb->update() returns `false`.
+     * Closes exactly ONE vigent ocupación via a compare-and-swap UPDATE — the
+     * WHERE clause requires `fecha_hasta_id IS NULL`, which `$wpdb->update()`
+     * cannot express (it only builds `col = value` equality pairs), hence the
+     * raw `$wpdb->query( $wpdb->prepare( ... ) )` here instead.
+     *
+     * WHY THIS MATTERS: two concurrent requests can both read the same
+     * vigent ocupación (via findOcupacionVigente()) before either one closes
+     * it. Without the `IS NULL` guard, a plain `UPDATE ... WHERE id = %d`
+     * would let BOTH requests "succeed" — the second one closes an
+     * already-closed row, silently affecting 0 rows (wpdb's insert()/update()
+     * never throw on failure, they return a row count) — and both then
+     * insert their own successor link, leaving the plaza with two vigent
+     * ocupaciones. Requiring `fecha_hasta_id IS NULL` in the WHERE, and
+     * requiring the result to be EXACTLY 1 affected row, turns that silent
+     * lost-update race into a hard failure for whichever caller loses the
+     * race — the transaction rolls back (see succeedOcupacion() /
+     * closeOcupacionByRegresoTitular()) instead of persisting a corrupted
+     * chain.
+     *
+     * @throws PlazaPersistenceException When the UPDATE affects zero rows
+     *         (lost the race, or $ocupacionId was already closed) or the
+     *         wpdb-level query itself fails.
      */
     private function closeOcupacion( int $ocupacionId, int $fechaHastaId, string $cerradaPor ): void {
         if ( ! in_array( $cerradaPor, self::VALID_CERRADA_POR, true ) ) {
@@ -359,24 +414,36 @@ class PlazaRepository {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $result = $wpdb->update(
-            $p . 'cambios_ocupacion',
-            [
-                'fecha_hasta_id' => $fechaHastaId,
-                'cerrada_por'    => $cerradaPor,
-            ],
-            [ 'id' => $ocupacionId ]
+        $affected = $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+            $wpdb->prepare(
+                "UPDATE {$p}cambios_ocupacion
+                    SET fecha_hasta_id = %d, cerrada_por = %s
+                  WHERE id = %d AND fecha_hasta_id IS NULL",
+                $fechaHastaId,
+                $cerradaPor,
+                $ocupacionId
+            )
         );
 
-        if ( false === $result ) {
-            throw new PlazaPersistenceException( 'close cambios_ocupacion', $wpdb->last_error );
+        if ( 1 !== $affected ) {
+            throw new PlazaPersistenceException(
+                "close cambios_ocupacion (id={$ocupacionId}, affected="
+                    . var_export( $affected, true )
+                    . ', expected exactly 1 — likely a concurrent close of the same ocupación)',
+                $wpdb->last_error
+            );
         }
     }
 
     /**
+     * @param bool $esGenesis Whether this is the plaza's FOUNDING link — see
+     *        `cambios_ocupacion.es_genesis`'s docblock in
+     *        Migrations\InitialSchema::sqlCambiosOcupacion(). Only
+     *        openPlaza() ever passes `true`.
+     *
      * @throws PlazaPersistenceException When $wpdb->insert() fails.
      */
-    private function insertOcupacion( int $plazaId, int $playerId, bool $esTitular, int $fechaDesdeId, string $now ): int {
+    private function insertOcupacion( int $plazaId, int $playerId, bool $esGenesis, int $fechaDesdeId, string $now ): int {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -385,7 +452,7 @@ class PlazaRepository {
             [
                 'plaza_id'       => $plazaId,
                 'player_id'      => $playerId,
-                'es_titular'     => $esTitular ? 1 : 0,
+                'es_genesis'     => $esGenesis ? 1 : 0,
                 'fecha_desde_id' => $fechaDesdeId,
                 'fecha_hasta_id' => null,
                 'cerrada_por'    => null,

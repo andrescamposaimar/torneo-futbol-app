@@ -64,10 +64,9 @@ class PlazaRepositoryTest extends TestCase {
 
     /**
      * Builds a \wpdb subclass sharing the SAME underlying PDO connection as
-     * the real (shim) $wpdb, whose insert() or update() unconditionally
-     * returns false — mirrors CapitanRepositoryTest::wpdbThatFailsOn()
-     * exactly, for the same reason (simulating a real wpdb write failure,
-     * which never throws).
+     * the real (shim) $wpdb, whose insert() unconditionally returns false —
+     * mirrors CapitanRepositoryTest::wpdbThatFailsOn() exactly, for the same
+     * reason (simulating a real wpdb write failure, which never throws).
      */
     private function wpdbThatFailsOn( \wpdb $real, string $method ): \wpdb {
         $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
@@ -86,19 +85,42 @@ class PlazaRepositoryTest extends TestCase {
                     return false;
                 }
             },
-            'update' => new class( $pdo, $real->prefix ) extends \wpdb {
-                public function __construct( \PDO $pdo, string $prefix ) {
-                    $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
-                    $ref->setValue( $this, $pdo );
-                    $this->prefix = $prefix;
-                }
+            default => throw new \InvalidArgumentException( "Unsupported method: {$method}" ),
+        };
+    }
 
-                public function update( string $table, array $data, array $where ): int|false {
-                    $this->last_error = 'simulated update failure for test';
+    /**
+     * closeOcupacion() no longer uses `$wpdb->update()` — it can't express
+     * the `fecha_hasta_id IS NULL` compare-and-swap guard through it (see
+     * PlazaRepository::closeOcupacion()'s docblock) — so simulating "the
+     * close write fails at the wpdb level" now means making the raw
+     * `$wpdb->query()` call fail, not `update()`. Matches the CAS UPDATE's
+     * shape specifically, so every OTHER query() call (START TRANSACTION,
+     * COMMIT, ROLLBACK, and any other UPDATE) still runs for real.
+     */
+    private function wpdbThatFailsCloseOcupacion( \wpdb $real ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix ) extends \wpdb {
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function query( string $sql ): int|false {
+                if (
+                    str_contains( $sql, 'UPDATE' )
+                    && str_contains( $sql, 'cambios_ocupacion' )
+                    && str_contains( $sql, 'fecha_hasta_id IS NULL' )
+                ) {
+                    $this->last_error = 'simulated close failure for test';
                     return false;
                 }
-            },
-            default => throw new \InvalidArgumentException( "Unsupported method: {$method}" ),
+
+                return parent::query( $sql );
+            }
         };
     }
 
@@ -133,6 +155,27 @@ class PlazaRepositoryTest extends TestCase {
         };
     }
 
+    /**
+     * Simulates data corruption (or a bug elsewhere) by closing every vigent
+     * ocupación of a plaza directly via raw SQL, bypassing the repository
+     * entirely — leaving the plaza in a state PlazaRepository's own API can
+     * never itself produce (a plaza with zero vigent ocupaciones), so the
+     * "no vigent ocupación" branches of succeedOcupacion() and
+     * closeOcupacionByRegresoTitular() can be exercised.
+     */
+    private function closeEveryVigenteRawSql( int $plazaId ): void {
+        global $wpdb;
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE {$wpdb->prefix}cambios_ocupacion
+                    SET fecha_hasta_id = 999, cerrada_por = 'trunca'
+                  WHERE plaza_id = %d AND fecha_hasta_id IS NULL",
+                $plazaId
+            )
+        );
+    }
+
     // -------------------------------------------------------------------------
     // openPlaza
     // -------------------------------------------------------------------------
@@ -159,7 +202,7 @@ class PlazaRepositoryTest extends TestCase {
         $vigente = $this->repo->findOcupacionVigente( $plazaId );
         $this->assertNotNull( $vigente );
         $this->assertSame( 777, (int) $vigente['player_id'] );
-        $this->assertSame( 1, (int) $vigente['es_titular'] );
+        $this->assertSame( 1, (int) $vigente['es_genesis'] );
         $this->assertSame( 1, (int) $vigente['fecha_desde_id'] );
         $this->assertNull( $vigente['fecha_hasta_id'] );
 
@@ -171,6 +214,83 @@ class PlazaRepositoryTest extends TestCase {
         $this->expectException( \InvalidArgumentException::class );
 
         $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'banco', 1, '2026-03-01 10:00:00' );
+    }
+
+    public function test_open_plaza_rolls_back_when_the_FIRST_insert_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsInsertOnTable( $wpdb, 'cambios_plaza' );
+        $failingRepo = new PlazaRepository( $failingWpdb );
+
+        try {
+            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $this->fail( 'Expected PlazaPersistenceException.' );
+        } catch ( PlazaPersistenceException $e ) {
+            // expected
+        }
+
+        $plazaCount = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_plaza" );
+        $this->assertSame( 0, $plazaCount, 'No plaza row must survive when the FIRST insert (cambios_plaza) failed.' );
+
+        $ocupacionCount = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_ocupacion" );
+        $this->assertSame( 0, $ocupacionCount, 'The genesis ocupación must never have been attempted for a plaza that never got an id.' );
+    }
+
+    /**
+     * A `wpdb->insert()` that reports success (`1`, not `false`) but leaves
+     * `insert_id <= 0` — a case `false === $result` alone would miss. This
+     * mirrors the real-world contract risk documented on
+     * PlazaRepository::openPlaza(): `$plazaId <= 0` must be checked
+     * explicitly, not inferred from the insert's own return value.
+     */
+    private function wpdbThatReturnsZeroInsertIdForTable( \wpdb $real, string $tableSuffix ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $tableSuffix ) extends \wpdb {
+            private string $targetTableSuffix;
+
+            public function __construct( \PDO $pdo, string $prefix, string $targetTableSuffix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix           = $prefix;
+                $this->targetTableSuffix = $targetTableSuffix;
+            }
+
+            public function insert( string $table, array $data, mixed $format = null ): int|false {
+                $result = parent::insert( $table, $data, $format );
+
+                if ( str_ends_with( $table, $this->targetTableSuffix ) ) {
+                    // The row really was inserted (so a real auto-increment id
+                    // exists) — we only lie about what wpdb reports back, to
+                    // simulate the documented but otherwise unreachable
+                    // insert_id <= 0 contract violation.
+                    $this->insert_id = 0;
+                }
+
+                return $result;
+            }
+        };
+    }
+
+    public function test_open_plaza_rolls_back_when_the_plaza_insert_id_is_not_positive(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatReturnsZeroInsertIdForTable( $wpdb, 'cambios_plaza' );
+        $failingRepo = new PlazaRepository( $failingWpdb );
+
+        try {
+            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $this->fail( 'Expected PlazaPersistenceException.' );
+        } catch ( PlazaPersistenceException $e ) {
+            // expected
+        }
+
+        $plazaCount = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_plaza" );
+        $this->assertSame( 0, $plazaCount, 'The row inserted under a bogus insert_id must be rolled back, not left orphaned.' );
+
+        $ocupacionCount = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_ocupacion" );
+        $this->assertSame( 0, $ocupacionCount );
     }
 
     // -------------------------------------------------------------------------
@@ -190,6 +310,119 @@ class PlazaRepositoryTest extends TestCase {
         $this->assertSame( 1, $this->countVigentesFor( $plazaId ) );
 
         $this->assertSame( 4, $this->countOcupacionesFor( $plazaId ), 'Every link must be preserved as history.' );
+    }
+
+    /**
+     * A \wpdb whose FIRST `query()` call matching closeOcupacion()'s
+     * compare-and-swap UPDATE shape (contains `fecha_hasta_id IS NULL` in an
+     * UPDATE against cambios_ocupacion) first executes a "concurrent"
+     * raw UPDATE closing the SAME row — no `IS NULL` guard, simulating
+     * another request that already won the race — before letting the real
+     * CAS UPDATE run. This reproduces the exact TOCTOU window
+     * succeedOcupacion() cannot see from the outside: its own
+     * findOcupacionVigente() read already happened (it still sees the row as
+     * vigent), but by the time its UPDATE executes, the row has already been
+     * closed by someone else.
+     */
+    private function wpdbThatRacesToCloseConcurrently( \wpdb $real ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix ) extends \wpdb {
+            private bool $raced = false;
+
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function query( string $sql ): int|false {
+                if (
+                    ! $this->raced
+                    && str_contains( $sql, 'UPDATE' )
+                    && str_contains( $sql, 'cambios_ocupacion' )
+                    && str_contains( $sql, 'fecha_hasta_id IS NULL' )
+                ) {
+                    $this->raced = true;
+
+                    // The "concurrent request" that wins the race: closes
+                    // every currently-vigent row of cambios_ocupacion,
+                    // unconditionally, entirely outside of the CAS guard —
+                    // exactly what a plain `UPDATE ... WHERE id = %d` (no
+                    // `IS NULL` check) would have let a loser also do.
+                    parent::query(
+                        "UPDATE {$this->prefix}cambios_ocupacion "
+                        . "SET fecha_hasta_id = 4, cerrada_por = 'reemplazada' "
+                        . 'WHERE fecha_hasta_id IS NULL'
+                    );
+                }
+
+                return parent::query( $sql );
+            }
+        };
+    }
+
+    public function test_succeed_ocupacion_fails_instead_of_creating_a_second_vigente_when_it_loses_the_close_race(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $racingWpdb = $this->wpdbThatRacesToCloseConcurrently( $wpdb );
+        $racingRepo = new PlazaRepository( $racingWpdb );
+
+        try {
+            $racingRepo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
+            $this->fail( 'Expected PlazaPersistenceException: the CAS UPDATE should have affected 0 rows after losing the race.' );
+        } catch ( PlazaPersistenceException $e ) {
+            // expected — the CAS guard detected the lost race.
+        }
+
+        // The transaction must have rolled back, so the concurrent close is
+        // undone too — the ONLY property that actually matters here is that
+        // the chain never ends up with two vigent ocupaciones.
+        $this->assertSame(
+            1,
+            $this->countVigentesFor( $plazaId ),
+            'Losing the close race must never leave two vigent ocupaciones — it must roll back cleanly instead.'
+        );
+    }
+
+    /**
+     * findOcupacionVigente() must not paper over a corrupted state with
+     * `LIMIT 1` — if two vigent rows ever exist for the same plaza (however
+     * that happened), it must throw rather than pick one at random. Since
+     * PlazaRepository's own API can never itself produce this state (that is
+     * exactly what the previous test defends), the second vigent row here is
+     * inserted directly via raw SQL to simulate corrupted data.
+     */
+    public function test_find_ocupacion_vigente_throws_when_more_than_one_row_is_vigent(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        // Insert a SECOND vigent ocupación for the same plaza directly —
+        // corrupted data no code path reachable through the public API
+        // could ever produce.
+        $wpdb->insert(
+            $wpdb->prefix . 'cambios_ocupacion',
+            [
+                'plaza_id'       => $plazaId,
+                'player_id'      => 888,
+                'es_genesis'     => 0,
+                'fecha_desde_id' => 5,
+                'fecha_hasta_id' => null,
+                'cerrada_por'    => null,
+                'created_at'     => '2026-04-01 10:00:00',
+            ]
+        );
+
+        $this->assertSame( 2, $this->countVigentesFor( $plazaId ), 'Precondition: the corrupted state really has 2 vigent rows.' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} has 2 vigent ocupaciones" );
+
+        $this->repo->findOcupacionVigente( $plazaId );
     }
 
     // -------------------------------------------------------------------------
@@ -212,7 +445,7 @@ class PlazaRepositoryTest extends TestCase {
         $newLink = $cadena[1];
         $this->assertSame( $newId, (int) $newLink['id'] );
         $this->assertSame( 888, (int) $newLink['player_id'] );
-        $this->assertSame( 0, (int) $newLink['es_titular'] );
+        $this->assertSame( 0, (int) $newLink['es_genesis'] );
         $this->assertNull( $newLink['fecha_hasta_id'] );
     }
 
@@ -230,6 +463,16 @@ class PlazaRepositoryTest extends TestCase {
         $this->expectException( \InvalidArgumentException::class );
 
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'regreso_titular', '2026-04-01 10:00:00' );
+    }
+
+    public function test_succeed_ocupacion_throws_when_the_plaza_has_no_vigent_ocupacion(): void {
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->closeEveryVigenteRawSql( $plazaId );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} has no vigent ocupación to succeed" );
+
+        $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
     }
 
     // -------------------------------------------------------------------------
@@ -263,6 +506,23 @@ class PlazaRepositoryTest extends TestCase {
 
         $this->assertSame( (int) $vigenteBefore['id'], $returnedId );
         $this->assertSame( 1, $this->countOcupacionesFor( $plazaId ), 'No new link should be created for an already-vigent titular.' );
+    }
+
+    public function test_close_by_regreso_titular_throws_when_the_plaza_does_not_exist(): void {
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( 'plaza 999999 does not exist' );
+
+        $this->repo->closeOcupacionByRegresoTitular( 999999, 5, '2026-04-01 10:00:00' );
+    }
+
+    public function test_close_by_regreso_titular_throws_when_the_plaza_has_no_vigent_ocupacion(): void {
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->closeEveryVigenteRawSql( $plazaId );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} has no vigent ocupación to close" );
+
+        $this->repo->closeOcupacionByRegresoTitular( $plazaId, 5, '2026-04-01 10:00:00' );
     }
 
     // -------------------------------------------------------------------------
@@ -315,7 +575,7 @@ class PlazaRepositoryTest extends TestCase {
 
         $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
 
-        $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'update' );
+        $failingWpdb = $this->wpdbThatFailsCloseOcupacion( $wpdb );
         $failingRepo = new PlazaRepository( $failingWpdb );
 
         try {

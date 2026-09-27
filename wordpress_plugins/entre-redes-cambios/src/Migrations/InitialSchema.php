@@ -283,13 +283,23 @@ class InitialSchema {
      * so on). See Plazas\CadenaResolver's class docblock for how this chain
      * is read; this docblock only covers the columns.
      *
-     * `es_titular` marks the very first link of every chain — the plaza's
-     * genesis ocupación, inserted by `PlazaRepository::openPlaza()` in the
-     * same transaction as the plaza itself. Every later link is a suplente
-     * (`es_titular = 0`), EXCEPT a link opened by
-     * `closeOcupacionByRegresoTitular()`, which is also of the titular's
-     * player_id but is NOT flagged `es_titular` again — that flag identifies
-     * the genesis row specifically, not "is this player the titular".
+     * `es_genesis` marks the very first link of every chain — the plaza's
+     * founding ocupación, inserted by `PlazaRepository::openPlaza()` in the
+     * same transaction as the plaza itself. It is `1` on exactly one row per
+     * plaza, ever, and `0` on every other link, including a later link opened
+     * by `closeOcupacionByRegresoTitular()` when the titular returns — that
+     * link is of the titular's player_id but is NOT the genesis row, so it is
+     * NOT flagged again.
+     *
+     * THIS COLUMN DOES NOT ANSWER "WHO IS THE TITULAR" — it was previously
+     * named `es_titular`, which claimed exactly that and was wrong: after any
+     * regreso del titular, the returning titular's row is inserted with this
+     * flag `0` (see previous paragraph), so `WHERE es_titular = 1` silently
+     * returned zero rows for a plaza that HAD had a substitution. The real,
+     * current source of truth for "who is the titular of this plaza" is
+     * `cambios_plaza.titular_player_id`, which never changes for the
+     * lifetime of the plaza — read that column, never this one, to find or
+     * compare against the titular.
      *
      * `fecha_desde_id` / `fecha_hasta_id` are `cambios_fecha.id` values — a
      * LOGICAL FK, never `orden` (see Calendario\FechaRepository's class
@@ -331,7 +341,7 @@ class InitialSchema {
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   plaza_id BIGINT UNSIGNED NOT NULL,
   player_id BIGINT UNSIGNED NOT NULL,
-  es_titular TINYINT(1) NOT NULL DEFAULT 0,
+  es_genesis TINYINT(1) NOT NULL DEFAULT 0,
   fecha_desde_id BIGINT UNSIGNED NOT NULL,
   fecha_hasta_id BIGINT UNSIGNED NULL DEFAULT NULL,
   cerrada_por ENUM('regreso_titular','reemplazada','trunca') NULL DEFAULT NULL,
