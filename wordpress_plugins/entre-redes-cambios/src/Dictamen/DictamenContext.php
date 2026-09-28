@@ -48,6 +48,28 @@ final class DictamenContext {
     /** @var array<int, array<int, array<string, mixed>>> */
     private array $entrantePlazasConCierreTruncado;
 
+    /**
+     * Whether the entrante is a "padre" — see
+     * Plazas\JugadorMetricasReader's docblock for how that is decided from
+     * `sp_metrics.caracter`. `false` for a `regreso` (no entrante at all,
+     * same convention as entrantePuntaje() being null) and `false` when the
+     * entrante's `sp_metrics` row could not resolve a caracter either —
+     * never a fabricated guess.
+     */
+    private bool $entranteEsPadre;
+
+    /**
+     * How many VIABLE padres exist for this solicitud's plaza — see
+     * Plazas\CandidatosResolver::contarPadresViables(). Always `0` for a
+     * `regreso`, and always `0` when Reglas\PrioridadDePadresRespetada's
+     * policy is OFF or the entrante already is a padre — see
+     * DictamenContextAssembler's own docblock for why this is deliberately
+     * left at the cheap default instead of querying: see this property's own
+     * consumer's docblock, Reglas\PrioridadDePadresRespetada, "the regla does
+     * not look at this when the policy is off".
+     */
+    private int $padresViablesParaLaPlaza;
+
     /** @var array<string, string> */
     private array $plazosUtc;
 
@@ -94,6 +116,10 @@ final class DictamenContext {
      *        this in its own Plazas\CadenaResolver instance;
      *        Reglas\EntranteNoBloqueado calls it directly when evaluating
      *        BloqueoReemplazoPolicy::topeTresFechas().
+     * @param bool                                            $entranteEsPadre
+     *        See this property's own docblock.
+     * @param int                                             $padresViablesParaLaPlaza
+     *        See this property's own docblock.
      */
     public function __construct(
         SolicitudDeCambio $solicitud,
@@ -103,7 +129,9 @@ final class DictamenContext {
         array $entranteOcupacionesEnOtrasPlazas,
         array $entrantePlazasConCierreTruncado,
         array $plazosUtc,
-        callable $countResolvedFechasSinceFn
+        callable $countResolvedFechasSinceFn,
+        bool $entranteEsPadre = false,
+        int $padresViablesParaLaPlaza = 0
     ) {
         $this->solicitud                        = $solicitud;
         $this->plaza                            = $plaza;
@@ -113,6 +141,8 @@ final class DictamenContext {
         $this->entrantePlazasConCierreTruncado  = $entrantePlazasConCierreTruncado;
         $this->plazosUtc                        = $plazosUtc;
         $this->countResolvedFechasSinceFn       = $countResolvedFechasSinceFn;
+        $this->entranteEsPadre                  = $entranteEsPadre;
+        $this->padresViablesParaLaPlaza         = $padresViablesParaLaPlaza;
     }
 
     public function solicitud(): SolicitudDeCambio {
@@ -146,6 +176,14 @@ final class DictamenContext {
     /** @return array<string, string> */
     public function plazosUtc(): array {
         return $this->plazosUtc;
+    }
+
+    public function entranteEsPadre(): bool {
+        return $this->entranteEsPadre;
+    }
+
+    public function padresViablesParaLaPlaza(): int {
+        return $this->padresViablesParaLaPlaza;
     }
 
     /** @return callable(int): int */

@@ -8,9 +8,10 @@ use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\PlazosCalculator;
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Plazas\CandidatosResolver;
 use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
-use EntreRedes\Cambios\Plazas\Puntaje;
 
 /**
  * Builds a `DictamenContext` from the real database for a given
@@ -56,6 +57,30 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  * `computeUtc()` together with `Settings::plazosOffsets()` and
  * `Settings::timezone()`.
  *
+ * *** PADRES VIABLES ES POLÍTICA-DEPENDIENTE ***
+ * `DictamenContext::padresViablesParaLaPlaza()` is not a plain fact like
+ * `ocupaciones()` — whether a given OTHER candidate is "viable" depends on
+ * `BloqueoReemplazoPolicy` (CC5b), exactly like `Reglas\EntranteNoBloqueado`'s
+ * own verdict for the named entrante does. `DictamenContext` itself stays
+ * policy-agnostic for every OTHER field (a Regla decides how to read
+ * `entrantePlazasConCierreTruncado()`), but this one count cannot be handed
+ * over raw — `Plazas\CandidatosResolver::contarPadresViables()` needs a
+ * policy to even compute it. This assembler is therefore constructed with
+ * the SAME `$politicaCC5b` value `Plugin::boot()` also hands to
+ * `DictamenPipeline` (see that class's own docblock), so the count baked
+ * into the context and the policy `Reglas\EntranteNoBloqueado` separately
+ * applies to the NAMED entrante can never silently disagree.
+ *
+ * *** NO QUERY WHEN THE POLICY IS OFF, OR WHEN IT WOULD BE WASTED ***
+ * `Plazas\CandidatosResolver::contarPadresViables()` is, by its own class
+ * docblock, an N+1 query over the plaza's whole season roster — this
+ * assembler only ever calls it when `Settings::prioridadPadresActiva()` is
+ * `true` AND the entrante is NOT already a padre (an entrante who already is
+ * a padre can never trigger `Reglas\PrioridadDePadresRespetada`, so counting
+ * padres for them would be work nobody reads). With the policy at its
+ * default (OFF), `DictamenContext::padresViablesParaLaPlaza()` stays `0`
+ * without a single extra query.
+ *
  * *** THE SANITY CAP ON THE INJECTED COUNTER ***
  * `Plazas\CadenaResolver`'s own class docblock is explicit that an INFLATED
  * resolved-fechas count (the callable lying UPWARD) is NOT something that
@@ -73,26 +98,46 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  */
 final class DictamenContextAssembler {
 
-    private const META_KEY_METRICS = 'sp_metrics';
-
     private PlazaRepository $plazaRepository;
     private FechaRepository $fechaRepository;
     private Settings $settings;
     private \wpdb $wpdb;
     private EventLog $eventLog;
+    private JugadorMetricasReader $metricasReader;
+    private CandidatosResolver $candidatosResolver;
+    private BloqueoReemplazoPolicy $politicaCC5b;
 
+    /**
+     * @param BloqueoReemplazoPolicy|null $politicaCC5b The SAME policy value
+     *        `Plugin::boot()` also hands to `DictamenPipeline` /
+     *        `DictamenEngineFactory::create()` — see this class's docblock,
+     *        "PADRES VIABLES ES POLÍTICA-DEPENDIENTE". Null keeps
+     *        Reglas\EntranteNoBloqueado's own default
+     *        (`BloqueoReemplazoPolicy::topeTresFechas()`), exactly like that
+     *        rule's constructor.
+     * @param CandidatosResolver|null $candidatosResolver Defaults to a plain
+     *        instance built from $plazaRepository/$wpdb — overridable in
+     *        tests, same pattern as every other optional collaborator in
+     *        this class.
+     */
     public function __construct(
         PlazaRepository $plazaRepository,
         FechaRepository $fechaRepository,
         Settings $settings,
         \wpdb $wpdb,
-        EventLog $eventLog
+        EventLog $eventLog,
+        ?BloqueoReemplazoPolicy $politicaCC5b = null,
+        ?CandidatosResolver $candidatosResolver = null,
+        ?JugadorMetricasReader $metricasReader = null
     ) {
-        $this->plazaRepository = $plazaRepository;
-        $this->fechaRepository = $fechaRepository;
-        $this->settings        = $settings;
-        $this->wpdb            = $wpdb;
-        $this->eventLog        = $eventLog;
+        $this->plazaRepository    = $plazaRepository;
+        $this->fechaRepository    = $fechaRepository;
+        $this->settings           = $settings;
+        $this->wpdb               = $wpdb;
+        $this->eventLog           = $eventLog;
+        $this->politicaCC5b       = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
+        $this->metricasReader     = $metricasReader ?? new JugadorMetricasReader( $wpdb );
+        $this->candidatosResolver = $candidatosResolver ?? new CandidatosResolver( $wpdb, $plazaRepository, $this->metricasReader );
     }
 
     /**
@@ -135,13 +180,25 @@ final class DictamenContextAssembler {
 
         $ocupaciones = $this->plazaRepository->listOcupaciones( $solicitud->plazaId() );
 
+        $countResolvedFechasSinceFn = $this->boundedCountResolvedFechasSinceFn( $solicitud->seasonId() );
+
         $entrantePlayerId                 = $solicitud->entrantePlayerId();
         $entrantePuntaje                  = null;
+        $entranteEsPadre                  = false;
         $entranteOcupacionesEnOtrasPlazas = [];
         $entrantePlazasConCierreTruncado  = [];
+        $padresViablesParaLaPlaza         = 0;
 
         if ( null !== $entrantePlayerId ) {
-            $entrantePuntaje = $this->resolveEntrantePuntaje( $entrantePlayerId );
+            $metricas        = $this->metricasReader->resolve( $entrantePlayerId );
+            $entrantePuntaje = $metricas->puntaje();
+            $entranteEsPadre = $metricas->esPadre();
+
+            if ( null === $entrantePuntaje ) {
+                $this->eventLog->record( 'entrante.puntaje_no_encontrado', [
+                    'player_id' => $entrantePlayerId,
+                ] );
+            }
 
             $entranteOcupacionesEnOtrasPlazas = $this->plazaRepository->listOcupacionesVigentesDeJugador(
                 $solicitud->seasonId(),
@@ -153,6 +210,20 @@ final class DictamenContextAssembler {
                 $this->plazaRepository->listPlazasConCierreTruncadoDeJugador( $solicitud->seasonId(), $entrantePlayerId ),
                 $solicitud->plazaId()
             );
+
+            // Never gasta el query costoso de CandidatosResolver a menos que
+            // la política esté encendida Y el entrante realmente la necesite
+            // — un entrante que YA es padre nunca dispara
+            // Reglas\PrioridadDePadresRespetada, así que contar padres
+            // viables para él sería trabajo tirado. See class docblock,
+            // "PADRES VIABLES ES POLÍTICA-DEPENDIENTE".
+            if ( $this->settings->prioridadPadresActiva() && ! $entranteEsPadre ) {
+                $padresViablesParaLaPlaza = $this->candidatosResolver->contarPadresViables(
+                    $plaza,
+                    $this->politicaCC5b,
+                    $countResolvedFechasSinceFn
+                );
+            }
         }
 
         $plazosUtc = PlazosCalculator::computeUtc(
@@ -169,7 +240,9 @@ final class DictamenContextAssembler {
             $entranteOcupacionesEnOtrasPlazas,
             $entrantePlazasConCierreTruncado,
             $plazosUtc,
-            $this->boundedCountResolvedFechasSinceFn( $solicitud->seasonId() )
+            $countResolvedFechasSinceFn,
+            $entranteEsPadre,
+            $padresViablesParaLaPlaza
         );
     }
 
@@ -201,92 +274,6 @@ final class DictamenContextAssembler {
                 return $chainPlazaId !== $currentPlazaId;
             }
         ) );
-    }
-
-    /**
-     * The entrante's puntaje, read from `sp_metrics` postmeta on the
-     * player's post — raw `$wpdb`, never `get_post_meta()`, consistent with
-     * every other query in this feature (see `Plazas\PlazaRepository`'s
-     * class docblock: `wp_postmeta` is a WordPress core table this plugin
-     * reads directly, exactly like every `cambios_*` table it owns).
-     *
-     * *** TWO KEYS, BOTH CASE VARIANTS OF THE SAME METRIC ***
-     * `entre-redes-api.php` itself reads this same value under TWO different
-     * keys depending on which endpoint — `'puntaje'`
-     * (`entre_redes_get_jugador_por_id()`) and `'Puntaje'` (the
-     * partido-lineup endpoint). Both are tried here, lowercase first.
-     *
-     * *** NEVER DEFAULTS TO 0 *** A puntaje of 0 is not one of the torneo's
-     * 9 valid discrete values (1..5 in 0.5 steps) — treating a missing value
-     * as 0 would fabricate a fact about a real person. When NEITHER key is
-     * present (or the value found is empty), this returns `null` — a
-     * legitimate missing-data outcome `Reglas\PuntajeDentroDelTecho` already
-     * converts into its own BLOCKING motivo (`entrante_puntaje_indeterminado`,
-     * see that rule's docblock, "A MISSING PUNTAJE IS NEVER READ AS 'NO
-     * OBJECTION'") — so unlike the two collection queries above, a missing
-     * puntaje already fails CLOSED by itself; this method logs the gap
-     * (`entrante.puntaje_no_encontrado`) for an operator to go fix the data,
-     * but does not need to throw to stay safe.
-     *
-     * A value that IS present but is not one of the 9 valid puntajes is a
-     * different problem entirely — corrupted business data, not a gap — and
-     * `Puntaje::fromDecimal()` throws for it, deliberately uncaught here:
-     * fail loud is correct for that case (see class docblock's general
-     * contract).
-     *
-     * @throws \InvalidArgumentException When the stored value is not one of
-     *         the 9 valid puntajes — propagated from `Puntaje::fromDecimal()`.
-     */
-    private function resolveEntrantePuntaje( int $entrantePlayerId ): ?Puntaje {
-        $wpdb = $this->wpdb;
-        $p    = $wpdb->prefix;
-
-        $raw = $wpdb->get_var(
-            $wpdb->prepare(
-                "SELECT meta_value FROM {$p}postmeta WHERE post_id = %d AND meta_key = %s LIMIT 1",
-                $entrantePlayerId,
-                self::META_KEY_METRICS
-            )
-        );
-
-        $metrics = $this->decodeMetrics( $raw );
-        $value   = null;
-
-        if ( null !== $metrics ) {
-            $value = $metrics['puntaje'] ?? ( $metrics['Puntaje'] ?? null );
-        }
-
-        if ( null === $value || '' === $value ) {
-            $this->eventLog->record( 'entrante.puntaje_no_encontrado', [
-                'player_id' => $entrantePlayerId,
-            ] );
-
-            return null;
-        }
-
-        return Puntaje::fromDecimal( is_string( $value ) ? $value : (string) $value );
-    }
-
-    /**
-     * WordPress serializes an array meta_value via PHP's native
-     * `serialize()` — this reimplements just enough of `maybe_unserialize()`
-     * to read `sp_metrics` back without depending on WordPress at all,
-     * consistent with reading `wp_postmeta` via raw `$wpdb` in the first
-     * place. Anything that does not decode to an array (missing row,
-     * malformed blob) collapses into `null` — indistinguishable, for THIS
-     * purpose, from a genuinely absent one; see resolveEntrantePuntaje()'s
-     * docblock for why that is safe here.
-     *
-     * @return array<string, mixed>|null
-     */
-    private function decodeMetrics( ?string $raw ): ?array {
-        if ( null === $raw || '' === $raw ) {
-            return null;
-        }
-
-        $decoded = @unserialize( $raw, [ 'allowed_classes' => false ] );
-
-        return is_array( $decoded ) ? $decoded : null;
     }
 
     /**

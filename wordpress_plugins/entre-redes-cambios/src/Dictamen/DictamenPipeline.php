@@ -38,6 +38,7 @@ final class DictamenPipeline {
     private DictamenContextAssembler $assembler;
     private EventLog $eventLog;
     private ?BloqueoReemplazoPolicy $politicaCC5b;
+    private bool $prioridadPadresActiva;
 
     /**
      * @param BloqueoReemplazoPolicy|null $politicaCC5b Forwarded verbatim to
@@ -48,15 +49,22 @@ final class DictamenPipeline {
      *        "Contracts for slice 4" point 3 for why whoever eventually
      *        confirms CC5b must pass the real policy here explicitly rather
      *        than relying on this default forever.
+     * @param bool                        $prioridadPadresActiva Forwarded
+     *        verbatim to `DictamenEngineFactory::create()` — see
+     *        `Reglas\PrioridadDePadresRespetada`'s docblock. Default `false`,
+     *        mirroring `Calendario\Settings::prioridadPadresActiva()`'s own
+     *        default.
      */
     public function __construct(
         DictamenContextAssembler $assembler,
         EventLog $eventLog,
-        ?BloqueoReemplazoPolicy $politicaCC5b = null
+        ?BloqueoReemplazoPolicy $politicaCC5b = null,
+        bool $prioridadPadresActiva = false
     ) {
-        $this->assembler    = $assembler;
-        $this->eventLog     = $eventLog;
-        $this->politicaCC5b = $politicaCC5b;
+        $this->assembler             = $assembler;
+        $this->eventLog              = $eventLog;
+        $this->politicaCC5b          = $politicaCC5b;
+        $this->prioridadPadresActiva = $prioridadPadresActiva;
     }
 
     /**
@@ -68,7 +76,7 @@ final class DictamenPipeline {
         try {
             $ctx = $this->assembler->assemble( $solicitud );
 
-            return DictamenEngineFactory::create( $this->politicaCC5b )->evaluate( $ctx );
+            return DictamenEngineFactory::create( $this->politicaCC5b, $this->prioridadPadresActiva )->evaluate( $ctx );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'dictamen.fallido', [
                 'season_id' => $solicitud->seasonId(),

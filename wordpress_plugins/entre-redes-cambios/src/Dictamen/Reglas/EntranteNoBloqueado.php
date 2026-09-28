@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Dictamen\Reglas;
 
+use EntreRedes\Cambios\Dictamen\BloqueoReemplazoEvaluator;
+use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Dictamen\DictamenContext;
 use EntreRedes\Cambios\Dictamen\Motivo;
-use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Dictamen\Regla;
-use EntreRedes\Cambios\Plazas\CadenaResolver;
 
 /**
  * The entrante of a `sustitucion` cannot be blocked by having left ANOTHER
@@ -29,18 +29,24 @@ use EntreRedes\Cambios\Plazas\CadenaResolver;
  * closure — this rule evaluates the injected policy against every one of
  * them and blocks on the first match; an entrante with no trunca closures
  * anywhere is never blocked, trivially.
+ *
+ * *** THE ACTUAL PER-CHAIN ALGORITHM LIVES IN BloqueoReemplazoEvaluator ***
+ * Extracted so Plazas\CandidatosResolver can answer "is this OTHER candidate
+ * blocked" with the exact same logic — see that class's own docblock,
+ * "WHY THIS EXISTS AT ALL". This rule is now a thin adapter: it reads
+ * DictamenContext, delegates the actual blocking decision, and shapes the
+ * Motivo.
  */
 final class EntranteNoBloqueado implements Regla {
 
     private const CODE = 'entrante_bloqueado_por_cierre_truncado';
 
-    /** How many resolved fechas TOPE_TRES_FECHAS caps the block at. */
-    private const TOPE_FECHAS = 3;
-
     private BloqueoReemplazoPolicy $politica;
+    private BloqueoReemplazoEvaluator $evaluador;
 
-    public function __construct( ?BloqueoReemplazoPolicy $politica = null ) {
-        $this->politica = $politica ?? BloqueoReemplazoPolicy::topeTresFechas();
+    public function __construct( ?BloqueoReemplazoPolicy $politica = null, ?BloqueoReemplazoEvaluator $evaluador = null ) {
+        $this->politica  = $politica ?? BloqueoReemplazoPolicy::topeTresFechas();
+        $this->evaluador = $evaluador ?? new BloqueoReemplazoEvaluator();
     }
 
     public function evaluate( DictamenContext $ctx ): ?Motivo {
@@ -50,70 +56,24 @@ final class EntranteNoBloqueado implements Regla {
             return null;
         }
 
-        foreach ( $ctx->entrantePlazasConCierreTruncado() as $ocupacionesDeOtraPlaza ) {
-            if ( $this->isBlockedAt( $entrantePlayerId, $ocupacionesDeOtraPlaza, $ctx ) ) {
-                return new Motivo(
-                    self::CODE,
-                    'El entrante está bloqueado por haber dejado trunca otra plaza — ver CC5b (política pendiente de confirmación).',
-                    // See CC5b in this class's docblock and BloqueoReemplazoPolicy's
-                    // own docblock: WHICH reading decided this motivo is not yet
-                    // confirmed policy, so it must travel with the dictamen rather
-                    // than live only in this rule's constructor argument — the
-                    // process owner's eventual answer needs to be checkable
-                    // against what was actually applied, not re-derived from a
-                    // wiring decision made months earlier.
-                    [ 'politica' => $this->politica->isHastaLiberacionDePlaza() ? 'hasta_liberacion_de_plaza' : 'tope_tres_fechas' ]
-                );
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $ocupaciones The other plaza's
-     *        full chain.
-     */
-    private function isBlockedAt( int $entrantePlayerId, array $ocupaciones, DictamenContext $ctx ): bool {
-        if ( $this->politica->isHastaLiberacionDePlaza() ) {
-            $resolver = new CadenaResolver( $ctx->countResolvedFechasSinceFn() );
-
-            return in_array( $entrantePlayerId, $resolver->listExOcupantesBloqueados( $ocupaciones ), true );
-        }
-
-        // TOPE_TRES_FECHAS: blocked only for whatever remains of 3 fechas
-        // counted from the moment the entrante LEFT (fecha_hasta_id) that
-        // other plaza — independent of that plaza's own liberation.
-        $cierreTrunco = $this->truncatedClosureOf( $entrantePlayerId, $ocupaciones );
-
-        if ( null === $cierreTrunco ) {
-            return false;
-        }
-
-        try {
-            $resueltas = ( $ctx->countResolvedFechasSinceFn() )( (int) $cierreTrunco['fecha_hasta_id'] );
-        } catch ( \Throwable $e ) {
-            // Fail closed, same discipline as CadenaResolver: an uncountable
-            // answer must never be read as "already unblocked".
-            return true;
-        }
-
-        if ( $resueltas < 0 ) {
-            return true;
-        }
-
-        return $resueltas < self::TOPE_FECHAS;
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $ocupaciones
-     * @return array<string, mixed>|null
-     */
-    private function truncatedClosureOf( int $playerId, array $ocupaciones ): ?array {
-        foreach ( $ocupaciones as $ocupacion ) {
-            if ( $playerId === (int) $ocupacion['player_id'] && 'trunca' === ( $ocupacion['cerrada_por'] ?? null ) ) {
-                return $ocupacion;
-            }
+        if ( $this->evaluador->isBlockedEnAlguna(
+            $entrantePlayerId,
+            $ctx->entrantePlazasConCierreTruncado(),
+            $this->politica,
+            $ctx->countResolvedFechasSinceFn()
+        ) ) {
+            return new Motivo(
+                self::CODE,
+                'El entrante está bloqueado por haber dejado trunca otra plaza — ver CC5b (política pendiente de confirmación).',
+                // See CC5b in this class's docblock and BloqueoReemplazoPolicy's
+                // own docblock: WHICH reading decided this motivo is not yet
+                // confirmed policy, so it must travel with the dictamen rather
+                // than live only in this rule's constructor argument — the
+                // process owner's eventual answer needs to be checkable
+                // against what was actually applied, not re-derived from a
+                // wiring decision made months earlier.
+                [ 'politica' => $this->politica->isHastaLiberacionDePlaza() ? 'hasta_liberacion_de_plaza' : 'tope_tres_fechas' ]
+            );
         }
 
         return null;
