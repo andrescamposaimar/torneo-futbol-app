@@ -162,7 +162,18 @@ class PlazasControllerTest extends TestCase {
         }
     }
 
-    public function test_listar_reads_fechas_faltantes_as_null_when_ocupaciones_could_not_be_read(): void {
+    /**
+     * `PlazaRepository::listOcupaciones()` now THROWS on a wpdb-level read
+     * failure (see its own docblock) — a genuinely empty chain reaching
+     * `shapePlaza()` is therefore only the DEFENSIVE fallback for a plaza
+     * that was somehow persisted with no ocupaciones at all, never a stand-in
+     * for "the read failed" (see `resolveFechasFaltantes()`'s own docblock).
+     * This test mocks that empty array directly, which still exercises the
+     * fallback branch; `test_listar_returns_a_real_error_when_the_underlying_read_fails()`
+     * below is what actually proves a REAL read failure now aborts the whole
+     * response instead of reaching this branch at all.
+     */
+    public function test_listar_defensively_reads_fechas_faltantes_as_null_when_ocupaciones_is_empty(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
@@ -170,9 +181,6 @@ class PlazasControllerTest extends TestCase {
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
             [ 'id' => 9, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
         ] );
-        // PlazaRepository::listOcupaciones() itself reads a wpdb-level query
-        // failure as "no rows" rather than throwing (see its own docblock) —
-        // this endpoint must answer "unknown", never a fabricated 0.
         $plazaRepository->method( 'listOcupaciones' )->willReturn( [] );
 
         $fechaRepository = $this->createMock( FechaRepository::class );
@@ -383,6 +391,57 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( self::SEASON_ID, $logged['season_id'] );
         $this->assertSame( self::TEAM_ID, $logged['team_id'] );
         $this->assertSame( \RuntimeException::class, $logged['excepcion'] );
+    }
+
+    /**
+     * THE test that closes the read-failure audit's gap for `/plazas`,
+     * mirroring `Rest\FechaControllerTest`'s own real-repository test: every
+     * OTHER test in this class mocks `PlazaRepository` entirely, which proves
+     * the CONTROLLER handles a throw but never that
+     * `PlazaRepository::listPlazasByEquipo()` itself actually throws now.
+     * This drives a REAL `PlazaRepository` against the SQLite test shim, with
+     * a `\wpdb` double that fails ONLY that method's own query, and asserts
+     * the endpoint answers a real error — never a 200 with an empty roster a
+     * captain with real plazas would otherwise see with no explanation
+     * anywhere.
+     */
+    public function test_listar_returns_a_real_error_when_the_underlying_read_fails(): void {
+        InitialSchema::up();
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+        $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $failingWpdb            = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_plaza' );
+            $failingPlazaRepository = new PlazaRepository( $failingWpdb, $this->eventLog );
+
+            $fechaRepository = $this->createMock( FechaRepository::class );
+
+            $controller = new PlazasController( $authorizer, $failingPlazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+            $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+            ] ) );
+
+            $this->assertSame( 500, $response->get_status() );
+            $this->assertNotSame(
+                [ 'plazas' => [] ],
+                $response->get_data(),
+                'A failed read must never look identical to "this team genuinely has no plazas".'
+            );
+            $this->assertTrue( $this->eventLog->has( 'rest.plazas_listar_fallida' ) );
+            $this->assertTrue(
+                $this->eventLog->has( 'lectura.fallida' ),
+                'PlazaRepository::listPlazasByEquipo() must log its own read failure too.'
+            );
+        } finally {
+            $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -721,6 +780,39 @@ class PlazasControllerTest extends TestCase {
 
         return $request;
     }
+
+    /**
+     * A `\wpdb` subclass whose get_results() sets $wpdb->last_error and
+     * returns [] whenever the SQL contains $mustContain — same double as
+     * `Plazas\PlazaRepositoryTest::wpdbThatFailsGetResults()`, copied here so
+     * this suite can drive a REAL `PlazaRepository` into a genuine read
+     * failure instead of mocking the repository away.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
     /**
      * @return array<int, array<string, mixed>> $n fechas already resolved,
      *         the shape Calendario\FechaRepository::listBySeason() returns and

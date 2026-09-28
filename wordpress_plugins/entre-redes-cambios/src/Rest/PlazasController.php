@@ -30,19 +30,36 @@ use EntreRedes\Cambios\Plazas\PlazaRepository;
  * Rest\HandlesCapitanAuthorization's own docblock; same discipline as
  * Rest\SolicitudesController.
  *
- * *** THIS IS A READ. A SINGLE PLAZA'S CALCULATION FAILING DOES NOT FAIL
- * THE WHOLE RESPONSE. *** `Plazas\CadenaResolver::countFechasUntilLiberacion()`
- * can throw `FechaCountUnavailableException` for one specific plaza (a
- * broken counter, an unreachable fecha) while every other plaza in the same
- * team is perfectly fine to compute. Letting that one exception bubble up
- * to `listar()`'s generic `\Throwable` catch would turn ONE plaza's problem
- * into a 500 for the captain's ENTIRE roster — eleven plazas hidden because
- * one could not be counted, when a READ carries no risk of authorizing
- * anything: there is nothing to protect by refusing to show the other ten.
- * `shapePlaza()` therefore catches that exception per plaza, logs it, and
- * degrades that ONE row to `fechas_faltantes_liberacion: null` plus an
- * explicit `fechas_faltantes_liberacion_indeterminado: true` marker — never
- * a silently wrong `0`.
+ * *** THIS IS A READ. ONE KIND OF PER-PLAZA FAILURE DOES NOT FAIL THE WHOLE
+ * RESPONSE — A READ THAT CANNOT EVEN LOAD THE PLAZA'S DATA DOES. ***
+ * `Plazas\CadenaResolver::countFechasUntilLiberacion()` can throw
+ * `FechaCountUnavailableException` for one specific plaza (a broken counter,
+ * an unreachable fecha) while every other plaza in the same team is
+ * perfectly fine to compute. Letting that one exception bubble up to
+ * `listar()`'s generic `\Throwable` catch would turn ONE plaza's problem into
+ * a 500 for the captain's ENTIRE roster — eleven plazas hidden because one
+ * could not be counted, when this specific failure carries no risk of
+ * authorizing anything: there is nothing to protect by refusing to show the
+ * other ten. `resolveFechasFaltantes()` therefore catches THAT exception per
+ * plaza, logs it, and degrades that ONE row to `fechas_faltantes_liberacion:
+ * null` plus an explicit `fechas_faltantes_liberacion_indeterminado: true`
+ * marker — never a silently wrong `0`.
+ *
+ * A failed READ of the roster or chain data itself
+ * (`Plazas\PlazaRepository::listPlazasByEquipo()` / `listOcupaciones()`) is
+ * NOT given this same per-row tolerance: both now throw on a wpdb-level
+ * failure (see their own docblocks — a prior version of this class's
+ * docblock claimed `listOcupaciones()` read a failure as "no rows"; that is
+ * no longer true), and `listar()`'s outer `\Throwable` catch turns that into
+ * a 500 for the WHOLE response, logged as `rest.plazas_listar_fallida`. This
+ * is a deliberate, coarser failure mode than the per-row degradation above:
+ * a plaza whose OWN chain cannot be read at all has no honest partial
+ * answer to show for `ocupante_player_id` — showing `null` there would be
+ * indistinguishable from "this plaza genuinely has no occupant", which
+ * `PlazaRepository::openPlaza()`'s invariant says can never happen. Failing
+ * the whole request is the honest choice; degrading only that one row would
+ * require inventing a NEW "indeterminado" marker for `ocupante_player_id`
+ * this class does not have today.
  *
  * *** THIS TOLERANCE DOES NOT EXTEND TO WRITES *** — creating a solicitud,
  * or publishing the Friday lote, still fails closed and loud on the exact
@@ -140,20 +157,18 @@ class PlazasController {
      * `ocupante_player_id` is null only when the plaza somehow has no vigent
      * ocupación (should not happen once PlazaRepository::openPlaza() has
      * run, but this endpoint does not assume it — see
-     * PlazaRepository::findOcupacionVigente()'s own docblock).
+     * PlazaRepository::findOcupacionVigente()'s own docblock). A plaza whose
+     * ocupaciones chain could not even be READ never reaches this shape at
+     * all — PlazaRepository::listOcupaciones() throws on a wpdb-level
+     * failure, which aborts the WHOLE response (see this class's docblock,
+     * "THIS IS A READ") rather than rendering as a fabricated `null`.
      *
-     * `fechas_faltantes_liberacion` is null in TWO distinct cases, both
-     * still an honest "unknown", never a fabricated 0 — `fechas_faltantes_
-     * liberacion_indeterminado` tells them apart:
-     *   - `indeterminado: false` — the plaza's own ocupaciones chain could
-     *     not be READ (PlazaRepository::listOcupaciones() reads a wpdb-level
-     *     failure as "no rows" rather than throwing — see that method's
-     *     docblock, "WHY listOcupaciones() ITSELF WAS NOT CHANGED").
-     *   - `indeterminado: true` — the chain WAS read, but the liberation
-     *     count itself could not be trusted (CadenaResolver's own injected
-     *     counter threw `FechaCountUnavailableException`) — see this class's
-     *     docblock, "THIS IS A READ", for why that failure degrades only
-     *     THIS plaza's row instead of failing the whole response.
+     * `fechas_faltantes_liberacion` is null, with `fechas_faltantes_
+     * liberacion_indeterminado: true`, when the chain WAS read but the
+     * liberation count itself could not be trusted (CadenaResolver's own
+     * injected counter threw `FechaCountUnavailableException`) — see this
+     * class's docblock, "THIS IS A READ", for why that ONE failure degrades
+     * only THIS plaza's row instead of failing the whole response.
      */
     public function listar( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -466,15 +481,21 @@ class PlazasController {
     }
 
     /**
-     * The per-plaza degradation this class's docblock describes
-     * ("A SINGLE PLAZA'S CALCULATION FAILING DOES NOT FAIL THE WHOLE
-     * RESPONSE"). An empty $ocupaciones chain is the pre-existing "no rows
-     * read" case (PlazaRepository::listOcupaciones()'s own docblock) — still
-     * an honest `null`, not this method's concern to log, since nothing was
-     * even attempted. A THROWN FechaCountUnavailableException is different:
-     * something WAS attempted and could not be trusted, so it is logged here
-     * — once, with the plaza id — before degrading, exactly like every other
-     * failure path in this plugin logs before answering conservatively.
+     * The per-plaza degradation this class's docblock describes ("ONE KIND
+     * OF PER-PLAZA FAILURE DOES NOT FAIL THE WHOLE RESPONSE"). An empty
+     * $ocupaciones chain reaching THIS method is no longer a "read failed"
+     * case — PlazaRepository::listOcupaciones() throws before `listar()`
+     * ever builds this array, which aborts the whole response instead (see
+     * that method's own docblock). An empty chain here would mean a plaza
+     * was genuinely persisted with none, which
+     * PlazaRepository::openPlaza()'s invariant says should never happen;
+     * this branch is kept as a defensive fallback, not a documented normal
+     * case, and returns the same honest "unknown" rather than guessing. A
+     * THROWN FechaCountUnavailableException is the real per-row failure this
+     * method exists to degrade: something WAS attempted and could not be
+     * trusted, so it is logged here — once, with the plaza id — before
+     * degrading, exactly like every other failure path in this plugin logs
+     * before answering conservatively.
      *
      * @param array<int, array<string, mixed>> $ocupaciones
      * @return array{0: int|null, 1: bool} [fechas_faltantes_liberacion,

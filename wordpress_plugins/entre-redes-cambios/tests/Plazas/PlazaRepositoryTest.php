@@ -999,6 +999,78 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // Read-failure audit — listPlazasByEquipo() / listOcupaciones() now fail
+    // loud, matching the discipline the "slice 4b" queries below already
+    // follow — see class docblock, "READ FAILURES...".
+    // -------------------------------------------------------------------------
+
+    public function test_list_plazas_by_equipo_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_plaza' );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->listPlazasByEquipo( self::SEASON_ID, 100 );
+    }
+
+    public function test_list_plazas_by_equipo_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_plaza' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new PlazaRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->listPlazasByEquipo( self::SEASON_ID, 100 );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'listPlazasByEquipo', $failingEventLog->last()['contexto']['operacion'] );
+    }
+
+    public function test_list_plazas_by_equipo_still_returns_an_empty_array_when_genuinely_none(): void {
+        $this->assertSame( [], $this->repo->listPlazasByEquipo( self::SEASON_ID, 999999 ) );
+    }
+
+    public function test_list_ocupaciones_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY fecha_desde_id ASC' );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->listOcupaciones( $plazaId );
+    }
+
+    public function test_list_ocupaciones_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY fecha_desde_id ASC' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new PlazaRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->listOcupaciones( $plazaId );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'listOcupaciones', $failingEventLog->last()['contexto']['operacion'] );
+    }
+
+    // -------------------------------------------------------------------------
     // Slice 4b — dictamen context queries: fail loud, never silently empty
     // -------------------------------------------------------------------------
 

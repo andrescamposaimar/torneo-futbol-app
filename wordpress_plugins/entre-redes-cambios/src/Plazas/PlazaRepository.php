@@ -78,7 +78,8 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * below is the guard: openPlaza(), succeedOcupacion() and
  * closeOcupacionByRegresoTitular() all call it before writing anything.
  *
- * *** READ FAILURES MUST NEVER READ AS "NO ROWS" (slice 4b) ***
+ * *** READ FAILURES MUST NEVER READ AS "NO ROWS" (slice 4b, widened in the
+ * read-failure audit) ***
  * `listOcupacionesVigentesDeJugador()` and `listPlazasConCierreTruncadoDeJugador()`
  * feed `Dictamen\DictamenContext` (via `Dictamen\DictamenContextAssembler`),
  * and `Dictamen\Reglas\EntranteDisponible` / `Dictamen\Reglas\EntranteNoBloqueado`
@@ -87,18 +88,31 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * call that fails at the wpdb level returns `null` (or, depending on the
  * driver, an empty array while leaving `$wpdb->last_error` non-empty) —
  * either way, indistinguishable from a genuine "no rows" result by return
- * value alone. `assertReadSucceeded()` is the guard both new methods (and
- * their private `listOcupacionesOrThrow()` helper) call immediately after
- * every `get_results()`: it throws — logging `lectura.fallida` first — the
- * instant either signal appears, so a broken query becomes a loud failure
- * instead of a silent authorization. Every OTHER read in this class
- * (`findPlaza()`, `listPlazasByEquipo()`, `listOcupaciones()`,
- * `findOcupacionVigente()`) predates this guard and is unchanged — a query
- * failure there still reads as "not found" / "no rows", exactly as before
- * slice 4b. That is an accepted, narrower gap: none of those results feeds a
- * Regla that reads an empty collection as "no objection" the way the two
- * new methods do (see Dictamen\DictamenContextAssembler's class docblock,
- * "WHY listOcupaciones() ITSELF WAS NOT CHANGED").
+ * value alone. `assertReadSucceeded()` is the guard every `get_results()`
+ * read in this class now calls immediately after the query: it throws —
+ * logging `lectura.fallida` first — the instant either signal appears, so a
+ * broken query becomes a loud failure instead of a silent authorization.
+ *
+ * `listPlazasByEquipo()` and `listOcupaciones()` originally predated this
+ * guard (slice 4b left them as an accepted, narrower gap — see
+ * Dictamen\DictamenContextAssembler's class docblock, "WHY listOcupaciones()
+ * ITSELF WAS NOT CHANGED", for the reasoning at the time) but are now routed
+ * through it too: `listPlazasByEquipo()` feeds the "Mi Plantel" screen
+ * (Rest\PlazasController::listar()`), where a captain reading an empty roster
+ * is indistinguishable from "you have no plazas" — and `listOcupaciones()`
+ * feeds that same screen's per-plaza `ocupante_player_id` AND the dictamen
+ * engine's `DictamenContext::ocupaciones()` — see
+ * Dictamen\DictamenContextAssembler's class docblock for why an empty chain
+ * there is no longer treated as an acceptable gap either.
+ *
+ * `findPlaza()` is the one read left NOT routed through `assertReadSucceeded()`
+ * — see that method's own docblock for why: every current caller only ever
+ * treats a `null` return as a reason to refuse/report "plaza not found",
+ * never as permission, so the narrower gap is intentional there, unlike the
+ * two methods above. `findOcupacionVigente()` already calls
+ * `assertReadSucceeded()` (see its own docblock) — it was NOT left unchanged
+ * the way this section used to claim; that was a stale claim in this
+ * docblock, corrected here.
  *
  * *** "WithinTransaction" VARIANTS (slice 4c) ***
  * `succeedOcupacionWithinTransaction()` and
@@ -256,6 +270,17 @@ class PlazaRepository {
     }
 
     /**
+     * *** WHY A FAILED READ HERE STILL READS AS "NOT FOUND" *** Every current
+     * caller (`prepareSucceedOcupacion()`, `prepareRegresoTitular()`,
+     * `closePlaza()`, `Dictamen\DictamenContextAssembler::assemble()`,
+     * `Rest\PlazasController::listarCandidatos()`) treats a `null` return as
+     * a reason to REFUSE the call ("plaza {id} does not exist" /
+     * `plaza_no_encontrada`) — never as permission to proceed. Misreading a
+     * wpdb-level failure as "not found" here can only ever produce a
+     * wrongful denial, the same reasoning as
+     * `Capitania\CapitanRepository::findCapitanVigente()` — so this read is
+     * deliberately NOT routed through `assertReadSucceeded()`.
+     *
      * @return array<string, mixed>|null
      */
     public function findPlaza( int $plazaId ): ?array {
@@ -274,7 +299,15 @@ class PlazaRepository {
     }
 
     /**
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** This is
+     * the sole data source for `Rest\PlazasController::listar()` — the
+     * captain-facing "Mi Plantel" screen. A failed read misread as "this team
+     * has no plazas" would render as an empty roster: a captain with real
+     * plazas silently told they have none, with no error and no `EventLog`
+     * entry anywhere to explain why. See class docblock, "READ FAILURES...".
+     *
      * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level.
      */
     public function listPlazasByEquipo( int $seasonId, int $teamId ): array {
         $wpdb = $this->wpdb;
@@ -291,7 +324,9 @@ class PlazaRepository {
             ARRAY_A
         );
 
-        return $rows ?: [];
+        $this->assertReadSucceeded( $rows, 'listPlazasByEquipo', [ 'season_id' => $seasonId, 'team_id' => $teamId ] );
+
+        return $rows;
     }
 
     /**
@@ -300,7 +335,40 @@ class PlazaRepository {
      * share the same starting fecha, which should not happen but costs
      * nothing to order deterministically anyway).
      *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** Two
+     * consumers both read an empty chain as a FACT, not as "unknown":
+     *   - `Rest\PlazasController::listar()` (the "Mi Plantel" screen) derives
+     *     `ocupante_player_id` from this chain's vigent link — an empty
+     *     chain renders as "this plaza has no current occupant", which is
+     *     never actually true (see `PlazaRepository::openPlaza()`'s genesis
+     *     ocupación guarantee) but would look like a legitimate answer to a
+     *     captain.
+     *   - `Dictamen\DictamenContextAssembler::assemble()` feeds this straight
+     *     into `DictamenContext::ocupaciones()`; `DictamenContext::vigente()`
+     *     returns null for an empty chain, and
+     *     `Dictamen\Reglas\PlazaConOcupacionVigente` reports that as its own
+     *     REJECTING motivo (`plaza_sin_ocupacion_vigente`) — so a silent read
+     *     failure here already failed CLOSED before this fix, but for the
+     *     WRONG reason: "the plaza has no vigent occupant" instead of "the
+     *     database could not be read". Verified against
+     *     `Dictamen\DictamenPipeline::evaluate()`, which catches \Throwable
+     *     from `assemble()`, logs `dictamen.fallido`, and RE-THROWS — it does
+     *     NOT swallow this into a fake Dictamen — and against
+     *     `Rest\SolicitudesController::crear()`, whose own `\Throwable` catch
+     *     logs `rest.solicitud_crear_fallida` and answers a real 500, never a
+     *     200 with a rejection motivo. Throwing here therefore keeps both
+     *     paths fail-closed and makes the REASON honest.
+     *
+     * This was slice 4b's one deliberately accepted gap (see
+     * `Dictamen\DictamenContextAssembler`'s class docblock, "WHY
+     * listOcupaciones() ITSELF WAS NOT CHANGED", now corrected there too) —
+     * closed here because a later screen (`Rest\PlazasController`) started
+     * reading this same empty-on-failure result as a user-visible fact, which
+     * the "fails closed by construction of the ruleset" argument never
+     * covered for that consumer.
+     *
      * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level.
      */
     public function listOcupaciones( int $plazaId ): array {
         $wpdb = $this->wpdb;
@@ -316,7 +384,9 @@ class PlazaRepository {
             ARRAY_A
         );
 
-        return $rows ?: [];
+        $this->assertReadSucceeded( $rows, 'listOcupaciones', [ 'plaza_id' => $plazaId ] );
+
+        return $rows;
     }
 
     /**
@@ -1099,7 +1169,16 @@ class PlazaRepository {
      * would only be rolled back.
      *
      * @throws \InvalidArgumentException When $fechaId does not exist in
-     *         cambios_fecha, or exists but belongs to a different season.
+     *         cambios_fecha, or exists but belongs to a different season — OR
+     *         when the lookup itself fails at the wpdb level. `get_row()`
+     *         returns `null` for both, and this guard already rejects `null`
+     *         unconditionally: a wpdb-level failure here can only ever
+     *         produce this SAME wrongful denial (a write refused for a
+     *         fecha_id that actually exists), never a wrongful grant, so it
+     *         is intentionally NOT split into a separate `\RuntimeException`
+     *         path the way `Calendario\FechaRepository::countResolvedFechasSince()`'s
+     *         equivalent lookup now is — the failure mode is identical
+     *         either way, only the exception TYPE and message would differ.
      */
     private function assertFechaExistsInSeason( int $fechaId, int $seasonId, string $operacion, string $campo, ?int $plazaId = null ): void {
         $wpdb = $this->wpdb;
