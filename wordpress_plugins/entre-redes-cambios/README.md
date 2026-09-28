@@ -251,6 +251,65 @@ The `cambios_ocupacion` id each solicitud's write produced is persisted back ont
 
 `publicarLote()`, `aprobar()` / `rechazar()` / `anular()` are among the most dangerous entry points this plugin exposes — they write real occupancy changes over real rosters. None of them perform a role or ownership check of their own; a future REST wrapper MUST verify the caller's role (and, for `aprobar`/`rechazar`/`anular`, that the solicitud belongs to a team they may act on) BEFORE invoking any of them.
 
+## Parent priority: a policy that is built, tested, and deliberately OFF
+
+The tournament has always distinguished parents of the school from historical
+guests, and has always preferred parents — as a soft rule nobody enforced. It is
+now a policy object, `Plazas\PrioridadDePadresPolicy`, injected explicitly in
+`Plugin::boot()` and **off by default**, which reproduces today's behaviour
+exactly.
+
+When it is ON, `Dictamen\Reglas\PrioridadDePadresRespetada` rejects a non-parent
+entrante if, and only if, at least one VIABLE parent exists for that plaza.
+
+### Why this is a restriction, not a sort order
+
+An ordering would be an app concern. This is not: one candidate's eligibility
+depends on the rest of the pool, so the engine itself has to know whether any
+parent fits that plaza. `DictamenContextAssembler` loads that count only when the
+policy is on AND the entrante is not a parent — with the policy off, the feature
+costs zero extra queries.
+
+### "Viable" means available, not merely well-rated
+
+`Plazas\CandidatosResolver` counts a parent only when their puntaje fits the
+plaza's ceiling AND they are actually free: not blocked by a truncated
+ocupación, not holding another plaza. A parent with the right rating but blocked
+helps nobody, and counting him would bar the non-parent WITHOUT letting the
+parent in — the team would be unable to change anyone at all. The rule exists to
+prefer parents, not to trap teams.
+
+`CandidatosResolver` is also the single source of "who may fill this plaza",
+shared by the rule and by the endpoint that feeds the captain's screen. Had the
+app computed eligibility on its own, it would eventually disagree with the
+engine, and a captain would pick someone the screen showed as valid only for the
+system to reject it. The backend decides; the app displays.
+
+### How a parent is recognised, and why the blank counts as "not a parent"
+
+`sp_metrics.caracter` is free text. The historical dump holds some two dozen
+distinct values, several unrelated to the distinction — including one that is a
+playing position mis-entered into the field. Every recent export holds only
+`Padre Activo` or nothing. So a candidate counts as a parent when the value
+starts with `padre`, case-insensitively; anything else, blank included, counts
+as not a parent. This policy takes something away, and an ambiguous record must
+never be the reason someone gains an advantage.
+
+### The data gap that gates turning this on
+
+> In the March 2026 players export, **691 of 1059 players have `caracter`
+> empty** — 65%. Only 368 carry `Padre Activo`.
+
+With the rule as written, empty means "not a parent". Turning this policy ON
+today would therefore treat two thirds of the tournament as guests, barring them
+from any plaza where a single `Padre Activo` happens to be viable. That is
+almost certainly a data-entry gap rather than the truth about who these people
+are.
+
+**The switch exists; the data does not yet support flipping it.** Populating
+`caracter` for the active roster is a prerequisite, not a nice-to-have — and it
+is a WordPress data task, not a code change.
+
 ## Scope of this slice (slice 0)
 
 This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registers no REST routes, no admin screens, and no cron jobs. It only runs migrations on activation. The calendar admin screen, the solicitud/regreso REST endpoints, and the seeding cron are later slices, built on top of the domain logic here once it is validated.

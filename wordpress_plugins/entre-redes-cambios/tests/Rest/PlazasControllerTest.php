@@ -8,7 +8,10 @@ use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
 use EntreRedes\Cambios\Capitania\Exception\InvalidTokenException;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Plazas\CandidatoEstado;
+use EntreRedes\Cambios\Plazas\CandidatosResolver;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Rest\PlazasController;
 use PHPUnit\Framework\TestCase;
 
@@ -72,7 +75,7 @@ class PlazasControllerTest extends TestCase {
             }
         );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -113,7 +116,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository = $this->createMock( FechaRepository::class );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -165,7 +168,7 @@ class PlazasControllerTest extends TestCase {
             }
         );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -196,7 +199,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository = $this->createMock( FechaRepository::class );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [ 'season_id' => self::SEASON_ID ] ) );
 
@@ -218,7 +221,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository = $this->createMock( FechaRepository::class );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -247,7 +250,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository = $this->createMock( FechaRepository::class );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -264,6 +267,112 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( self::SEASON_ID, $logged['season_id'] );
         $this->assertSame( self::TEAM_ID, $logged['team_id'] );
         $this->assertSame( \RuntimeException::class, $logged['excepcion'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // listarCandidatos()
+    // -------------------------------------------------------------------------
+
+    private const PLAZA_ID = 1;
+
+    public function test_listar_candidatos_happy_path_shapes_every_candidato(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository = $this->createMock( FechaRepository::class );
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )
+            ->method( 'paraPlaza' )
+            ->willReturn( [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
+            ] );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+            'plaza_id'  => self::PLAZA_ID,
+        ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame(
+            [
+                [ 'player_id' => 800, 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                [ 'player_id' => 801, 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+            ],
+            $response->get_data()['candidatos']
+        );
+    }
+
+    public function test_listar_candidatos_missing_fields_returns_400(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->expects( $this->never() )->method( 'authorize' );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $fechaRepository = $this->createMock( FechaRepository::class );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+        $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $this->assertSame( 400, $response->get_status() );
+    }
+
+    public function test_listar_candidatos_returns_403_without_touching_the_resolver(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willThrowException( new InvalidTokenException() );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->expects( $this->never() )->method( 'findPlaza' );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->never() )->method( 'paraPlaza' );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+            'plaza_id'  => self::PLAZA_ID,
+        ] ) );
+
+        $this->assertSame( 403, $response->get_status() );
+    }
+
+    public function test_listar_candidatos_returns_400_when_the_plaza_does_not_match_season_or_team(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => 999999, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->never() )->method( 'paraPlaza' );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+            'plaza_id'  => self::PLAZA_ID,
+        ] ) );
+
+        $this->assertSame( 400, $response->get_status() );
     }
 
     // -------------------------------------------------------------------------

@@ -72,6 +72,18 @@ class Settings {
         ];
     }
 
+    /**
+     * Whether the reglamento's "prioridad para padres" is an ENFORCED gate
+     * (a non-padre entrante is ineligible whenever a viable padre exists for
+     * the plaza) rather than the soft, unenforced preference it is today —
+     * see Dictamen\Reglas\PrioridadDePadresRespetada's own docblock for the
+     * full rule. Default: `false` (OFF) — see
+     * Migrations\InitialSchema::SEED_DEFAULTS, 'prioridad_padres_activa'.
+     */
+    public function prioridadPadresActiva(): bool {
+        return $this->readBool( 'prioridad_padres_activa', (string) InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'] );
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
@@ -106,5 +118,14 @@ class Settings {
 
     private function readInt( string $key, int $default ): int {
         return (int) $this->readString( $key, (string) $default );
+    }
+
+    /**
+     * `'1'` is true, anything else (including an absent row, via $default)
+     * is false — the same "stored as a string, typed at the accessor"
+     * discipline as readInt(), never a second storage representation.
+     */
+    private function readBool( string $key, string $default ): bool {
+        return '1' === $this->readString( $key, $default );
     }
 }

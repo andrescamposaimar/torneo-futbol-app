@@ -7,8 +7,11 @@ namespace EntreRedes\Cambios\Rest;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
 use EntreRedes\Cambios\Capitania\Exception\AuthorizationDeniedException;
+use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\CadenaResolver;
+use EntreRedes\Cambios\Plazas\CandidatoEstado;
+use EntreRedes\Cambios\Plazas\CandidatosResolver;
 use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 
@@ -56,11 +59,25 @@ class PlazasController {
     private PlazaRepository $plazaRepository;
     private FechaRepository $fechaRepository;
     private EventLog $eventLog;
+    private CandidatosResolver $candidatosResolver;
+    private BloqueoReemplazoPolicy $politicaCC5b;
 
     /** @var callable(): int */
     private $clockFn;
 
     /**
+     * @param CandidatosResolver           $candidatosResolver THE single
+     *        source of truth for the candidatos endpoint — see that class's
+     *        own docblock. Required, not defaulted: this controller has no
+     *        `\wpdb` of its own to build one internally, so whoever wires
+     *        this together (`Plugin::boot()`) must construct it explicitly.
+     * @param BloqueoReemplazoPolicy|null  $politicaCC5b The SAME policy value
+     *        `Plugin::boot()` hands to `Dictamen\DictamenPipeline` — the
+     *        candidatos endpoint must judge "bloqueado" under the exact
+     *        policy the dictamen engine itself applies, or a candidate this
+     *        endpoint calls viable could still be rejected when actually
+     *        requested. Null keeps the same default as
+     *        `Reglas\EntranteNoBloqueado` (`topeTresFechas()`).
      * @param callable(): int|null $clockFn Returns the current instant as a
      *        Unix epoch, for the authorization check — see
      *        Rest\SolicitudesController's constructor docblock for why this
@@ -72,13 +89,17 @@ class PlazasController {
         PlazaRepository $plazaRepository,
         FechaRepository $fechaRepository,
         EventLog $eventLog,
+        CandidatosResolver $candidatosResolver,
+        ?BloqueoReemplazoPolicy $politicaCC5b = null,
         ?callable $clockFn = null
     ) {
-        $this->authorizer      = $authorizer;
-        $this->plazaRepository = $plazaRepository;
-        $this->fechaRepository = $fechaRepository;
-        $this->eventLog        = $eventLog;
-        $this->clockFn         = $clockFn ?? static fn (): int => time();
+        $this->authorizer         = $authorizer;
+        $this->plazaRepository    = $plazaRepository;
+        $this->fechaRepository    = $fechaRepository;
+        $this->eventLog           = $eventLog;
+        $this->candidatosResolver = $candidatosResolver;
+        $this->politicaCC5b       = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
+        $this->clockFn            = $clockFn ?? static fn (): int => time();
     }
 
     public function register_routes(): void {
@@ -88,6 +109,16 @@ class PlazasController {
             [
                 'methods'             => \WP_REST_Server::READABLE,
                 'callback'            => [ $this, 'listar' ],
+                'permission_callback' => '__return_true',
+            ]
+        );
+
+        register_rest_route(
+            RestController::API_NAMESPACE,
+            '/' . RestController::BASE . '/plazas/candidatos',
+            [
+                'methods'             => \WP_REST_Server::READABLE,
+                'callback'            => [ $this, 'listarCandidatos' ],
                 'permission_callback' => '__return_true',
             ]
         );
@@ -177,9 +208,92 @@ class PlazasController {
         }
     }
 
+    /**
+     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..
+     *
+     * Response 200: { candidatos: [ { player_id, es_padre, puntaje,
+     *         viable, motivo }, ... ] }
+     *
+     * THE single endpoint the captain's screen calls to know who is
+     * available for a plaza AND why someone is not — backed entirely by
+     * Plazas\CandidatosResolver, the same source
+     * Dictamen\Reglas\PrioridadDePadresRespetada consults, so this screen can
+     * never show a candidate as viable that the dictamen engine would then
+     * reject — see that class's own docblock, "WHY THIS MUST BE THE ONLY
+     * IMPLEMENTATION".
+     */
+    public function listarCandidatos( \WP_REST_Request $request ): \WP_REST_Response {
+        $seasonId = (int) $request->get_param( 'season_id' );
+        $teamId   = (int) $request->get_param( 'team_id' );
+        $plazaId  = (int) $request->get_param( 'plaza_id' );
+
+        if ( $seasonId <= 0 || $teamId <= 0 || $plazaId <= 0 ) {
+            return $this->respuestaSolicitudInvalida(
+                'campos_invalidos',
+                'season_id, team_id y plaza_id son obligatorios y deben ser mayores a 0.'
+            );
+        }
+
+        try {
+            $this->authorizeCapitan( $this->authorizer, $request, $seasonId, $teamId, ( $this->clockFn )() );
+        } catch ( AuthorizationDeniedException $e ) {
+            $this->eventLog->record( 'rest.autorizacion_denegada', [
+                'endpoint'  => 'GET /cambios/plazas/candidatos',
+                'season_id' => $seasonId,
+                'team_id'   => $teamId,
+                'plaza_id'  => $plazaId,
+                'excepcion' => get_class( $e ),
+            ] );
+
+            return $this->respuestaNoAutorizada();
+        }
+
+        try {
+            $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+            if ( null === $plaza || (int) $plaza['season_id'] !== $seasonId || (int) $plaza['team_id'] !== $teamId ) {
+                return $this->respuestaSolicitudInvalida(
+                    'plaza_no_encontrada',
+                    'La plaza indicada no existe o no pertenece a este equipo y temporada.'
+                );
+            }
+
+            $countResolvedFechasSinceFn = fn ( int $fechaId ): int =>
+                $this->fechaRepository->countResolvedFechasSince( $seasonId, $fechaId );
+
+            $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
+
+            return new \WP_REST_Response(
+                [ 'candidatos' => array_map( [ $this, 'shapeCandidato' ], $candidatos ) ],
+                200
+            );
+        } catch ( \Throwable $e ) {
+            $this->eventLog->record( 'rest.plazas_candidatos_fallida', [
+                'season_id' => $seasonId,
+                'team_id'   => $teamId,
+                'plaza_id'  => $plazaId,
+                'excepcion' => get_class( $e ),
+                'mensaje'   => $e->getMessage(),
+            ] );
+
+            return $this->respuestaErrorInterno();
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /** @return array<string, mixed> */
+    private function shapeCandidato( CandidatoEstado $c ): array {
+        return [
+            'player_id' => $c->playerId(),
+            'es_padre'  => $c->esPadre(),
+            'puntaje'   => null !== $c->puntaje() ? $c->puntaje()->toDecimal() : null,
+            'viable'    => $c->viable(),
+            'motivo'    => $c->motivoNoViable(),
+        ];
+    }
 
     /**
      * @param array<string, mixed> $plaza As returned by

@@ -190,6 +190,25 @@ class SettingsTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // prioridadPadresActiva()
+    // -------------------------------------------------------------------------
+
+    public function test_prioridad_padres_activa_is_false_by_default(): void {
+        $this->assertFalse( $this->settings->prioridadPadresActiva() );
+    }
+
+    public function test_prioridad_padres_activa_reads_true_when_the_row_is_1(): void {
+        $this->putSetting( 'prioridad_padres_activa', '1' );
+
+        $this->assertTrue( $this->settings->prioridadPadresActiva() );
+    }
+
+    public function test_prioridad_padres_activa_reads_false_for_anything_other_than_1(): void {
+        $this->putSetting( 'prioridad_padres_activa', '0' );
+        $this->assertFalse( $this->settings->prioridadPadresActiva() );
+    }
+
+    // -------------------------------------------------------------------------
     // Drift protection: every getter's fallback vs InitialSchema::SEED_DEFAULTS
     // (mirrors entre-redes-prode's SettingsKeyConsistencyTest)
     // -------------------------------------------------------------------------
@@ -197,6 +216,7 @@ class SettingsTest extends TestCase {
     public function test_every_default_falls_back_to_exactly_what_initial_schema_seeds(): void {
         $this->assertSame( InitialSchema::SEED_DEFAULTS['timezone'], $this->settings->timezone() );
         $this->assertSame( (int) InitialSchema::SEED_DEFAULTS['season_id'], $this->settings->seasonId() );
+        $this->assertSame( '1' === InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'], $this->settings->prioridadPadresActiva() );
 
         $offsetGetters = [
             'plazo_apertura_solicitudes' => fn () => $this->settings->aperturaSolicitudesOffset(),
