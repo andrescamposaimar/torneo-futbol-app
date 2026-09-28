@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Dictamen;
 
+use EntreRedes\Cambios\Calendario\BoundedFechaCounter;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\PlazosCalculator;
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\CandidatosResolver;
-use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 
@@ -85,16 +85,14 @@ use EntreRedes\Cambios\Plazas\PlazaRepository;
  * `Plazas\CadenaResolver`'s own class docblock is explicit that an INFLATED
  * resolved-fechas count (the callable lying UPWARD) is NOT something that
  * class can detect on its own — it has no season total to compare against.
- * "Bounded is the caller's responsibility", and this assembler is that
- * caller: `boundedCountResolvedFechasSinceFn()` wraps
- * `FechaRepository::countResolvedFechasSince()` with the season's own total
- * of resolved fechas (`countTotalResolvedFechas()`) and throws
- * `Plazas\Exception\FechaCountUnavailableException` the instant a count
- * exceeds that total — an answer that is, by construction, impossible.
- * `CadenaResolver` (and `Reglas\EntranteNoBloqueado`, which calls the
- * injected callable directly for its `tope_tres_fechas` policy) already
- * translate that exception into a fail-closed answer; this wrapper is what
- * makes that translation reachable at all.
+ * "Bounded is the caller's responsibility". `Calendario\BoundedFechaCounter`
+ * is that caller — extracted out of what used to be this assembler's own
+ * private `boundedCountResolvedFechasSinceFn()` / `countTotalResolvedFechas()`
+ * so `Rest\PlazasController::listarCandidatos()` shares the EXACT same
+ * bounded counter instead of building its own unbounded one (see that
+ * collaborator's own class docblock, "WHY THIS EXISTS", for the
+ * screen-disagrees-with-engine failure that drift would otherwise cause).
+ * This assembler delegates to it, never re-deriving the cap itself.
  */
 final class DictamenContextAssembler {
 
@@ -106,6 +104,7 @@ final class DictamenContextAssembler {
     private JugadorMetricasReader $metricasReader;
     private CandidatosResolver $candidatosResolver;
     private BloqueoReemplazoPolicy $politicaCC5b;
+    private BoundedFechaCounter $boundedFechaCounter;
 
     /**
      * @param BloqueoReemplazoPolicy|null $politicaCC5b The SAME policy value
@@ -130,14 +129,15 @@ final class DictamenContextAssembler {
         ?CandidatosResolver $candidatosResolver = null,
         ?JugadorMetricasReader $metricasReader = null
     ) {
-        $this->plazaRepository    = $plazaRepository;
-        $this->fechaRepository    = $fechaRepository;
-        $this->settings           = $settings;
-        $this->wpdb               = $wpdb;
-        $this->eventLog           = $eventLog;
-        $this->politicaCC5b       = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
-        $this->metricasReader     = $metricasReader ?? new JugadorMetricasReader( $wpdb );
-        $this->candidatosResolver = $candidatosResolver ?? new CandidatosResolver( $wpdb, $plazaRepository, $this->metricasReader );
+        $this->plazaRepository     = $plazaRepository;
+        $this->fechaRepository     = $fechaRepository;
+        $this->settings            = $settings;
+        $this->wpdb                = $wpdb;
+        $this->eventLog            = $eventLog;
+        $this->politicaCC5b        = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
+        $this->metricasReader      = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
+        $this->candidatosResolver  = $candidatosResolver ?? new CandidatosResolver( $wpdb, $plazaRepository, $eventLog, $this->metricasReader );
+        $this->boundedFechaCounter = new BoundedFechaCounter( $fechaRepository, $eventLog );
     }
 
     /**
@@ -180,7 +180,7 @@ final class DictamenContextAssembler {
 
         $ocupaciones = $this->plazaRepository->listOcupaciones( $solicitud->plazaId() );
 
-        $countResolvedFechasSinceFn = $this->boundedCountResolvedFechasSinceFn( $solicitud->seasonId() );
+        $countResolvedFechasSinceFn = $this->boundedFechaCounter->boundedCountResolvedFechasSinceFn( $solicitud->seasonId() );
 
         $entrantePlayerId                 = $solicitud->entrantePlayerId();
         $entrantePuntaje                  = null;
@@ -211,12 +211,6 @@ final class DictamenContextAssembler {
                 $solicitud->plazaId()
             );
 
-            // Never gasta el query costoso de CandidatosResolver a menos que
-            // la política esté encendida Y el entrante realmente la necesite
-            // — un entrante que YA es padre nunca dispara
-            // Reglas\PrioridadDePadresRespetada, así que contar padres
-            // viables para él sería trabajo tirado. See class docblock,
-            // "PADRES VIABLES ES POLÍTICA-DEPENDIENTE".
             if ( $this->settings->prioridadPadresActiva() && ! $entranteEsPadre ) {
                 $padresViablesParaLaPlaza = $this->candidatosResolver->contarPadresViables(
                     $plaza,
@@ -273,47 +267,6 @@ final class DictamenContextAssembler {
 
                 return $chainPlazaId !== $currentPlazaId;
             }
-        ) );
-    }
-
-    /**
-     * See class docblock, "THE SANITY CAP ON THE INJECTED COUNTER".
-     */
-    private function boundedCountResolvedFechasSinceFn( int $seasonId ): callable {
-        $totalResueltas = $this->countTotalResolvedFechas( $seasonId );
-
-        return function ( int $fechaId ) use ( $seasonId, $totalResueltas ): int {
-            $count = $this->fechaRepository->countResolvedFechasSince( $seasonId, $fechaId );
-
-            if ( $count > $totalResueltas ) {
-                $this->eventLog->record( 'contador.fechas_resueltas_inflado', [
-                    'season_id'       => $seasonId,
-                    'fecha_id'        => $fechaId,
-                    'count'           => $count,
-                    'total_resueltas' => $totalResueltas,
-                ] );
-
-                throw new FechaCountUnavailableException(
-                    sprintf(
-                        "countResolvedFechasSince() returned %d for fecha_id %d, more than the season's own "
-                            . 'total of %d resolved fechas — impossible, the counter itself must be broken.',
-                        $count,
-                        $fechaId,
-                        $totalResueltas
-                    )
-                );
-            }
-
-            return $count;
-        };
-    }
-
-    private function countTotalResolvedFechas( int $seasonId ): int {
-        $fechas = $this->fechaRepository->listBySeason( $seasonId );
-
-        return count( array_filter(
-            $fechas,
-            static fn ( array $f ): bool => in_array( (string) ( $f['estado'] ?? '' ), [ 'jugada', 'dirimida' ], true )
         ) );
     }
 }

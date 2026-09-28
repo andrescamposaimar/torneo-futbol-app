@@ -578,6 +578,93 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     /**
+     * THE actual proof behind "NO QUERY WHEN THE POLICY IS OFF, OR WHEN IT
+     * WOULD BE WASTED" (see class docblock): the three tests above only ever
+     * assert the RESULTING count (0, 1, 0) — never that CandidatosResolver's
+     * expensive query was actually left alone. A mock with expects(never())
+     * / expects(once()) is what actually proves the assembler skips (or
+     * pays) that cost — mirrors the same pattern PlazasControllerTest already
+     * uses for `never()`.
+     */
+    public function test_contar_padres_viables_is_never_called_when_the_policy_is_off(): void {
+        global $wpdb;
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->never() )->method( 'contarPadresViables' );
+
+        $assembler = new DictamenContextAssembler(
+            $this->plazaRepository,
+            $this->fechaRepository,
+            $this->settings,
+            $wpdb,
+            $this->eventLog,
+            null,
+            $candidatosResolver
+        );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+        $assembler->assemble( $solicitud );
+    }
+
+    public function test_contar_padres_viables_is_never_called_when_the_entrante_is_already_a_padre(): void {
+        global $wpdb;
+
+        $this->putSetting( 'prioridad_padres_activa', '1' );
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] ); // padre entrante
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->never() )->method( 'contarPadresViables' );
+
+        $assembler = new DictamenContextAssembler(
+            $this->plazaRepository,
+            $this->fechaRepository,
+            $this->settings,
+            $wpdb,
+            $this->eventLog,
+            null,
+            $candidatosResolver
+        );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+        $assembler->assemble( $solicitud );
+    }
+
+    public function test_contar_padres_viables_is_called_exactly_once_when_the_policy_is_on_and_the_entrante_is_not_a_padre(): void {
+        global $wpdb;
+
+        $this->putSetting( 'prioridad_padres_activa', '1' );
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )->method( 'contarPadresViables' )->willReturn( 1 );
+
+        $assembler = new DictamenContextAssembler(
+            $this->plazaRepository,
+            $this->fechaRepository,
+            $this->settings,
+            $wpdb,
+            $this->eventLog,
+            null,
+            $candidatosResolver
+        );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+        $ctx       = $assembler->assemble( $solicitud );
+
+        $this->assertSame( 1, $ctx->padresViablesParaLaPlaza() );
+    }
+
+    /**
      * THE end-to-end agreement test: Plazas\CandidatosResolver, consulted
      * directly, and Reglas\PrioridadDePadresRespetada, consulted through the
      * full assemble() + DictamenEngineFactory pipeline, must reach the exact
@@ -599,7 +686,7 @@ class DictamenContextAssemblerTest extends TestCase {
 
         global $wpdb;
         $plaza          = $this->plazaRepository->findPlaza( $plazaId );
-        $resolverDirecto = new CandidatosResolver( $wpdb, $this->plazaRepository );
+        $resolverDirecto = new CandidatosResolver( $wpdb, $this->plazaRepository, $this->eventLog );
         $conteoDirecto   = $resolverDirecto->contarPadresViables(
             $plaza,
             \EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy::topeTresFechas(),
@@ -614,5 +701,78 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->assertFalse( $dictamen->procede() );
         $codigos = array_map( static fn ( $m ) => $m->codigo(), $dictamen->motivos() );
         $this->assertContains( 'prioridad_de_padres_no_respetada', $codigos );
+    }
+
+    /**
+     * FIX 1's end-to-end proof: with the padre-priority policy ON and a
+     * non-padre entrante, a failing candidate-pool read must NEVER produce a
+     * silent approval. Before this fix, `CandidatosResolver::
+     * playerIdsRegistradosEnTemporada()` degraded a failed
+     * `$wpdb->get_results()` into `[]` via `$rows ?: []` — zero candidates
+     * — so `contarPadresViables()` returned 0, `Reglas\
+     * PrioridadDePadresRespetada::evaluate()` hit its
+     * `$padresViables <= 0 -> return null` shortcut, and the non-padre
+     * entrante was APPROVED purely because the system could not count. This
+     * asserts assemble() now THROWS instead — the failure propagates, no
+     * `DictamenContext` (and therefore no `Dictamen`, no approval) is ever
+     * produced.
+     */
+    public function test_prioridad_de_padres_never_silently_approves_when_the_candidate_pool_read_fails(): void {
+        global $wpdb;
+
+        $this->putSetting( 'prioridad_padres_activa', '1' );
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
+
+        // A viable padre genuinely exists in the season roster — if the read
+        // failure below silently became "zero candidates" (the pre-fix
+        // bug), this scenario would wrongly approve 888.
+        $this->seedPlayerEnTemporada( 900 );
+        $this->putSpMetrics( 900, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $wpdb );
+
+        $failingWpdb = new class( $pdo, $wpdb->prefix ) extends \wpdb {
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, 'sp_season' ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+
+        $failingCandidatosResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, new InMemoryEventLog() );
+
+        $assembler = new DictamenContextAssembler(
+            $this->plazaRepository,
+            $this->fechaRepository,
+            $this->settings,
+            $wpdb,
+            $this->eventLog,
+            null,
+            $failingCandidatosResolver
+        );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+
+        try {
+            $assembler->assemble( $solicitud );
+            $this->fail( 'assemble() must propagate the candidate-pool read failure — never silently approve.' );
+        } catch ( \RuntimeException $e ) {
+            // expected: the failure surfaced, so no DictamenContext (and
+            // therefore no approving Dictamen) was ever produced.
+            $this->assertInstanceOf( \RuntimeException::class, $e );
+        }
     }
 }

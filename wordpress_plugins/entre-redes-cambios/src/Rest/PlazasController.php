@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Rest;
 
+use EntreRedes\Cambios\Calendario\BoundedFechaCounter;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
 use EntreRedes\Cambios\Capitania\Exception\AuthorizationDeniedException;
@@ -181,12 +182,27 @@ class PlazasController {
         try {
             $plazas = $this->plazaRepository->listPlazasByEquipo( $seasonId, $teamId );
 
-            // Bound to THIS season, exactly like
-            // DictamenContextAssembler::boundedCountResolvedFechasSinceFn() —
-            // see Plazas\CadenaResolver's class docblock for why the
-            // callable is injected rather than read from a global clock.
-            $countResolvedFechasSinceFn = fn ( int $fechaId ): int =>
-                $this->fechaRepository->countResolvedFechasSince( $seasonId, $fechaId );
+            // Bound to THIS season — see Plazas\CadenaResolver's class
+            // docblock for why the callable is injected rather than read
+            // from a global clock — and routed through
+            // Calendario\BoundedFechaCounter, exactly like
+            // listarCandidatos() below.
+            //
+            // The cap is not decoration here. `fechas_faltantes_liberacion`
+            // is what tells a capitan whether the titular may come back yet,
+            // and an INFLATED count makes that number too SMALL — the screen
+            // would read "0 faltantes, pedilo" for a plaza the dictamen
+            // engine (whose own path is bounded, and fails closed) will then
+            // reject. CadenaResolver cannot notice an inflated count on its
+            // own, so without this wrapper nothing in this path ever would.
+            //
+            // A thrown FechaCountUnavailableException does not fail the
+            // response: resolveFechasFaltantes() below already degrades that
+            // single plaza to `indeterminado`, which is the honest answer
+            // when the count cannot be trusted — see "A SINGLE PLAZA'S
+            // CALCULATION FAILING DOES NOT FAIL THE WHOLE RESPONSE".
+            $boundedFechaCounter        = new BoundedFechaCounter( $this->fechaRepository, $this->eventLog );
+            $countResolvedFechasSinceFn = $boundedFechaCounter->boundedCountResolvedFechasSinceFn( $seasonId );
 
             $cadenaResolver = new CadenaResolver( $countResolvedFechasSinceFn );
 
@@ -220,7 +236,13 @@ class PlazasController {
      * Dictamen\Reglas\PrioridadDePadresRespetada consults, so this screen can
      * never show a candidate as viable that the dictamen engine would then
      * reject — see that class's own docblock, "WHY THIS MUST BE THE ONLY
-     * IMPLEMENTATION".
+     * IMPLEMENTATION". The injected resolved-fechas counter is bounded by
+     * Calendario\BoundedFechaCounter — the SAME collaborator
+     * Dictamen\DictamenContextAssembler uses — so an inflated counter makes
+     * THIS endpoint fail closed (caught below, logged as
+     * `rest.plazas_candidatos_fallida`) exactly like it would make the
+     * dictamen engine refuse, instead of this screen showing an optimistic
+     * list the engine would then reject.
      */
     public function listarCandidatos( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -258,8 +280,8 @@ class PlazasController {
                 );
             }
 
-            $countResolvedFechasSinceFn = fn ( int $fechaId ): int =>
-                $this->fechaRepository->countResolvedFechasSince( $seasonId, $fechaId );
+            $boundedFechaCounter        = new BoundedFechaCounter( $this->fechaRepository, $this->eventLog );
+            $countResolvedFechasSinceFn = $boundedFechaCounter->boundedCountResolvedFechasSinceFn( $seasonId );
 
             $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
 

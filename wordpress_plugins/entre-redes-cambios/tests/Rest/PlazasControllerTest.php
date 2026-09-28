@@ -7,6 +7,7 @@ namespace EntreRedes\Cambios\Tests\Rest;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
 use EntreRedes\Cambios\Capitania\Exception\InvalidTokenException;
+use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Plazas\CandidatoEstado;
 use EntreRedes\Cambios\Plazas\CandidatosResolver;
@@ -63,6 +64,11 @@ class PlazasControllerTest extends TestCase {
         ] );
 
         $fechaRepository = $this->createMock( FechaRepository::class );
+        // Calendario\BoundedFechaCounter caps every count against the season's
+        // OWN total of resolved fechas, so a fixture that reports resolved
+        // fechas must also own enough of them — otherwise the cap correctly
+        // reads the count as inflated and degrades the plaza.
+        $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
         $fechaRepository->method( 'countResolvedFechasSince' )->willReturnCallback(
             function ( int $seasonId, int $fechaId ): int {
                 $this->assertSame( self::SEASON_ID, $seasonId );
@@ -158,6 +164,11 @@ class PlazasControllerTest extends TestCase {
         ] );
 
         $fechaRepository = $this->createMock( FechaRepository::class );
+        // Calendario\BoundedFechaCounter caps every count against the season's
+        // OWN total of resolved fechas, so a fixture that reports resolved
+        // fechas must also own enough of them — otherwise the cap correctly
+        // reads the count as inflated and degrades the plaza.
+        $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
         $fechaRepository->method( 'countResolvedFechasSince' )->willReturnCallback(
             function ( int $seasonId, int $fechaId ): int {
                 if ( 1 === $fechaId ) {
@@ -188,6 +199,53 @@ class PlazasControllerTest extends TestCase {
         $this->assertTrue( $this->eventLog->has( 'rest.plaza_fechas_faltantes_no_calculable' ) );
         $logged = $this->eventLog->last()['contexto'];
         $this->assertSame( 1, $logged['plaza_id'] );
+    }
+
+    /**
+     * The cap is not decoration on this endpoint either.
+     * `fechas_faltantes_liberacion` is what tells a capitan whether the
+     * titular may come back yet, and an INFLATED count makes that number too
+     * SMALL — without the cap the screen would read "0 faltantes, pedilo" for
+     * a plaza the dictamen engine (whose own path is bounded) then rejects.
+     * Plazas\CadenaResolver cannot notice an inflated count on its own, so
+     * this is the only place that ever could.
+     */
+    public function test_listar_degrades_a_plaza_whose_liberation_count_is_inflated(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
+            [ 'id' => 1, 'tipo' => 'titular', 'titular_player_id' => 777, 'closed_at' => null ],
+        ] );
+        $plazaRepository->method( 'listOcupaciones' )->willReturn( [
+            [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 888, 'es_genesis' => 0, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+        ] );
+
+        $fechaRepository = $this->createMock( FechaRepository::class );
+        // The season owns 2 resolved fechas, but the counter claims 9 have
+        // passed since fecha 1 — impossible, so the count cannot be trusted.
+        $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 2 ) );
+        $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 9 );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+        $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        // The response still succeeds — one plaza failing does not fail the
+        // whole list — but it says "indeterminado" instead of the optimistic
+        // "0 faltantes" an unbounded count would have produced.
+        $this->assertSame( 200, $response->get_status() );
+        $plaza = $response->get_data()['plazas'][0];
+
+        $this->assertNull( $plaza['fechas_faltantes_liberacion'] );
+        $this->assertTrue( $plaza['fechas_faltantes_liberacion_indeterminado'] );
+
+        $this->assertTrue( $this->eventLog->has( 'contador.fechas_resueltas_inflado' ) );
+        $this->assertTrue( $this->eventLog->has( 'rest.plaza_fechas_faltantes_no_calculable' ) );
     }
 
     public function test_listar_missing_season_or_team_returns_400(): void {
@@ -375,6 +433,90 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 400, $response->get_status() );
     }
 
+    /**
+     * FIX 5: `listarCandidatos()` must route its resolved-fechas counter
+     * through `Calendario\BoundedFechaCounter` — the SAME bounded, capped
+     * collaborator `Dictamen\DictamenContextAssembler` uses — so an inflated
+     * counter makes THIS endpoint fail closed too, instead of showing an
+     * optimistic candidatos list the dictamen engine would then reject. This
+     * suite mocks CandidatosResolver wholesale everywhere else, which never
+     * exercises the real closure — here a REAL `FechaRepository` (against
+     * the SQLite shim) deliberately lies upward, exactly like
+     * DictamenContextAssemblerTest's own "inflated counter" fixture, and the
+     * mocked CandidatosResolver invokes the injected counter itself (as the
+     * real one would internally) to prove the wiring actually caps it.
+     */
+    public function test_listar_candidatos_fails_closed_when_the_fecha_counter_is_inflated(): void {
+        InitialSchema::up();
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+        $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
+
+        // The season has ZERO resolved fechas (estado 'programada') — the
+        // bounded counter's own total is therefore 0, so ANY positive count
+        // reported for it is impossible.
+        $wpdb->insert( $p . 'cambios_fecha', [
+            'id'                 => 1,
+            'season_id'          => self::SEASON_ID,
+            'orden'              => 1,
+            'torneo_liga_ids'    => '1',
+            'torneo_label'       => 'Apertura',
+            'numero_en_torneo'   => 1,
+            'play_date'          => '2026-05-30',
+            'play_date_original' => '2026-05-30',
+            'estado'             => 'programada',
+            'created_at'         => '2026-01-01 00:00:00',
+            'updated_at'         => '2026-01-01 00:00:00',
+        ] );
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'findPlaza' )->willReturn( [
+                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+            ] );
+
+            // A REAL FechaRepository against the SQLite shim, deliberately
+            // lying upward — same fixture shape as
+            // DictamenContextAssemblerTest's inflating FechaRepository.
+            $inflatingFechaRepository = new class( $wpdb, new InMemoryEventLog() ) extends FechaRepository {
+                public function countResolvedFechasSince( int $seasonId, int $fechaId ): int {
+                    return 999;
+                }
+            };
+
+            $candidatosResolver = $this->createMock( CandidatosResolver::class );
+            $candidatosResolver->method( 'paraPlaza' )->willReturnCallback(
+                static function ( array $plaza, $politica, callable $countResolvedFechasSinceFn ): array {
+                    // Exactly what the real CandidatosResolver does
+                    // internally when it evaluates bloqueo por cierre
+                    // truncado — invoking the injected counter is what must
+                    // fail closed here.
+                    $countResolvedFechasSinceFn( 1 );
+
+                    return [];
+                }
+            );
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $inflatingFechaRepository, $this->eventLog, $candidatosResolver );
+
+            $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+                'plaza_id'  => self::PLAZA_ID,
+            ] ) );
+
+            $this->assertSame( 500, $response->get_status() );
+            $this->assertSame( 'error_interno', $response->get_data()['code'] );
+            $this->assertTrue( $this->eventLog->has( 'rest.plazas_candidatos_fallida' ) );
+        } finally {
+            $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
@@ -389,5 +531,16 @@ class PlazasControllerTest extends TestCase {
         }
 
         return $request;
+    }
+    /**
+     * @return array<int, array<string, mixed>> $n fechas already resolved,
+     *         the shape Calendario\FechaRepository::listBySeason() returns and
+     *         Calendario\BoundedFechaCounter reads to build its cap.
+     */
+    private static function fechasResueltas( int $n ): array {
+        return array_map(
+            static fn ( int $i ): array => [ 'id' => $i, 'orden' => $i, 'estado' => 'jugada' ],
+            range( 1, $n )
+        );
     }
 }
