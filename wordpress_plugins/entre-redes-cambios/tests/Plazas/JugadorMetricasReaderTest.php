@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Tests\Plazas;
 
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use PHPUnit\Framework\TestCase;
 
@@ -38,7 +39,7 @@ class JugadorMetricasReaderTest extends TestCase {
         );
         $wpdb->query( "DELETE FROM {$p}postmeta" );
 
-        $this->reader = new JugadorMetricasReader( $wpdb );
+        $this->reader = new JugadorMetricasReader( $wpdb, new InMemoryEventLog() );
     }
 
     protected function tearDown(): void {
@@ -176,5 +177,167 @@ class JugadorMetricasReaderTest extends TestCase {
 
     public function test_resolve_muchos_returns_an_empty_map_for_an_empty_input(): void {
         $this->assertSame( [], $this->reader->resolveMuchos( [] ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX 4 — determinism when more than one sp_metrics row exists
+    // -------------------------------------------------------------------------
+
+    /**
+     * WordPress does not enforce uniqueness on `(post_id, meta_key)` in
+     * `postmeta` — a player can legitimately end up with two `sp_metrics`
+     * rows. resolve() (`ORDER BY meta_id DESC LIMIT 1`) and resolveMuchos()
+     * (`ORDER BY meta_id ASC` + last-write-wins) must agree on which one
+     * wins — see class docblock, "DETERMINISM WHEN MORE THAN ONE sp_metrics
+     * ROW EXISTS".
+     */
+    public function test_resolve_and_resolve_muchos_agree_when_a_player_has_two_sp_metrics_rows(): void {
+        $this->putSpMetrics( 20, [ 'caracter' => 'Invitado', 'puntaje' => '1' ] );        // older row (lower meta_id)
+        $this->putSpMetrics( 20, [ 'caracter' => 'Padre Activo', 'puntaje' => '3' ] );    // newest row (higher meta_id) — must win
+
+        $viaResolve = $this->reader->resolve( 20 );
+        $viaMuchos  = $this->reader->resolveMuchos( [ 20 ] )[20];
+
+        $this->assertSame( $viaResolve->esPadre(), $viaMuchos->esPadre() );
+        $this->assertSame( $viaResolve->puntaje()->toDecimal(), $viaMuchos->puntaje()->toDecimal() );
+
+        // And specifically: the MOST RECENT row (highest meta_id) is the one
+        // that wins, per the chosen rule.
+        $this->assertTrue( $viaResolve->esPadre() );
+        $this->assertSame( 3.0, $viaResolve->puntaje()->toDecimal() );
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX 3 — read failures must never read as "nobody has metrics"
+    // -------------------------------------------------------------------------
+
+    /**
+     * A `\wpdb` subclass whose get_var() sets $wpdb->last_error and returns
+     * null whenever the SQL contains $mustContain — the get_var() analogue
+     * of the get_results() double used elsewhere in this suite (see
+     * PlazaRepositoryTest::wpdbThatFailsGetResults()).
+     */
+    private function wpdbThatFailsGetVar( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_var( string $sql ): ?string {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_var failure for test';
+                    return null;
+                }
+
+                return parent::get_var( $sql );
+            }
+        };
+    }
+
+    /**
+     * Same pattern, for get_results() — used by resolveMuchos().
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    public function test_resolve_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $failingWpdb   = $this->wpdbThatFailsGetVar( $wpdb, 'sp_metrics' );
+        $failingReader = new JugadorMetricasReader( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingReader->resolve( 1 );
+    }
+
+    public function test_resolve_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $failingWpdb     = $this->wpdbThatFailsGetVar( $wpdb, 'sp_metrics' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingReader   = new JugadorMetricasReader( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingReader->resolve( 1 );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            $this->assertInstanceOf( \RuntimeException::class, $e );
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'resolve', $failingEventLog->last()['contexto']['operacion'] );
+        $this->assertSame( 1, $failingEventLog->last()['contexto']['player_id'] );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
+    }
+
+    public function test_resolve_a_genuinely_absent_row_still_reads_as_no_metrics(): void {
+        // No wpdb failure at all here — just confirming the guard did not
+        // change the existing, correct meaning of "no row found".
+        $resultado = $this->reader->resolve( 999999 );
+
+        $this->assertFalse( $resultado->esPadre() );
+        $this->assertNull( $resultado->puntaje() );
+    }
+
+    public function test_resolve_muchos_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $failingWpdb   = $this->wpdbThatFailsGetResults( $wpdb, 'sp_metrics' );
+        $failingReader = new JugadorMetricasReader( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingReader->resolveMuchos( [ 1, 2 ] );
+    }
+
+    public function test_resolve_muchos_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_metrics' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingReader   = new JugadorMetricasReader( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingReader->resolveMuchos( [ 1, 2 ] );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            $this->assertInstanceOf( \RuntimeException::class, $e );
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'resolveMuchos', $failingEventLog->last()['contexto']['operacion'] );
+        $this->assertSame( 2, $failingEventLog->last()['contexto']['player_ids_count'] );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
     }
 }

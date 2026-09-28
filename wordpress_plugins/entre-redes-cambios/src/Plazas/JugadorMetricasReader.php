@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Plazas;
 
+use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Support\ChecksReads;
+
 /**
  * Reads `sp_metrics` postmeta (raw `$wpdb`, never `get_post_meta()` — same
  * discipline as every other query this plugin runs directly against a
@@ -45,21 +48,63 @@ namespace EntreRedes\Cambios\Plazas;
  * No `Caracter` (capital C) dual-key problem was found in either the API code
  * or the historical dump — unlike `puntaje`/`Puntaje`, `caracter` has never
  * been read under a second casing anywhere in this codebase.
+ *
+ * *** DETERMINISM WHEN MORE THAN ONE `sp_metrics` ROW EXISTS FOR A PLAYER ***
+ * WordPress does NOT enforce uniqueness on `(post_id, meta_key)` in
+ * `postmeta` — a player can legitimately end up with two `sp_metrics` rows
+ * (a re-import, a stray manual edit). Without an explicit ordering,
+ * `resolve()`'s old `LIMIT 1` and `resolveMuchos()`'s old row-order iteration
+ * could each pick a DIFFERENT one of the two rows for the SAME player,
+ * silently breaking the single-source-of-truth invariant this whole feature
+ * rests on (`Plazas\CandidatosResolver`'s own class docblock, "WHY THIS MUST
+ * BE THE ONLY IMPLEMENTATION"). THE CHOSEN RULE: the row with the HIGHEST
+ * `meta_id` wins — i.e. the MOST RECENTLY WRITTEN row for that player.
+ * `resolve()` implements this directly (`ORDER BY meta_id DESC LIMIT 1`);
+ * `resolveMuchos()` implements the same selection by ordering
+ * `ORDER BY meta_id ASC` and letting the LAST matching row in that ascending
+ * iteration overwrite `$resultado[$playerId]` — the last row processed is
+ * therefore always the one with the highest `meta_id`. Both routes converge
+ * on the identical row for the identical player; see
+ * JugadorMetricasReaderTest's "two rows for one player" test.
+ *
+ * *** READ FAILURES MUST NEVER READ AS "NOBODY HAS METRICS" *** `resolve()`
+ * feeds `Dictamen\DictamenContextAssembler`'s entrante lookup, and
+ * `resolveMuchos()` feeds `Plazas\CandidatosResolver`'s whole candidate pool
+ * — a failed read misread as "no sp_metrics row" would under-count padres
+ * (or misread the entrante's own puntaje) instead of failing loud. Same
+ * discipline as `PlazaRepository`, via `Support\ChecksReads`. See that
+ * trait's docblock for the full contract; `resolveMuchos()` uses it
+ * directly, and `resolve()` applies the equivalent `last_error` check
+ * inline, since `$wpdb->get_var()` returns a scalar, not the `array|null`
+ * shape the trait guards.
  */
 final class JugadorMetricasReader {
+
+    use ChecksReads;
 
     private const META_KEY_METRICS = 'sp_metrics';
 
     private \wpdb $wpdb;
+    private EventLog $eventLog;
 
-    public function __construct( \wpdb $wpdb ) {
-        $this->wpdb = $wpdb;
+    /**
+     * @param EventLog $eventLog MANDATORY, no null-object fallback — same
+     *        discipline as every other class in this plugin that reads
+     *        directly against `$wpdb`.
+     */
+    public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
+        $this->wpdb     = $wpdb;
+        $this->eventLog = $eventLog;
     }
 
     /**
      * @throws \InvalidArgumentException When the stored puntaje value is
      *         present but is not one of the 9 valid puntajes — propagated
      *         from Puntaje::fromDecimal(), same as before this extraction.
+     * @throws \RuntimeException When the query fails at the wpdb level. A
+     *         genuinely absent row (`$raw === null` with `$wpdb->last_error`
+     *         empty) is NOT a failure — it keeps its existing meaning,
+     *         "no sp_metrics row for this player" — see class docblock.
      */
     public function resolve( int $playerId ): JugadorMetricas {
         $wpdb = $this->wpdb;
@@ -67,11 +112,28 @@ final class JugadorMetricasReader {
 
         $raw = $wpdb->get_var(
             $wpdb->prepare(
-                "SELECT meta_value FROM {$p}postmeta WHERE post_id = %d AND meta_key = %s LIMIT 1",
+                "SELECT meta_value FROM {$p}postmeta
+                  WHERE post_id = %d AND meta_key = %s
+                  ORDER BY meta_id DESC
+                  LIMIT 1",
                 $playerId,
                 self::META_KEY_METRICS
             )
         );
+
+        $lastError = (string) ( $wpdb->last_error ?? '' );
+
+        if ( '' !== $lastError ) {
+            $this->eventLog->record( 'lectura.fallida', [
+                'operacion'  => 'resolve',
+                'player_id'  => $playerId,
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new \RuntimeException(
+                "JugadorMetricasReader::resolve(): the query failed at the wpdb level ({$lastError})."
+            );
+        }
 
         return $this->fromRawMetaValue( $raw );
     }
@@ -90,6 +152,9 @@ final class JugadorMetricasReader {
      *         is total over $playerIds, never partial.
      * @throws \InvalidArgumentException Same as resolve(), for whichever
      *         player's stored puntaje is invalid.
+     * @throws \RuntimeException When the query fails at the wpdb level — see
+     *         class docblock, "READ FAILURES MUST NEVER READ AS 'NOBODY HAS
+     *         METRICS'".
      */
     public function resolveMuchos( array $playerIds ): array {
         $resultado = [];
@@ -107,16 +172,25 @@ final class JugadorMetricasReader {
 
         $placeholders = implode( ', ', array_fill( 0, count( $playerIds ), '%d' ) );
 
+        // ORDER BY meta_id ASC — NOT arbitrary, see class docblock,
+        // "DETERMINISM WHEN MORE THAN ONE sp_metrics ROW EXISTS": the loop
+        // below overwrites $resultado[$playerId] on every matching row, so
+        // ascending order makes the LAST overwrite always the row with the
+        // highest meta_id — the same row resolve()'s own `ORDER BY meta_id
+        // DESC LIMIT 1` picks for that same player.
         $rows = $wpdb->get_results(
             $wpdb->prepare(
                 "SELECT post_id, meta_value FROM {$p}postmeta
-                  WHERE meta_key = %s AND post_id IN ({$placeholders})",
+                  WHERE meta_key = %s AND post_id IN ({$placeholders})
+                  ORDER BY meta_id ASC",
                 array_merge( [ self::META_KEY_METRICS ], $playerIds )
             ),
             ARRAY_A
         );
 
-        foreach ( ( $rows ?: [] ) as $row ) {
+        $this->assertReadSucceeded( $rows, 'resolveMuchos', [ 'player_ids_count' => count( $playerIds ) ] );
+
+        foreach ( $rows as $row ) {
             $playerId               = (int) $row['post_id'];
             $resultado[ $playerId ] = $this->fromRawMetaValue( (string) $row['meta_value'] );
         }

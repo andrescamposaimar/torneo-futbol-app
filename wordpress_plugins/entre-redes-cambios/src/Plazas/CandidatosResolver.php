@@ -6,6 +6,8 @@ namespace EntreRedes\Cambios\Plazas;
 
 use EntreRedes\Cambios\Dictamen\BloqueoReemplazoEvaluator;
 use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
+use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Support\ChecksReads;
 
 /**
  * THE single source of truth for "who could occupy this plaza, and are they
@@ -91,20 +93,34 @@ use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
  */
 class CandidatosResolver {
 
+    use ChecksReads;
+
     private \wpdb $wpdb;
     private PlazaRepository $plazaRepository;
+    private EventLog $eventLog;
     private JugadorMetricasReader $metricasReader;
     private BloqueoReemplazoEvaluator $bloqueoEvaluator;
 
+    /**
+     * @param EventLog $eventLog MANDATORY, no null-object fallback — same
+     *        discipline as every other class in this plugin that reads
+     *        directly against `$wpdb` (PlazaRepository, FechaRepository,
+     *        SolicitudRepository, CapitanRepository,
+     *        DictamenContextAssembler): this class has nowhere to record a
+     *        failed read without it. See Support\ChecksReads for what it is
+     *        used for here.
+     */
     public function __construct(
         \wpdb $wpdb,
         PlazaRepository $plazaRepository,
+        EventLog $eventLog,
         ?JugadorMetricasReader $metricasReader = null,
         ?BloqueoReemplazoEvaluator $bloqueoEvaluator = null
     ) {
         $this->wpdb             = $wpdb;
         $this->plazaRepository  = $plazaRepository;
-        $this->metricasReader   = $metricasReader ?? new JugadorMetricasReader( $wpdb );
+        $this->eventLog         = $eventLog;
+        $this->metricasReader   = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
         $this->bloqueoEvaluator = $bloqueoEvaluator ?? new BloqueoReemplazoEvaluator();
     }
 
@@ -117,8 +133,9 @@ class CandidatosResolver {
      * @param callable(int): int  $countResolvedFechasSinceFn Same contract as
      *        DictamenContext::countResolvedFechasSinceFn() — bounded to
      *        $plaza['season_id'] by the caller (see
-     *        Dictamen\DictamenContextAssembler::boundedCountResolvedFechasSinceFn()
-     *        for the production wiring).
+     *        Calendario\BoundedFechaCounter::boundedCountResolvedFechasSinceFn()
+     *        for the production wiring, shared by
+     *        Dictamen\DictamenContextAssembler and Rest\PlazasController).
      * @return CandidatoEstado[]
      */
     public function paraPlaza( array $plaza, BloqueoReemplazoPolicy $politica, callable $countResolvedFechasSinceFn ): array {
@@ -216,7 +233,16 @@ class CandidatosResolver {
      * class docblock): `WP_Query`/`tax_query` has no equivalent in the SQLite
      * test shim this plugin's whole suite relies on.
      *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** This
+     * result feeds `paraPlaza()`'s whole candidate pool, and from there
+     * `contarPadresViables()` — the exact count
+     * `Dictamen\Reglas\PrioridadDePadresRespetada` gates on. A failed read
+     * misread as "zero candidates" would make that count `0`, which the rule
+     * reads as "no viable padre exists" — turning a database failure into a
+     * silent APPROVAL of a non-padre entrante. See Support\ChecksReads.
+     *
      * @return array<int, int>
+     * @throws \RuntimeException When the query fails at the wpdb level.
      */
     private function playerIdsRegistradosEnTemporada( int $seasonId ): array {
         $wpdb = $this->wpdb;
@@ -238,6 +264,8 @@ class CandidatosResolver {
             ARRAY_A
         );
 
-        return array_map( static fn ( array $row ): int => (int) $row['id'], $rows ?: [] );
+        $this->assertReadSucceeded( $rows, 'playerIdsRegistradosEnTemporada', [ 'season_id' => $seasonId ] );
+
+        return array_map( static fn ( array $row ): int => (int) $row['id'], $rows );
     }
 }

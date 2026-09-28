@@ -105,7 +105,7 @@ final class Plugin {
                 $eventLog
             );
 
-            $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository );
+            $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository, $eventLog );
 
             $plazasController = new Rest\PlazasController(
                 $capitanAuthorizer,

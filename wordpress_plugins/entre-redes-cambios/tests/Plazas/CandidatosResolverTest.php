@@ -25,6 +25,7 @@ class CandidatosResolverTest extends TestCase {
     private const SEASON_ID = 359;
     private const OTHER_SEASON_ID = 360;
 
+    private InMemoryEventLog $eventLog;
     private PlazaRepository $plazaRepository;
     private CandidatosResolver $resolver;
 
@@ -80,8 +81,9 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->insert( $p . 'term_taxonomy', [ 'term_taxonomy_id' => self::SEASON_ID, 'term_id' => self::SEASON_ID, 'taxonomy' => 'sp_season' ] );
         $wpdb->insert( $p . 'term_taxonomy', [ 'term_taxonomy_id' => self::OTHER_SEASON_ID, 'term_id' => self::OTHER_SEASON_ID, 'taxonomy' => 'sp_season' ] );
 
-        $this->plazaRepository = new PlazaRepository( $wpdb, new InMemoryEventLog() );
-        $this->resolver        = new CandidatosResolver( $wpdb, $this->plazaRepository );
+        $this->eventLog        = new InMemoryEventLog();
+        $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
+        $this->resolver        = new CandidatosResolver( $wpdb, $this->plazaRepository, $this->eventLog );
 
         $this->countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 10;
 
@@ -267,6 +269,65 @@ class CandidatosResolverTest extends TestCase {
         $this->assertSame( 0, $this->resolver->contarPadresViables( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $countResolvedFechasSinceFn ) );
     }
 
+    /**
+     * `BloqueoReemplazoEvaluator::isBlocked()` has a
+     * `BloqueoReemplazoPolicy::hastaLiberacionDePlaza()` branch that the test
+     * above never exercises (it only ever passes `topeTresFechas()`) — this
+     * drives the candidate pool with the OTHER policy reading, so this
+     * branch is reached through CandidatosResolver too, not only through
+     * BloqueoReemplazoEvaluatorTest's own direct unit tests.
+     */
+    public function test_a_padre_blocked_under_hasta_liberacion_de_plaza_is_not_viable_before_the_other_plaza_liberates(): void {
+        $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
+        $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        // 800 left ANOTHER plaza 'trunca' at fecha 7; its new vigent
+        // occupant (999) has NOT yet cleared the mínimo since fecha 7 — the
+        // other plaza itself has not liberated, so under
+        // hastaLiberacionDePlaza() 800 stays blocked regardless of how many
+        // fechas passed since 800's OWN closure.
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $plaza                      = $this->plazaRepository->findPlaza( $plazaId );
+        $countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 7 === $fechaId ? 2 : 10;
+
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::hastaLiberacionDePlaza(), $countResolvedFechasSinceFn );
+
+        $candidato800 = current( array_filter( $candidatos, static fn ( $c ) => 800 === $c->playerId() ) );
+        $this->assertFalse( $candidato800->viable() );
+        $this->assertSame( 'bloqueado_por_cierre_truncado', $candidato800->motivoNoViable() );
+    }
+
+    public function test_a_padre_becomes_viable_under_hasta_liberacion_de_plaza_once_the_other_plaza_liberates(): void {
+        $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
+        $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+        // Now 999 (the other plaza's vigent occupant since fecha 7) HAS
+        // cleared the mínimo — the other plaza has liberated, so
+        // hastaLiberacionDePlaza() unblocks every 'trunca' ex-occupant of
+        // that plaza at once, 800 included.
+        $countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 7 === $fechaId ? 3 : 10;
+
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::hastaLiberacionDePlaza(), $countResolvedFechasSinceFn );
+
+        $candidato800 = current( array_filter( $candidatos, static fn ( $c ) => 800 === $c->playerId() ) );
+        $this->assertTrue( $candidato800->viable() );
+        $this->assertNull( $candidato800->motivoNoViable() );
+    }
+
     // -------------------------------------------------------------------------
     // contarPadresViables()
     // -------------------------------------------------------------------------
@@ -285,5 +346,120 @@ class CandidatosResolverTest extends TestCase {
             2,
             $this->resolver->contarPadresViables( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn )
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX 1 (BLOCKER) — a failed candidate-pool read must never read as
+    // "zero candidates"
+    // -------------------------------------------------------------------------
+
+    /**
+     * A `\wpdb` subclass whose get_results() sets $wpdb->last_error and
+     * returns [] whenever the SQL contains $mustContain — same pattern as
+     * `PlazaRepositoryTest::wpdbThatFailsGetResults()`, which this mirrors.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    /**
+     * THE blocker this fix closes: before it, a failed
+     * `playerIdsRegistradosEnTemporada()` read degraded via `$rows ?: []`
+     * into "zero candidates" — this proves it now throws instead.
+     */
+    public function test_para_plaza_throws_when_the_player_ids_query_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza();
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_season' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, $failingEventLog );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingResolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+    }
+
+    public function test_para_plaza_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza();
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_season' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, $failingEventLog );
+
+        try {
+            $failingResolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'playerIdsRegistradosEnTemporada', $failingEventLog->last()['contexto']['operacion'] );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
+    }
+
+    /**
+     * THE end-to-end proof of WHY this matters: with the padre-priority
+     * policy ON and a non-padre entrante, a failing candidate-pool read must
+     * NEVER produce a silent approval — it must surface as a propagated
+     * failure. contarPadresViables() is the exact method
+     * Reglas\PrioridadDePadresRespetada consults for its `padresViables <= 0
+     * -> approve` shortcut (see that rule's own docblock); before FIX 1, the
+     * failed read below would have silently become `0`, and this scenario
+     * would have wrongly approved a non-padre entrante while a viable padre
+     * genuinely existed.
+     */
+    public function test_contar_padres_viables_never_silently_approves_when_the_read_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza( 6 ); // techo 3.0
+
+        // A viable padre genuinely exists in the season roster — if the read
+        // failure below were swallowed into "zero candidates", this
+        // scenario would wrongly report 0 padres viables instead of failing.
+        $this->seedPlayer( 900, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_season' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, $failingEventLog );
+
+        try {
+            $failingResolver->contarPadresViables( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+            $this->fail( 'contarPadresViables() must propagate the read failure, never silently answer 0.' );
+        } catch ( \RuntimeException $e ) {
+            // expected: the failure surfaced instead of becoming a silent
+            // "no padres viables" that would have approved the non-padre
+            // entrante.
+            $this->assertInstanceOf( \RuntimeException::class, $e );
+        }
     }
 }

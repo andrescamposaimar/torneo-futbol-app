@@ -432,7 +432,15 @@ class PlazaRepository {
      *         has none open — should not happen once openPlaza() has run,
      *         but callers should not assume it.
      *
-     * @throws \RuntimeException When MORE THAN ONE ocupación of this plaza is
+     * *** MUST THROW, NEVER SILENTLY RETURN NULL ON A QUERY FAILURE ***
+     * `Plazas\CandidatosResolver::paraPlaza()` calls this to find the plaza's
+     * incumbent so it can be excluded from the candidate pool — a failed read
+     * here misread as "no vigent occupant" would silently put the current
+     * occupant back into their OWN candidate pool. See class docblock,
+     * "READ FAILURES MUST NEVER READ AS 'NO ROWS'".
+     *
+     * @throws \RuntimeException When the query fails at the wpdb level (see
+     *         above), OR when MORE THAN ONE ocupación of this plaza is
      *         vigent at once — this is a violation of the invariant this
      *         class defends (see class docblock) and must never be silently
      *         resolved by picking one at random via `LIMIT 1`. A caller's
@@ -453,6 +461,8 @@ class PlazaRepository {
             ),
             ARRAY_A
         );
+
+        $this->assertReadSucceeded( $rows, 'findOcupacionVigente', [ 'plaza_id' => $plazaId ] );
 
         if ( empty( $rows ) ) {
             return null;
