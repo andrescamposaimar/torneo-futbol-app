@@ -13,6 +13,10 @@ namespace EntreRedes\Cambios\Rest;
  * (approve/reject/publish the lote) is a later slice — see this plugin's
  * task brief.
  *
+ * Also wires Rest\CapitanController (`/cambios/mis-equipos`) — the
+ * bootstrap endpoint every other captain-facing route above assumes the
+ * client already got its season_id/team_id from.
+ *
  * Mirrors entre-redes-prode's Rest\RestController: one class per route
  * group, each responsible for registering its OWN routes
  * (register_routes()); this class only wires the group together, exactly
@@ -25,17 +29,21 @@ final class RestController {
 
     private SolicitudesController $solicitudesController;
     private PlazasController $plazasController;
+    private CapitanController $capitanController;
 
     public function __construct(
         SolicitudesController $solicitudesController,
-        PlazasController $plazasController
+        PlazasController $plazasController,
+        CapitanController $capitanController
     ) {
         $this->solicitudesController = $solicitudesController;
         $this->plazasController      = $plazasController;
+        $this->capitanController     = $capitanController;
     }
 
     public function register_routes(): void {
         $this->solicitudesController->register_routes();
         $this->plazasController->register_routes();
+        $this->capitanController->register_routes();
     }
 }

@@ -50,7 +50,7 @@ class PluginTest extends TestCase {
         $this->resetPluginBootState();
     }
 
-    public function test_boot_registers_the_three_captain_endpoints(): void {
+    public function test_boot_registers_the_four_captain_endpoints(): void {
         Plugin::boot();
         do_action( 'rest_api_init' );
 
@@ -59,6 +59,7 @@ class PluginTest extends TestCase {
         $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/solicitudes', \WP_REST_Server::CREATABLE );
         $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/solicitudes', \WP_REST_Server::READABLE );
         $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/plazas', \WP_REST_Server::READABLE );
+        $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/mis-equipos', \WP_REST_Server::READABLE );
     }
 
     /**

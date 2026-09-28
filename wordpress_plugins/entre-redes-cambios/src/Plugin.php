@@ -116,7 +116,14 @@ final class Plugin {
                 $bloqueoReemplazoPolicy
             );
 
-            ( new Rest\RestController( $solicitudesController, $plazasController ) )->register_routes();
+            $capitanController = new Rest\CapitanController(
+                $capitanAuthorizer,
+                $capitanRepository,
+                $settings,
+                $eventLog
+            );
+
+            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController ) )->register_routes();
         } );
 
         // Process owner's admin bandeja — only in wp-admin context, same

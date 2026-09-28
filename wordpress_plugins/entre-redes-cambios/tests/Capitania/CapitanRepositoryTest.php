@@ -265,6 +265,47 @@ class CapitanRepositoryTest extends TestCase {
         $this->assertSame( [], $this->repo->listEquiposByCapitan( 359, 777 ) );
     }
 
+    /**
+     * THE fix this method needed: before it, a failed read degraded via
+     * `$rows ?: []` into "captains nothing" — indistinguishable from a real
+     * captain whose read simply failed. This proves it now throws instead,
+     * so `Rest\CapitanController`'s `/cambios/mis-equipos` endpoint can
+     * never mistake a broken query for "no sos capitán de ningún equipo".
+     */
+    public function test_list_equipos_by_capitan_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $failingWpdb = new class( ( new \ReflectionProperty( \wpdb::class, 'pdo' ) )->getValue( $wpdb ), $wpdb->prefix ) extends \wpdb {
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, 'cambios_capitan' ) && str_contains( $sql, 'player_id' ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new CapitanRepository( $failingWpdb, $failingEventLog );
+
+        $this->expectException( \RuntimeException::class );
+
+        try {
+            $failingRepo->listEquiposByCapitan( 359, 777 );
+        } finally {
+            $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        }
+    }
+
     // -------------------------------------------------------------------------
     // THE property: never two vigent rows for the same (season, team), across
     // a longer sequence of designations.

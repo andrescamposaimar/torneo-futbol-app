@@ -130,4 +130,51 @@ class CapitanAuthorizerTest extends TestCase {
         $this->expectException( NotCaptainException::class );
         $this->authorizer->authorize( $jwt, self::SEASON_ID, self::TEAM_B, self::utc( '2026-09-26 12:05:00' ) );
     }
+
+    // -------------------------------------------------------------------------
+    // verifyIdentity() — establishes WHO, never WHAT they may touch (FIX 1)
+    // -------------------------------------------------------------------------
+
+    public function test_verify_identity_returns_the_claims_for_a_valid_non_revoked_token(): void {
+        $jwt = $this->issueToken();
+
+        $claims = $this->authorizer->verifyIdentity( $jwt, self::utc( '2026-09-26 12:05:00' ) );
+
+        $this->assertSame( self::PLAYER_ID, $claims['player_id'] );
+    }
+
+    public function test_verify_identity_rejects_an_invalid_signature(): void {
+        $otherResource = openssl_pkey_new( [
+            'private_key_bits' => 2048,
+            'private_key_type' => OPENSSL_KEYTYPE_RSA,
+        ] );
+        openssl_pkey_export( $otherResource, $otherPrivateKeyPem );
+
+        $jwt = $this->issueToken( [], $otherPrivateKeyPem );
+
+        $this->expectException( InvalidTokenException::class );
+        $this->authorizer->verifyIdentity( $jwt, self::utc( '2026-09-26 12:05:00' ) );
+    }
+
+    public function test_verify_identity_rejects_a_revoked_session(): void {
+        global $wpdb;
+        $wpdb->update( $wpdb->prefix . 'prode_users', [ 'session_version' => 4 ], [ 'id' => self::PRODE_USER_ID ] );
+
+        $jwt = $this->issueToken();
+
+        $this->expectException( SessionRevokedException::class );
+        $this->authorizer->verifyIdentity( $jwt, self::utc( '2026-09-26 12:05:00' ) );
+    }
+
+    /**
+     * THE method's own point: it establishes identity WITHOUT checking any
+     * captaincy — a player who captains nothing at all still verifies fine.
+     */
+    public function test_verify_identity_succeeds_for_a_player_who_captains_nothing(): void {
+        $jwt = $this->issueToken( [ 'player_id' => 999999 ] );
+
+        $claims = $this->authorizer->verifyIdentity( $jwt, self::utc( '2026-09-26 12:05:00' ) );
+
+        $this->assertSame( 999999, $claims['player_id'] );
+    }
 }
