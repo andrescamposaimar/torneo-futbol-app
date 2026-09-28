@@ -64,9 +64,32 @@ class DictamenEngineFactoryTest extends TestCase {
         $this->assertInstanceOf( DictamenEngine::class, $motor );
     }
 
-    public function test_create_forwards_prioridad_padres_activa_to_the_new_rule(): void {
-        $motor = DictamenEngineFactory::create( null, true );
+    /**
+     * @dataProvider prioridadPadresActivaValues
+     */
+    public function test_create_forwards_prioridad_padres_activa_to_the_new_rule( bool $prioridadPadresActiva ): void {
+        // assertInstanceOf() alone would pass identically even if create()
+        // silently dropped $prioridadPadresActiva — this asserts the ACTUAL
+        // forwarding, against the rule list the factory itself builds.
+        $reglas = DictamenEngineFactory::reglas( null, $prioridadPadresActiva );
 
+        $regla = current( array_filter(
+            $reglas,
+            static fn ( object $r ): bool => $r instanceof PrioridadDePadresRespetada
+        ) );
+
+        $this->assertInstanceOf( PrioridadDePadresRespetada::class, $regla );
+        $this->assertSame( $prioridadPadresActiva, $regla->activa() );
+
+        $motor = DictamenEngineFactory::create( null, $prioridadPadresActiva );
         $this->assertInstanceOf( DictamenEngine::class, $motor );
+    }
+
+    /** @return array<int, array{0: bool}> */
+    public static function prioridadPadresActivaValues(): array {
+        return [
+            [ true ],
+            [ false ],
+        ];
     }
 }

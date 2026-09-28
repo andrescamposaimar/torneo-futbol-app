@@ -255,9 +255,18 @@ The `cambios_ocupacion` id each solicitud's write produced is persisted back ont
 
 The tournament has always distinguished parents of the school from historical
 guests, and has always preferred parents — as a soft rule nobody enforced. It is
-now a policy object, `Plazas\PrioridadDePadresPolicy`, injected explicitly in
-`Plugin::boot()` and **off by default**, which reproduces today's behaviour
+now a setting, `prioridad_padres_activa`, read per request by
+`Calendario\Settings::prioridadPadresActiva()` and **seeded off**
+(`Migrations\InitialSchema::SEED_DEFAULTS`), which reproduces today's behaviour
 exactly.
+
+It is a plain `bool`, not a policy object — unlike `Dictamen\
+BloqueoReemplazoPolicy`, which is an object because CC5b has two distinct
+readings to choose between. This setting has one question and two answers, so
+a bool says everything there is to say. `Plugin::boot()` threads it explicitly
+through `Dictamen\DictamenPipeline` and `Dictamen\DictamenEngineFactory::create()`
+into `Dictamen\Reglas\PrioridadDePadresRespetada`'s constructor; turning it on
+must stay one visible value rather than a default buried somewhere.
 
 When it is ON, `Dictamen\Reglas\PrioridadDePadresRespetada` rejects a non-parent
 entrante if, and only if, at least one VIABLE parent exists for that plaza.

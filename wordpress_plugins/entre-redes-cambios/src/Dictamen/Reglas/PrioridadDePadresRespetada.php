@@ -62,6 +62,19 @@ final class PrioridadDePadresRespetada implements Regla {
         $this->activa = $activa;
     }
 
+    /**
+     * Whether this rule was constructed with the policy ON — the narrowest
+     * possible accessor onto the constructor's own `$activa`, added purely so
+     * a test consuming `DictamenEngineFactory::reglas()` can verify the
+     * factory actually FORWARDED `$prioridadPadresActiva` to this rule
+     * (rather than silently dropping it) without resorting to reflection.
+     * Zero business meaning beyond that — `evaluate()` above is still the
+     * only place this flag drives a decision.
+     */
+    public function activa(): bool {
+        return $this->activa;
+    }
+
     public function evaluate( DictamenContext $ctx ): ?Motivo {
         if ( ! $this->activa ) {
             return null;
