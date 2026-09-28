@@ -138,12 +138,12 @@ class CapitanRepository {
 
                 throw new CapitanPersistenceException( 'insert', $wpdb->last_error );
             }
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         $this->eventLog->record( 'capitan.designado', [
             'capitan_id'    => $newId,

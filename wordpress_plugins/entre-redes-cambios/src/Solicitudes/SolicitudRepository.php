@@ -259,13 +259,23 @@ class SolicitudRepository {
      * solicitud in any other estado aborts the WHOLE lote, same as a
      * solicitud whose fresh dictamen no longer procede.
      *
+     * *** THIS METHOD DOES NOT AUTHORIZE THE CALLER ***
+     * Exactly like `undoLastOcupacion()` / `closePlaza()` below: this is one
+     * of the most dangerous entry points in this plugin to expose — it
+     * writes real occupancy changes over real rosters for an entire lote at
+     * once. It performs NO role or ownership check of its own. A future REST
+     * wrapper MUST verify the caller's role (process owner, never a captain)
+     * BEFORE invoking this — never rely on this method to reject an
+     * unauthorized caller, because it will not.
+     *
      * @param int[] $ids
      * @return array{
      *     publicadas: int[],
      *     no_publicadas: int[],
      *     abortado: bool,
      *     motivo: string|null,
-     *     divergencias: int[]
+     *     divergencias: int[],
+     *     culprit_id: int|null
      * } `publicadas` — solicitud ids actually applied and moved to
      *   `publicada`. `no_publicadas` — every id that did NOT get applied
      *   (all of $ids when `abortado` is true, empty when the lote fully
@@ -273,7 +283,13 @@ class SolicitudRepository {
      *   applied. `motivo` — human-readable reason, only set when aborted.
      *   `divergencias` — ids that WERE published but whose fresh dictamen's
      *   motivos differ from the original snapshot (see
-     *   `dictamenDivergio()`) — informational, not a failure.
+     *   `dictamenDivergio()`) — informational, not a failure. `culprit_id` —
+     *   the ONE solicitud id responsible for the abort (the one that failed
+     *   validation/re-evaluation, or the one mid-write when a lote-wide
+     *   failure hit), as a plain field a UI can highlight directly — never
+     *   null when `abortado` is true, always null otherwise. `motivo`
+     *   remains the human-readable sentence; this is its machine-readable
+     *   twin, so a caller never has to parse Spanish prose to find the id.
      */
     public function publicarLote( array $ids, int $resueltaPor, string $now ): array {
         $ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
@@ -285,36 +301,50 @@ class SolicitudRepository {
                 'abortado'       => false,
                 'motivo'         => null,
                 'divergencias'   => [],
+                'culprit_id'     => null,
             ];
         }
 
         // ─── Pre-flight: load, validate transition, re-evaluate — no writes yet. ───
 
-        $prepared = [];
+        $prepared  = [];
+        $seasonIds = [];
 
         foreach ( $ids as $id ) {
             $row = $this->findSolicitud( $id );
 
             if ( null === $row ) {
-                return $this->abortarLote( $ids, "la solicitud {$id} no existe" );
+                return $this->abortarLote( $ids, "la solicitud {$id} no existe", $id );
             }
 
             if ( ! EstadoSolicitud::esTransicionValida( (string) $row['estado'], EstadoSolicitud::PUBLICADA ) ) {
                 return $this->abortarLote(
                     $ids,
                     "la solicitud {$id} no puede publicarse desde su estado actual ('{$row['estado']}') — "
-                        . 'debe estar aprobada.'
+                        . 'debe estar aprobada.',
+                    $id
                 );
             }
 
+            $seasonIds[ $id ] = (int) $row['season_id'];
+
             $solicitudObj = $this->reconstruirSolicitud( $row );
 
+            // Both the fresh re-evaluation AND the parse of the ORIGINAL
+            // snapshot live in the same try/catch on purpose: a corrupt
+            // `dictamen_original` (bad JSON from a data problem elsewhere)
+            // must abort THIS lote with an explicit motivo and an EventLog
+            // event — exactly like a re-evaluation failure — never escape as
+            // a raw, unlogged exception that takes the whole request down.
             try {
                 $dictamenFresco = $this->dictamenPipeline->evaluate( $solicitudObj );
+                $original       = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
             } catch ( \Throwable $e ) {
                 return $this->abortarLote(
                     $ids,
-                    "el dictamen de la solicitud {$id} no pudo re-evaluarse: " . $e->getMessage()
+                    "la solicitud {$id} no pudo prepararse para publicarse (re-evaluacion o "
+                        . 'dictamen_original invalido): ' . $e->getMessage(),
+                    $id
                 );
             }
 
@@ -323,11 +353,10 @@ class SolicitudRepository {
 
                 return $this->abortarLote(
                     $ids,
-                    "la solicitud {$id} ya no procede al momento de publicar el lote (motivos: {$motivos})"
+                    "la solicitud {$id} ya no procede al momento de publicar el lote (motivos: {$motivos})",
+                    $id
                 );
             }
-
-            $original = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
 
             $prepared[ $id ] = [
                 'row'       => $row,
@@ -336,9 +365,23 @@ class SolicitudRepository {
             ];
         }
 
+        // A lote spanning more than one season is not exploitable TODAY (the
+        // captain/process-owner role is unique and global — see
+        // Capitania\CapitanAuthorizer), but this project already has
+        // scoped-by-season authorization elsewhere, and the day this becomes
+        // per-season, a lote silently mixing seasons would be exactly the
+        // kind of gap that sits quiet until someone finds it. Fail loud now,
+        // while it costs nothing to check.
+        if ( count( array_unique( $seasonIds ) ) > 1 ) {
+            return $this->abortarLote(
+                $ids,
+                'las solicitudes del lote pertenecen a mas de una temporada ('
+                    . implode( ', ', array_unique( $seasonIds ) ) . ') — un lote debe publicarse por temporada.'
+            );
+        }
+
         // ─── Apply — every write below runs inside ONE transaction. ───
 
-        $wpdb = $this->wpdb;
         $this->beginTransaction( __FUNCTION__ );
 
         $ultimoIdIntentado = null;
@@ -352,7 +395,7 @@ class SolicitudRepository {
                 $fechaId = (int) $row['fecha_id'];
 
                 if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
-                    $this->plazaRepository->succeedOcupacionWithinTransaction(
+                    $ocupacionId = $this->plazaRepository->succeedOcupacionWithinTransaction(
                         $plazaId,
                         (int) $row['entrante_player_id'],
                         $fechaId,
@@ -360,20 +403,24 @@ class SolicitudRepository {
                         $now
                     );
                 } else {
-                    $this->plazaRepository->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, $fechaId, $now );
+                    $ocupacionId = $this->plazaRepository->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, $fechaId, $now );
                 }
 
-                $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'] );
+                $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId );
             }
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            // rollbackTransaction() itself throws Support\Exception\InconsistentStateException
+            // — instead of returning a tidy "abortado" array — when the
+            // ROLLBACK fails too: at that point the database state is
+            // genuinely unknown, and returning "nothing was applied" would
+            // be exactly as false as returning "everything was applied".
+            $this->rollbackTransaction( __FUNCTION__, $e, [ 'ids' => $ids ] );
 
             $this->eventLog->record( 'solicitud.lote_abortado', [
                 'ids'                 => $ids,
                 'motivo'              => 'escritura fallida a mitad del lote: ' . $e->getMessage(),
                 'ultima_id_intentada' => $ultimoIdIntentado,
+                'culprit_id'          => $ultimoIdIntentado,
             ] );
 
             return [
@@ -382,8 +429,17 @@ class SolicitudRepository {
                 'abortado'      => true,
                 'motivo'        => 'escritura fallida a mitad del lote (id ' . $ultimoIdIntentado . '): ' . $e->getMessage(),
                 'divergencias'  => [],
+                'culprit_id'    => $ultimoIdIntentado,
             ];
         }
+
+        // Outside the try/catch above ON PURPOSE: a COMMIT that fails must
+        // never be caught by the same handler that reports "abortado" —
+        // commitTransaction() itself throws instead (see
+        // Support\OpensTransactions), so the caller can never mistake an
+        // unconfirmed COMMIT for either a successful publish or a clean
+        // abort.
+        $this->commitTransaction( __FUNCTION__, [ 'ids' => $ids ] );
 
         $divergencias = [];
 
@@ -412,6 +468,7 @@ class SolicitudRepository {
             'abortado'      => false,
             'motivo'        => null,
             'divergencias'  => $divergencias,
+            'culprit_id'    => null,
         ];
     }
 
@@ -481,10 +538,16 @@ class SolicitudRepository {
      * `publicarLote()` logs `solicitud.publicada` itself once the whole
      * lote's COMMIT has actually succeeded.
      *
+     * `$ocupacionId` is the id `succeedOcupacionWithinTransaction()` /
+     * `closeOcupacionByRegresoTitularWithinTransaction()` just returned for
+     * THIS solicitud — persisted here so undoing a badly-published lote never
+     * again requires cross-referencing the EventLog by `plaza_id` and
+     * timestamp by hand.
+     *
      * @throws SolicitudPersistenceException When the update fails at the
      *         wpdb level.
      */
-    private function marcarPublicadaWithinTransaction( int $id, int $resueltaPor, string $now, Dictamen $dictamenAplicado ): void {
+    private function marcarPublicadaWithinTransaction( int $id, int $resueltaPor, string $now, Dictamen $dictamenAplicado, int $ocupacionId ): void {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -495,6 +558,7 @@ class SolicitudRepository {
                 'resuelta_por'       => $resueltaPor,
                 'resuelta_at'        => $now,
                 'dictamen_aplicado'  => DictamenSnapshot::fromDictamen( $dictamenAplicado, $now )->toJson(),
+                'ocupacion_id'       => $ocupacionId,
                 'updated_at'         => $now,
             ],
             [ 'id' => $id ]
@@ -563,13 +627,20 @@ class SolicitudRepository {
      * publicarLote()'s pre-flight phase — reached before any write starts,
      * so there is nothing to roll back, only to report.
      *
-     * @param int[] $ids
-     * @return array{publicadas: int[], no_publicadas: int[], abortado: bool, motivo: string, divergencias: int[]}
+     * @param int[]    $ids
+     * @param int|null $culpritId The ONE solicitud id responsible for the
+     *        abort, when the pre-flight phase found exactly one (every
+     *        pre-flight call site has one); null for a lote-wide reason that
+     *        does not point at a single id (e.g. the season_id mismatch
+     *        guard) — see publicarLote()'s own docblock for the field's
+     *        contract.
+     * @return array{publicadas: int[], no_publicadas: int[], abortado: bool, motivo: string, divergencias: int[], culprit_id: int|null}
      */
-    private function abortarLote( array $ids, string $motivo ): array {
+    private function abortarLote( array $ids, string $motivo, ?int $culpritId = null ): array {
         $this->eventLog->record( 'solicitud.lote_abortado', [
-            'ids'    => $ids,
-            'motivo' => $motivo,
+            'ids'        => $ids,
+            'motivo'     => $motivo,
+            'culprit_id' => $culpritId,
         ] );
 
         return [
@@ -578,6 +649,7 @@ class SolicitudRepository {
             'abortado'      => true,
             'motivo'        => $motivo,
             'divergencias'  => [],
+            'culprit_id'    => $culpritId,
         ];
     }
 

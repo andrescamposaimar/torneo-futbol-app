@@ -338,12 +338,12 @@ class FechaRepository {
                     [ 'id' => $t['id'] ]
                 );
             }
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         return count( $dirty );
     }

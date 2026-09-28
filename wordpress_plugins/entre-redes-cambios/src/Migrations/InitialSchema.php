@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Migrations;
 
 /**
- * Creates (or upgrades) all 6 cambios_ tables.
+ * Creates (or upgrades) all 7 cambios_ tables.
  *
  * Uses dbDelta() for idempotent CREATE TABLE; safe to re-run on every plugin
  * upgrade — dbDelta only alters schema when columns differ.
@@ -402,6 +402,15 @@ class InitialSchema {
      * a solicitud only ever has ONE most-recent resolution at a time; the
      * full history of every state it passed through lives in the EventLog,
      * not in this row.
+     *
+     * `ocupacion_id` is the `cambios_ocupacion` row `publicarLote()` created
+     * (or, for a `regreso`, closed) for THIS solicitud — written only at the
+     * moment it publishes, alongside `dictamen_aplicado`, never before. It
+     * exists so undoing a wrongly-published lote never again requires
+     * cross-referencing the EventLog by `plaza_id` and timestamp by hand —
+     * see `Solicitudes\SolicitudRepository::marcarPublicadaWithinTransaction()`'s
+     * docblock. `NULL` means exactly what `dictamen_aplicado`'s `NULL`
+     * means: "never published".
      */
     private static function sqlCambiosSolicitud( string $p, string $charset ): string {
         return "CREATE TABLE {$p}cambios_solicitud (
@@ -421,6 +430,7 @@ class InitialSchema {
   resuelta_por BIGINT UNSIGNED NULL DEFAULT NULL,
   resuelta_at DATETIME NULL DEFAULT NULL,
   nota TEXT NULL DEFAULT NULL,
+  ocupacion_id BIGINT UNSIGNED NULL DEFAULT NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
   PRIMARY KEY  (id),
