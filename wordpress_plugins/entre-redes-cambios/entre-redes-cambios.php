@@ -54,8 +54,21 @@ register_activation_hook( __FILE__, function () {
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Observability/WpEventLog.php';
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Migrations/InitialSchema.php';
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Migrations/MigrationRunner.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Admin/ProcessOwnerAuthorizer.php';
 
     \EntreRedes\Cambios\Migrations\MigrationRunner::run( new \EntreRedes\Cambios\Observability\WpEventLog() );
+
+    // Grant the process-owner capability to `administrator` by default — see
+    // Admin\ProcessOwnerAuthorizer's own docblock for why this is a
+    // capability and not a re-check of `manage_options`: today it behaves
+    // identically to requiring admin, but the day the comisión wants to hand
+    // this screen to someone WITHOUT making them a full site administrator,
+    // the fix is granting them this one capability, never redesigning this
+    // plugin's permission checks.
+    $administrador = get_role( 'administrator' );
+    if ( null !== $administrador && ! $administrador->has_cap( \EntreRedes\Cambios\Admin\ProcessOwnerAuthorizer::CAPABILITY ) ) {
+        $administrador->add_cap( \EntreRedes\Cambios\Admin\ProcessOwnerAuthorizer::CAPABILITY );
+    }
 } );
 
 // Deactivation hook — no crons are scheduled by this slice; kept as a no-op

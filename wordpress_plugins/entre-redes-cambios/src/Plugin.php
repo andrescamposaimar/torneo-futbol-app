@@ -10,15 +10,19 @@ namespace EntreRedes\Cambios;
  * Slice 4d scope: registers the CAPTAIN-facing REST endpoints
  * (Rest\SolicitudesController, Rest\PlazasController) on `rest_api_init`,
  * with manual constructor injection — no container — mirroring exactly how
- * entre-redes-prode's own Plugin::boot() wires its `/prode/*` routes. The
- * process owner's tray (approve/reject/publish the lote) is a later slice's
- * job; nothing here constructs or exposes it.
+ * entre-redes-prode's own Plugin::boot() wires its `/prode/*` routes.
  *
- * Every service built inside the `rest_api_init` closure is built there and
- * ONLY there — never at the top level of boot() — so a request that never
- * hits the REST API (a cron run, a WP-CLI command) never pays for
- * constructing TokenVerifier, DictamenPipeline, or any of the repositories
- * these endpoints need.
+ * Slice 4e scope: the PROCESS OWNER's admin bandeja (Admin\BandejaPage,
+ * Admin\AdminMenu) on `admin_menu`, only `if ( is_admin() )` — exactly the
+ * same guard entre-redes-prode's own Plugin::boot() uses for its admin
+ * screens, so a REST request or a cron run never pays for constructing
+ * anything this closure builds.
+ *
+ * Every service built inside the `rest_api_init` / `admin_menu` closures is
+ * built there and ONLY there — never at the top level of boot() — so a
+ * request that never hits that surface never pays for constructing
+ * TokenVerifier, DictamenPipeline, or any of the repositories these
+ * endpoints need.
  */
 final class Plugin {
 
@@ -94,6 +98,43 @@ final class Plugin {
 
             ( new Rest\RestController( $solicitudesController, $plazasController ) )->register_routes();
         } );
+
+        // Process owner's admin bandeja — only in wp-admin context, same
+        // guard as entre-redes-prode's own Plugin::boot(). Built here, and
+        // ONLY here, for the same reason as the rest_api_init closure above.
+        if ( is_admin() ) {
+            add_action( 'admin_menu', static function (): void {
+                global $wpdb;
+
+                $eventLog        = new Observability\WpEventLog();
+                $authorizer      = new Admin\ProcessOwnerAuthorizer();
+                $plazaRepository = new Plazas\PlazaRepository( $wpdb, $eventLog );
+                $fechaRepository = new Calendario\FechaRepository( $wpdb, $eventLog );
+                $settings        = new Calendario\Settings( $wpdb );
+
+                $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
+                    $plazaRepository,
+                    $fechaRepository,
+                    $settings,
+                    $wpdb,
+                    $eventLog
+                );
+
+                $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
+                $dictamenPipeline       = new Dictamen\DictamenPipeline( $dictamenContextAssembler, $eventLog, $bloqueoReemplazoPolicy );
+
+                $solicitudRepository = new Solicitudes\SolicitudRepository(
+                    $wpdb,
+                    $plazaRepository,
+                    $dictamenPipeline,
+                    $eventLog
+                );
+
+                $bandejaPage = new Admin\BandejaPage( $authorizer, $solicitudRepository, $plazaRepository, $settings, $eventLog );
+
+                ( new Admin\AdminMenu( $bandejaPage ) )->register();
+            } );
+        }
 
         load_plugin_textdomain(
             'entre-redes-cambios',
