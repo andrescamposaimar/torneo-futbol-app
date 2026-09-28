@@ -19,7 +19,11 @@ declare(strict_types=1);
  *   - get_option() / update_option() backed by a static array
  *   - current_time() / wp_generate_uuid4() / wp_salt() / wp_generate_password()
  *   - add_action() / do_action() / add_filter() / remove_action() — no-ops in test context
- *   - current_user_can() — returns false (admin tests are manual)
+ *   - current_user_can() / check_admin_referer() / wp_verify_nonce() — each
+ *     controllable via a $GLOBALS['wp_test_*'] switch (see each function's
+ *     own docblock below, and $wp_test_postmeta above for the same
+ *     data-driven-global convention); default to the fail-closed behavior
+ *     they always had when a test sets nothing
  */
 
 // ─── SQLite-backed wpdb shim ─────────────────────────────────────────────────
@@ -764,7 +768,26 @@ if ( ! function_exists( 'get_current_user_id' ) ) {
 }
 
 if ( ! function_exists( 'check_admin_referer' ) ) {
-    function check_admin_referer( string $action = '-1' ): int {
+    /**
+     * Controllable via $GLOBALS['wp_test_check_admin_referer'] — WHY
+     * FIDELITY MATTERS HERE: the real check_admin_referer() calls wp_die()
+     * (via wp_nonce_ays()) the moment the nonce is missing or invalid. A
+     * hardcoded `1` return — this function's ENTIRE previous body — meant no
+     * test in this plugin could ever prove that a mutating admin action
+     * (aprobar/rechazar/publicar el lote) actually REJECTS a forged or
+     * missing nonce; every such test would pass whether or not the check was
+     * even wired up. Defaults to valid (true) when the test sets nothing, so
+     * every OTHER existing test that never touches this global keeps the
+     * exact behavior it had before (a no-op pass). A test that needs to
+     * prove rejection sets the global to `false` first.
+     */
+    function check_admin_referer( string $action = '-1', string $query_arg = '_wpnonce' ): int|false {
+        global $wp_test_check_admin_referer;
+
+        if ( false === ( $wp_test_check_admin_referer ?? true ) ) {
+            wp_die( 'Verificacion de seguridad fallida (nonce invalido o ausente).' );
+        }
+
         return 1;
     }
 }
@@ -776,8 +799,37 @@ if ( ! function_exists( 'wp_nonce_field' ) ) {
 }
 
 if ( ! function_exists( 'wp_verify_nonce' ) ) {
+    /**
+     * Controllable via $GLOBALS['wp_test_wp_verify_nonce'] — same
+     * fidelity rationale as check_admin_referer() above: a hardcoded `1`
+     * meant no caller of wp_verify_nonce() directly (rather than through
+     * check_admin_referer()) could ever be proven to reject a bad nonce
+     * either. Defaults to valid (1) so every test that never sets this
+     * global is unaffected.
+     */
     function wp_verify_nonce( string $nonce, string $action ): int|false {
-        return 1;
+        global $wp_test_wp_verify_nonce;
+
+        return $wp_test_wp_verify_nonce ?? 1;
+    }
+}
+
+if ( ! function_exists( 'wp_get_current_user' ) ) {
+    /**
+     * Controllable via $GLOBALS['wp_test_current_user_display_name'] (and
+     * optionally ['user_login']) — BandejaPage snapshots this value into
+     * `cambios_decision.decidida_por_nombre` at the exact moment of each
+     * decision (see SolicitudRepository's "cambios_decision" docblock).
+     * Tests change this global BETWEEN two decisions to prove the snapshot
+     * is never re-derived later from a "current" name.
+     */
+    function wp_get_current_user(): object {
+        global $wp_test_current_user_display_name, $wp_test_current_user_login;
+
+        return (object) [
+            'display_name' => $wp_test_current_user_display_name ?? 'Admin',
+            'user_login'   => $wp_test_current_user_login ?? 'admin',
+        ];
     }
 }
 
@@ -930,8 +982,32 @@ if ( ! function_exists( 'get_admin_page_title' ) ) {
 }
 
 if ( ! function_exists( 'current_user_can' ) ) {
+    /**
+     * Controllable via $GLOBALS['wp_test_current_user_can'] — WHY
+     * FIDELITY MATTERS HERE: a hardcoded `false` return (this function's
+     * ENTIRE previous body) means no test could ever prove that a permission
+     * check ADMITS an authorized user — only ever that it rejects, and even
+     * that "proof" was really just this function always saying no, not the
+     * check itself doing anything. ProcessOwnerAuthorizer's contract has TWO
+     * directions (grants `gestionar_cambios`, denies everything else) and a
+     * fixed response can only ever exercise one of them.
+     *
+     * Accepts either a bare bool (blanket answer for every capability) or an
+     * array keyed by capability string, so a test can grant `gestionar_cambios`
+     * specifically without having to reason about every other capability
+     * this shim might be asked about. Defaults to `false` when the test sets
+     * nothing — the exact same fail-closed default this function always had,
+     * so every OTHER existing test that never touches this global is
+     * unaffected.
+     */
     function current_user_can( string $capability ): bool {
-        return false;
+        global $wp_test_current_user_can;
+
+        if ( is_array( $wp_test_current_user_can ) ) {
+            return (bool) ( $wp_test_current_user_can[ $capability ] ?? false );
+        }
+
+        return (bool) ( $wp_test_current_user_can ?? false );
     }
 }
 
@@ -970,8 +1046,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 // ─── WP admin menu / hook stubs ───────────────────────────────────────────────
 
 if ( ! function_exists( 'is_admin' ) ) {
+    /**
+     * Controllable via $GLOBALS['wp_test_is_admin'] — Plugin::boot() only
+     * builds and registers the process-owner admin bandeja `if ( is_admin() )`
+     * (see Plugin.php); a wiring test needs to simulate an actual wp-admin
+     * request to prove that registration happens at all. Defaults to `false`
+     * — the exact previous, hardcoded behavior — so every OTHER existing
+     * test that never touches this global is unaffected.
+     */
     function is_admin(): bool {
-        return false;
+        global $wp_test_is_admin;
+
+        return (bool) ( $wp_test_is_admin ?? false );
     }
 }
 
@@ -1001,13 +1087,37 @@ if ( ! defined( 'WP_CLI' ) ) {
 }
 
 if ( ! function_exists( 'add_menu_page' ) ) {
+    /**
+     * Records every call into _prode_test_registered_admin_menus so a wiring
+     * test can assert Plugin::boot() actually registered the admin menu with
+     * the expected slug AND capability — same "prove the CABLE, not just the
+     * pieces" rationale as _prode_test_registered_routes for REST routes
+     * (see tests/PluginTest.php).
+     */
     function add_menu_page( string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, string $icon_url = '', ?int $position = null ): string {
+        $GLOBALS['_prode_test_registered_admin_menus'][] = [
+            'page_title' => $page_title,
+            'menu_title' => $menu_title,
+            'capability' => $capability,
+            'menu_slug'  => $menu_slug,
+            'function'   => $function,
+        ];
+
         return $menu_slug;
     }
 }
 
 if ( ! function_exists( 'add_submenu_page' ) ) {
     function add_submenu_page( string $parent_slug, string $page_title, string $menu_title, string $capability, string $menu_slug, mixed $function = null, ?int $position = null ): string|false {
+        $GLOBALS['_prode_test_registered_admin_menus'][] = [
+            'parent_slug' => $parent_slug,
+            'page_title'  => $page_title,
+            'menu_title'  => $menu_title,
+            'capability'  => $capability,
+            'menu_slug'   => $menu_slug,
+            'function'    => $function,
+        ];
+
         return $menu_slug;
     }
 }
