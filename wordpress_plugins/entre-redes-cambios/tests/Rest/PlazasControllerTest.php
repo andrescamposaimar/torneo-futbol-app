@@ -389,10 +389,37 @@ class PlazasControllerTest extends TestCase {
     private const PLAZA_ID = 1;
 
     /**
-     * FIX 2: `nombre` resolves alongside `player_id` for every candidato —
-     * both fall back to "Jugador #<id>" here since no title is seeded.
+     * @return CandidatosResolver&\PHPUnit\Framework\MockObject\MockObject
      */
-    public function test_listar_candidatos_happy_path_shapes_every_candidato(): void {
+    private function candidatosResolverConDosCandidatos(): CandidatosResolver {
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'paraPlaza' )
+            ->willReturn( [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
+            ] );
+
+        return $candidatosResolver;
+    }
+
+    /** @param array<string, mixed> $extraParams */
+    private function requestParaCandidatos( array $extraParams = [] ): \WP_REST_Request {
+        return $this->requestConToken( 'a-valid-jwt', array_merge(
+            [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+                'plaza_id'  => self::PLAZA_ID,
+            ],
+            $extraParams
+        ) );
+    }
+
+    /**
+     * FIX 3: viable-only by default — a captain cannot act on a non-viable
+     * candidate, so 801 (puntaje_indeterminado, not viable) is excluded
+     * unless `incluir_no_viables=1` is passed (see the next test).
+     */
+    public function test_listar_candidatos_default_returns_only_viable_candidatos(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
@@ -401,23 +428,41 @@ class PlazasControllerTest extends TestCase {
             'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
         ] );
 
-        $fechaRepository = $this->createMock( FechaRepository::class );
-
-        $candidatosResolver = $this->createMock( CandidatosResolver::class );
-        $candidatosResolver->expects( $this->once() )
-            ->method( 'paraPlaza' )
-            ->willReturn( [
-                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
-                new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
-            ] );
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->candidatosResolverConDosCandidatos();
 
         $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
-        $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
-            'season_id' => self::SEASON_ID,
-            'team_id'   => self::TEAM_ID,
-            'plaza_id'  => self::PLAZA_ID,
-        ] ) );
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame(
+            [
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+            ],
+            $response->get_data()['candidatos']
+        );
+    }
+
+    /**
+     * FIX 3: `?incluir_no_viables=1` opts back into the FULL list — the
+     * committee's own tooling may want to see WHY a candidate was excluded.
+     */
+    public function test_listar_candidatos_incluir_no_viables_returns_the_full_list_with_motivo(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'incluir_no_viables' => '1' ] ) );
 
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
@@ -427,6 +472,87 @@ class PlazasControllerTest extends TestCase {
             ],
             $response->get_data()['candidatos']
         );
+    }
+
+    /**
+     * FIX 3: `?search=` narrows on the player's name, case-insensitively —
+     * both candidates are viable here (via incluir_no_viables=1, but search
+     * alone is what this test asserts), only one matches the needle.
+     */
+    public function test_listar_candidatos_search_filters_case_insensitively(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 800 => 'Juan Pérez', 801 => 'Martín Gómez' ];
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+            ] );
+
+            $fechaRepository    = $this->createMock( FechaRepository::class );
+            $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+            $response = $controller->listarCandidatos(
+                $this->requestParaCandidatos( [ 'incluir_no_viables' => '1', 'search' => 'gómez' ] )
+            );
+
+            $this->assertSame( 200, $response->get_status() );
+            $this->assertSame(
+                [
+                    [ 'player_id' => 801, 'nombre' => 'Martín Gómez', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+                ],
+                $response->get_data()['candidatos']
+            );
+        } finally {
+            $wp_test_post_titles = [];
+        }
+    }
+
+    /**
+     * FIX 3: `search` is applied ON TOP of the default viable-only filter,
+     * not instead of it — a search matching a NON-viable candidate's name
+     * must still exclude them when incluir_no_viables was not requested.
+     */
+    public function test_listar_candidatos_search_combined_with_default_viable_only_filter(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 800 => 'Juan Pérez', 801 => 'Martín Gómez' ];
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+            ] );
+
+            $fechaRepository    = $this->createMock( FechaRepository::class );
+            $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+            // "gómez" matches candidate 801's name, but 801 is not viable and
+            // incluir_no_viables was NOT passed — it must stay excluded.
+            $responseGomez = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'search' => 'gómez' ] ) );
+            $this->assertSame( [], $responseGomez->get_data()['candidatos'] );
+
+            // "pérez" matches candidate 800's name, and 800 IS viable — it
+            // must come through.
+            $responsePerez = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'search' => 'pérez' ] ) );
+            $this->assertSame(
+                [
+                    [ 'player_id' => 800, 'nombre' => 'Juan Pérez', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                ],
+                $responsePerez->get_data()['candidatos']
+            );
+        } finally {
+            $wp_test_post_titles = [];
+        }
     }
 
     public function test_listar_candidatos_missing_fields_returns_400(): void {

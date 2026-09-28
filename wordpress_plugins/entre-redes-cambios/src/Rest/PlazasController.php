@@ -258,7 +258,7 @@ class PlazasController {
     }
 
     /**
-     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..
+     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&incluir_no_viables=1][&search=..]
      *
      * Response 200: { candidatos: [ { player_id, nombre, es_padre, puntaje,
      *         viable, motivo }, ... ] }
@@ -276,6 +276,21 @@ class PlazasController {
      * `rest.plazas_candidatos_fallida`) exactly like it would make the
      * dictamen engine refuse, instead of this screen showing an optimistic
      * list the engine would then reject.
+     *
+     * *** FILTERING HAPPENS HERE, NEVER IN CandidatosResolver ***
+     * `paraPlaza()` stays the single, unfiltered source of truth (see its
+     * own docblock) — `Reglas\PrioridadDePadresRespetada` needs that FULL
+     * pool to count viable padres, so `CandidatosResolver` itself must never
+     * change to accommodate this endpoint's own presentation needs. Instead:
+     *   - By DEFAULT, only VIABLE candidates are returned — a captain cannot
+     *     act on a non-viable one, and a season's full candidate pool can run
+     *     into the hundreds (see CandidatosResolver's own docblock, "COST:
+     *     THIS IS N+1 BY DESIGN"), most of it not actionable.
+     *   - `?incluir_no_viables=1` opts back into the FULL list, `viable` and
+     *     `motivo` intact — for the committee's own tooling, which may want
+     *     to see WHY someone was excluded.
+     *   - `?search=<text>` narrows whatever set the two rules above already
+     *     produced to names containing $text, case-insensitively.
      */
     public function listarCandidatos( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -318,15 +333,30 @@ class PlazasController {
 
             $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
 
-            // Names are primed for the whole candidate pool BEFORE shaping —
-            // see primePlayerTitles()'s own docblock for why resolving each
-            // one's name with an unprimed get_the_title() would cost one
-            // query PER CANDIDATE, and a season's pool can run into the
-            // hundreds.
+            $incluirNoViables = '1' === (string) $request->get_param( 'incluir_no_viables' );
+
+            $candidatos = array_values( array_filter(
+                $candidatos,
+                static fn ( CandidatoEstado $c ): bool => $incluirNoViables || $c->viable()
+            ) );
+
+            // Names are primed for exactly the set that survived the
+            // viable/incluir_no_viables filter above — the only ids this
+            // response could still need, whether to search against or to
+            // finally shape. See primePlayerTitles()'s own docblock.
             $this->primePlayerTitles( array_map(
                 static fn ( CandidatoEstado $c ): int => $c->playerId(),
                 $candidatos
             ) );
+
+            $search = trim( (string) ( $request->get_param( 'search' ) ?? '' ) );
+
+            if ( '' !== $search ) {
+                $candidatos = array_values( array_filter(
+                    $candidatos,
+                    fn ( CandidatoEstado $c ): bool => false !== mb_stripos( $this->nombreJugador( $c->playerId() ), $search )
+                ) );
+            }
 
             return new \WP_REST_Response(
                 [ 'candidatos' => array_map( [ $this, 'shapeCandidato' ], $candidatos ) ],
