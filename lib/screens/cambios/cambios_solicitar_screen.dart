@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/cambios_fecha_abierta.dart';
 import '../../models/cambios_plaza.dart';
 import '../../models/cambios_solicitud.dart';
 import '../../providers/cambios_providers.dart';
@@ -23,28 +24,33 @@ import '../../widgets/loading_seccion.dart';
 /// so the roster reflects the change through shared Riverpod state, exactly
 /// like `_PredictionSheet` never threads a result back through `pop()`.
 ///
-/// *** [fechaId] — A CONFIRMED BACKEND GAP, NOT A TODO ***
+/// *** WHERE `fechaId` COMES FROM ***
 /// `POST /cambios/solicitudes` requires a `fecha_id` (the season fecha this
 /// request targets — see `Dictamen\Reglas\SolicitudEnPlazo`, which uses it
-/// to look up that fecha's Tue/Thu/Fri deadline window). No endpoint in
-/// `wordpress_plugins/entre-redes-cambios/src/Rest/` exposes the season's
-/// fechas to a client — `Calendario\FechaRepository::listBySeason()` exists
-/// server-side but is never registered as a route. There is therefore no
-/// value this app can honestly send here. Every call site in this app passes
-/// `fechaId: null`; when null, this screen disables submission and shows
-/// [_FechaGapBanner] instead of guessing an id the backend would either
-/// reject (`fecha_id <= 0` → 400) or, worse, silently accept against the
-/// wrong week. Once a fechas-listing endpoint exists, wire the real id
-/// through this same parameter — the rest of the submit plumbing (search,
-/// selection, POST, error handling, shared-state refresh) is already correct
-/// and already tested end-to-end via a non-null [fechaId] in
-/// `cambios_solicitar_screen_test.dart`.
+/// to look up that fecha's Tue/Thu/Fri deadline window). This screen fetches
+/// it itself via [cambiosFechaAbiertaProvider] (`GET /cambios/fecha-abierta`)
+/// rather than taking it as a constructor parameter — there is no honest
+/// value a caller could pass in advance, and the fetch also carries
+/// `ventanas`, which the screen needs anyway (see below). While the fetch is
+/// in flight, or when it resolves to `null` (the season has no unresolved
+/// fecha right now) or fails, submission stays disabled behind
+/// [_FechaGapBanner] — never a guess.
+///
+/// *** WHY THE WINDOW CHECK HAPPENS HERE, NOT ONLY ON THE BACKEND ***
+/// `Dictamen\Reglas\SolicitudEnPlazo` already rejects a solicitud submitted
+/// past its deadline — but that is a REJECTION AFTER SUBMITTING, and a
+/// captain who picked a candidate, waited for the search, and confirmed
+/// deserves to learn the window already closed BEFORE doing any of that.
+/// [CambiosFechaAbierta.ventanaAbiertaPara] answers exactly the question this
+/// screen's own tipo cares about — `regreso_abierta` for
+/// [CambiosSolicitudTipo.regreso], `sustitucion_abierta` for
+/// [CambiosSolicitudTipo.sustitucion] — and [_VentanaCerradaBanner] shows
+/// that BEFORE the candidate list or the confirm button ever becomes usable.
 class CambiosSolicitarScreen extends ConsumerStatefulWidget {
   final int seasonId;
   final int teamId;
   final CambiosPlaza plaza;
   final CambiosSolicitudTipo tipo;
-  final int? fechaId;
 
   const CambiosSolicitarScreen({
     super.key,
@@ -52,7 +58,6 @@ class CambiosSolicitarScreen extends ConsumerStatefulWidget {
     required this.teamId,
     required this.plaza,
     required this.tipo,
-    this.fechaId,
   });
 
   @override
@@ -93,9 +98,14 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
       return;
     }
 
-    // See this class's own docblock, "[fechaId] — A CONFIRMED BACKEND GAP".
-    final fechaId = widget.fechaId;
-    if (fechaId == null) return;
+    // See this class's own docblock, "WHERE `fechaId` COMES FROM". `read`,
+    // not `watch` — this is a one-shot action, not something that should
+    // re-run this method on every rebuild.
+    final fecha = ref.read(cambiosFechaAbiertaProvider(widget.seasonId)).valueOrNull;
+    if (fecha == null) return;
+    final isSustitucion = widget.tipo == CambiosSolicitudTipo.sustitucion;
+    if (!fecha.ventanaAbiertaPara(esSustitucion: isSustitucion)) return;
+    final fechaId = fecha.fechaId;
 
     setState(() {
       _submitting = true;
@@ -141,9 +151,13 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
   @override
   Widget build(BuildContext context) {
     final isSustitucion = widget.tipo == CambiosSolicitudTipo.sustitucion;
-    final fechaId = widget.fechaId;
+    final fechaAsync = ref.watch(cambiosFechaAbiertaProvider(widget.seasonId));
+    final fecha = fechaAsync.valueOrNull;
+    final fechaId = fecha?.fechaId;
+    final ventanaAbierta = fecha != null && fecha.ventanaAbiertaPara(esSustitucion: isSustitucion);
     final canSubmit = !_submitting &&
         fechaId != null &&
+        ventanaAbierta &&
         (!isSustitucion || _selectedPlayerId != null);
 
     return Scaffold(
@@ -153,7 +167,10 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
       body: Column(
         children: [
           _PlazaHeader(plaza: widget.plaza),
-          if (fechaId == null) const _FechaGapBanner(),
+          if (fechaAsync.isLoading) const _FechaLoadingBanner(),
+          if (!fechaAsync.isLoading && fecha == null) const _FechaGapBanner(),
+          if (fecha != null && !ventanaAbierta)
+            _VentanaCerradaBanner(esSustitucion: isSustitucion),
           if (isSustitucion) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -330,6 +347,11 @@ class _CandidatosEmptyView extends StatelessWidget {
   }
 }
 
+/// Shown when [cambiosFechaAbiertaProvider] resolved to `null` (the season
+/// has no unresolved fecha right now) OR the fetch itself failed — both
+/// cases fall back to the SAME honest, generic banner: there is no fecha to
+/// request a change against, so submission stays disabled. See
+/// `CambiosSolicitarScreen`'s own docblock, "WHERE `fechaId` COMES FROM".
 class _FechaGapBanner extends StatelessWidget {
   const _FechaGapBanner();
 
@@ -341,8 +363,56 @@ class _FechaGapBanner extends StatelessWidget {
       leading: const Icon(Icons.info_outline, color: Colors.orange),
       backgroundColor: Colors.amber.shade100,
       content: const Text(
-        'Todavía no podemos enviar pedidos desde la app: falta terminar una '
-        'parte del sistema. Probá de nuevo más adelante.',
+        'No hay una fecha abierta para pedidos en este momento. '
+        'Probá de nuevo más adelante.',
+      ),
+      actions: const [SizedBox.shrink()],
+    );
+  }
+}
+
+/// Shown briefly while [cambiosFechaAbiertaProvider] is still resolving —
+/// keeps the confirm button disabled without prematurely claiming there is
+/// no open fecha.
+class _FechaLoadingBanner extends StatelessWidget {
+  const _FechaLoadingBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialBanner(
+      key: const Key('fecha_loading_banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: const SizedBox(
+        height: 16,
+        width: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+      content: const Text('Buscando la fecha para este pedido...'),
+      actions: const [SizedBox.shrink()],
+    );
+  }
+}
+
+/// Shown when there IS an open fecha, but the deadline window for THIS
+/// tipo of request (regreso or sustitucion) has already closed — see
+/// `CambiosSolicitarScreen`'s own docblock, "WHY THE WINDOW CHECK HAPPENS
+/// HERE, NOT ONLY ON THE BACKEND": a captain must learn this before picking
+/// a candidate, never from a rejected submit.
+class _VentanaCerradaBanner extends StatelessWidget {
+  final bool esSustitucion;
+  const _VentanaCerradaBanner({required this.esSustitucion});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialBanner(
+      key: const Key('ventana_cerrada_banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      leading: const Icon(Icons.lock_clock_outlined, color: Colors.orange),
+      backgroundColor: Colors.amber.shade100,
+      content: Text(
+        esSustitucion
+            ? 'El plazo para pedir un cambio en esta fecha ya cerró.'
+            : 'El plazo para pedir un regreso en esta fecha ya cerró.',
       ),
       actions: const [SizedBox.shrink()],
     );

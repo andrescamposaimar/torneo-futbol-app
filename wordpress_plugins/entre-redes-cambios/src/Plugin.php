@@ -123,7 +123,14 @@ final class Plugin {
                 $eventLog
             );
 
-            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController ) )->register_routes();
+            $fechaController = new Rest\FechaController(
+                $capitanAuthorizer,
+                $fechaRepository,
+                $settings,
+                $eventLog
+            );
+
+            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController, $fechaController ) )->register_routes();
         } );
 
         // Process owner's admin bandeja — only in wp-admin context, same

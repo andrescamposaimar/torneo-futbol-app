@@ -38,9 +38,8 @@ class CambiosPlantelScreen extends ConsumerWidget {
       state: state,
       onRetry: () => notifier.load(seasonId: seasonId, teamId: teamId),
       onRefresh: () => notifier.refresh(seasonId: seasonId, teamId: teamId),
-      // fechaId: null — see CambiosSolicitarScreen's own docblock,
-      // "[fechaId] — A CONFIRMED BACKEND GAP": no endpoint exists yet to
-      // discover which fecha a solicitud should target.
+      // CambiosSolicitarScreen fetches its own fecha (see its docblock,
+      // "WHERE `fechaId` COMES FROM") — nothing to pass here any more.
       onPedirCambio: (plaza) => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => CambiosSolicitarScreen(
@@ -48,7 +47,6 @@ class CambiosPlantelScreen extends ConsumerWidget {
             teamId: teamId,
             plaza: plaza,
             tipo: CambiosSolicitudTipo.sustitucion,
-            fechaId: null,
           ),
         ),
       ),
@@ -59,7 +57,6 @@ class CambiosPlantelScreen extends ConsumerWidget {
             teamId: teamId,
             plaza: plaza,
             tipo: CambiosSolicitudTipo.regreso,
-            fechaId: null,
           ),
         ),
       ),

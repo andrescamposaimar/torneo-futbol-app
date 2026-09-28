@@ -262,6 +262,102 @@ void main() {
     });
   });
 
+  group('CambiosApiService — fetchFechaAbierta', () {
+    test('parses the fecha envelope, including ventanas, on 200', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async {
+          expect(request.url.path, endsWith('/cambios/fecha-abierta'));
+          expect(request.url.queryParameters['season_id'], '7');
+          return _jsonResponse({
+            'fecha': {
+              'fecha_id': 42,
+              'numero_en_torneo': 3,
+              'torneo': 'Apertura',
+              'play_date': '2026-01-10',
+              'plazos_utc': {
+                'apertura_solicitudes': '2026-01-04 03:00:00',
+                'cierre_regresos': '2026-01-07 02:59:59',
+                'cierre_solicitudes': '2026-01-09 02:59:59',
+                'publicacion': '2026-01-09 03:00:00',
+              },
+              'ventanas': {'regreso_abierta': false, 'sustitucion_abierta': true},
+            },
+          }, 200);
+        }),
+      );
+
+      final fecha = await service.fetchFechaAbierta(seasonId: 7);
+
+      expect(fecha, isNotNull);
+      expect(fecha!.fechaId, 42);
+      expect(fecha.numeroEnTorneo, 3);
+      expect(fecha.torneo, 'Apertura');
+      expect(fecha.playDate, '2026-01-10');
+      expect(fecha.regresoAbierta, isFalse);
+      expect(fecha.sustitucionAbierta, isTrue);
+    });
+
+    test('returns null when the backend answers {"fecha": null}', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _jsonResponse({'fecha': null}, 200)),
+      );
+
+      final fecha = await service.fetchFechaAbierta(seasonId: 7);
+
+      expect(fecha, isNull);
+    });
+
+    test('a 401 token_expired refreshes silently and retries once', () async {
+      final repo = await _repoWithAccessToken();
+      var refreshCalled = false;
+      final service = _makeService(
+        repo,
+        MockClient((request) async {
+          if (request.url.path.endsWith('/auth/refresh')) {
+            refreshCalled = true;
+            return _jsonResponse({
+              'access_token': 'new-access-token',
+              'refresh_token': 'new-refresh-token',
+              'user': {
+                'user_id': 1,
+                'player_id': 2,
+                'name': 'Test',
+                'session_version': 2,
+              },
+            }, 200);
+          }
+          if (request.headers['Authorization'] == 'Bearer new-access-token') {
+            return _jsonResponse({'fecha': null}, 200);
+          }
+          return _jsonResponse({'code': 'token_expired'}, 401);
+        }),
+      );
+
+      final fecha = await service.fetchFechaAbierta(seasonId: 7);
+
+      expect(refreshCalled, isTrue);
+      expect(fecha, isNull);
+    });
+
+    test('a 401 session_revoked throws ProdeAuthRequired', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((_) async => _jsonResponse({'code': 'session_revoked'}, 401)),
+      );
+
+      await expectLater(
+        service.fetchFechaAbierta(seasonId: 7),
+        throwsA(isA<ProdeAuthRequired>()
+            .having((e) => e.code, 'code', 'session_revoked')),
+      );
+    });
+  });
+
   group('CambiosApiService — 401 handling', () {
     test('a 401 whose refresh also fails throws ProdeAuthRequired', () async {
       // ProdeApiService.request() sees the 401, attempts a single refresh

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/tenant_provider.dart';
+import '../models/cambios_fecha_abierta.dart';
 import '../services/cambios_api_service.dart';
 import '../services/cambios_candidatos_controller.dart';
 import '../services/cambios_context_controller.dart';
@@ -95,3 +96,18 @@ final cambiosCandidatosControllerProvider = StateNotifierProvider.autoDispose
     return controller;
   },
 );
+
+/// Fetches the season's currently open fecha (`GET /cambios/fecha-abierta`)
+/// — the `fecha_id` "Pedir cambio" needs for `POST /cambios/solicitudes`,
+/// and whether each request tipo's own deadline window is still open. `null`
+/// is a legitimate resolved value (see [CambiosFechaAbierta]'s own
+/// docblock), not the absence of one — [AsyncValue.hasError] is what
+/// distinguishes a genuine fetch failure from "no open fecha right now".
+///
+/// autoDispose: this is single-screen-lifetime data, same rationale as
+/// [cambiosCandidatosControllerProvider] — no value in keeping a stale
+/// fetch alive once the captain navigates away from "Pedir cambio".
+final cambiosFechaAbiertaProvider =
+    FutureProvider.autoDispose.family<CambiosFechaAbierta?, int>((ref, seasonId) {
+  return ref.watch(cambiosApiServiceProvider).fetchFechaAbierta(seasonId: seasonId);
+});
