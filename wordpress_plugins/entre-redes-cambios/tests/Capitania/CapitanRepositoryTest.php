@@ -7,6 +7,7 @@ namespace EntreRedes\Cambios\Tests\Capitania;
 use EntreRedes\Cambios\Capitania\CapitanRepository;
 use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -22,6 +23,7 @@ use PHPUnit\Framework\TestCase;
 class CapitanRepositoryTest extends TestCase {
 
     private CapitanRepository $repo;
+    private InMemoryEventLog $eventLog;
 
     protected function setUp(): void {
         InitialSchema::up();
@@ -29,7 +31,8 @@ class CapitanRepositoryTest extends TestCase {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_capitan" );
 
-        $this->repo = new CapitanRepository( $wpdb );
+        $this->eventLog = new InMemoryEventLog();
+        $this->repo     = new CapitanRepository( $wpdb, $this->eventLog );
     }
 
     protected function tearDown(): void {
@@ -155,7 +158,7 @@ class CapitanRepositoryTest extends TestCase {
         $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'insert' );
-        $failingRepo = new CapitanRepository( $failingWpdb );
+        $failingRepo = new CapitanRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
@@ -182,7 +185,7 @@ class CapitanRepositoryTest extends TestCase {
         $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'update' );
-        $failingRepo = new CapitanRepository( $failingWpdb );
+        $failingRepo = new CapitanRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
             $failingRepo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
@@ -294,5 +297,107 @@ class CapitanRepositoryTest extends TestCase {
         $this->assertTrue( $this->repo->isCapitanVigente( 359, 100, 777 ) );
         $this->assertTrue( $this->repo->isCapitanVigente( 360, 100, 888 ) );
         $this->assertFalse( $this->repo->isCapitanVigente( 359, 100, 888 ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // EventLog — audit events on every successful write
+    // -------------------------------------------------------------------------
+
+    public function test_designate_captain_records_an_audit_event(): void {
+        $id = $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $this->assertTrue( $this->eventLog->has( 'capitan.designado' ) );
+        $event = $this->eventLog->last();
+        $this->assertSame( 'capitan.designado', $event['evento'] );
+        $this->assertSame( $id, $event['contexto']['capitan_id'] );
+        $this->assertSame( 359, $event['contexto']['season_id'] );
+        $this->assertSame( 100, $event['contexto']['team_id'] );
+        $this->assertSame( 777, $event['contexto']['player_id'] );
+        $this->assertNull( $event['contexto']['reemplazo_a'] );
+    }
+
+    public function test_designate_captain_records_who_it_replaced(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
+
+        $event = $this->eventLog->last();
+        $this->assertSame( 'capitan.designado', $event['evento'] );
+        $this->assertSame( 888, $event['contexto']['player_id'] );
+        $this->assertSame( 777, $event['contexto']['reemplazo_a'] );
+    }
+
+    public function test_designate_captain_records_no_event_on_the_idempotent_no_op(): void {
+        global $wpdb;
+
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $this->eventLog = new InMemoryEventLog();
+        $this->repo     = new CapitanRepository( $wpdb, $this->eventLog );
+
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-27 10:00:00' );
+
+        $this->assertFalse( $this->eventLog->has( 'capitan.designado' ), 'No write happened on the incumbent no-op.' );
+    }
+
+    public function test_revoke_captain_records_an_audit_event(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $this->repo->revokeCapitan( 359, 100, '2026-09-27 10:00:00' );
+
+        $this->assertTrue( $this->eventLog->has( 'capitan.revocado' ) );
+        $event = $this->eventLog->last();
+        $this->assertSame( 359, $event['contexto']['season_id'] );
+        $this->assertSame( 100, $event['contexto']['team_id'] );
+        $this->assertSame( 777, $event['contexto']['player_id'] );
+    }
+
+    public function test_revoke_captain_records_no_event_when_there_is_nothing_to_revoke(): void {
+        $this->repo->revokeCapitan( 359, 100, '2026-09-27 10:00:00' );
+
+        $this->assertFalse( $this->eventLog->has( 'capitan.revocado' ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // EventLog — failure events recorded BEFORE the exception propagates
+    // -------------------------------------------------------------------------
+
+    public function test_designate_captain_records_the_failure_event_before_throwing_when_the_insert_fails(): void {
+        global $wpdb;
+
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $failingWpdb     = $this->wpdbThatFailsOn( $wpdb, 'insert' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new CapitanRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
+            $this->fail( 'Expected CapitanPersistenceException.' );
+        } catch ( CapitanPersistenceException $e ) {
+            // expected — the event must already exist even though this propagated.
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'escritura.fallida' ) );
+        $last = $failingEventLog->last();
+        $this->assertSame( 'designateCapitan', $last['contexto']['operacion'] );
+        $this->assertNotNull( $last['contexto']['last_error'] ?? null );
+    }
+
+    public function test_designate_captain_records_the_failure_event_before_throwing_when_the_revoke_fails(): void {
+        global $wpdb;
+
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+
+        $failingWpdb     = $this->wpdbThatFailsOn( $wpdb, 'update' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new CapitanRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->designateCapitan( 359, 100, 888, 7, '2026-09-27 10:00:00' );
+            $this->fail( 'Expected CapitanPersistenceException.' );
+        } catch ( CapitanPersistenceException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'escritura.fallida' ) );
     }
 }

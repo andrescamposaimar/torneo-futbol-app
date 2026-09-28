@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Capitania;
 
 use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
+use EntreRedes\Cambios\Observability\EventLog;
 
 /**
  * Encapsulates all wpdb persistence for cambios_capitan.
@@ -30,13 +31,22 @@ use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
  * cambios_capitan, designated explicitly through designateCapitan(). Do not
  * wire the taxonomy term into authorization later — it means something else
  * entirely.
+ *
+ * *** OBSERVABILITY (slice 4) ***
+ * The EventLog is a MANDATORY constructor dependency, with no null-object
+ * default — see Observability\EventLog's class docblock for why. Every
+ * successful designation or revocation records an audit event AFTER its
+ * COMMIT/write; every failure this class can throw is recorded BEFORE the
+ * throw.
  */
 class CapitanRepository {
 
     private \wpdb $wpdb;
+    private EventLog $eventLog;
 
-    public function __construct( \wpdb $wpdb ) {
-        $this->wpdb = $wpdb;
+    public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
+        $this->wpdb     = $wpdb;
+        $this->eventLog = $eventLog;
     }
 
     /**
@@ -47,7 +57,8 @@ class CapitanRepository {
      *
      * IDEMPOTENT: designating the SAME player_id that is already the vigent
      * captain of this team is a no-op — no new row is created and the
-     * existing one is not revoked — and returns that row's existing id.
+     * existing one is not revoked — and returns that row's existing id. No
+     * audit event is recorded for this no-op branch: nothing was written.
      *
      * Not safe against two concurrent designateCapitan() calls for the same
      * team racing past the initial findCapitanVigente() read before either's
@@ -82,7 +93,7 @@ class CapitanRepository {
 
         try {
             if ( null !== $vigente ) {
-                $this->revokeRow( (int) $vigente['id'], $now );
+                $this->revokeRow( (int) $vigente['id'], $now, 'designateCapitan', $seasonId, $teamId );
             }
 
             $result = $wpdb->insert(
@@ -98,12 +109,30 @@ class CapitanRepository {
             );
 
             if ( false === $result ) {
+                $this->eventLog->record( 'escritura.fallida', [
+                    'operacion'  => 'designateCapitan',
+                    'motivo'     => 'insert cambios_capitan fallo',
+                    'season_id'  => $seasonId,
+                    'team_id'    => $teamId,
+                    'player_id'  => $playerId,
+                    'last_error' => $wpdb->last_error,
+                ] );
+
                 throw new CapitanPersistenceException( 'insert', $wpdb->last_error );
             }
 
             $newId = (int) $wpdb->insert_id;
 
             if ( $newId <= 0 ) {
+                $this->eventLog->record( 'escritura.fallida', [
+                    'operacion'  => 'designateCapitan',
+                    'motivo'     => 'insert cambios_capitan devolvio insert_id <= 0',
+                    'season_id'  => $seasonId,
+                    'team_id'    => $teamId,
+                    'player_id'  => $playerId,
+                    'last_error' => $wpdb->last_error,
+                ] );
+
                 throw new CapitanPersistenceException( 'insert', $wpdb->last_error );
             }
 
@@ -112,6 +141,15 @@ class CapitanRepository {
             $wpdb->query( 'ROLLBACK' );
             throw $e;
         }
+
+        $this->eventLog->record( 'capitan.designado', [
+            'capitan_id'    => $newId,
+            'season_id'     => $seasonId,
+            'team_id'       => $teamId,
+            'player_id'     => $playerId,
+            'designado_por' => $designadoPor,
+            'reemplazo_a'   => null !== $vigente ? (int) $vigente['player_id'] : null,
+        ] );
 
         return $newId;
     }
@@ -132,7 +170,14 @@ class CapitanRepository {
             return false;
         }
 
-        $this->revokeRow( (int) $vigente['id'], $now );
+        $this->revokeRow( (int) $vigente['id'], $now, 'revokeCapitan', $seasonId, $teamId );
+
+        $this->eventLog->record( 'capitan.revocado', [
+            'capitan_id' => (int) $vigente['id'],
+            'season_id'  => $seasonId,
+            'team_id'    => $teamId,
+            'player_id'  => (int) $vigente['player_id'],
+        ] );
 
         return true;
     }
@@ -196,13 +241,22 @@ class CapitanRepository {
      *         `false` (see wpdb's own contract — it never throws on
      *         failure) instead of the number of affected rows.
      */
-    private function revokeRow( int $id, string $now ): void {
+    private function revokeRow( int $id, string $now, string $operacion, int $seasonId, int $teamId ): void {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
         $result = $wpdb->update( $p . 'cambios_capitan', [ 'revocado_at' => $now ], [ 'id' => $id ] );
 
         if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => $operacion,
+                'motivo'     => 'revoke cambios_capitan fallo',
+                'capitan_id' => $id,
+                'season_id'  => $seasonId,
+                'team_id'    => $teamId,
+                'last_error' => $wpdb->last_error,
+            ] );
+
             throw new CapitanPersistenceException( 'revoke', $wpdb->last_error );
         }
     }

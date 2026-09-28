@@ -50,10 +50,12 @@ if ( file_exists( ENTRE_REDES_CAMBIOS_DIR . 'vendor/autoload.php' ) ) {
 
 // Activation hook — runs once when the operator clicks "Activate".
 register_activation_hook( __FILE__, function () {
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Observability/EventLog.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Observability/WpEventLog.php';
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Migrations/InitialSchema.php';
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Migrations/MigrationRunner.php';
 
-    \EntreRedes\Cambios\Migrations\MigrationRunner::run();
+    \EntreRedes\Cambios\Migrations\MigrationRunner::run( new \EntreRedes\Cambios\Observability\WpEventLog() );
 } );
 
 // Deactivation hook — no crons are scheduled by this slice; kept as a no-op

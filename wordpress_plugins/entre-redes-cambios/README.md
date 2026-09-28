@@ -163,8 +163,30 @@ Slice 3 is the pure-function decision layer on top of slice 2's data model: give
 ### Contracts for slice 4 — written here, not yet implemented
 
 1. **Every query that fills `DictamenContext` must throw on failure, never return `[]`.** An empty `entranteOcupacionesEnOtrasPlazas()` or `entrantePlazasConCierreTruncado()` reads as "confirmado, sin conflicto" to `Reglas\EntranteDisponible` and `Reglas\EntranteNoBloqueado` — a query that fails silently becomes a silent approval, not a rejection.
-2. **The wrapper that invokes `DictamenEngine` must catch `\Throwable`, log it with the solicitud's identifiers (seasonId, teamId, plazaId, fechaId), and only then decide what to answer the caller.** Without that, "the subcomisión rejected it" and "the dictamen engine crashed" are indistinguishable to whoever reads the response.
+2. **The wrapper that invokes `DictamenEngine` must catch `\Throwable`, log it with the solicitud's identifiers (seasonId, teamId, plazaId, fechaId), and only then decide what to answer the caller.** Without that, "the subcomisión rejected it" and "the dictamen engine crashed" are indistinguishable to whoever reads the response. `Observability\EventLog` (see "Guardrails" below) is the channel that wrapper should log through once it exists — nothing invokes `DictamenEngine` from a real caller yet.
 3. **When CC5b is resolved, remove `BloqueoReemplazoPolicy`'s default** (`EntranteNoBloqueado`'s constructor currently defaults to `topeTresFechas()` when no policy is injected) — whoever wires `DictamenEngineFactory::create()` for real must pass the confirmed policy explicitly, so a future ambiguity cannot silently fall back to a guess again.
+
+## Guardrails (slice 4)
+
+Before slice 4, this plugin had no `error_log()` call and no hook anywhere — a captain reporting "I asked for a change and nothing happened" had nothing to look at. This slice adds the observability and defensive checks a real endpoint needs before it can go live; it still ships no REST routes, no admin UI, no cron (see "Scope of this slice" below) — it stays domain infrastructure.
+
+### `Observability\EventLog` — the one channel every write and every failure speaks through
+
+`EventLog` is a plain interface (`record(string $evento, array $contexto): void`). `WpEventLog` (production) always fires `do_action('entre_redes_cambios_event', $evento, $contexto)` and additionally writes to `error_log()` — and ONLY `error_log()`, no custom file — when `WP_DEBUG` is active. `InMemoryEventLog` (tests) keeps every event in order, so a test can assert not just that an event fired but that it fired BEFORE an exception propagated.
+
+`Plazas\PlazaRepository` and `Capitania\CapitanRepository` both take an `EventLog` as a MANDATORY constructor argument — there is deliberately no null-object default. A default that silently swallowed events would reproduce, in code, the exact silent-failure pattern this slice exists to end. Every successful write that matters to an operator (`plaza.abierta`, `ocupacion.sucedida`, `ocupacion.regreso_titular`, `ocupacion.deshecha`, `plaza.cerrada`, `capitan.designado`, `capitan.revocado`) is recorded AFTER its `COMMIT`; every failure (`escritura.fallida`) is recorded BEFORE the exception is thrown, with the ids needed to diagnose it (season, team, plaza, ocupación, player, fecha, and `$wpdb->last_error` when applicable).
+
+### Fecha id validation — `PlazaRepository`
+
+`fecha_desde_id` / `fecha_hasta_id` are LOGICAL foreign keys into `cambios_fecha` with no DB-level constraint (same "SQLite shim drops every KEY" story as everywhere else in this schema — see `InitialSchema`'s docblock). `openPlaza()`, `succeedOcupacion()` and `closeOcupacionByRegresoTitular()` now validate — via `assertFechaExistsInSeason()` — that the id exists AND belongs to the same season as the plaza, before writing anything. An id typo or one copied from the wrong season now fails loud, at the write, instead of surfacing much later inside `Calendario\FechaRepository::countResolvedFechasSince()`.
+
+### Correction primitives — `PlazaRepository::undoLastOcupacion()` / `::closePlaza()`
+
+Before this slice, fixing a plaza opened with the wrong titular, or an ocupación succeeded by mistake, meant raw SQL against production — run by a parents' committee, not a developer. `undoLastOcupacion()` deletes the last link of a plaza's chain and reopens the one before it (refusing on a single-link/genesis-only chain — use `closePlaza()` for that case instead). `closePlaza()` marks a plaza's `closed_at` for one opened entirely by mistake. Both are explicitly CORRECTION tools, not part of the normal solicitud/regreso flow — nothing in `Dictamen\DictamenEngine` or `Plazas\CadenaResolver` ever calls them.
+
+### InnoDB storage-engine check — `MigrationRunner`
+
+Every invariant this plugin defends ("at most one vigent ocupación/captain") depends on `START TRANSACTION` / `COMMIT` / `ROLLBACK` being real, which requires every `cambios_` table to actually be InnoDB. MySQL accepts `ENGINE=InnoDB` and silently substitutes another engine on some hosts, WARNING but not failing. `MigrationRunner::run()` now checks each table's real engine via `information_schema.TABLES` after migrations, logs `motor.no_innodb` and shows an `admin_notice` if any table isn't InnoDB — tolerantly: if the query itself is unavailable (e.g. the SQLite test shim has no `information_schema`), it is treated as "could not check", never as "found a violation".
 
 ## Scope of this slice (slice 0)
 
