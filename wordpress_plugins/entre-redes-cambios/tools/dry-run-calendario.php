@@ -29,6 +29,7 @@ if ( 'cli' !== PHP_SAPI ) {
 }
 
 use EntreRedes\Cambios\Calendario\FechaRepository;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Calendario\LigaResolver;
 use EntreRedes\Cambios\Calendario\PartidosApiClient;
 use EntreRedes\Cambios\Calendario\SeedTemporadaService;
@@ -159,7 +160,7 @@ if ( ! empty( $stats['skipped_ligas'] ) ) {
 
 $fetcherFn = static fn(): array => $allPartidos;
 
-$repository = new FechaRepository( $wpdb );
+$repository = new FechaRepository( $wpdb, new InMemoryEventLog() );
 $service    = new SeedTemporadaService( $repository, $fetcherFn, $ligaToTorneoLabel );
 
 // ─── First run ────────────────────────────────────────────────────────────────

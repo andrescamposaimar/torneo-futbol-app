@@ -1,0 +1,710 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EntreRedes\Cambios\Solicitudes;
+
+use EntreRedes\Cambios\Dictamen\Dictamen;
+use EntreRedes\Cambios\Dictamen\DictamenPipeline;
+use EntreRedes\Cambios\Dictamen\DictamenSnapshot;
+use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
+use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Solicitudes\Exception\SolicitudPersistenceException;
+use EntreRedes\Cambios\Support\OpensTransactions;
+
+/**
+ * Encapsulates all wpdb persistence for `cambios_solicitud` — the SOLICITUD
+ * DE CAMBIO as a persisted entity with its own lifecycle, as opposed to
+ * `Dictamen\SolicitudDeCambio`, which is a pure, ephemeral input DTO the
+ * dictamen engine evaluates and never itself stores (see that class's own
+ * docblock). This class is what turns "a captain asked for a change" into a
+ * row the process owner can act on over several days.
+ *
+ * *** APROBAR IS NOT PUBLICAR — THE CENTRAL FACT THIS CLASS ENFORCES ***
+ * The real operating calendar (see this plugin's README) has the process
+ * owner reviewing and approving solicitudes AS THEY ARRIVE, Wednesday
+ * through Thursday, but the change is only OFFICIAL once Friday's lote is
+ * announced. Until then an `aprobada` solicitud is an INTENTION, still
+ * revocable — the process owner can change their mind and move it to
+ * `rechazada` or `anulada` before the lote runs. Concretely:
+ *
+ *   - `aprobar()` NEVER touches `Plazas\PlazaRepository` — it only flips
+ *     `estado`. No ocupación closes, no ocupación opens, nothing about who
+ *     occupies a plaza changes.
+ *   - `publicarLote()` is the ONLY method that calls
+ *     `PlazaRepository::succeedOcupacionWithinTransaction()` /
+ *     `::closeOcupacionByRegresoTitularWithinTransaction()` — this is where
+ *     an approved intention becomes a real change of occupant.
+ *
+ * *** RE-EVALUATING BEFORE APPLYING ***
+ * The dictamen `crear()` stores is a SNAPSHOT of facts true the moment the
+ * solicitud was made. Between Wednesday and Friday those facts can go
+ * stale: a fecha passed, the entrante got occupied in another plaza, someone
+ * else succeeded the very plaza this solicitud targets. `publicarLote()`
+ * therefore re-runs `DictamenPipeline::evaluate()` for every solicitud in
+ * the lote, fresh, against the CURRENT database, right before applying
+ * anything:
+ *
+ *   - If the fresh dictamen no longer `procede()`, THIS solicitud is not
+ *     published, and — because a lote applied halfway would leave nobody
+ *     able to tell which of it actually went through — the WHOLE lote is
+ *     aborted; nothing in it is applied. The caller finds out which
+ *     solicitud failed re-evaluation and why.
+ *   - If it still `procede()` but the motivos that produced that answer
+ *     changed (e.g. it originally objected and now clears), the solicitud
+ *     IS published, and the divergence is recorded in the EventLog — see
+ *     `dictamenDivergio()`.
+ *
+ * The fresh dictamen — not the original one — is what gets stored as
+ * `dictamen_aplicado`: when someone later asks "why was this change
+ * applied", the honest answer is what was true AT THAT MOMENT, never what
+ * was true three days earlier (see `Dictamen\DictamenSnapshot`'s docblock).
+ *
+ * *** WHY THIS METHOD EXISTS: `PlazaRepository`'s "WithinTransaction" pair ***
+ * `publicarLote()` can touch several plazas in one call, and the whole lote
+ * must apply as ONE atomic transaction — a lote applied halfway (three
+ * plazas changed, a fourth failed) is worse than none applied, because
+ * nobody could tell which of it actually went through. `PlazaRepository::
+ * succeedOcupacion()` / `::closeOcupacionByRegresoTitular()` each open and
+ * close their OWN transaction per call, which is exactly right for a single
+ * ad-hoc change but wrong here: a nested `START TRANSACTION` per solicitud
+ * would either implicitly commit the outer transaction (real MySQL) or fail
+ * outright (the SQLite test shim — see tests/wp-shim.php), either way
+ * silently breaking the lote's atomicity. `succeedOcupacionWithinTransaction()`
+ * / `closeOcupacionByRegresoTitularWithinTransaction()` exist for exactly
+ * this caller: same validation, same write, but assuming an ambient
+ * transaction THIS class opens once for the whole lote, and leaving the
+ * EventLog record to this class — see those methods' own docblocks.
+ *
+ * *** OBSERVABILITY ***
+ * Same discipline as `PlazaRepository` / `CapitanRepository`: `EventLog` is
+ * a mandatory constructor dependency, every successful write records an
+ * event after it is durable, every failure is logged before it is thrown.
+ */
+class SolicitudRepository {
+
+    use OpensTransactions;
+
+    private \wpdb $wpdb;
+    private PlazaRepository $plazaRepository;
+    private DictamenPipeline $dictamenPipeline;
+    private EventLog $eventLog;
+
+    public function __construct(
+        \wpdb $wpdb,
+        PlazaRepository $plazaRepository,
+        DictamenPipeline $dictamenPipeline,
+        EventLog $eventLog
+    ) {
+        $this->wpdb             = $wpdb;
+        $this->plazaRepository  = $plazaRepository;
+        $this->dictamenPipeline = $dictamenPipeline;
+        $this->eventLog         = $eventLog;
+    }
+
+    /**
+     * Persists a brand-new solicitud, `pendiente`, with $dictamen frozen as
+     * its `dictamen_original` snapshot. Does NOT gate on `$dictamen->procede()`
+     * — per the reglamento the process owner reviews and decides on every
+     * solicitud regardless of what the dictamen says (see `Dictamen\Dictamen`'s
+     * own docblock: "a dictamen is not an approval"), so a solicitud whose
+     * dictamen objects is stored exactly the same way as one that clears
+     * every rule; only `aprobar()` / `rechazar()` decide anything.
+     *
+     * @throws SolicitudPersistenceException When the insert fails at the
+     *         wpdb level.
+     */
+    public function crear( SolicitudDeCambio $solicitud, int $solicitadaPor, Dictamen $dictamen, string $now ): int {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $snapshot = DictamenSnapshot::fromDictamen( $dictamen, $now );
+
+        $result = $wpdb->insert(
+            $p . 'cambios_solicitud',
+            [
+                'season_id'                => $solicitud->seasonId(),
+                'team_id'                  => $solicitud->teamId(),
+                'plaza_id'                 => $solicitud->plazaId(),
+                'tipo'                     => $solicitud->tipo(),
+                'entrante_player_id'       => $solicitud->entrantePlayerId(),
+                'fecha_id'                 => $solicitud->fechaId(),
+                'solicitada_por'           => $solicitadaPor,
+                'solicitada_at'            => $now,
+                'solicitud_instante_epoch' => $solicitud->instanteEpoch(),
+                'dictamen_original'        => $snapshot->toJson(),
+                'dictamen_aplicado'        => null,
+                'estado'                   => EstadoSolicitud::PENDIENTE,
+                'resuelta_por'             => null,
+                'resuelta_at'              => null,
+                'nota'                     => null,
+                'created_at'               => $now,
+                'updated_at'               => $now,
+            ]
+        );
+
+        if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'crear',
+                'motivo'     => 'insert cambios_solicitud fallo',
+                'season_id'  => $solicitud->seasonId(),
+                'team_id'    => $solicitud->teamId(),
+                'plaza_id'   => $solicitud->plazaId(),
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new SolicitudPersistenceException( 'insert cambios_solicitud', $wpdb->last_error );
+        }
+
+        $id = (int) $wpdb->insert_id;
+
+        if ( $id <= 0 ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'crear',
+                'motivo'     => 'insert cambios_solicitud devolvio insert_id <= 0',
+                'season_id'  => $solicitud->seasonId(),
+                'team_id'    => $solicitud->teamId(),
+                'plaza_id'   => $solicitud->plazaId(),
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new SolicitudPersistenceException( 'insert cambios_solicitud', $wpdb->last_error );
+        }
+
+        $this->eventLog->record( 'solicitud.creada', [
+            'solicitud_id'       => $id,
+            'season_id'          => $solicitud->seasonId(),
+            'team_id'            => $solicitud->teamId(),
+            'plaza_id'           => $solicitud->plazaId(),
+            'tipo'               => $solicitud->tipo(),
+            'entrante_player_id' => $solicitud->entrantePlayerId(),
+            'fecha_id'           => $solicitud->fechaId(),
+            'solicitada_por'     => $solicitadaPor,
+            'dictamen_procede'   => $dictamen->procede(),
+            'dictamen_motivos'   => $snapshot->motivoCodigos(),
+        ] );
+
+        return $id;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function findSolicitud( int $id ): ?array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $row = $wpdb->get_row(
+            $wpdb->prepare( "SELECT * FROM {$p}cambios_solicitud WHERE id = %d LIMIT 1", $id ),
+            ARRAY_A
+        );
+
+        return empty( $row ) ? null : $row;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function listPendientes( int $seasonId ): array {
+        return $this->listByEstado( $seasonId, EstadoSolicitud::PENDIENTE );
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function listAprobadas( int $seasonId ): array {
+        return $this->listByEstado( $seasonId, EstadoSolicitud::APROBADA );
+    }
+
+    /**
+     * Flips a `pendiente` (or still-`aprobada`) solicitud to `aprobada` —
+     * see class docblock, "APROBAR IS NOT PUBLICAR": this NEVER touches
+     * `PlazaRepository`. No ocupación is opened or closed here.
+     *
+     * @throws \RuntimeException When $id does not exist.
+     * @throws Exception\TransicionInvalidaException When the solicitud's
+     *         current estado cannot move to `aprobada`.
+     * @throws SolicitudPersistenceException When the update fails at the
+     *         wpdb level.
+     */
+    public function aprobar( int $id, int $resueltaPor, ?string $nota, string $now ): void {
+        $this->transicionar( $id, EstadoSolicitud::APROBADA, $resueltaPor, $nota, $now, 'solicitud.aprobada' );
+    }
+
+    /**
+     * @throws \RuntimeException When $id does not exist.
+     * @throws Exception\TransicionInvalidaException When the solicitud's
+     *         current estado cannot move to `rechazada`.
+     * @throws SolicitudPersistenceException When the update fails at the
+     *         wpdb level.
+     */
+    public function rechazar( int $id, int $resueltaPor, ?string $nota, string $now ): void {
+        $this->transicionar( $id, EstadoSolicitud::RECHAZADA, $resueltaPor, $nota, $now, 'solicitud.rechazada' );
+    }
+
+    /**
+     * @throws \RuntimeException When $id does not exist.
+     * @throws Exception\TransicionInvalidaException When the solicitud's
+     *         current estado cannot move to `anulada`.
+     * @throws SolicitudPersistenceException When the update fails at the
+     *         wpdb level.
+     */
+    public function anular( int $id, int $resueltaPor, ?string $nota, string $now ): void {
+        $this->transicionar( $id, EstadoSolicitud::ANULADA, $resueltaPor, $nota, $now, 'solicitud.anulada' );
+    }
+
+    /**
+     * The Friday lote announcement: re-evaluates every $ids solicitud's
+     * dictamen fresh, and — only if EVERY one of them still `procede()` —
+     * applies all of them as ONE atomic transaction (see class docblock,
+     * "RE-EVALUATING BEFORE APPLYING" and "WHY THIS METHOD EXISTS").
+     *
+     * Every $ids entry MUST currently be `aprobada` — that is the only
+     * transition this method performs (`aprobada` → `publicada`); a
+     * solicitud in any other estado aborts the WHOLE lote, same as a
+     * solicitud whose fresh dictamen no longer procede.
+     *
+     * *** THIS METHOD DOES NOT AUTHORIZE THE CALLER ***
+     * Exactly like `undoLastOcupacion()` / `closePlaza()` below: this is one
+     * of the most dangerous entry points in this plugin to expose — it
+     * writes real occupancy changes over real rosters for an entire lote at
+     * once. It performs NO role or ownership check of its own. A future REST
+     * wrapper MUST verify the caller's role (process owner, never a captain)
+     * BEFORE invoking this — never rely on this method to reject an
+     * unauthorized caller, because it will not.
+     *
+     * @param int[] $ids
+     * @return array{
+     *     publicadas: int[],
+     *     no_publicadas: int[],
+     *     abortado: bool,
+     *     motivo: string|null,
+     *     divergencias: int[],
+     *     culprit_id: int|null
+     * } `publicadas` — solicitud ids actually applied and moved to
+     *   `publicada`. `no_publicadas` — every id that did NOT get applied
+     *   (all of $ids when `abortado` is true, empty when the lote fully
+     *   succeeded). `abortado` — true when nothing in this call was
+     *   applied. `motivo` — human-readable reason, only set when aborted.
+     *   `divergencias` — ids that WERE published but whose fresh dictamen's
+     *   motivos differ from the original snapshot (see
+     *   `dictamenDivergio()`) — informational, not a failure. `culprit_id` —
+     *   the ONE solicitud id responsible for the abort (the one that failed
+     *   validation/re-evaluation, or the one mid-write when a lote-wide
+     *   failure hit), as a plain field a UI can highlight directly — never
+     *   null when `abortado` is true, always null otherwise. `motivo`
+     *   remains the human-readable sentence; this is its machine-readable
+     *   twin, so a caller never has to parse Spanish prose to find the id.
+     */
+    public function publicarLote( array $ids, int $resueltaPor, string $now ): array {
+        $ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
+
+        if ( empty( $ids ) ) {
+            return [
+                'publicadas'     => [],
+                'no_publicadas'  => [],
+                'abortado'       => false,
+                'motivo'         => null,
+                'divergencias'   => [],
+                'culprit_id'     => null,
+            ];
+        }
+
+        // ─── Pre-flight: load, validate transition, re-evaluate — no writes yet. ───
+
+        $prepared  = [];
+        $seasonIds = [];
+
+        foreach ( $ids as $id ) {
+            $row = $this->findSolicitud( $id );
+
+            if ( null === $row ) {
+                return $this->abortarLote( $ids, "la solicitud {$id} no existe", $id );
+            }
+
+            if ( ! EstadoSolicitud::esTransicionValida( (string) $row['estado'], EstadoSolicitud::PUBLICADA ) ) {
+                return $this->abortarLote(
+                    $ids,
+                    "la solicitud {$id} no puede publicarse desde su estado actual ('{$row['estado']}') — "
+                        . 'debe estar aprobada.',
+                    $id
+                );
+            }
+
+            $seasonIds[ $id ] = (int) $row['season_id'];
+
+            $solicitudObj = $this->reconstruirSolicitud( $row );
+
+            // Both the fresh re-evaluation AND the parse of the ORIGINAL
+            // snapshot live in the same try/catch on purpose: a corrupt
+            // `dictamen_original` (bad JSON from a data problem elsewhere)
+            // must abort THIS lote with an explicit motivo and an EventLog
+            // event — exactly like a re-evaluation failure — never escape as
+            // a raw, unlogged exception that takes the whole request down.
+            try {
+                $dictamenFresco = $this->dictamenPipeline->evaluate( $solicitudObj );
+                $original       = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+            } catch ( \Throwable $e ) {
+                return $this->abortarLote(
+                    $ids,
+                    "la solicitud {$id} no pudo prepararse para publicarse (re-evaluacion o "
+                        . 'dictamen_original invalido): ' . $e->getMessage(),
+                    $id
+                );
+            }
+
+            if ( ! $dictamenFresco->procede() ) {
+                $motivos = implode( ', ', array_map( static fn ( $m ) => $m->codigo(), $dictamenFresco->motivos() ) );
+
+                return $this->abortarLote(
+                    $ids,
+                    "la solicitud {$id} ya no procede al momento de publicar el lote (motivos: {$motivos})",
+                    $id
+                );
+            }
+
+            $prepared[ $id ] = [
+                'row'       => $row,
+                'dictamen'  => $dictamenFresco,
+                'divergio'  => $this->dictamenDivergio( $original, $dictamenFresco ),
+            ];
+        }
+
+        // A lote spanning more than one season is not exploitable TODAY (the
+        // captain/process-owner role is unique and global — see
+        // Capitania\CapitanAuthorizer), but this project already has
+        // scoped-by-season authorization elsewhere, and the day this becomes
+        // per-season, a lote silently mixing seasons would be exactly the
+        // kind of gap that sits quiet until someone finds it. Fail loud now,
+        // while it costs nothing to check.
+        if ( count( array_unique( $seasonIds ) ) > 1 ) {
+            return $this->abortarLote(
+                $ids,
+                'las solicitudes del lote pertenecen a mas de una temporada ('
+                    . implode( ', ', array_unique( $seasonIds ) ) . ') — un lote debe publicarse por temporada.'
+            );
+        }
+
+        // ─── Apply — every write below runs inside ONE transaction. ───
+
+        $this->beginTransaction( __FUNCTION__ );
+
+        $ultimoIdIntentado = null;
+
+        try {
+            foreach ( $ids as $id ) {
+                $ultimoIdIntentado = $id;
+
+                $row     = $prepared[ $id ]['row'];
+                $plazaId = (int) $row['plaza_id'];
+                $fechaId = (int) $row['fecha_id'];
+
+                if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
+                    $ocupacionId = $this->plazaRepository->succeedOcupacionWithinTransaction(
+                        $plazaId,
+                        (int) $row['entrante_player_id'],
+                        $fechaId,
+                        'reemplazada',
+                        $now
+                    );
+                } else {
+                    $ocupacionId = $this->plazaRepository->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, $fechaId, $now );
+                }
+
+                $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId );
+            }
+        } catch ( \Throwable $e ) {
+            // rollbackTransaction() itself throws Support\Exception\InconsistentStateException
+            // — instead of returning a tidy "abortado" array — when the
+            // ROLLBACK fails too: at that point the database state is
+            // genuinely unknown, and returning "nothing was applied" would
+            // be exactly as false as returning "everything was applied".
+            $this->rollbackTransaction( __FUNCTION__, $e, [ 'ids' => $ids ] );
+
+            $this->eventLog->record( 'solicitud.lote_abortado', [
+                'ids'                 => $ids,
+                'motivo'              => 'escritura fallida a mitad del lote: ' . $e->getMessage(),
+                'ultima_id_intentada' => $ultimoIdIntentado,
+                'culprit_id'          => $ultimoIdIntentado,
+            ] );
+
+            return [
+                'publicadas'    => [],
+                'no_publicadas' => $ids,
+                'abortado'      => true,
+                'motivo'        => 'escritura fallida a mitad del lote (id ' . $ultimoIdIntentado . '): ' . $e->getMessage(),
+                'divergencias'  => [],
+                'culprit_id'    => $ultimoIdIntentado,
+            ];
+        }
+
+        // Outside the try/catch above ON PURPOSE: a COMMIT that fails must
+        // never be caught by the same handler that reports "abortado" —
+        // commitTransaction() itself throws instead (see
+        // Support\OpensTransactions), so the caller can never mistake an
+        // unconfirmed COMMIT for either a successful publish or a clean
+        // abort.
+        $this->commitTransaction( __FUNCTION__, [ 'ids' => $ids ] );
+
+        $divergencias = [];
+
+        foreach ( $ids as $id ) {
+            $row      = $prepared[ $id ]['row'];
+            $divergio = $prepared[ $id ]['divergio'];
+
+            if ( $divergio ) {
+                $divergencias[] = $id;
+            }
+
+            $this->eventLog->record( 'solicitud.publicada', [
+                'solicitud_id' => $id,
+                'season_id'    => (int) $row['season_id'],
+                'team_id'      => (int) $row['team_id'],
+                'plaza_id'     => (int) $row['plaza_id'],
+                'tipo'         => $row['tipo'],
+                'resuelta_por' => $resueltaPor,
+                'divergio'     => $divergio,
+            ] );
+        }
+
+        return [
+            'publicadas'    => $ids,
+            'no_publicadas' => [],
+            'abortado'      => false,
+            'motivo'        => null,
+            'divergencias'  => $divergencias,
+            'culprit_id'    => null,
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Shared body of aprobar() / rechazar() / anular(): find, validate the
+     * transition through `EstadoSolicitud`, write, log.
+     */
+    private function transicionar( int $id, string $nuevoEstado, int $resueltaPor, ?string $nota, string $now, string $evento ): void {
+        $row = $this->findSolicitud( $id );
+
+        if ( null === $row ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion' => $evento,
+                'motivo'    => 'la solicitud no existe',
+                'solicitud_id' => $id,
+            ] );
+
+            throw new \RuntimeException( "SolicitudRepository: solicitud {$id} does not exist." );
+        }
+
+        EstadoSolicitud::assertTransicionValida( (string) $row['estado'], $nuevoEstado );
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->update(
+            $p . 'cambios_solicitud',
+            [
+                'estado'       => $nuevoEstado,
+                'resuelta_por' => $resueltaPor,
+                'resuelta_at'  => $now,
+                'nota'         => $nota,
+                'updated_at'   => $now,
+            ],
+            [ 'id' => $id ]
+        );
+
+        if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'    => $evento,
+                'motivo'       => 'update cambios_solicitud fallo',
+                'solicitud_id' => $id,
+                'last_error'   => $wpdb->last_error,
+            ] );
+
+            throw new SolicitudPersistenceException( "update cambios_solicitud (estado={$nuevoEstado})", $wpdb->last_error );
+        }
+
+        $this->eventLog->record( $evento, [
+            'solicitud_id'   => $id,
+            'estado_anterior' => $row['estado'],
+            'estado_nuevo'   => $nuevoEstado,
+            'resuelta_por'   => $resueltaPor,
+            'nota'           => $nota,
+        ] );
+    }
+
+    /**
+     * Writes the `publicada` transition WITHOUT wrapping its own
+     * transaction or logging its own event — same contract as
+     * `PlazaRepository`'s "WithinTransaction" methods, for the same reason:
+     * this runs inside `publicarLote()`'s single outer transaction, and
+     * `publicarLote()` logs `solicitud.publicada` itself once the whole
+     * lote's COMMIT has actually succeeded.
+     *
+     * `$ocupacionId` is the id `succeedOcupacionWithinTransaction()` /
+     * `closeOcupacionByRegresoTitularWithinTransaction()` just returned for
+     * THIS solicitud — persisted here so undoing a badly-published lote never
+     * again requires cross-referencing the EventLog by `plaza_id` and
+     * timestamp by hand.
+     *
+     * @throws SolicitudPersistenceException When the update fails at the
+     *         wpdb level.
+     */
+    private function marcarPublicadaWithinTransaction( int $id, int $resueltaPor, string $now, Dictamen $dictamenAplicado, int $ocupacionId ): void {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->update(
+            $p . 'cambios_solicitud',
+            [
+                'estado'             => EstadoSolicitud::PUBLICADA,
+                'resuelta_por'       => $resueltaPor,
+                'resuelta_at'        => $now,
+                'dictamen_aplicado'  => DictamenSnapshot::fromDictamen( $dictamenAplicado, $now )->toJson(),
+                'ocupacion_id'       => $ocupacionId,
+                'updated_at'         => $now,
+            ],
+            [ 'id' => $id ]
+        );
+
+        if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'    => 'publicarLote',
+                'motivo'       => 'update cambios_solicitud (publicada) fallo',
+                'solicitud_id' => $id,
+                'last_error'   => $wpdb->last_error,
+            ] );
+
+            throw new SolicitudPersistenceException( 'update cambios_solicitud (publicada)', $wpdb->last_error );
+        }
+    }
+
+    /**
+     * Rebuilds the `Dictamen\SolicitudDeCambio` a stored row originally
+     * came from, so `publicarLote()` can hand it back to `DictamenPipeline`.
+     * Uses `solicitud_instante_epoch`, NEVER a value derived from
+     * `solicitada_at` — see `Migrations\InitialSchema::sqlCambiosSolicitud()`'s
+     * docblock for why.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function reconstruirSolicitud( array $row ): SolicitudDeCambio {
+        if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
+            return SolicitudDeCambio::sustitucion(
+                (int) $row['season_id'],
+                (int) $row['team_id'],
+                (int) $row['plaza_id'],
+                (int) $row['entrante_player_id'],
+                (int) $row['fecha_id'],
+                (int) $row['solicitud_instante_epoch']
+            );
+        }
+
+        return SolicitudDeCambio::regreso(
+            (int) $row['season_id'],
+            (int) $row['team_id'],
+            (int) $row['plaza_id'],
+            (int) $row['fecha_id'],
+            (int) $row['solicitud_instante_epoch']
+        );
+    }
+
+    /**
+     * True when $fresco's verdict differs from $original's — either
+     * `procede()` itself flipped, or the same verdict was reached through a
+     * different set of motivo codes. See class docblock, "RE-EVALUATING
+     * BEFORE APPLYING".
+     */
+    private function dictamenDivergio( DictamenSnapshot $original, Dictamen $fresco ): bool {
+        $codigosOriginales = $original->motivoCodigos();
+        $codigosFrescos     = array_map( static fn ( $m ) => $m->codigo(), $fresco->motivos() );
+
+        sort( $codigosOriginales );
+        sort( $codigosFrescos );
+
+        return $original->procede() !== $fresco->procede() || $codigosOriginales !== $codigosFrescos;
+    }
+
+    /**
+     * Common "abort the whole lote, nothing written" return shape for
+     * publicarLote()'s pre-flight phase — reached before any write starts,
+     * so there is nothing to roll back, only to report.
+     *
+     * @param int[]    $ids
+     * @param int|null $culpritId The ONE solicitud id responsible for the
+     *        abort, when the pre-flight phase found exactly one (every
+     *        pre-flight call site has one); null for a lote-wide reason that
+     *        does not point at a single id (e.g. the season_id mismatch
+     *        guard) — see publicarLote()'s own docblock for the field's
+     *        contract.
+     * @return array{publicadas: int[], no_publicadas: int[], abortado: bool, motivo: string, divergencias: int[], culprit_id: int|null}
+     */
+    private function abortarLote( array $ids, string $motivo, ?int $culpritId = null ): array {
+        $this->eventLog->record( 'solicitud.lote_abortado', [
+            'ids'        => $ids,
+            'motivo'     => $motivo,
+            'culprit_id' => $culpritId,
+        ] );
+
+        return [
+            'publicadas'    => [],
+            'no_publicadas' => $ids,
+            'abortado'      => true,
+            'motivo'        => $motivo,
+            'divergencias'  => [],
+            'culprit_id'    => $culpritId,
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level —
+     *         see Plazas\PlazaRepository's class docblock, "READ FAILURES
+     *         MUST NEVER READ AS 'NO ROWS'": the same discipline applies
+     *         here, even though nothing yet reads an empty list from this
+     *         method as "no conflict" — a silently swallowed query failure
+     *         must never look identical to a genuine empty result regardless.
+     */
+    private function listByEstado( int $seasonId, string $estado ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}cambios_solicitud
+                  WHERE season_id = %d AND estado = %s
+                  ORDER BY solicitada_at ASC, id ASC",
+                $seasonId,
+                $estado
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listByEstado', [ 'season_id' => $seasonId, 'estado' => $estado ] );
+
+        return $rows;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>>|null $rows
+     * @param array<string, mixed>                  $contexto
+     * @throws \RuntimeException
+     */
+    private function assertReadSucceeded( ?array $rows, string $operacion, array $contexto ): void {
+        $lastError = (string) ( $this->wpdb->last_error ?? '' );
+
+        if ( null !== $rows && '' === $lastError ) {
+            return;
+        }
+
+        $this->eventLog->record( 'lectura.fallida', array_merge( $contexto, [
+            'operacion'  => $operacion,
+            'last_error' => $this->wpdb->last_error,
+        ] ) );
+
+        throw new \RuntimeException(
+            sprintf(
+                "SolicitudRepository::%s(): the query failed at the wpdb level%s.",
+                $operacion,
+                '' !== $lastError ? " ({$lastError})" : ''
+            )
+        );
+    }
+}

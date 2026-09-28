@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Tests\Calendario;
 
 use EntreRedes\Cambios\Calendario\FechaRepository;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use PHPUnit\Framework\TestCase;
 
@@ -29,7 +30,7 @@ class FechaRepositoryTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_fecha_partido" );
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
 
-        $this->repo = new FechaRepository( $wpdb );
+        $this->repo = new FechaRepository( $wpdb, new InMemoryEventLog() );
     }
 
     protected function tearDown(): void {

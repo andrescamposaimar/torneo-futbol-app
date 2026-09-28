@@ -26,7 +26,7 @@ composer test
 
 ## Table structure
 
-The plugin creates 6 custom tables prefixed with `{wp_prefix}cambios_`:
+The plugin creates 7 custom tables prefixed with `{wp_prefix}cambios_`:
 
 | Table | Purpose |
 |-------|---------|
@@ -36,6 +36,7 @@ The plugin creates 6 custom tables prefixed with `{wp_prefix}cambios_`:
 | `cambios_capitan` | One row per captaincy DESIGNATION (history + current state) — see "Captaincy and authorization" below |
 | `cambios_plaza` | One row per PLAZA of a team's roster (the aggregate of the player-change model) — see "Plazas and ocupaciones" below |
 | `cambios_ocupacion` | One row per LINK in a plaza's chain of successive occupations — see "Plazas and ocupaciones" below |
+| `cambios_solicitud` | One row per SOLICITUD DE CAMBIO, from submission through its whole lifecycle — see "Solicitudes de cambio: ciclo de vida" below |
 
 ## Identity: a fecha is its partidos, not its day
 
@@ -146,14 +147,15 @@ Slice 3 is the pure-function decision layer on top of slice 2's data model: give
 
 ### The ruleset has exactly one source of truth: `DictamenEngineFactory`
 
-`Dictamen\DictamenEngineFactory::create()` (and `::reglas()`) is the ONLY place, production or test, that lists the seven rules. `DictamenEngineFactoryTest` locks that list down; every other test builds its engine through the factory instead of keeping a parallel copy — the same shape of bug as `Calendario\EstadoDeriver` forgetting a state, closed by having exactly one enumeration to forget.
+`Dictamen\DictamenEngineFactory::create()` (and `::reglas()`) is the ONLY place, production or test, that lists the eight rules. `DictamenEngineFactoryTest` locks that list down; every other test builds its engine through the factory instead of keeping a parallel copy — the same shape of bug as `Calendario\EstadoDeriver` forgetting a state, closed by having exactly one enumeration to forget.
 
-### The seven rules
+### The eight rules
 
-`Reglas\PuntajeDentroDelTecho`, `Reglas\EntranteNoBloqueado`, `Reglas\EntranteDisponible`, `Reglas\EntranteNoEsElSaliente`, `Reglas\SolicitudEnPlazo`, `Reglas\PlazaConOcupacionVigente`, `Reglas\RegresoSoloConMinimoCumplido` — each a pure function of `DictamenContext`, independent of the others (see `Regla`'s class docblock). Two are worth calling out:
+`Reglas\PuntajeDentroDelTecho`, `Reglas\EntranteNoBloqueado`, `Reglas\EntranteDisponible`, `Reglas\EntranteNoEsElSaliente`, `Reglas\SolicitudEnPlazo`, `Reglas\PlazaConOcupacionVigente`, `Reglas\PlazaNoCerrada`, `Reglas\RegresoSoloConMinimoCumplido` — each a pure function of `DictamenContext`, independent of the others (see `Regla`'s class docblock). Three are worth calling out:
 
 - **`PuntajeDentroDelTecho`** treats a missing `entrantePuntaje` differently by `tipo`: null is the type's own guarantee for a `regreso` (no objection), but for a `sustitucion` it is an unresolved external lookup and is reported as its own motivo (`entrante_puntaje_indeterminado`) rather than silently read as "no objection" — see that class's docblock.
 - **`EntranteNoBloqueado`** takes CC5b's still-unconfirmed policy (`BloqueoReemplazoPolicy::topeTresFechas()` vs `::hastaLiberacionDePlaza()`) as a constructor parameter, defaulting to the less severe reading. The motivo it produces carries `datos()['politica']` naming which reading fired, so the process owner's eventual answer can be checked against what was actually applied to past solicitudes.
+- **`PlazaNoCerrada`** (slice 4c) rejects a solicitud targeting a plaza the operator has `closePlaza()`d — otherwise a solicitud submitted before the closure could still get published on the following Friday against a plaza the operator explicitly declared inert. See "Correction primitives" below for the matching write-side guard in `PlazaRepository` itself.
 
 ### Explicitly out of scope
 
@@ -203,17 +205,47 @@ Before slice 4, this plugin had no `error_log()` call and no hook anywhere — a
 
 `Plazas\PlazaRepository` and `Capitania\CapitanRepository` both take an `EventLog` as a MANDATORY constructor argument — there is deliberately no null-object default. A default that silently swallowed events would reproduce, in code, the exact silent-failure pattern this slice exists to end. Every successful write that matters to an operator (`plaza.abierta`, `ocupacion.sucedida`, `ocupacion.regreso_titular`, `ocupacion.deshecha`, `plaza.cerrada`, `capitan.designado`, `capitan.revocado`) is recorded AFTER its `COMMIT`; every failure (`escritura.fallida`) is recorded BEFORE the exception is thrown, with the ids needed to diagnose it (season, team, plaza, ocupación, player, fecha, and `$wpdb->last_error` when applicable).
 
+**`record()` itself never propagates (slice 4c).** `WpEventLog::record()` wraps its entire body in `try`/`catch (\Throwable)`: a listener some OTHER plugin registered on `entre_redes_cambios_event` throwing must never take down the caller — which, for every write in this plugin, is AFTER that write already committed — and must never REPLACE the original exception a `catch` block was trying to log (see `Dictamen\DictamenPipeline::evaluate()`). A failure here falls back to a single `error_log()` line and nothing more; logging is best-effort on purpose, because a log that can abort the operation it merely records is worse than no log at all.
+
+**Every COMMIT and ROLLBACK is checked, not just START TRANSACTION (slice 4c).** `Support\OpensTransactions::commitTransaction()` / `::rollbackTransaction()` extend the same discipline `beginTransaction()` already applied to `START TRANSACTION`: `$wpdb->query()` returns `false` on failure for all three statements, and silently ignoring that let a failed COMMIT report success, or a failed ROLLBACK report "abortado", for writes whose real fate was unknown. A failed COMMIT now logs `transaccion.commit_fallido` and throws — the caller can never believe an unconfirmed write went through. A failed ROLLBACK now logs `transaccion.rollback_fallido` (the worst event this plugin can emit — it means the database state is genuinely UNKNOWN, not "rolled back") and throws `Support\Exception\InconsistentStateException`, chaining whatever exception triggered the rollback attempt as `previous` so the original cause is never lost.
+
 ### Fecha id validation — `PlazaRepository`
 
 `fecha_desde_id` / `fecha_hasta_id` are LOGICAL foreign keys into `cambios_fecha` with no DB-level constraint (same "SQLite shim drops every KEY" story as everywhere else in this schema — see `InitialSchema`'s docblock). `openPlaza()`, `succeedOcupacion()` and `closeOcupacionByRegresoTitular()` now validate — via `assertFechaExistsInSeason()` — that the id exists AND belongs to the same season as the plaza, before writing anything. An id typo or one copied from the wrong season now fails loud, at the write, instead of surfacing much later inside `Calendario\FechaRepository::countResolvedFechasSince()`.
 
 ### Correction primitives — `PlazaRepository::undoLastOcupacion()` / `::closePlaza()`
 
-Before this slice, fixing a plaza opened with the wrong titular, or an ocupación succeeded by mistake, meant raw SQL against production — run by a parents' committee, not a developer. `undoLastOcupacion()` deletes the last link of a plaza's chain and reopens the one before it (refusing on a single-link/genesis-only chain — use `closePlaza()` for that case instead). `closePlaza()` marks a plaza's `closed_at` for one opened entirely by mistake. Both are explicitly CORRECTION tools, not part of the normal solicitud/regreso flow — nothing in `Dictamen\DictamenEngine` or `Plazas\CadenaResolver` ever calls them.
+Before this slice, fixing a plaza opened with the wrong titular, or an ocupación succeeded by mistake, meant raw SQL against production — run by a parents' committee, not a developer. `undoLastOcupacion()` deletes the last link of a plaza's chain and reopens the one before it (refusing on a single-link/genesis-only chain — use `closePlaza()` for that case instead). `closePlaza()` marks a plaza's `closed_at` for one opened entirely by mistake. Both are explicitly CORRECTION tools, not part of the normal solicitud/regreso flow — nothing in `Dictamen\DictamenEngine` or `Plazas\CadenaResolver` ever calls them. **Neither method authorizes its caller** — both perform no role or ownership check of their own; a future REST wrapper must verify the caller's role before invoking them.
+
+A closed plaza is defended on BOTH sides, not just the read side: `Dictamen\Reglas\PlazaNoCerrada` (slice 4c) rejects a solicitud against it, and `PlazaRepository::succeedOcupacion()` / `::closeOcupacionByRegresoTitular()` (and their `*WithinTransaction` twins) refuse to write over one via `assertPlazaNotClosed()` — a correction that only the dictamen ruleset respected would stop correcting anything the moment a stale or previously-approved solicitud reached the write path directly.
 
 ### InnoDB storage-engine check — `MigrationRunner`
 
 Every invariant this plugin defends ("at most one vigent ocupación/captain") depends on `START TRANSACTION` / `COMMIT` / `ROLLBACK` being real, which requires every `cambios_` table to actually be InnoDB. MySQL accepts `ENGINE=InnoDB` and silently substitutes another engine on some hosts, WARNING but not failing. `MigrationRunner::run()` now checks each table's real engine via `information_schema.TABLES` after migrations, logs `motor.no_innodb` and shows an `admin_notice` if any table isn't InnoDB — tolerantly: if the query itself is unavailable (e.g. the SQLite test shim has no `information_schema`), it is treated as "could not check", never as "found a violation".
+
+## Solicitudes de cambio: ciclo de vida (slice 4c)
+
+Slice 4c turns the SOLICITUD DE CAMBIO into a persisted entity with its own lifecycle (`Solicitudes\SolicitudRepository` + `Solicitudes\EstadoSolicitud`) — everything before this slice only had `Dictamen\SolicitudDeCambio`, a pure, ephemeral input DTO the engine evaluates and never itself stores. It ships no REST routes, no admin UI, no cron — see "Scope of this slice" below; a REST wrapper is a later slice's job, and every dangerous method here says so explicitly in its own docblock.
+
+### The estado machine
+
+`estado` moves `pendiente` → (`aprobada` | `rechazada` | `anulada`), and `aprobada` → (`publicada` | `rechazada` | `anulada`). `publicada`, `rechazada` and `anulada` are terminal — nothing transitions out of any of them. `EstadoSolicitud` is the single source of truth for this graph, defended in code (never a DB constraint) for the same reason as `Calendario\FechaRepository::VALID_ESTADOS` and `Plazas\PlazaRepository::VALID_TIPOS` — see that class's own docblock.
+
+### Aprobar is not publicar
+
+The real operating calendar has the process owner reviewing and approving solicitudes AS THEY ARRIVE, Wednesday through Thursday, but the change only becomes OFFICIAL at Friday's lote announcement. `aprobar()` NEVER touches `Plazas\PlazaRepository` — it only flips `estado`; no ocupación opens or closes. Until the lote runs, an `aprobada` solicitud is still an INTENTION, revocable via `rechazar()` / `anular()`. `publicarLote()` is the ONLY method that turns an approved intention into a real change of occupant.
+
+### The Friday lote is atomic, and it re-evaluates before applying
+
+`publicarLote()` re-runs `DictamenPipeline::evaluate()` for every solicitud in the lote, fresh, against the CURRENT database, right before applying anything — the dictamen a solicitud was created with is a snapshot that can go stale between Wednesday and Friday (a fecha passed, the entrante got occupied elsewhere, someone else already succeeded the same plaza). If any one of them no longer `procede()`, is not currently `aprobada`, or its `dictamen_original` cannot even be parsed, the WHOLE lote aborts — nothing in it is applied, and the caller gets back which solicitud caused it (`culprit_id`, a plain field alongside the human-readable `motivo`) — because a lote applied halfway would leave nobody able to tell which of it actually went through. Every solicitud in one call to `publicarLote()` must belong to the SAME `season_id`; a lote mixing seasons aborts too.
+
+Every write below the pre-flight phase runs inside ONE database transaction, opened, committed and rolled back through `Support\OpensTransactions` — see "Guardrails" above for why every one of those three steps is checked, not assumed. `PlazaRepository::succeedOcupacionWithinTransaction()` / `::closeOcupacionByRegresoTitularWithinTransaction()` exist for exactly this caller: same validation and write as the normal `succeedOcupacion()` / `closeOcupacionByRegresoTitular()`, but against the ambient transaction this class already opened, leaving the EventLog record and the `estado` transition to `publicarLote()` itself once the whole lote's COMMIT has actually succeeded.
+
+The `cambios_ocupacion` id each solicitud's write produced is persisted back onto the solicitud row (`ocupacion_id`) at the moment it publishes — so undoing a wrongly-published lote never again requires cross-referencing the EventLog by `plaza_id` and timestamp by hand.
+
+### None of this authorizes the caller
+
+`publicarLote()`, `aprobar()` / `rechazar()` / `anular()` are among the most dangerous entry points this plugin exposes — they write real occupancy changes over real rosters. None of them perform a role or ownership check of their own; a future REST wrapper MUST verify the caller's role (and, for `aprobar`/`rechazar`/`anular`, that the solicitud belongs to a team they may act on) BEFORE invoking any of them.
 
 ## Scope of this slice (slice 0)
 
@@ -224,3 +256,5 @@ Slice 1 (captaincy and authorization, above) keeps the same discipline: no REST 
 Slice 2 (plazas and ocupaciones, above) keeps it too: no REST routes, no admin UI, no cron, no dictamen engine, no backfill. It is domain logic only — the data model and the derivations a later slice's dictamen engine and endpoints will call.
 
 Slice 4b (assembling the dictamen context, above) keeps it too: no REST routes, no admin UI, no cron. `Dictamen\DictamenPipeline` is ready for a future endpoint to call, but nothing calls it yet.
+
+Slice 4c (solicitudes de cambio, above) keeps it too: no REST routes, no admin UI, no cron. `Solicitudes\SolicitudRepository` is ready for a future endpoint to call, but — see that section's "None of this authorizes the caller" — that future endpoint is also where role/ownership authorization must live; nothing in this slice provides it.

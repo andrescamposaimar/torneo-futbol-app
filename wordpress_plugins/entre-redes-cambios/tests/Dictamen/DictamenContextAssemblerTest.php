@@ -54,7 +54,7 @@ class DictamenContextAssemblerTest extends TestCase {
 
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
-        $this->fechaRepository = new FechaRepository( $wpdb );
+        $this->fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
         $this->settings        = new Settings( $wpdb );
 
         $this->assembler = new DictamenContextAssembler(
@@ -350,7 +350,7 @@ class DictamenContextAssemblerTest extends TestCase {
         $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
 
         global $wpdb;
-        $inflatingFechaRepository = new class( $wpdb ) extends FechaRepository {
+        $inflatingFechaRepository = new class( $wpdb, new InMemoryEventLog() ) extends FechaRepository {
             public function countResolvedFechasSince( int $seasonId, int $fechaId ): int {
                 // Deliberately lies upward: the season only has 2 resolved
                 // fechas (see the two seeded above), never 999.

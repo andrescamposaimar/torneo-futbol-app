@@ -8,6 +8,7 @@ use EntreRedes\Cambios\Dictamen\Reglas\EntranteDisponible;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoEsElSaliente;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaConOcupacionVigente;
+use EntreRedes\Cambios\Dictamen\Reglas\PlazaNoCerrada;
 use EntreRedes\Cambios\Dictamen\Reglas\PuntajeDentroDelTecho;
 use EntreRedes\Cambios\Dictamen\Reglas\RegresoSoloConMinimoCumplido;
 use EntreRedes\Cambios\Dictamen\Reglas\SolicitudEnPlazo;
@@ -18,7 +19,7 @@ use EntreRedes\Cambios\Dictamen\Reglas\SolicitudEnPlazo;
  * DictamenEngineTest::reglasCompletas() — a method whose name promised
  * completeness but whose only enforcement was "the test author remembered
  * to keep it in sync". A caller (or a future slice) wiring
- * `new DictamenEngine([...])` by hand with six rules instead of seven would
+ * `new DictamenEngine([...])` by hand with seven rules instead of eight would
  * produce no error and no red test — only a dictamen that is silently more
  * permissive than the reglamento, forever, until someone notices a solicitud
  * that should have been rejected. This is the exact same shape of bug as
@@ -60,6 +61,7 @@ final class DictamenEngineFactory {
             new EntranteNoEsElSaliente(),
             new SolicitudEnPlazo(),
             new PlazaConOcupacionVigente(),
+            new PlazaNoCerrada(),
             new RegresoSoloConMinimoCumplido(),
         ];
     }

@@ -6,6 +6,7 @@ namespace EntreRedes\Cambios\Capitania;
 
 use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Support\OpensTransactions;
 
 /**
  * Encapsulates all wpdb persistence for cambios_capitan.
@@ -40,6 +41,8 @@ use EntreRedes\Cambios\Observability\EventLog;
  * throw.
  */
 class CapitanRepository {
+
+    use OpensTransactions;
 
     private \wpdb $wpdb;
     private EventLog $eventLog;
@@ -89,7 +92,7 @@ class CapitanRepository {
             return (int) $vigente['id'];
         }
 
-        $wpdb->query( 'START TRANSACTION' );
+        $this->beginTransaction( __FUNCTION__ );
 
         try {
             if ( null !== $vigente ) {
@@ -135,12 +138,12 @@ class CapitanRepository {
 
                 throw new CapitanPersistenceException( 'insert', $wpdb->last_error );
             }
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         $this->eventLog->record( 'capitan.designado', [
             'capitan_id'    => $newId,

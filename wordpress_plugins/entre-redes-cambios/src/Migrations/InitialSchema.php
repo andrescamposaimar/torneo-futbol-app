@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Migrations;
 
 /**
- * Creates (or upgrades) all 6 cambios_ tables.
+ * Creates (or upgrades) all 7 cambios_ tables.
  *
  * Uses dbDelta() for idempotent CREATE TABLE; safe to re-run on every plugin
  * upgrade — dbDelta only alters schema when columns differ.
@@ -81,6 +81,7 @@ class InitialSchema {
             self::sqlCambiosCapitan( $p, $charset_collate ),
             self::sqlCambiosPlaza( $p, $charset_collate ),
             self::sqlCambiosOcupacion( $p, $charset_collate ),
+            self::sqlCambiosSolicitud( $p, $charset_collate ),
         ];
 
         $results = [];
@@ -349,6 +350,92 @@ class InitialSchema {
   PRIMARY KEY  (id),
   KEY idx_plaza (plaza_id),
   KEY idx_player (player_id)
+) ENGINE=InnoDB $charset;";
+    }
+
+    /**
+     * cambios_solicitud — one row per SOLICITUD DE CAMBIO, from the moment a
+     * captain submits it through its whole lifecycle
+     * (`Solicitudes\EstadoSolicitud`: pendiente → aprobada/rechazada/anulada
+     * → publicada). See `Solicitudes\SolicitudRepository`'s class docblock
+     * for the full model this table backs; this docblock only covers the
+     * columns.
+     *
+     * `tipo` / `entrante_player_id` / `plaza_id` / `fecha_id` mirror
+     * `Dictamen\SolicitudDeCambio`'s own shape exactly — `entrante_player_id`
+     * is NULL for a `regreso`, same reasoning as that class's docblock
+     * (who returns is never a choice this request makes).
+     *
+     * `solicitud_instante_epoch` is a Unix epoch, deliberately NOT derived
+     * from `solicitada_at` later — same reasoning as
+     * `Dictamen\SolicitudDeCambio::instanteEpoch()`'s own docblock: an epoch
+     * has no timezone to misread, while re-deriving it from a civil
+     * `DATETIME` string would force a guess about which timezone that string
+     * was written in. `SolicitudRepository::publicarLote()` reconstructs a
+     * `Dictamen\SolicitudDeCambio` from a stored row to re-run the dictamen
+     * pipeline before applying the change (see that method's docblock,
+     * "RE-EVALUATING BEFORE APPLYING") — it reads THIS column for that
+     * object's `instanteEpoch`, never `solicitada_at`.
+     *
+     * `dictamen_original` / `dictamen_aplicado` are JSON-encoded
+     * `Dictamen\DictamenSnapshot`s — the former frozen the moment `crear()`
+     * persists the solicitud, the latter written only by `publicarLote()`,
+     * once, right before applying the change for real. Both exist because a
+     * dictamen is a snapshot of facts that can go stale between Wednesday
+     * (when a captain requests a change) and Friday (when the lote is
+     * published) — see `SolicitudRepository`'s class docblock. `NULL` on
+     * `dictamen_aplicado` means exactly "never published", not "no
+     * dictamen" — a solicitud that is `rechazada` or `anulada` keeps this
+     * column NULL forever.
+     *
+     * `estado` is one of `Solicitudes\EstadoSolicitud::todos()` — declared as
+     * an `ENUM` here purely for readability in a real MySQL schema; nothing
+     * about the TRANSITION graph between these values could be expressed by
+     * an `ENUM` anyway, so `EstadoSolicitud` defends it in code regardless of
+     * what the column type allows (see that class's own docblock, and
+     * `Calendario\FechaRepository::VALID_ESTADOS`'s docblock for the same
+     * ENUM-is-not-a-guard rationale repeated once more here).
+     *
+     * `resuelta_por` / `resuelta_at` / `nota` are shared by every terminal
+     * decision — `aprobar()`, `rechazar()`, `anular()`, and the eventual
+     * `publicarLote()` — rather than one pair of columns per action, because
+     * a solicitud only ever has ONE most-recent resolution at a time; the
+     * full history of every state it passed through lives in the EventLog,
+     * not in this row.
+     *
+     * `ocupacion_id` is the `cambios_ocupacion` row `publicarLote()` created
+     * (or, for a `regreso`, closed) for THIS solicitud — written only at the
+     * moment it publishes, alongside `dictamen_aplicado`, never before. It
+     * exists so undoing a wrongly-published lote never again requires
+     * cross-referencing the EventLog by `plaza_id` and timestamp by hand —
+     * see `Solicitudes\SolicitudRepository::marcarPublicadaWithinTransaction()`'s
+     * docblock. `NULL` means exactly what `dictamen_aplicado`'s `NULL`
+     * means: "never published".
+     */
+    private static function sqlCambiosSolicitud( string $p, string $charset ): string {
+        return "CREATE TABLE {$p}cambios_solicitud (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  season_id BIGINT UNSIGNED NOT NULL,
+  team_id BIGINT UNSIGNED NOT NULL,
+  plaza_id BIGINT UNSIGNED NOT NULL,
+  tipo ENUM('sustitucion','regreso') NOT NULL,
+  entrante_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  fecha_id BIGINT UNSIGNED NOT NULL,
+  solicitada_por BIGINT UNSIGNED NOT NULL,
+  solicitada_at DATETIME NOT NULL,
+  solicitud_instante_epoch BIGINT UNSIGNED NOT NULL,
+  dictamen_original TEXT NOT NULL,
+  dictamen_aplicado TEXT NULL DEFAULT NULL,
+  estado ENUM('pendiente','aprobada','rechazada','publicada','anulada') NOT NULL DEFAULT 'pendiente',
+  resuelta_por BIGINT UNSIGNED NULL DEFAULT NULL,
+  resuelta_at DATETIME NULL DEFAULT NULL,
+  nota TEXT NULL DEFAULT NULL,
+  ocupacion_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY  (id),
+  KEY idx_season_estado (season_id, estado),
+  KEY idx_plaza (plaza_id)
 ) ENGINE=InnoDB $charset;";
     }
 
