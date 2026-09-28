@@ -1,0 +1,329 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:torneo_futbol_app/config/prode_auth_config.dart';
+import 'package:torneo_futbol_app/models/cambios_candidato.dart';
+import 'package:torneo_futbol_app/models/cambios_dictamen.dart';
+import 'package:torneo_futbol_app/models/cambios_plaza.dart';
+import 'package:torneo_futbol_app/models/cambios_solicitud.dart';
+import 'package:torneo_futbol_app/providers/cambios_providers.dart';
+import 'package:torneo_futbol_app/screens/cambios/cambios_solicitar_screen.dart';
+import 'package:torneo_futbol_app/services/cambios_api_service.dart';
+import 'package:torneo_futbol_app/services/cambios_candidatos_controller.dart';
+import 'package:torneo_futbol_app/services/cambios_plantel_controller.dart';
+import 'package:torneo_futbol_app/services/prode_api_service.dart';
+import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
+
+// ---------------------------------------------------------------------------
+// Fakes / stubs
+// ---------------------------------------------------------------------------
+
+CambiosApiService _baseFakeService() {
+  return CambiosApiService(
+    baseUrl: 'https://nowhere.test/cambios',
+    prodeApi: ProdeApiService(
+      config: const ProdeAuthConfig(
+        prodeApiBaseUrl: 'https://nowhere.test/prode',
+        googleWebClientId: 'test',
+        appleTeamId: 'TEST',
+      ),
+      authRepo: ProdeAuthRepository(),
+    ),
+  );
+}
+
+class _StubCandidatosController extends CambiosCandidatosController {
+  _StubCandidatosController(CambiosCandidatosState initialState)
+      : super(_baseFakeService(), seasonId: 7, teamId: 1, plazaId: 10) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load({String query = ''}) async {}
+}
+
+class _StubPlantelController extends CambiosPlantelController {
+  int refreshCalls = 0;
+  _StubPlantelController() : super(_baseFakeService()) {
+    state = const CambiosPlantelLoaded(plazas: []);
+  }
+
+  @override
+  Future<void> load({required int seasonId, required int teamId}) async {}
+
+  @override
+  Future<void> refresh({required int seasonId, required int teamId}) async {
+    refreshCalls++;
+  }
+}
+
+/// Fake service whose crearSolicitud() is fully controllable — succeeds
+/// (and records the call) or throws, per test.
+class _FakeSubmitService extends CambiosApiService {
+  bool shouldFail;
+  Map<String, Object?>? lastCall;
+
+  _FakeSubmitService({this.shouldFail = false})
+      : super(
+          baseUrl: 'https://nowhere.test/cambios',
+          prodeApi: ProdeApiService(
+            config: const ProdeAuthConfig(
+              prodeApiBaseUrl: 'https://nowhere.test/prode',
+              googleWebClientId: 'test',
+              appleTeamId: 'TEST',
+            ),
+            authRepo: ProdeAuthRepository(),
+          ),
+        );
+
+  @override
+  Future<CambiosNuevaSolicitud> crearSolicitud({
+    required int seasonId,
+    required int teamId,
+    required int plazaId,
+    required CambiosSolicitudTipo tipo,
+    required int fechaId,
+    int? entrantePlayerId,
+  }) async {
+    lastCall = {
+      'seasonId': seasonId,
+      'teamId': teamId,
+      'plazaId': plazaId,
+      'tipo': tipo,
+      'fechaId': fechaId,
+      'entrantePlayerId': entrantePlayerId,
+    };
+    if (shouldFail) {
+      throw const CambiosApiException(statusCode: 500, code: 'error_interno');
+    }
+    return const CambiosNuevaSolicitud(
+      id: 1,
+      estado: CambiosSolicitudEstado.pendiente,
+      dictamen: CambiosDictamen(procede: true),
+    );
+  }
+}
+
+final _plaza = CambiosPlaza(
+  plazaId: 10,
+  tipo: 'campo',
+  titularPlayerId: 100,
+  titularNombre: 'Juan Pérez',
+  ocupantePlayerId: 200,
+  ocupanteNombre: 'Pedro Gómez',
+  esTitularElOcupante: false,
+  cerrada: false,
+  fechasFaltantesLiberacion: 0,
+  fechasFaltantesLiberacionIndeterminado: false,
+);
+
+CambiosCandidatosParams get _params => (seasonId: 7, teamId: 1, plazaId: 10);
+CambiosTeamScope get _scope => (seasonId: 7, teamId: 1);
+
+Future<void> _pumpScreen(
+  WidgetTester tester, {
+  required CambiosSolicitudTipo tipo,
+  CambiosCandidatosState candidatosState = const CambiosCandidatosLoaded(candidatos: [], query: ''),
+  CambiosApiService? apiService,
+  _StubPlantelController? plantelController,
+  int? fechaId,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        cambiosCandidatosControllerProvider(_params)
+            .overrideWith((ref) => _StubCandidatosController(candidatosState)),
+        cambiosPlantelControllerProvider(_scope)
+            .overrideWith((ref) => plantelController ?? _StubPlantelController()),
+        if (apiService != null) cambiosApiServiceProvider.overrideWithValue(apiService),
+      ],
+      child: MaterialApp(
+        home: CambiosSolicitarScreen(
+          seasonId: 7,
+          teamId: 1,
+          plaza: _plaza,
+          tipo: tipo,
+          fechaId: fechaId,
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
+}
+
+void main() {
+  group('CambiosSolicitarScreen — sustitucion', () {
+    testWidgets('candidatos loading -> shows a spinner', (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        candidatosState: const CambiosCandidatosLoading(),
+      );
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('candidatos error -> shows retry', (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        candidatosState: const CambiosCandidatosError(),
+      );
+      expect(find.text('Reintentar'), findsOneWidget);
+    });
+
+    testWidgets('candidatos empty -> shows the empty message', (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        candidatosState: const CambiosCandidatosLoaded(candidatos: [], query: ''),
+      );
+      expect(find.text('No encontramos candidatos disponibles para esta plaza.'), findsOneWidget);
+    });
+
+    testWidgets('candidatos loaded -> renders the list and selecting one is required to submit',
+        (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        candidatosState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+          ],
+          query: '',
+        ),
+        fechaId: 42,
+      );
+
+      expect(find.byKey(const Key('candidatos_list')), findsOneWidget);
+      final confirmButton = tester.widget<ElevatedButton>(
+        find.byKey(const Key('confirmar_solicitud_button')),
+      );
+      expect(confirmButton.onPressed, isNull); // no candidate selected yet
+
+      await tester.tap(find.byKey(const Key('candidato_200')));
+      await tester.pump();
+
+      final confirmAfter = tester.widget<ElevatedButton>(
+        find.byKey(const Key('confirmar_solicitud_button')),
+      );
+      expect(confirmAfter.onPressed, isNotNull);
+    });
+
+    testWidgets('no fechaId available -> shows the honest gap banner and disables submit even '
+        'with a candidate selected', (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        candidatosState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+          ],
+          query: '',
+        ),
+        fechaId: null,
+      );
+
+      expect(find.byKey(const Key('fecha_gap_banner')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('candidato_200')));
+      await tester.pump();
+
+      final confirmButton = tester.widget<ElevatedButton>(
+        find.byKey(const Key('confirmar_solicitud_button')),
+      );
+      expect(confirmButton.onPressed, isNull);
+    });
+
+    testWidgets('successful submit pops the screen and refreshes the roster', (tester) async {
+      final fakeService = _FakeSubmitService();
+      final plantel = _StubPlantelController();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            cambiosCandidatosControllerProvider(_params).overrideWith(
+              (ref) => _StubCandidatosController(const CambiosCandidatosLoaded(
+                candidatos: [
+                  CambiosCandidato(
+                      playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+                ],
+                query: '',
+              )),
+            ),
+            cambiosPlantelControllerProvider(_scope).overrideWith((ref) => plantel),
+            cambiosApiServiceProvider.overrideWithValue(fakeService),
+          ],
+          child: MaterialApp(
+            home: Navigator(
+              onGenerateRoute: (settings) => MaterialPageRoute(
+                builder: (_) => CambiosSolicitarScreen(
+                  seasonId: 7,
+                  teamId: 1,
+                  plaza: _plaza,
+                  tipo: CambiosSolicitudTipo.sustitucion,
+                  fechaId: 42,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('candidato_200')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('confirmar_solicitud_button')));
+      await tester.pumpAndSettle();
+
+      expect(fakeService.lastCall, isNotNull);
+      expect(fakeService.lastCall!['tipo'], CambiosSolicitudTipo.sustitucion);
+      expect(fakeService.lastCall!['entrantePlayerId'], 200);
+      expect(fakeService.lastCall!['fechaId'], 42);
+      expect(plantel.refreshCalls, 1);
+      // The screen itself is gone after popping.
+      expect(find.byType(CambiosSolicitarScreen), findsNothing);
+    });
+
+    testWidgets('a failed submit shows an inline friendly error and stays on screen', (tester) async {
+      final fakeService = _FakeSubmitService(shouldFail: true);
+
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        candidatosState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+          ],
+          query: '',
+        ),
+        apiService: fakeService,
+        fechaId: 42,
+      );
+
+      await tester.tap(find.byKey(const Key('candidato_200')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('confirmar_solicitud_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No se pudo enviar el pedido. Probá de nuevo en unos minutos.'),
+          findsOneWidget);
+      expect(find.byType(CambiosSolicitarScreen), findsOneWidget);
+    });
+  });
+
+  group('CambiosSolicitarScreen — regreso', () {
+    testWidgets('shows a direct confirm, no search field or candidate list', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.regreso, fechaId: 42);
+
+      expect(find.byKey(const Key('candidato_search_field')), findsNothing);
+      expect(find.textContaining('¿Confirmás pedir el regreso de Juan Pérez'), findsOneWidget);
+
+      final confirmButton = tester.widget<ElevatedButton>(
+        find.byKey(const Key('confirmar_solicitud_button')),
+      );
+      // No candidate needed for a regreso — submit is enabled as soon as a
+      // fechaId is available.
+      expect(confirmButton.onPressed, isNotNull);
+    });
+  });
+}
