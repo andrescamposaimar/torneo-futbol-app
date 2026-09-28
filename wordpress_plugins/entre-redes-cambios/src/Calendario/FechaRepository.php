@@ -107,7 +107,10 @@ class FechaRepository {
 
         $seasonId = (int) $fecha['season_id'];
         $playDate = (string) $fecha['play_date'];
-        $now      = current_time( 'mysql' );
+        // `created_at`/`updated_at` are DATETIME columns, and every DATETIME
+        // column this plugin persists is UTC (see the README) — `$gmt = true`
+        // is mandatory, never the default `current_time('mysql')` local time.
+        $now      = current_time( 'mysql', true );
 
         $matchIds = $this->extractMatchIds( $partidos );
         $fechaId  = $this->findFechaIdByMatchIds( $matchIds );

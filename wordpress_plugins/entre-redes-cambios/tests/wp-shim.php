@@ -332,8 +332,40 @@ if ( ! function_exists( 'get_option' ) ) {
 // ─── WP time / crypto shims ──────────────────────────────────────────────────
 
 if ( ! function_exists( 'current_time' ) ) {
-    function current_time( string $type ): string {
-        return ( new \DateTime( 'now', new \DateTimeZone( 'UTC' ) ) )->format( 'Y-m-d H:i:s' );
+    /**
+     * WHY THIS SHIM MUST BE FAITHFUL TO WORDPRESS, NOT A UTC PASSTHROUGH.
+     *
+     * Real WordPress's `current_time( $type, $gmt = false )` hands out the
+     * SITE'S LOCAL civil time by default, and UTC only when the caller
+     * explicitly passes `$gmt = true`. An earlier version of this shim
+     * ignored that second parameter entirely (its signature did not even
+     * declare it) and always returned UTC — which meant no test running
+     * against this shim could ever catch a caller that confused "local" and
+     * "UTC", because both frames collapsed onto the identical string. A
+     * plugin bug that mixes `current_time('mysql')` (local) with
+     * `time()`/`gmdate()` (UTC) is therefore invisible to any assertion, no
+     * matter how carefully written, until it reaches real WordPress.
+     *
+     * This shim simulates the torneo's own site timezone,
+     * America/Argentina/Buenos_Aires — a FIXED, NON-ZERO offset from UTC
+     * (UTC-3, no DST since 2009, so the offset never itself becomes a
+     * moving target). That is deliberate: if `current_time('mysql')` and
+     * `current_time('mysql', true)` ever come back equal in a test, that is
+     * a real bug to investigate, never an artifact of the simulated site
+     * happening to sit on UTC+0 the way the old shim effectively did.
+     *
+     * Only `'mysql'` and `'timestamp'` are modeled — the only two `$type`
+     * values this plugin actually calls `current_time()` with.
+     */
+    function current_time( string $type, bool $gmt = false ): string {
+        $zone = new \DateTimeZone( $gmt ? 'UTC' : 'America/Argentina/Buenos_Aires' );
+        $now  = new \DateTime( 'now', $zone );
+
+        if ( 'timestamp' === $type ) {
+            return (string) $now->getTimestamp();
+        }
+
+        return $now->format( 'Y-m-d H:i:s' );
     }
 }
 
