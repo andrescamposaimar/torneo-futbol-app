@@ -81,4 +81,58 @@ class WpEventLogTest extends TestCase {
         clearstatcache( true, $this->errorLogFile );
         $this->assertSame( '', (string) file_get_contents( $this->errorLogFile ) );
     }
+
+    /**
+     * THE guarantee this class exists to make: a listener registered by code
+     * this plugin does not control (another plugin, an integration) must
+     * never be able to take down the caller of record() — which, for every
+     * write in this plugin, runs AFTER that write already committed. See
+     * class docblock, "record() NEVER PROPAGATES".
+     */
+    public function test_record_swallows_a_throwing_listener_instead_of_propagating(): void {
+        $listener = static function (): void {
+            throw new \RuntimeException( 'a completely unrelated plugin blew up in here' );
+        };
+        add_action( 'entre_redes_cambios_event', $listener, 10, 2 );
+
+        try {
+            $log = new WpEventLog( static fn(): bool => false );
+
+            // The whole point: this must NOT throw.
+            $log->record( 'plaza.abierta', [ 'plaza_id' => 42 ] );
+
+            clearstatcache( true, $this->errorLogFile );
+            $this->assertStringContainsString(
+                'EventLog listener failed',
+                (string) file_get_contents( $this->errorLogFile ),
+                'A swallowed listener failure must still leave SOME trace, via error_log() as the last resort.'
+            );
+        } finally {
+            remove_action( 'entre_redes_cambios_event', $listener, 10 );
+        }
+    }
+
+    /**
+     * The realistic scenario from the task description: a listener throwing
+     * on, say, the 3rd of 5 sequential business writes must not make the
+     * CALLER's operation fail — the write itself already succeeded before
+     * record() was ever invoked.
+     */
+    public function test_a_throwing_listener_never_fails_the_callers_own_operation(): void {
+        $listener = static function (): void {
+            throw new \RuntimeException( 'listener blew up' );
+        };
+        add_action( 'entre_redes_cambios_event', $listener, 10, 2 );
+
+        try {
+            $log = new WpEventLog( static fn(): bool => false );
+
+            $resultadoDeLaOperacion = 'ok';
+            $log->record( 'ocupacion.sucedida', [ 'plaza_id' => 1 ] );
+
+            $this->assertSame( 'ok', $resultadoDeLaOperacion, 'The caller must reach this line unaffected.' );
+        } finally {
+            remove_action( 'entre_redes_cambios_event', $listener, 10 );
+        }
+    }
 }
