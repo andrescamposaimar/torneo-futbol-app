@@ -45,7 +45,7 @@ class SolicitudRepositoryTest extends TestCase {
 
         global $wpdb;
         $p = $wpdb->prefix;
-        foreach ( [ 'cambios_solicitud', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha' ] as $table ) {
+        foreach ( [ 'cambios_solicitud', 'cambios_decision', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha' ] as $table ) {
             $wpdb->query( "DELETE FROM {$p}{$table}" );
         }
 
@@ -79,7 +79,7 @@ class SolicitudRepositoryTest extends TestCase {
     protected function tearDown(): void {
         global $wpdb;
         $p = $wpdb->prefix;
-        foreach ( [ 'cambios_solicitud', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha', 'postmeta' ] as $table ) {
+        foreach ( [ 'cambios_solicitud', 'cambios_decision', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha', 'postmeta' ] as $table ) {
             $wpdb->query( "DELETE FROM {$p}{$table}" );
         }
     }
@@ -216,7 +216,7 @@ class SolicitudRepositoryTest extends TestCase {
         $idB           = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 2, 889, 5, time() ), 777, Dictamen::from( [] ), $now );
         $idOtraSeason  = $this->repo->crear( SolicitudDeCambio::sustitucion( 999, 100, 3, 890, 5, time() ), 777, Dictamen::from( [] ), $now );
 
-        $this->repo->aprobar( $idB, 42, null, $now );
+        $this->repo->aprobar( $idB, 42, null, $now, 'Proceso Owner Test' );
 
         $pendientes = $this->repo->listPendientes( self::SEASON_ID );
         $this->assertCount( 1, $pendientes );
@@ -243,8 +243,8 @@ class SolicitudRepositoryTest extends TestCase {
         $idB          = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 2, 889, 5, time() ), 777, Dictamen::from( [] ), $now );
         $idOtroEquipo = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 200, 3, 890, 5, time() ), 777, Dictamen::from( [] ), $now );
 
-        $this->repo->aprobar( $idB, 42, null, $now );
-        $this->repo->rechazar( $idA, 42, 'no cumple', $now );
+        $this->repo->aprobar( $idB, 42, null, $now, 'Proceso Owner Test' );
+        $this->repo->rechazar( $idA, 42, 'no cumple', $now, 'Proceso Owner Test' );
 
         $solicitudes = $this->repo->listByEquipo( self::SEASON_ID, 100 );
 
@@ -272,7 +272,7 @@ class SolicitudRepositoryTest extends TestCase {
         $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() );
         $id        = $this->repo->crear( $solicitud, 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
 
-        $this->repo->aprobar( $id, 42, 'ok', '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, 'ok', '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         $despues = $this->plazaRepository->findOcupacionVigente( $plazaId );
 
@@ -289,7 +289,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_rechazar_desde_pendiente(): void {
         $id = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
 
-        $this->repo->rechazar( $id, 42, 'no corresponde', '2026-05-27 11:00:00' );
+        $this->repo->rechazar( $id, 42, 'no corresponde', '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         $this->assertSame( EstadoSolicitud::RECHAZADA, $this->repo->findSolicitud( $id )['estado'] );
         $this->assertTrue( $this->eventLog->has( 'solicitud.rechazada' ) );
@@ -297,9 +297,9 @@ class SolicitudRepositoryTest extends TestCase {
 
     public function test_anular_desde_aprobada(): void {
         $id = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
-        $this->repo->anular( $id, 42, 'cambio de opinión', '2026-05-27 12:00:00' );
+        $this->repo->anular( $id, 42, 'cambio de opinión', '2026-05-27 12:00:00', 'Proceso Owner Test' );
 
         $this->assertSame( EstadoSolicitud::ANULADA, $this->repo->findSolicitud( $id )['estado'] );
         $this->assertTrue( $this->eventLog->has( 'solicitud.anulada' ) );
@@ -307,10 +307,10 @@ class SolicitudRepositoryTest extends TestCase {
 
     public function test_aprobar_una_solicitud_ya_aprobada_lanza(): void {
         $id = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         $this->expectException( TransicionInvalidaException::class );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 12:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 12:00:00', 'Proceso Owner Test' );
     }
 
     public function test_rechazar_una_solicitud_publicada_lanza(): void {
@@ -324,16 +324,16 @@ class SolicitudRepositoryTest extends TestCase {
         $dictamen  = $this->pipeline->evaluate( $solicitud );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
-        $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+        $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->expectException( TransicionInvalidaException::class );
-        $this->repo->rechazar( $id, 42, null, '2026-05-29 10:00:00' );
+        $this->repo->rechazar( $id, 42, null, '2026-05-29 10:00:00', 'Proceso Owner Test' );
     }
 
     public function test_aprobar_solicitud_inexistente_lanza(): void {
         $this->expectException( \RuntimeException::class );
-        $this->repo->aprobar( 999999, 42, null, '2026-05-27 10:00:00' );
+        $this->repo->aprobar( 999999, 42, null, '2026-05-27 10:00:00', 'Proceso Owner Test' );
     }
 
     // -------------------------------------------------------------------------
@@ -352,9 +352,9 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertTrue( $dictamen->procede() );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
-        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertFalse( $resultado['abortado'] );
         $this->assertSame( [ $id ], $resultado['publicadas'] );
@@ -391,9 +391,9 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertTrue( $dictamen->procede() );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-06-10 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-06-10 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-06-10 11:00:00', 'Proceso Owner Test' );
 
-        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-06-12 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-06-12 09:00:00', 'Proceso Owner Test' );
 
         $this->assertFalse( $resultado['abortado'] );
         $this->assertSame( [ $id ], $resultado['publicadas'] );
@@ -405,7 +405,7 @@ class SolicitudRepositoryTest extends TestCase {
     }
 
     public function test_publicar_lote_devuelve_vacio_cuando_no_recibe_ids(): void {
-        $resultado = $this->repo->publicarLote( [], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertFalse( $resultado['abortado'] );
         $this->assertSame( [], $resultado['publicadas'] );
@@ -429,19 +429,19 @@ class SolicitudRepositoryTest extends TestCase {
         $dictA = $this->pipeline->evaluate( $solA );
         $this->assertTrue( $dictA->procede() );
         $idA = $this->repo->crear( $solA, 777, $dictA, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         $solB  = SolicitudDeCambio::sustitucion( self::SEASON_ID, 101, $plazaB, 999, 5, $epoch );
         $dictB = $this->pipeline->evaluate( $solB );
         $this->assertTrue( $dictB->procede() );
         $idB = $this->repo->crear( $solB, 555, $dictB, '2026-05-27 10:05:00' );
-        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00' );
+        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00', 'Proceso Owner Test' );
 
         // Between approval and the lote, an UNRELATED write occupies 888
         // elsewhere — exactly the kind of drift publicarLote() must catch.
         $this->plazaRepository->succeedOcupacion( $plazaC, 888, 5, 'reemplazada', '2026-05-28 10:00:00' );
 
-        $resultado = $this->repo->publicarLote( [ $idB, $idA ], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $idB, $idA ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertTrue( $resultado['abortado'] );
         $this->assertSame( [], $resultado['publicadas'] );
@@ -468,7 +468,7 @@ class SolicitudRepositoryTest extends TestCase {
             '2026-05-27 10:00:00'
         );
 
-        $resultado = $this->repo->publicarLote( [ $idPendiente ], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $idPendiente ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertTrue( $resultado['abortado'] );
         $this->assertSame( [ $idPendiente ], $resultado['no_publicadas'] );
@@ -490,9 +490,9 @@ class SolicitudRepositoryTest extends TestCase {
         $dictamenOriginalDivergente = Dictamen::from( [ new Motivo( 'entrante_puntaje_indeterminado', 'sin puntaje al momento de pedir' ) ] );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamenOriginalDivergente, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
-        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertFalse( $resultado['abortado'] );
         $this->assertSame( [ $id ], $resultado['publicadas'] );
@@ -519,12 +519,12 @@ class SolicitudRepositoryTest extends TestCase {
         $solA  = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaA, 888, 5, $epoch );
         $dictA = $this->pipeline->evaluate( $solA );
         $idA   = $this->repo->crear( $solA, 777, $dictA, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         $solB  = SolicitudDeCambio::sustitucion( self::SEASON_ID, 101, $plazaB, 999, 5, $epoch );
         $dictB = $this->pipeline->evaluate( $solB );
         $idB   = $this->repo->crear( $solB, 555, $dictB, '2026-05-27 10:05:00' );
-        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00' );
+        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00', 'Proceso Owner Test' );
 
         global $wpdb;
         // Let the FIRST plaza's write succeed, fail the SECOND — proving the
@@ -533,7 +533,7 @@ class SolicitudRepositoryTest extends TestCase {
         $failingPlazaRepo = new PlazaRepository( $failingWpdb, $this->eventLog );
         $failingRepo      = new SolicitudRepository( $failingWpdb, $failingPlazaRepo, $this->pipeline, $this->eventLog );
 
-        $resultado = $failingRepo->publicarLote( [ $idA, $idB ], 42, '2026-05-29 09:00:00' );
+        $resultado = $failingRepo->publicarLote( [ $idA, $idB ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertTrue( $resultado['abortado'] );
         $this->assertSame( [], $resultado['publicadas'] );
@@ -574,7 +574,7 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertTrue( $dictamen->procede() );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         global $wpdb;
         $wpdb->update(
@@ -583,7 +583,7 @@ class SolicitudRepositoryTest extends TestCase {
             [ 'id' => $id ]
         );
 
-        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertTrue( $resultado['abortado'] );
         $this->assertSame( [ $id ], $resultado['no_publicadas'] );
@@ -623,15 +623,15 @@ class SolicitudRepositoryTest extends TestCase {
         $dictA = $this->pipeline->evaluate( $solA );
         $this->assertTrue( $dictA->procede() );
         $idA = $this->repo->crear( $solA, 777, $dictA, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         $solB  = SolicitudDeCambio::sustitucion( $otherSeasonId, 200, $plazaB, 999, 105, $epoch );
         $dictB = $this->pipeline->evaluate( $solB );
         $this->assertTrue( $dictB->procede() );
         $idB = $this->repo->crear( $solB, 555, $dictB, '2026-05-27 10:05:00' );
-        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00' );
+        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00', 'Proceso Owner Test' );
 
-        $resultado = $this->repo->publicarLote( [ $idA, $idB ], 42, '2026-05-29 09:00:00' );
+        $resultado = $this->repo->publicarLote( [ $idA, $idB ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $this->assertTrue( $resultado['abortado'] );
         $this->assertSame( [ $idA, $idB ], $resultado['no_publicadas'] );
@@ -657,9 +657,9 @@ class SolicitudRepositoryTest extends TestCase {
         $dictamen  = $this->pipeline->evaluate( $solicitud );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
-        $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00' );
+        $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
 
         $vigente = $this->plazaRepository->findOcupacionVigente( $plazaId );
         $row     = $this->repo->findSolicitud( $id );
@@ -714,7 +714,7 @@ class SolicitudRepositoryTest extends TestCase {
         $dictamen  = $this->pipeline->evaluate( $solicitud );
 
         $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-05-27 10:00:00' );
-        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
 
         global $wpdb;
         $failingWpdb      = $this->wpdbWhoseCommitFails( $wpdb );
@@ -722,7 +722,7 @@ class SolicitudRepositoryTest extends TestCase {
         $failingRepo      = new SolicitudRepository( $failingWpdb, $failingPlazaRepo, $this->pipeline, $this->eventLog );
 
         try {
-            $failingRepo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00' );
+            $failingRepo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
             $this->fail( 'Expected a RuntimeException.' );
         } catch ( \RuntimeException $e ) {
             $this->assertStringContainsString( 'must never believe', $e->getMessage() );
@@ -735,5 +735,211 @@ class SolicitudRepositoryTest extends TestCase {
             // transaction").
             $wpdb->query( 'ROLLBACK' );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // cambios_decision — the append-only decision log
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param \wpdb $real A live wpdb sharing THIS test's SQLite connection.
+     */
+    private function wpdbThatFailsOnNthInsertInto( \wpdb $real, string $table, int $failOnCall ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $table, $failOnCall ) extends \wpdb {
+            private int $calls = 0;
+            private string $table;
+            private int $failOnCall;
+
+            public function __construct( \PDO $pdo, string $prefix, string $table, int $failOnCall ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix     = $prefix;
+                $this->table      = $table;
+                $this->failOnCall = $failOnCall;
+            }
+
+            public function insert( string $table, array $data, mixed $format = null ): int|false {
+                if ( str_ends_with( $table, $this->table ) ) {
+                    $this->calls++;
+
+                    if ( $this->calls === $this->failOnCall ) {
+                        $this->last_error = 'simulated insert failure for test (' . $this->table . ' insert #' . $this->calls . ')';
+                        return false;
+                    }
+                }
+
+                return parent::insert( $table, $data, $format );
+            }
+        };
+    }
+
+    public function test_aprobar_y_luego_rechazar_deja_dos_decisiones_no_pisa_la_anterior(): void {
+        $id = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        $this->repo->aprobar( $id, 42, 'aprobado por ahora', '2026-05-27 11:00:00', 'Ana Pérez' );
+        $this->repo->rechazar( $id, 42, 'me arrepentí', '2026-05-28 09:00:00', 'Beatriz Gómez' );
+
+        $decisiones = $this->repo->listDecisiones( $id );
+
+        $this->assertCount( 2, $decisiones, 'Two separate decisions must leave TWO rows, not one overwritten.' );
+
+        $this->assertSame( EstadoSolicitud::APROBADA, $decisiones[0]['accion'] );
+        $this->assertSame( 'Ana Pérez', $decisiones[0]['decidida_por_nombre'] );
+        $this->assertSame( 'aprobado por ahora', $decisiones[0]['nota'] );
+
+        $this->assertSame( EstadoSolicitud::RECHAZADA, $decisiones[1]['accion'] );
+        $this->assertSame( 'Beatriz Gómez', $decisiones[1]['decidida_por_nombre'] );
+        $this->assertSame( 'me arrepentí', $decisiones[1]['nota'] );
+
+        // The FIRST decision's snapshot must still read 'Ana Pérez' after the
+        // SECOND decision was appended — proving the name is never rewritten
+        // once recorded, even by a later decision on the very same solicitud.
+        $this->assertSame( 'Ana Pérez', $decisiones[0]['decidida_por_nombre'] );
+    }
+
+    /**
+     * The name is a SNAPSHOT captured at decision time, never re-derived
+     * later — see `cambios_decision`'s own docblock in `InitialSchema`. This
+     * is proven here without needing a real `wp_users` row: the caller (this
+     * test) simply passes a DIFFERENT name string on a second, independent
+     * decision, and the first row must still read exactly what was passed
+     * the first time — nothing re-reads or rewrites it afterwards.
+     */
+    public function test_decidida_por_nombre_es_un_snapshot_no_se_actualiza_retroactivamente(): void {
+        $idA = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+        $idB = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 2, 889, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00', 'Ana Pérez' );
+
+        // The same WP user (id 42) is now presented under a different name —
+        // exactly what a real WP profile rename or a different session would
+        // look like from this repository's point of view.
+        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00', 'Ana P. (renombrada)' );
+
+        $decisionesA = $this->repo->listDecisiones( $idA );
+        $decisionesB = $this->repo->listDecisiones( $idB );
+
+        $this->assertSame( 'Ana Pérez', $decisionesA[0]['decidida_por_nombre'] );
+        $this->assertSame( 'Ana P. (renombrada)', $decisionesB[0]['decidida_por_nombre'] );
+    }
+
+    public function test_publicar_lote_registra_una_decision_por_cada_solicitud_publicada(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+
+        $plazaIdA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaIdB = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 778, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 888, 2.5 );
+        $this->seedPuntaje( 889, 2.5 );
+
+        $epoch = $this->instanteEnPlazo( '2026-05-30' );
+
+        $solicitudA = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaIdA, 888, 5, $epoch );
+        $solicitudB = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaIdB, 889, 5, $epoch );
+
+        $idA = $this->repo->crear( $solicitudA, 777, $this->pipeline->evaluate( $solicitudA ), '2026-05-27 10:00:00' );
+        $idB = $this->repo->crear( $solicitudB, 777, $this->pipeline->evaluate( $solicitudB ), '2026-05-27 10:05:00' );
+
+        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+        $this->repo->aprobar( $idB, 42, null, '2026-05-27 11:05:00', 'Proceso Owner Test' );
+
+        $resultado = $this->repo->publicarLote( [ $idA, $idB ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
+
+        $this->assertFalse( $resultado['abortado'] );
+
+        foreach ( [ $idA, $idB ] as $id ) {
+            $decisiones = $this->repo->listDecisiones( $id );
+            $this->assertCount( 2, $decisiones, "Solicitud {$id} should have its 'aprobada' AND its 'publicada' decision." );
+            $this->assertSame( EstadoSolicitud::APROBADA, $decisiones[0]['accion'] );
+            $this->assertSame( EstadoSolicitud::PUBLICADA, $decisiones[1]['accion'] );
+            $this->assertSame( 'Proceso Owner Test', $decisiones[1]['decidida_por_nombre'] );
+        }
+    }
+
+    public function test_list_decisiones_devuelve_el_historial_completo_en_orden_cronologico(): void {
+        $id = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        $this->repo->aprobar( $id, 42, 'ok', '2026-05-27 11:00:00', 'Ana Pérez' );
+        $this->repo->rechazar( $id, 43, 'no, en realidad no', '2026-05-28 09:00:00', 'Beatriz Gómez' );
+
+        $decisiones = $this->repo->listDecisiones( $id );
+
+        $this->assertSame(
+            [ EstadoSolicitud::APROBADA, EstadoSolicitud::RECHAZADA ],
+            array_column( $decisiones, 'accion' )
+        );
+        $this->assertSame(
+            [ '2026-05-27 11:00:00', '2026-05-28 09:00:00' ],
+            array_column( $decisiones, 'decidida_at' )
+        );
+    }
+
+    /**
+     * If the `cambios_decision` insert fails, the `cambios_solicitud` estado
+     * flip must NOT persist either — see `transicionar()`'s own docblock:
+     * the two are one atomic unit, never one without the other.
+     */
+    public function test_aprobar_no_deja_el_estado_cambiado_si_falla_el_registro_de_la_decision(): void {
+        $id = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        global $wpdb;
+        $failingWpdb      = $this->wpdbThatFailsOnNthInsertInto( $wpdb, 'cambios_decision', 1 );
+        $failingPlazaRepo = new PlazaRepository( $failingWpdb, $this->eventLog );
+        $failingRepo      = new SolicitudRepository( $failingWpdb, $failingPlazaRepo, $this->pipeline, $this->eventLog );
+
+        try {
+            $failingRepo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+            $this->fail( 'Expected a SolicitudPersistenceException.' );
+        } catch ( \RuntimeException $e ) {
+            // Expected — either SolicitudPersistenceException (decision
+            // insert) surfaces here.
+        }
+
+        $row = $this->repo->findSolicitud( $id );
+        $this->assertSame( EstadoSolicitud::PENDIENTE, $row['estado'], 'estado must be rolled back when the decision row could not be written.' );
+        $this->assertSame( [], $this->repo->listDecisiones( $id ), 'No decision row should exist either — both writes are one atomic unit.' );
+    }
+
+    /**
+     * Same atomicity guarantee as above, at `publicarLote()`'s scale: if the
+     * `cambios_decision` insert fails for ANY solicitud mid-lote, nothing in
+     * the whole lote is applied — no ocupación changes, no decision rows,
+     * exactly like any other mid-lote write failure (see
+     * `test_publicar_lote_hace_rollback_si_una_escritura_falla_a_mitad_del_lote`).
+     */
+    public function test_publicar_lote_no_aplica_nada_si_falla_el_registro_de_una_decision(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 888, 2.5 );
+
+        $epoch     = $this->instanteEnPlazo( '2026-05-30' );
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, $epoch );
+        $dictamen  = $this->pipeline->evaluate( $solicitud );
+
+        $id = $this->repo->crear( $solicitud, 777, $dictamen, '2026-05-27 10:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+
+        $antes = $this->plazaRepository->findOcupacionVigente( $plazaId );
+
+        global $wpdb;
+        $failingWpdb      = $this->wpdbThatFailsOnNthInsertInto( $wpdb, 'cambios_decision', 1 );
+        $failingPlazaRepo = new PlazaRepository( $failingWpdb, $this->eventLog );
+        $failingRepo      = new SolicitudRepository( $failingWpdb, $failingPlazaRepo, $this->pipeline, $this->eventLog );
+
+        $resultado = $failingRepo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
+
+        $this->assertTrue( $resultado['abortado'] );
+        $this->assertSame( $id, $resultado['culprit_id'] );
+
+        $despues = $this->plazaRepository->findOcupacionVigente( $plazaId );
+        $this->assertSame( (int) $antes['player_id'], (int) $despues['player_id'], 'No ocupacion change should survive an aborted lote.' );
+
+        $row = $this->repo->findSolicitud( $id );
+        $this->assertSame( EstadoSolicitud::APROBADA, $row['estado'], 'estado must remain aprobada — never publicada — when the lote aborts.' );
+        $this->assertCount( 1, $this->repo->listDecisiones( $id ), 'Only the original "aprobada" decision should exist — no "publicada" row from the aborted attempt.' );
     }
 }

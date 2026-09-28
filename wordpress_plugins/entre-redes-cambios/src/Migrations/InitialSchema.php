@@ -82,6 +82,7 @@ class InitialSchema {
             self::sqlCambiosPlaza( $p, $charset_collate ),
             self::sqlCambiosOcupacion( $p, $charset_collate ),
             self::sqlCambiosSolicitud( $p, $charset_collate ),
+            self::sqlCambiosDecision( $p, $charset_collate ),
         ];
 
         $results = [];
@@ -396,12 +397,17 @@ class InitialSchema {
      * `Calendario\FechaRepository::VALID_ESTADOS`'s docblock for the same
      * ENUM-is-not-a-guard rationale repeated once more here).
      *
-     * `resuelta_por` / `resuelta_at` / `nota` are shared by every terminal
-     * decision — `aprobar()`, `rechazar()`, `anular()`, and the eventual
-     * `publicarLote()` — rather than one pair of columns per action, because
-     * a solicitud only ever has ONE most-recent resolution at a time; the
-     * full history of every state it passed through lives in the EventLog,
-     * not in this row.
+     * `resuelta_por` / `resuelta_at` / `nota` are a READ CONVENIENCE ONLY —
+     * "what was the most recent decision on this solicitud" — kept because a
+     * caller that only needs the latest decision (e.g. a captain checking
+     * their own request) should not have to join `cambios_decision` for it.
+     * They are NOT the historical record: every individual decision
+     * (`aprobar()`, `rechazar()`, `anular()`, `publicarLote()`) additionally
+     * appends its own row to `cambios_decision` (see that table's docblock),
+     * which is the only source of truth for "who decided what, and when" —
+     * these three columns get overwritten on every new decision, exactly
+     * like `cambios_solicitud.estado` itself does, so they can never answer
+     * "what did the FIRST decision say" once a second one has been made.
      *
      * `ocupacion_id` is the `cambios_ocupacion` row `publicarLote()` created
      * (or, for a `regreso`, closed) for THIS solicitud — written only at the
@@ -436,6 +442,46 @@ class InitialSchema {
   PRIMARY KEY  (id),
   KEY idx_season_estado (season_id, estado),
   KEY idx_plaza (plaza_id)
+) ENGINE=InnoDB $charset;";
+    }
+
+    /**
+     * cambios_decision — APPEND-ONLY. One row per decision ever made on a
+     * solicitud (`aprobada`, `rechazada`, `anulada`, `publicada`) — never
+     * updated, never deleted. This is the honest answer to "who approved or
+     * rejected this, and when", which `cambios_solicitud.resuelta_por` /
+     * `resuelta_at` cannot give once a solicitud has been decided more than
+     * once (see that table's docblock): those three columns are overwritten
+     * on every transition, so a solicitud approved Wednesday and then
+     * rejected Thursday would otherwise lose the Wednesday decision entirely.
+     *
+     * `decidida_por` is the WP user id — same "id can go stale" problem every
+     * other *_por column in this plugin has (the user can be deleted or
+     * renamed later). `decidida_por_nombre` exists BECAUSE of that: it is the
+     * display name (or login) captured AT THE MOMENT of the decision, a
+     * deliberate snapshot, never re-derived from `wp_users` on read. The id
+     * says who this points to TODAY; the name says who it was THEN — the same
+     * split `Dictamen\DictamenSnapshot` makes for a dictamen's motivos, for
+     * the same reason: a fact that was true at one instant must stay
+     * legible even after the live source of truth has moved on.
+     *
+     * Written by `Solicitudes\SolicitudRepository` in the SAME transaction as
+     * the `cambios_solicitud.estado` write it accompanies — see that class's
+     * `transicionar()` and `publicarLote()` for why: a state change recorded
+     * without its decision row, or a decision row for a state change that
+     * never actually committed, are equally unacceptable half-truths.
+     */
+    private static function sqlCambiosDecision( string $p, string $charset ): string {
+        return "CREATE TABLE {$p}cambios_decision (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  solicitud_id BIGINT UNSIGNED NOT NULL,
+  accion ENUM('aprobada','rechazada','anulada','publicada') NOT NULL,
+  decidida_por BIGINT UNSIGNED NOT NULL,
+  decidida_por_nombre VARCHAR(255) NOT NULL,
+  decidida_at DATETIME NOT NULL,
+  nota TEXT NULL DEFAULT NULL,
+  PRIMARY KEY  (id),
+  KEY idx_solicitud (solicitud_id)
 ) ENGINE=InnoDB $charset;";
     }
 

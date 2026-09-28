@@ -49,6 +49,7 @@ class MigrationRunner {
         'cambios_plaza',
         'cambios_ocupacion',
         'cambios_solicitud',
+        'cambios_decision',
     ];
 
     public static function run( EventLog $eventLog ): void {
