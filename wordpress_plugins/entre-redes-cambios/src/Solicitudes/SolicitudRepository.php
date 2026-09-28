@@ -81,6 +81,17 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * Same discipline as `PlazaRepository` / `CapitanRepository`: `EventLog` is
  * a mandatory constructor dependency, every successful write records an
  * event after it is durable, every failure is logged before it is thrown.
+ *
+ * *** cambios_decision — THE APPEND-ONLY DECISION LOG ***
+ * `cambios_solicitud.resuelta_por` / `resuelta_at` / `nota` answer "what is
+ * the LATEST decision on this solicitud" — see that table's own docblock in
+ * `Migrations\InitialSchema`. They are overwritten on every transition, so
+ * they cannot answer "what did the FIRST decision say" once a solicitud has
+ * been decided more than once (approved Wednesday, rejected Thursday).
+ * `transicionar()` and `publicarLote()` therefore ALSO append one row to
+ * `cambios_decision` for every decision, in the SAME transaction as the
+ * `estado` write — never one without the other (see
+ * `insertDecisionWithinTransaction()`'s own docblock).
  */
 class SolicitudRepository {
 
@@ -250,36 +261,73 @@ class SolicitudRepository {
      * see class docblock, "APROBAR IS NOT PUBLICAR": this NEVER touches
      * `PlazaRepository`. No ocupación is opened or closed here.
      *
+     * @param string $decididaPorNombre The acting user's display name (or
+     *        login), captured NOW and frozen into `cambios_decision` — see
+     *        class docblock, "cambios_decision". Never re-derived from
+     *        `wp_users` later, so a renamed or deleted WP user never rewrites
+     *        history.
      * @throws \RuntimeException When $id does not exist.
      * @throws Exception\TransicionInvalidaException When the solicitud's
      *         current estado cannot move to `aprobada`.
      * @throws SolicitudPersistenceException When the update fails at the
      *         wpdb level.
      */
-    public function aprobar( int $id, int $resueltaPor, ?string $nota, string $now ): void {
-        $this->transicionar( $id, EstadoSolicitud::APROBADA, $resueltaPor, $nota, $now, 'solicitud.aprobada' );
+    public function aprobar( int $id, int $resueltaPor, ?string $nota, string $now, string $decididaPorNombre ): void {
+        $this->transicionar( $id, EstadoSolicitud::APROBADA, $resueltaPor, $nota, $now, $decididaPorNombre, 'solicitud.aprobada' );
     }
 
     /**
+     * @param string $decididaPorNombre See `aprobar()`'s own docblock.
      * @throws \RuntimeException When $id does not exist.
      * @throws Exception\TransicionInvalidaException When the solicitud's
      *         current estado cannot move to `rechazada`.
      * @throws SolicitudPersistenceException When the update fails at the
      *         wpdb level.
      */
-    public function rechazar( int $id, int $resueltaPor, ?string $nota, string $now ): void {
-        $this->transicionar( $id, EstadoSolicitud::RECHAZADA, $resueltaPor, $nota, $now, 'solicitud.rechazada' );
+    public function rechazar( int $id, int $resueltaPor, ?string $nota, string $now, string $decididaPorNombre ): void {
+        $this->transicionar( $id, EstadoSolicitud::RECHAZADA, $resueltaPor, $nota, $now, $decididaPorNombre, 'solicitud.rechazada' );
     }
 
     /**
+     * @param string $decididaPorNombre See `aprobar()`'s own docblock.
      * @throws \RuntimeException When $id does not exist.
      * @throws Exception\TransicionInvalidaException When the solicitud's
      *         current estado cannot move to `anulada`.
      * @throws SolicitudPersistenceException When the update fails at the
      *         wpdb level.
      */
-    public function anular( int $id, int $resueltaPor, ?string $nota, string $now ): void {
-        $this->transicionar( $id, EstadoSolicitud::ANULADA, $resueltaPor, $nota, $now, 'solicitud.anulada' );
+    public function anular( int $id, int $resueltaPor, ?string $nota, string $now, string $decididaPorNombre ): void {
+        $this->transicionar( $id, EstadoSolicitud::ANULADA, $resueltaPor, $nota, $now, $decididaPorNombre, 'solicitud.anulada' );
+    }
+
+    /**
+     * The complete history of decisions made on $solicitudId, chronological
+     * — see class docblock, "cambios_decision". Unlike `findSolicitud()`'s
+     * `resuelta_por`/`resuelta_at`/`nota` (the LATEST decision only), this
+     * returns every row ever appended, oldest first.
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level —
+     *         same "READ FAILURES MUST NEVER READ AS 'NO ROWS'" discipline as
+     *         `listByEstado()`.
+     */
+    public function listDecisiones( int $solicitudId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}cambios_decision
+                  WHERE solicitud_id = %d
+                  ORDER BY decidida_at ASC, id ASC",
+                $solicitudId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listDecisiones', [ 'solicitud_id' => $solicitudId ] );
+
+        return $rows;
     }
 
     /**
@@ -324,8 +372,14 @@ class SolicitudRepository {
      *   null when `abortado` is true, always null otherwise. `motivo`
      *   remains the human-readable sentence; this is its machine-readable
      *   twin, so a caller never has to parse Spanish prose to find the id.
+     *
+     * @param string $decididaPorNombre See `aprobar()`'s own docblock — ONE
+     *        name for the whole lote, since a lote publication is a single
+     *        process-owner action; `insertDecisionWithinTransaction()` still
+     *        appends one `cambios_decision` row PER solicitud published, each
+     *        stamped with this same name.
      */
-    public function publicarLote( array $ids, int $resueltaPor, string $now ): array {
+    public function publicarLote( array $ids, int $resueltaPor, string $now, string $decididaPorNombre ): array {
         $ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
 
         if ( empty( $ids ) ) {
@@ -441,6 +495,12 @@ class SolicitudRepository {
                 }
 
                 $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId );
+
+                // One cambios_decision row PER solicitud published — see
+                // class docblock, "cambios_decision" — inside this SAME
+                // ambient transaction, so a lote that rolls back below takes
+                // every decision row it just appended down with it too.
+                $this->insertDecisionWithinTransaction( $id, EstadoSolicitud::PUBLICADA, $resueltaPor, $decididaPorNombre, null, $now );
             }
         } catch ( \Throwable $e ) {
             // rollbackTransaction() itself throws Support\Exception\InconsistentStateException
@@ -512,9 +572,20 @@ class SolicitudRepository {
 
     /**
      * Shared body of aprobar() / rechazar() / anular(): find, validate the
-     * transition through `EstadoSolicitud`, write, log.
+     * transition through `EstadoSolicitud`, write the `estado` change AND
+     * append its `cambios_decision` row in ONE transaction, log.
+     *
+     * *** WHY A TRANSACTION FOR A SINGLE-ROW UPDATE ***
+     * The `cambios_solicitud` UPDATE alone would be atomic on its own — but
+     * this method also writes a SECOND row, to `cambios_decision`, and the
+     * two must land together or not at all (see class docblock,
+     * "cambios_decision"): a state flipped to `aprobada` with no decision
+     * row would make "who approved this" unanswerable, and a decision row
+     * for a state change that never actually committed would be a
+     * fabricated record of something that did not happen. Same reasoning as
+     * `publicarLote()`'s own transaction, at one-tenth the size.
      */
-    private function transicionar( int $id, string $nuevoEstado, int $resueltaPor, ?string $nota, string $now, string $evento ): void {
+    private function transicionar( int $id, string $nuevoEstado, int $resueltaPor, ?string $nota, string $now, string $decididaPorNombre, string $evento ): void {
         $row = $this->findSolicitud( $id );
 
         if ( null === $row ) {
@@ -532,36 +603,89 @@ class SolicitudRepository {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $result = $wpdb->update(
-            $p . 'cambios_solicitud',
-            [
-                'estado'       => $nuevoEstado,
-                'resuelta_por' => $resueltaPor,
-                'resuelta_at'  => $now,
-                'nota'         => $nota,
-                'updated_at'   => $now,
-            ],
-            [ 'id' => $id ]
-        );
+        $this->beginTransaction( $evento, [ 'solicitud_id' => $id ] );
 
-        if ( false === $result ) {
+        try {
+            $result = $wpdb->update(
+                $p . 'cambios_solicitud',
+                [
+                    'estado'       => $nuevoEstado,
+                    'resuelta_por' => $resueltaPor,
+                    'resuelta_at'  => $now,
+                    'nota'         => $nota,
+                    'updated_at'   => $now,
+                ],
+                [ 'id' => $id ]
+            );
+
+            if ( false === $result ) {
+                throw new SolicitudPersistenceException( "update cambios_solicitud (estado={$nuevoEstado})", $wpdb->last_error );
+            }
+
+            $this->insertDecisionWithinTransaction( $id, $nuevoEstado, $resueltaPor, $decididaPorNombre, $nota, $now );
+        } catch ( \Throwable $e ) {
+            $this->rollbackTransaction( $evento, $e, [ 'solicitud_id' => $id ] );
+
             $this->eventLog->record( 'escritura.fallida', [
                 'operacion'    => $evento,
-                'motivo'       => 'update cambios_solicitud fallo',
+                'motivo'       => 'transicion de estado o registro de decision fallo: ' . $e->getMessage(),
                 'solicitud_id' => $id,
                 'last_error'   => $wpdb->last_error,
             ] );
 
-            throw new SolicitudPersistenceException( "update cambios_solicitud (estado={$nuevoEstado})", $wpdb->last_error );
+            throw $e;
         }
 
+        $this->commitTransaction( $evento, [ 'solicitud_id' => $id ] );
+
         $this->eventLog->record( $evento, [
-            'solicitud_id'   => $id,
-            'estado_anterior' => $row['estado'],
-            'estado_nuevo'   => $nuevoEstado,
-            'resuelta_por'   => $resueltaPor,
-            'nota'           => $nota,
+            'solicitud_id'        => $id,
+            'estado_anterior'     => $row['estado'],
+            'estado_nuevo'        => $nuevoEstado,
+            'resuelta_por'        => $resueltaPor,
+            'decidida_por_nombre' => $decididaPorNombre,
+            'nota'                => $nota,
         ] );
+    }
+
+    /**
+     * Appends ONE row to `cambios_decision` for a single decision on
+     * $solicitudId — see class docblock, "cambios_decision". Writes WITHOUT
+     * wrapping its own transaction or logging its own event — same contract
+     * as `PlazaRepository`'s "WithinTransaction" methods (and this class's own
+     * `marcarPublicadaWithinTransaction()`): the caller (`transicionar()`,
+     * `publicarLote()`) owns the ambient transaction and its own EventLog
+     * event, once, after that transaction actually commits.
+     *
+     * @throws SolicitudPersistenceException When the insert fails at the
+     *         wpdb level.
+     */
+    private function insertDecisionWithinTransaction(
+        int $solicitudId,
+        string $accion,
+        int $decididaPor,
+        string $decididaPorNombre,
+        ?string $nota,
+        string $now
+    ): void {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->insert(
+            $p . 'cambios_decision',
+            [
+                'solicitud_id'        => $solicitudId,
+                'accion'              => $accion,
+                'decidida_por'        => $decididaPor,
+                'decidida_por_nombre' => $decididaPorNombre,
+                'decidida_at'         => $now,
+                'nota'                => $nota,
+            ]
+        );
+
+        if ( false === $result ) {
+            throw new SolicitudPersistenceException( 'insert cambios_decision', $wpdb->last_error );
+        }
     }
 
     /**

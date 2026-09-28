@@ -35,6 +35,10 @@ class InitialSchemaTest extends TestCase {
                 'id', 'season_id', 'team_id', 'player_id',
                 'designado_por', 'designado_at', 'revocado_at',
             ],
+            'wp_cambios_decision' => [
+                'id', 'solicitud_id', 'accion', 'decidida_por',
+                'decidida_por_nombre', 'decidida_at', 'nota',
+            ],
         ];
     }
 
