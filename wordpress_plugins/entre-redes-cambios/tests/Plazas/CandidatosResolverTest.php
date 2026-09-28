@@ -1,0 +1,477 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EntreRedes\Cambios\Tests\Plazas;
+
+use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
+use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Plazas\CandidatosResolver;
+use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Plazas\Puntaje;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Integration tests for CandidatosResolver against the in-memory SQLite
+ * shim — real PlazaRepository, plus ad hoc `wp_posts` / `wp_term_relationships`
+ * / `wp_term_taxonomy` / `wp_postmeta` tables (WordPress core tables this
+ * plugin's own test schema does not otherwise create — see
+ * DictamenContextAssemblerTest for the same pattern applied to `wp_postmeta`
+ * alone).
+ */
+class CandidatosResolverTest extends TestCase {
+
+    private const SEASON_ID = 359;
+    private const OTHER_SEASON_ID = 360;
+
+    private InMemoryEventLog $eventLog;
+    private PlazaRepository $plazaRepository;
+    private CandidatosResolver $resolver;
+
+    /** @var callable(int): int */
+    private $countResolvedFechasSinceFn;
+
+    protected function setUp(): void {
+        InitialSchema::up();
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
+        $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
+        $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
+
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$p}posts (
+                ID INTEGER PRIMARY KEY,
+                post_type TEXT,
+                post_status TEXT
+            )"
+        );
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$p}term_relationships (
+                object_id INTEGER,
+                term_taxonomy_id INTEGER
+            )"
+        );
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$p}term_taxonomy (
+                term_taxonomy_id INTEGER PRIMARY KEY,
+                term_id INTEGER,
+                taxonomy TEXT
+            )"
+        );
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$p}postmeta (
+                meta_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                meta_key TEXT,
+                meta_value TEXT
+            )"
+        );
+        $wpdb->query( "DELETE FROM {$p}posts" );
+        $wpdb->query( "DELETE FROM {$p}term_relationships" );
+        $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
+        $wpdb->query( "DELETE FROM {$p}postmeta" );
+
+        // ONE sp_season taxonomy row per season, term_taxonomy_id == term_id
+        // == season_id for simplicity — nothing in this test cares about the
+        // distinction, only the plugin's own raw JOIN does.
+        $wpdb->insert( $p . 'term_taxonomy', [ 'term_taxonomy_id' => self::SEASON_ID, 'term_id' => self::SEASON_ID, 'taxonomy' => 'sp_season' ] );
+        $wpdb->insert( $p . 'term_taxonomy', [ 'term_taxonomy_id' => self::OTHER_SEASON_ID, 'term_id' => self::OTHER_SEASON_ID, 'taxonomy' => 'sp_season' ] );
+
+        $this->eventLog        = new InMemoryEventLog();
+        $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
+        $this->resolver        = new CandidatosResolver( $wpdb, $this->plazaRepository, $this->eventLog );
+
+        $this->countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 10;
+
+        $this->seedFecha( 1, self::SEASON_ID );
+    }
+
+    protected function tearDown(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+        $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
+        $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
+        $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
+        $wpdb->query( "DELETE FROM {$p}posts" );
+        $wpdb->query( "DELETE FROM {$p}term_relationships" );
+        $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
+        $wpdb->query( "DELETE FROM {$p}postmeta" );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fixtures
+    // -------------------------------------------------------------------------
+
+    private function seedFecha( int $fechaId, int $seasonId, string $playDate = '2026-05-30' ): void {
+        global $wpdb;
+
+        $wpdb->insert(
+            $wpdb->prefix . 'cambios_fecha',
+            [
+                'id'                 => $fechaId,
+                'season_id'          => $seasonId,
+                'orden'              => $fechaId,
+                'torneo_liga_ids'    => '1',
+                'torneo_label'       => 'Apertura',
+                'numero_en_torneo'   => $fechaId,
+                'play_date'          => $playDate,
+                'play_date_original' => $playDate,
+                'estado'             => 'programada',
+                'created_at'         => '2026-01-01 00:00:00',
+                'updated_at'         => '2026-01-01 00:00:00',
+            ]
+        );
+    }
+
+    /**
+     * @param array<string, mixed>|null $metrics Null = no `sp_metrics` row
+     *        and no `caracter` row at all. A `caracter` key, if present, is
+     *        written as its own un-serialized ACF postmeta row — NOT nested
+     *        inside `sp_metrics` — matching how JugadorMetricasReader now
+     *        reads it (see its class docblock, "Reads TWO independent
+     *        postmeta values").
+     */
+    private function seedPlayer( int $playerId, int $seasonId, ?array $metrics ): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->insert( $p . 'posts', [ 'ID' => $playerId, 'post_type' => 'sp_player', 'post_status' => 'publish' ] );
+        $wpdb->insert( $p . 'term_relationships', [ 'object_id' => $playerId, 'term_taxonomy_id' => $seasonId ] );
+
+        if ( null !== $metrics ) {
+            if ( array_key_exists( 'caracter', $metrics ) ) {
+                $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'caracter', 'meta_value' => (string) $metrics['caracter'] ] );
+                unset( $metrics['caracter'] );
+            }
+
+            $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'sp_metrics', 'meta_value' => serialize( $metrics ) ] );
+        }
+    }
+
+    private function plaza( int $puntajeTechoHalfPoints = 6 /* 3.0 */ ): int {
+        return $this->plazaRepository->openPlaza(
+            self::SEASON_ID,
+            100,
+            700,
+            Puntaje::fromHalfPoints( $puntajeTechoHalfPoints ),
+            'campo',
+            1,
+            '2026-03-01 10:00:00'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // paraPlaza() — pool membership
+    // -------------------------------------------------------------------------
+
+    public function test_excludes_the_plazas_own_current_vigent_occupant(): void {
+        $plazaId = $this->plaza();
+        // 700 is the plaza's own titular/vigent occupant (see plaza()).
+        $this->seedPlayer( 700, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '3' ] );
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '3' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $candidatos );
+
+        $this->assertNotContains( 700, $ids );
+        $this->assertContains( 800, $ids );
+    }
+
+    public function test_excludes_players_registered_in_a_different_season(): void {
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::OTHER_SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '3' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertSame( [], $candidatos );
+    }
+
+    // -------------------------------------------------------------------------
+    // Viability
+    // -------------------------------------------------------------------------
+
+    public function test_a_padre_within_techo_and_free_is_viable(): void {
+        $plazaId = $this->plaza( 6 ); // techo 3.0
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertCount( 1, $candidatos );
+        $this->assertTrue( $candidatos[0]->esPadre() );
+        $this->assertTrue( $candidatos[0]->viable() );
+        $this->assertNull( $candidatos[0]->motivoNoViable() );
+        $this->assertSame( 2.5, $candidatos[0]->puntaje()->toDecimal() );
+    }
+
+    public function test_a_candidate_over_the_techo_is_not_viable(): void {
+        $plazaId = $this->plaza( 6 ); // techo 3.0
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '5' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertFalse( $candidatos[0]->viable() );
+        $this->assertSame( 'puntaje_excede_techo', $candidatos[0]->motivoNoViable() );
+    }
+
+    public function test_a_candidate_with_no_resolvable_puntaje_is_not_viable(): void {
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo' ] ); // no puntaje key
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertFalse( $candidatos[0]->viable() );
+        $this->assertSame( 'puntaje_indeterminado', $candidatos[0]->motivoNoViable() );
+    }
+
+    public function test_a_candidate_occupying_another_vigent_plaza_is_not_viable(): void {
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        // 800 already vigently occupies a SECOND plaza this season.
+        $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 800, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $candidato800 = current( array_filter( $candidatos, static fn ( $c ) => 800 === $c->playerId() ) );
+        $this->assertFalse( $candidato800->viable() );
+        $this->assertSame( 'ocupa_otra_plaza_vigente', $candidato800->motivoNoViable() );
+    }
+
+    /**
+     * THE case that motivated the definition of "viable" (see
+     * CandidatosResolver's own class docblock and the task brief): a padre
+     * with a puntaje that fits the techo, but BLOCKED elsewhere by a trunca
+     * closure, must NOT count as viable — otherwise a non-padre entrante
+     * would be blocked by Reglas\PrioridadDePadresRespetada against a padre
+     * who could not actually take the plaza either, leaving the team unable
+     * to change anyone.
+     */
+    public function test_a_padre_blocked_by_a_trunca_closure_elsewhere_is_not_viable(): void {
+        $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
+        $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        // 800 left ANOTHER plaza 'trunca' — only 2 resolved fechas have
+        // passed since (< 3, TOPE_TRES_FECHAS keeps them blocked).
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+        $countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 7 === $fechaId ? 2 : 10;
+
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $countResolvedFechasSinceFn );
+
+        $candidato800 = current( array_filter( $candidatos, static fn ( $c ) => 800 === $c->playerId() ) );
+        $this->assertFalse( $candidato800->viable() );
+        $this->assertSame( 'bloqueado_por_cierre_truncado', $candidato800->motivoNoViable() );
+        $this->assertSame( 0, $this->resolver->contarPadresViables( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $countResolvedFechasSinceFn ) );
+    }
+
+    /**
+     * `BloqueoReemplazoEvaluator::isBlocked()` has a
+     * `BloqueoReemplazoPolicy::hastaLiberacionDePlaza()` branch that the test
+     * above never exercises (it only ever passes `topeTresFechas()`) — this
+     * drives the candidate pool with the OTHER policy reading, so this
+     * branch is reached through CandidatosResolver too, not only through
+     * BloqueoReemplazoEvaluatorTest's own direct unit tests.
+     */
+    public function test_a_padre_blocked_under_hasta_liberacion_de_plaza_is_not_viable_before_the_other_plaza_liberates(): void {
+        $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
+        $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        // 800 left ANOTHER plaza 'trunca' at fecha 7; its new vigent
+        // occupant (999) has NOT yet cleared the mínimo since fecha 7 — the
+        // other plaza itself has not liberated, so under
+        // hastaLiberacionDePlaza() 800 stays blocked regardless of how many
+        // fechas passed since 800's OWN closure.
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $plaza                      = $this->plazaRepository->findPlaza( $plazaId );
+        $countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 7 === $fechaId ? 2 : 10;
+
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::hastaLiberacionDePlaza(), $countResolvedFechasSinceFn );
+
+        $candidato800 = current( array_filter( $candidatos, static fn ( $c ) => 800 === $c->playerId() ) );
+        $this->assertFalse( $candidato800->viable() );
+        $this->assertSame( 'bloqueado_por_cierre_truncado', $candidato800->motivoNoViable() );
+    }
+
+    public function test_a_padre_becomes_viable_under_hasta_liberacion_de_plaza_once_the_other_plaza_liberates(): void {
+        $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
+        $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+        // Now 999 (the other plaza's vigent occupant since fecha 7) HAS
+        // cleared the mínimo — the other plaza has liberated, so
+        // hastaLiberacionDePlaza() unblocks every 'trunca' ex-occupant of
+        // that plaza at once, 800 included.
+        $countResolvedFechasSinceFn = static fn ( int $fechaId ): int => 7 === $fechaId ? 3 : 10;
+
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::hastaLiberacionDePlaza(), $countResolvedFechasSinceFn );
+
+        $candidato800 = current( array_filter( $candidatos, static fn ( $c ) => 800 === $c->playerId() ) );
+        $this->assertTrue( $candidato800->viable() );
+        $this->assertNull( $candidato800->motivoNoViable() );
+    }
+
+    // -------------------------------------------------------------------------
+    // contarPadresViables()
+    // -------------------------------------------------------------------------
+
+    public function test_contar_padres_viables_counts_only_viable_padres(): void {
+        $plazaId = $this->plaza( 6 ); // techo 3.0
+
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] ); // viable padre
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Padre de Alumno', 'puntaje' => '3' ] ); // viable padre
+        $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '5' ] ); // padre pero excede techo
+        $this->seedPlayer( 803, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] ); // viable pero NO padre
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $this->assertSame(
+            2,
+            $this->resolver->contarPadresViables( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn )
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // FIX 1 (BLOCKER) — a failed candidate-pool read must never read as
+    // "zero candidates"
+    // -------------------------------------------------------------------------
+
+    /**
+     * A `\wpdb` subclass whose get_results() sets $wpdb->last_error and
+     * returns [] whenever the SQL contains $mustContain — same pattern as
+     * `PlazaRepositoryTest::wpdbThatFailsGetResults()`, which this mirrors.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    /**
+     * THE blocker this fix closes: before it, a failed
+     * `playerIdsRegistradosEnTemporada()` read degraded via `$rows ?: []`
+     * into "zero candidates" — this proves it now throws instead.
+     */
+    public function test_para_plaza_throws_when_the_player_ids_query_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza();
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_season' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, $failingEventLog );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingResolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+    }
+
+    public function test_para_plaza_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza();
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_season' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, $failingEventLog );
+
+        try {
+            $failingResolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'playerIdsRegistradosEnTemporada', $failingEventLog->last()['contexto']['operacion'] );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
+    }
+
+    /**
+     * THE end-to-end proof of WHY this matters: with the padre-priority
+     * policy ON and a non-padre entrante, a failing candidate-pool read must
+     * NEVER produce a silent approval — it must surface as a propagated
+     * failure. contarPadresViables() is the exact method
+     * Reglas\PrioridadDePadresRespetada consults for its `padresViables <= 0
+     * -> approve` shortcut (see that rule's own docblock); before FIX 1, the
+     * failed read below would have silently become `0`, and this scenario
+     * would have wrongly approved a non-padre entrante while a viable padre
+     * genuinely existed.
+     */
+    public function test_contar_padres_viables_never_silently_approves_when_the_read_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza( 6 ); // techo 3.0
+
+        // A viable padre genuinely exists in the season roster — if the read
+        // failure below were swallowed into "zero candidates", this
+        // scenario would wrongly report 0 padres viables instead of failing.
+        $this->seedPlayer( 900, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'sp_season' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingResolver = new CandidatosResolver( $failingWpdb, $this->plazaRepository, $failingEventLog );
+
+        try {
+            $failingResolver->contarPadresViables( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+            $this->fail( 'contarPadresViables() must propagate the read failure, never silently answer 0.' );
+        } catch ( \RuntimeException $e ) {
+            // expected: the failure surfaced instead of becoming a silent
+            // "no padres viables" that would have approved the non-padre
+            // entrante.
+            $this->assertInstanceOf( \RuntimeException::class, $e );
+        }
+    }
+}

@@ -56,14 +56,6 @@ final class Plugin {
             $settings        = new Calendario\Settings( $wpdb );
             $plazaRepository = new Plazas\PlazaRepository( $wpdb, $eventLog );
 
-            $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
-                $plazaRepository,
-                $fechaRepository,
-                $settings,
-                $wpdb,
-                $eventLog
-            );
-
             // CC5b — which of the two BloqueoReemplazoPolicy readings applies
             // — is still pending confirmation from the process owner (see
             // that class's own docblock). Injected explicitly and VISIBLY
@@ -73,7 +65,31 @@ final class Plugin {
             // a hidden default someone has to go find first.
             $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
 
-            $dictamenPipeline = new Dictamen\DictamenPipeline( $dictamenContextAssembler, $eventLog, $bloqueoReemplazoPolicy );
+            // "Prioridad de padres" (see Reglas\PrioridadDePadresRespetada) is
+            // a REAL, persisted setting (unlike CC5b above) — OFF by default
+            // (Migrations\InitialSchema::SEED_DEFAULTS). Read HERE, once, and
+            // threaded explicitly into both the assembler (so it only pays
+            // for Plazas\CandidatosResolver's query when actually on) and the
+            // pipeline/factory (so the rule itself only fires when on) —
+            // never re-read independently by either, which would risk the
+            // two silently disagreeing.
+            $prioridadPadresActiva = $settings->prioridadPadresActiva();
+
+            $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
+                $plazaRepository,
+                $fechaRepository,
+                $settings,
+                $wpdb,
+                $eventLog,
+                $bloqueoReemplazoPolicy
+            );
+
+            $dictamenPipeline = new Dictamen\DictamenPipeline(
+                $dictamenContextAssembler,
+                $eventLog,
+                $bloqueoReemplazoPolicy,
+                $prioridadPadresActiva
+            );
 
             $solicitudRepository = new Solicitudes\SolicitudRepository(
                 $wpdb,
@@ -89,11 +105,15 @@ final class Plugin {
                 $eventLog
             );
 
+            $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository, $eventLog );
+
             $plazasController = new Rest\PlazasController(
                 $capitanAuthorizer,
                 $plazaRepository,
                 $fechaRepository,
-                $eventLog
+                $eventLog,
+                $candidatosResolver,
+                $bloqueoReemplazoPolicy
             );
 
             ( new Rest\RestController( $solicitudesController, $plazasController ) )->register_routes();
@@ -112,16 +132,24 @@ final class Plugin {
                 $fechaRepository = new Calendario\FechaRepository( $wpdb, $eventLog );
                 $settings        = new Calendario\Settings( $wpdb );
 
+                $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
+                $prioridadPadresActiva  = $settings->prioridadPadresActiva();
+
                 $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                     $plazaRepository,
                     $fechaRepository,
                     $settings,
                     $wpdb,
-                    $eventLog
+                    $eventLog,
+                    $bloqueoReemplazoPolicy
                 );
 
-                $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
-                $dictamenPipeline       = new Dictamen\DictamenPipeline( $dictamenContextAssembler, $eventLog, $bloqueoReemplazoPolicy );
+                $dictamenPipeline = new Dictamen\DictamenPipeline(
+                    $dictamenContextAssembler,
+                    $eventLog,
+                    $bloqueoReemplazoPolicy,
+                    $prioridadPadresActiva
+                );
 
                 $solicitudRepository = new Solicitudes\SolicitudRepository(
                     $wpdb,

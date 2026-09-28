@@ -57,6 +57,12 @@ class InitialSchema {
         'plazo_cierre_regresos'      => '{"days":-4,"time":"23:59:59"}',
         'plazo_cierre_solicitudes'   => '{"days":-2,"time":"23:59:59"}',
         'plazo_publicacion'          => '{"days":-1,"time":"00:00:00"}',
+        // OFF by default — the reglamento's "prioridad para padres" is today a
+        // SOFT rule nobody enforces (see Dictamen\Reglas\PrioridadDePadresRespetada's
+        // own docblock). Flipping this to '1' is the one, explicit way to turn
+        // it into an actual gate; it must never silently become active on its
+        // own just because the setting row is unseeded.
+        'prioridad_padres_activa'    => '0',
     ];
 
     /**

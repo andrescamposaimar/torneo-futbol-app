@@ -466,6 +466,48 @@ class PlazaRepositoryTest extends TestCase {
         $this->repo->findOcupacionVigente( $plazaId );
     }
 
+    /**
+     * findOcupacionVigente() must throw, never silently read a failed query
+     * as "no vigent ocupación" — Plazas\CandidatosResolver::paraPlaza() calls
+     * this to find the plaza's incumbent so it can be EXCLUDED from the
+     * candidate pool. A failed read misread as null would silently put that
+     * incumbent back into their OWN candidate pool. See class docblock,
+     * "MUST THROW, NEVER SILENTLY RETURN NULL ON A QUERY FAILURE".
+     */
+    public function test_find_ocupacion_vigente_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_ocupacion' );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->findOcupacionVigente( $plazaId );
+    }
+
+    public function test_find_ocupacion_vigente_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_ocupacion' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new PlazaRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->findOcupacionVigente( $plazaId );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'findOcupacionVigente', $failingEventLog->last()['contexto']['operacion'] );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
+    }
+
     // -------------------------------------------------------------------------
     // succeedOcupacion — closes the previous link with the correct reason
     // -------------------------------------------------------------------------

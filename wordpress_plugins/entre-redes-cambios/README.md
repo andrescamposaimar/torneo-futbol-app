@@ -251,6 +251,112 @@ The `cambios_ocupacion` id each solicitud's write produced is persisted back ont
 
 `publicarLote()`, `aprobar()` / `rechazar()` / `anular()` are among the most dangerous entry points this plugin exposes — they write real occupancy changes over real rosters. None of them perform a role or ownership check of their own; a future REST wrapper MUST verify the caller's role (and, for `aprobar`/`rechazar`/`anular`, that the solicitud belongs to a team they may act on) BEFORE invoking any of them.
 
+## Parent priority: a policy that is built, tested, and deliberately OFF
+
+The tournament has always distinguished parents of the school from historical
+guests, and has always preferred parents — as a soft rule nobody enforced. It is
+now a setting, `prioridad_padres_activa`, read per request by
+`Calendario\Settings::prioridadPadresActiva()` and **seeded off**
+(`Migrations\InitialSchema::SEED_DEFAULTS`), which reproduces today's behaviour
+exactly.
+
+It is a plain `bool`, not a policy object — unlike `Dictamen\
+BloqueoReemplazoPolicy`, which is an object because CC5b has two distinct
+readings to choose between. This setting has one question and two answers, so
+a bool says everything there is to say. `Plugin::boot()` threads it explicitly
+through `Dictamen\DictamenPipeline` and `Dictamen\DictamenEngineFactory::create()`
+into `Dictamen\Reglas\PrioridadDePadresRespetada`'s constructor; turning it on
+must stay one visible value rather than a default buried somewhere.
+
+When it is ON, `Dictamen\Reglas\PrioridadDePadresRespetada` rejects a non-parent
+entrante if, and only if, at least one VIABLE parent exists for that plaza.
+
+### Why this is a restriction, not a sort order
+
+An ordering would be an app concern. This is not: one candidate's eligibility
+depends on the rest of the pool, so the engine itself has to know whether any
+parent fits that plaza. `DictamenContextAssembler` loads that count only when the
+policy is on AND the entrante is not a parent — with the policy off, the feature
+costs zero extra queries.
+
+### "Viable" means available, not merely well-rated
+
+`Plazas\CandidatosResolver` counts a parent only when their puntaje fits the
+plaza's ceiling AND they are actually free: not blocked by a truncated
+ocupación, not holding another plaza. A parent with the right rating but blocked
+helps nobody, and counting him would bar the non-parent WITHOUT letting the
+parent in — the team would be unable to change anyone at all. The rule exists to
+prefer parents, not to trap teams.
+
+`CandidatosResolver` is also the single source of "who may fill this plaza",
+shared by the rule and by the endpoint that feeds the captain's screen. Had the
+app computed eligibility on its own, it would eventually disagree with the
+engine, and a captain would pick someone the screen showed as valid only for the
+system to reject it. The backend decides; the app displays.
+
+### How a parent is recognised, and why the blank counts as "not a parent"
+
+`caracter` is a dedicated ACF field on the player (`acf.caracter` on
+`wp-json/wp/v2/sp_player/{id}`), populated deliberately across the whole
+roster — a clean, consistent vocabulary, not the free-text mess an older
+SportsPress metric field used to be. So a candidate counts as a parent when
+the value starts with `padre`, case-insensitively; anything else, blank
+included, counts as not a parent. This policy takes something away, and an
+ambiguous record must never be the reason someone gains an advantage.
+
+A consistent vocabulary is not the same thing as correct data, and the
+difference is not hypothetical here — see the next section.
+
+### The data gap that used to gate turning this on — closed
+
+> Verified against live production data (1105 players, `acf.caracter`):
+> `Padre Alumno` 570, `Padre Ex-Alumno` 268, `Invitado` 129, empty 114,
+> `Personal Colegio` 22, `Socio Fundador` 2. The ACF field is **90%
+> populated**, with a clean vocabulary — not the 65%-empty legacy field this
+> section used to report.
+
+With the rule as written, empty still means "not a parent" — that has not
+changed. But the field it reads from is no longer mostly empty: turning this
+policy ON today would classify the large majority of the roster correctly,
+with only the genuinely unfilled 10% defaulting to "not a parent", exactly as
+the policy always intended for an ambiguous record.
+
+**The data gap that used to block enabling this policy is closed.** Whether
+to turn `prioridad_padres_activa` on is a product decision now, not one
+blocked by missing data.
+
+### But the values are not all CORRECT, and one category is known bad
+
+Of the 24 players carrying `Personal Colegio` or `Socio Fundador`, only three
+are registered in the current season at all — the other 21 are in the
+"no inscriptos" pseudo-team, which does NOT carry the season taxonomy term
+and therefore never reaches the candidate pool (see the pool's own note
+below). The process owner reviewed those three by name, and **all three are
+mislabelled**: two are padres de alumno, one is an invitado. None is school
+staff.
+
+So every in-pool record of that category is wrong. That matters more than the
+count suggests, because two of them are padres the rule would currently treat
+as NOT padres — penalising the exact people the policy exists to favour. A
+rule that classifies people wrongly is worse than no rule, so this is a
+correction to make in WordPress before the policy is ever enabled, not
+something to special-case in code.
+
+It also says something about the field as a whole: `caracter` being
+well-formed does not make it accurate. The 90% figure above measures how much
+of it is FILLED. Nobody has yet measured how much of it is RIGHT, and the one
+category anyone has audited came back entirely wrong.
+
+### One more unknown in the same neighbourhood
+
+The player also carries an ACF `estado` (`Habilitado` for 588 of 1105, blank
+for 517). In the current season's pool, 43 of the 96 players on the waiting
+list do NOT have it set. Nothing in this plugin reads that field, so if
+`Habilitado` encodes something like medical clearance or a confirmed
+registration, the captain's candidate list is currently offering people it
+should not. Its meaning is an open question for the process owner — recorded
+here rather than guessed at.
+
 ## Scope of this slice (slice 0)
 
 This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registers no REST routes, no admin screens, and no cron jobs. It only runs migrations on activation. The calendar admin screen, the solicitud/regreso REST endpoints, and the seeding cron are later slices, built on top of the domain logic here once it is validated.

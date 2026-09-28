@@ -12,6 +12,7 @@ use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoEsElSaliente;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaConOcupacionVigente;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaNoCerrada;
+use EntreRedes\Cambios\Dictamen\Reglas\PrioridadDePadresRespetada;
 use EntreRedes\Cambios\Dictamen\Reglas\PuntajeDentroDelTecho;
 use EntreRedes\Cambios\Dictamen\Reglas\RegresoSoloConMinimoCumplido;
 use EntreRedes\Cambios\Dictamen\Reglas\SolicitudEnPlazo;
@@ -19,17 +20,17 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * THE test that protects the ruleset's completeness itself: this is the
- * ONLY place — production or test — allowed to assert "these eight, no
+ * ONLY place — production or test — allowed to assert "these nine, no
  * more, no fewer" against DictamenEngineFactory. Every other test consumes
  * the factory rather than re-listing the rules, so a future rule dropped
  * from create()/reglas() fails HERE, loudly, instead of nowhere.
  */
 class DictamenEngineFactoryTest extends TestCase {
 
-    public function test_reglas_returns_exactly_the_eight_rules_of_the_reglamento(): void {
+    public function test_reglas_returns_exactly_the_nine_rules_of_the_reglamento(): void {
         $reglas = DictamenEngineFactory::reglas();
 
-        $this->assertCount( 8, $reglas );
+        $this->assertCount( 9, $reglas );
 
         $clases = array_map( static fn ( object $r ): string => get_class( $r ), $reglas );
 
@@ -43,6 +44,7 @@ class DictamenEngineFactoryTest extends TestCase {
                 PlazaConOcupacionVigente::class,
                 PlazaNoCerrada::class,
                 RegresoSoloConMinimoCumplido::class,
+                PrioridadDePadresRespetada::class,
             ],
             $clases
         );
@@ -60,5 +62,34 @@ class DictamenEngineFactoryTest extends TestCase {
         $motor = DictamenEngineFactory::create( BloqueoReemplazoPolicy::hastaLiberacionDePlaza() );
 
         $this->assertInstanceOf( DictamenEngine::class, $motor );
+    }
+
+    /**
+     * @dataProvider prioridadPadresActivaValues
+     */
+    public function test_create_forwards_prioridad_padres_activa_to_the_new_rule( bool $prioridadPadresActiva ): void {
+        // assertInstanceOf() alone would pass identically even if create()
+        // silently dropped $prioridadPadresActiva — this asserts the ACTUAL
+        // forwarding, against the rule list the factory itself builds.
+        $reglas = DictamenEngineFactory::reglas( null, $prioridadPadresActiva );
+
+        $regla = current( array_filter(
+            $reglas,
+            static fn ( object $r ): bool => $r instanceof PrioridadDePadresRespetada
+        ) );
+
+        $this->assertInstanceOf( PrioridadDePadresRespetada::class, $regla );
+        $this->assertSame( $prioridadPadresActiva, $regla->activa() );
+
+        $motor = DictamenEngineFactory::create( null, $prioridadPadresActiva );
+        $this->assertInstanceOf( DictamenEngine::class, $motor );
+    }
+
+    /** @return array<int, array{0: bool}> */
+    public static function prioridadPadresActivaValues(): array {
+        return [
+            [ true ],
+            [ false ],
+        ];
     }
 }

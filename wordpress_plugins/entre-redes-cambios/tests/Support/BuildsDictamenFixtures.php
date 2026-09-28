@@ -201,6 +201,12 @@ trait BuildsDictamenFixtures {
             'entrantePlazasConCierreTruncado' => [],
             'plazosUtc'                       => $this->plazosUtc(),
             'countResolvedFechasSinceFn'      => static fn ( int $fechaId ): int => 10,
+            // Both default OFF/0 — the "prioridad de padres" policy is off
+            // by default (see Migrations\InitialSchema::SEED_DEFAULTS), so
+            // the favorable baseline every OTHER rule's test relies on must
+            // stay unaffected unless a test explicitly overrides these.
+            'entranteEsPadre'                 => false,
+            'padresViablesParaLaPlaza'        => 0,
         ];
 
         $o = array_merge( $defaults, $overrides );
@@ -213,7 +219,9 @@ trait BuildsDictamenFixtures {
             $o['entranteOcupacionesEnOtrasPlazas'],
             $o['entrantePlazasConCierreTruncado'],
             $o['plazosUtc'],
-            $o['countResolvedFechasSinceFn']
+            $o['countResolvedFechasSinceFn'],
+            $o['entranteEsPadre'],
+            $o['padresViablesParaLaPlaza']
         );
     }
 }
