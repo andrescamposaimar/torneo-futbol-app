@@ -1186,4 +1186,68 @@ class PlazaRepositoryTest extends TestCase {
         $this->assertSame( 1, $this->countOcupacionesFor( $plazaB ) );
     }
 
+    // -------------------------------------------------------------------------
+    // Defense in depth — a closed plaza refuses every write, on all 4
+    // entry points (see assertPlazaNotClosed()'s and Dictamen\Reglas\
+    // PlazaNoCerrada's docblocks for why the READ-side rule alone is not
+    // enough).
+    // -------------------------------------------------------------------------
+
+    public function test_succeed_ocupacion_refuses_to_write_over_a_closed_plaza(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->closePlaza( $plazaId, '2026-03-15 10:00:00' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} is closed" );
+
+        $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+    }
+
+    public function test_succeed_ocupacion_within_transaction_refuses_to_write_over_a_closed_plaza(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->closePlaza( $plazaId, '2026-03-15 10:00:00' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} is closed" );
+
+        $this->repo->succeedOcupacionWithinTransaction( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+    }
+
+    public function test_close_ocupacion_by_regreso_titular_refuses_to_write_over_a_closed_plaza(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->repo->closePlaza( $plazaId, '2026-04-15 10:00:00' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} is closed" );
+
+        $this->repo->closeOcupacionByRegresoTitular( $plazaId, 5, '2026-05-01 10:00:00' );
+    }
+
+    public function test_close_ocupacion_by_regreso_titular_within_transaction_refuses_to_write_over_a_closed_plaza(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->repo->closePlaza( $plazaId, '2026-04-15 10:00:00' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "plaza {$plazaId} is closed" );
+
+        $this->repo->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, 5, '2026-05-01 10:00:00' );
+    }
+
+    public function test_succeed_ocupacion_on_a_closed_plaza_records_the_failure_event(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->closePlaza( $plazaId, '2026-03-15 10:00:00' );
+
+        try {
+            $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+            $this->fail( 'Expected a RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $this->eventLog->has( 'escritura.fallida' ) );
+        $this->assertSame( $plazaId, $this->eventLog->last()['contexto']['plaza_id'] );
+    }
+
 }

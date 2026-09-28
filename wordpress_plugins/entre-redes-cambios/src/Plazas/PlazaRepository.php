@@ -236,12 +236,12 @@ class PlazaRepository {
                 $fechaDesdeId,
                 $now
             );
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         $this->eventLog->record( 'plaza.abierta', [
             'plaza_id'           => $plazaId,
@@ -507,12 +507,12 @@ class PlazaRepository {
         try {
             $this->closeOcupacion( (int) $vigente['id'], $fechaId, $cerradaPor );
             $newId = $this->insertOcupacion( $plazaId, $newPlayerId, false, $fechaId, $now );
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         $this->eventLog->record( 'ocupacion.sucedida', [
             'plaza_id'             => $plazaId,
@@ -609,12 +609,12 @@ class PlazaRepository {
         try {
             $this->closeOcupacion( (int) $vigente['id'], $fechaId, 'regreso_titular' );
             $newId = $this->insertOcupacion( $plazaId, $titularPlayerId, false, $fechaId, $now );
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         $this->eventLog->record( 'ocupacion.regreso_titular', [
             'plaza_id'             => $plazaId,
@@ -672,6 +672,14 @@ class PlazaRepository {
      * (Dictamen\DictamenEngine, CadenaResolver) ever calls as part of a
      * normal solicitud/regreso — a normal chain only ever grows via
      * succeedOcupacion() / closeOcupacionByRegresoTitular(), never shrinks.
+     *
+     * *** THIS METHOD DOES NOT AUTHORIZE THE CALLER *** One of the most
+     * dangerous entry points in this plugin to expose — it deletes a real
+     * audit row and rewrites a plaza's current occupant. It performs NO role
+     * or ownership check of its own. A future REST wrapper MUST verify the
+     * caller's role and their standing to act on THIS plaza's team BEFORE
+     * invoking this — never rely on this method to reject an unauthorized
+     * caller, because it will not.
      *
      * Refuses to touch the plaza's GENESIS link — a chain with exactly one
      * ocupación has nothing to "undo back to"; closePlaza() is the correct
@@ -760,12 +768,12 @@ class PlazaRepository {
 
                 throw new PlazaPersistenceException( 'reopen cambios_ocupacion (undo)', $wpdb->last_error );
             }
-
-            $wpdb->query( 'COMMIT' );
         } catch ( \Throwable $e ) {
-            $wpdb->query( 'ROLLBACK' );
+            $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
         }
+
+        $this->commitTransaction( __FUNCTION__ );
 
         $this->eventLog->record( 'ocupacion.deshecha', [
             'plaza_id'               => $plazaId,
@@ -784,6 +792,12 @@ class PlazaRepository {
      * itself stops existing. Same rationale as undoLastOcupacion(): the
      * alternative, absent this method, is raw SQL run by a parents'
      * committee against production.
+     *
+     * *** THIS METHOD DOES NOT AUTHORIZE THE CALLER *** Same warning as
+     * undoLastOcupacion(): it performs NO role or ownership check of its
+     * own. A future REST wrapper MUST verify the caller's role and their
+     * standing to act on THIS plaza's team BEFORE invoking this — never rely
+     * on this method to reject an unauthorized caller, because it will not.
      *
      * @throws \RuntimeException When $plazaId does not exist.
      * @throws PlazaPersistenceException When the wpdb update fails.
@@ -874,6 +888,8 @@ class PlazaRepository {
             );
         }
 
+        $this->assertPlazaNotClosed( $plaza, 'succeedOcupacion' );
+
         $this->assertFechaExistsInSeason( $fechaId, (int) $plaza['season_id'], 'succeedOcupacion', 'fecha_id', $plazaId );
 
         $vigente = $this->findOcupacionVigente( $plazaId );
@@ -922,6 +938,8 @@ class PlazaRepository {
                 "PlazaRepository::closeOcupacionByRegresoTitular(): plaza {$plazaId} does not exist."
             );
         }
+
+        $this->assertPlazaNotClosed( $plaza, 'closeOcupacionByRegresoTitular' );
 
         $this->assertFechaExistsInSeason( $fechaId, (int) $plaza['season_id'], 'closeOcupacionByRegresoTitular', 'fecha_id', $plazaId );
 
@@ -1020,6 +1038,47 @@ class PlazaRepository {
                 $operacion,
                 '' !== $lastError ? " ({$lastError})" : ''
             )
+        );
+    }
+
+    /**
+     * DEFENSE IN DEPTH for closePlaza() — see that method's class docblock
+     * and Dictamen\Reglas\PlazaNoCerrada's own docblock for the full story:
+     * a `closePlaza()` correction is meant to make a plaza's data inert.
+     * Before this guard, nothing in this repository itself enforced that —
+     * only the dictamen ruleset did, and a solicitud created BEFORE the
+     * closure (or one whose fresh re-evaluation somehow still cleared every
+     * rule) could still reach succeedOcupacion() /
+     * closeOcupacionByRegresoTitular() and write over a plaza the operator
+     * had explicitly marked as not existing. Called by both
+     * prepareSucceedOcupacion() and prepareRegresoTitular(), so all FOUR
+     * public entry points that end up calling either one — including the
+     * two "WithinTransaction" variants `Solicitudes\SolicitudRepository::
+     * publicarLote()` uses — refuse identically, never only the ones that
+     * happen to open their own transaction.
+     *
+     * @param array<string, mixed> $plaza As returned by findPlaza().
+     * @throws \RuntimeException When the plaza has a non-null `closed_at`.
+     */
+    private function assertPlazaNotClosed( array $plaza, string $operacion ): void {
+        if ( null === $plaza['closed_at'] ) {
+            return;
+        }
+
+        $plazaId = (int) $plaza['id'];
+
+        $this->eventLog->record( 'escritura.fallida', [
+            'operacion' => $operacion,
+            'motivo'    => 'la plaza esta cerrada (closed_at no nulo)',
+            'plaza_id'  => $plazaId,
+            'season_id' => (int) $plaza['season_id'],
+            'team_id'   => (int) $plaza['team_id'],
+            'closed_at' => $plaza['closed_at'],
+        ] );
+
+        throw new \RuntimeException(
+            "PlazaRepository::{$operacion}(): plaza {$plazaId} is closed (closed_at="
+            . (string) $plaza['closed_at'] . ') — refusing to write over a plaza the operator marked as not existing.'
         );
     }
 
