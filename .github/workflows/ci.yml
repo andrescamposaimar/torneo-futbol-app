@@ -59,7 +59,7 @@ jobs:
         # uncovered plugin does not announce itself: its suite simply never
         # runs, and the first red build is whichever unrelated PR happens to
         # break it months later.
-        plugin: [entre-redes-prode, entre-redes-campeones, entre-redes-cambios]
+        plugin: [entre-redes-prode, entre-redes-campeones, entre-redes-cambios, entre-redes-credencial]
 
         # 8.2 is the floor for all of them: it is what the production host
         # runs (8.2.33), and prode's brick/math 0.14.8 — a production
