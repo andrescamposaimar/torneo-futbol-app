@@ -320,11 +320,14 @@ class PlazasControllerTest extends TestCase {
     }
 
     /**
-     * THE WIRING GUARANTEE, same as SolicitudesControllerTest: an
-     * authorization failure returns 403 and NEVER touches PlazaRepository —
-     * asserted with a double that fails the test if called.
+     * THE WIRING GUARANTEE, same as SolicitudesControllerTest, UPDATED for
+     * FIX 1 of the slice 5 task brief: an invalid token (no wrapped
+     * TokenVerificationException, exactly like a missing/malformed
+     * Authorization header) now returns 401 `token_invalid`, not the old
+     * blanket 403 — and NEVER touches PlazaRepository, asserted with a
+     * double that fails the test if called.
      */
-    public function test_listar_returns_403_without_touching_the_repository(): void {
+    public function test_listar_returns_401_token_invalid_without_touching_the_repository(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willThrowException( new InvalidTokenException() );
 
@@ -341,12 +344,12 @@ class PlazasControllerTest extends TestCase {
             'team_id'   => self::TEAM_ID,
         ] ) );
 
-        $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( 401, $response->get_status() );
         $this->assertSame(
             [
-                'code'    => 'no_autorizado',
+                'code'    => 'token_invalid',
                 'message' => 'No estás autorizado para realizar esta acción en este equipo y temporada.',
-                'data'    => [ 'status' => 403 ],
+                'data'    => [ 'status' => 401 ],
             ],
             $response->get_data()
         );
@@ -572,7 +575,7 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 400, $response->get_status() );
     }
 
-    public function test_listar_candidatos_returns_403_without_touching_the_resolver(): void {
+    public function test_listar_candidatos_returns_401_token_invalid_without_touching_the_resolver(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willThrowException( new InvalidTokenException() );
 
@@ -591,7 +594,8 @@ class PlazasControllerTest extends TestCase {
             'plaza_id'  => self::PLAZA_ID,
         ] ) );
 
-        $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( 401, $response->get_status() );
+        $this->assertSame( 'token_invalid', $response->get_data()['code'] );
     }
 
     public function test_listar_candidatos_returns_400_when_the_plaza_does_not_match_season_or_team(): void {

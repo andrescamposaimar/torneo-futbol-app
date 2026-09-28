@@ -151,7 +151,7 @@ class SolicitudesController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         $plazaId          = (int) $request->get_param( 'plaza_id' );
@@ -262,7 +262,7 @@ class SolicitudesController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         try {

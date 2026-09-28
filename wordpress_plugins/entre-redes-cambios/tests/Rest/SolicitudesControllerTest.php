@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Tests\Rest;
 
+use EntreRedes\Cambios\Auth\Exception\TokenExpiredException;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
@@ -300,15 +301,23 @@ class SolicitudesControllerTest extends TestCase {
     }
 
     /**
-     * THE WIRING GUARANTEE (slice 4d task brief, point 4/5): the three
-     * AuthorizationDeniedException subtypes ALL produce the exact SAME 403
-     * body, and the repository is NEVER touched — asserted here with a
-     * repository double that FAILS the test if any of its methods is
-     * called.
+     * THE WIRING GUARANTEE (slice 4d task brief, point 4/5), UPDATED for FIX
+     * 1 of the slice 5 task brief: the three AuthorizationDeniedException
+     * subtypes no longer produce the SAME body — see
+     * Rest\HandlesCapitanAuthorization::respuestaNoAutorizada()'s own
+     * docblock for the exact status/code mapping this now asserts — but the
+     * repository is STILL never touched for any of them, and the
+     * human-readable `message` STILL stays the one generic text regardless
+     * of which subtype fired. Asserted with a repository double that FAILS
+     * the test if any of its methods is called.
      *
      * @dataProvider authorizationFailureProvider
      */
-    public function test_crear_returns_403_for_every_authorization_failure_without_touching_the_repository( \Throwable $exception ): void {
+    public function test_crear_returns_the_precise_status_and_code_for_every_authorization_failure_without_touching_the_repository(
+        \Throwable $exception,
+        int $expectedStatus,
+        string $expectedCode
+    ): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willThrowException( $exception );
 
@@ -327,12 +336,12 @@ class SolicitudesControllerTest extends TestCase {
             'fecha_id'            => self::SOLICITUD_FECHA_ID,
         ] ) );
 
-        $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( $expectedStatus, $response->get_status() );
         $this->assertSame(
             [
-                'code'    => 'no_autorizado',
+                'code'    => $expectedCode,
                 'message' => 'No estás autorizado para realizar esta acción en este equipo y temporada.',
-                'data'    => [ 'status' => 403 ],
+                'data'    => [ 'status' => $expectedStatus ],
             ],
             $response->get_data()
         );
@@ -341,12 +350,17 @@ class SolicitudesControllerTest extends TestCase {
         $this->assertSame( get_class( $exception ), $this->eventLog->last()['contexto']['excepcion'] );
     }
 
-    /** @return array<string, array{0: \Throwable}> */
+    /** @return array<string, array{0: \Throwable, 1: int, 2: string}> */
     public static function authorizationFailureProvider(): array {
         return [
-            'invalid token'   => [ new InvalidTokenException() ],
-            'revoked session' => [ new SessionRevokedException() ],
-            'not captain'     => [ new NotCaptainException() ],
+            // No wrapped TokenVerificationException — the same shape
+            // CapitanAuthorizer::verifyIdentity() produces for a missing or
+            // malformed Authorization header — collapses into 'token_invalid',
+            // never 'token_expired'.
+            'invalid token'   => [ new InvalidTokenException(), 401, 'token_invalid' ],
+            'expired token'   => [ new InvalidTokenException( new TokenExpiredException() ), 401, 'token_expired' ],
+            'revoked session' => [ new SessionRevokedException(), 401, 'session_revoked' ],
+            'not captain'     => [ new NotCaptainException(), 403, 'no_capitan' ],
         ];
     }
 
@@ -448,7 +462,7 @@ class SolicitudesControllerTest extends TestCase {
         $this->assertSame( 400, $response->get_status() );
     }
 
-    public function test_listar_returns_403_without_touching_the_repository(): void {
+    public function test_listar_returns_403_no_capitan_without_touching_the_repository(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willThrowException( new NotCaptainException() );
 
@@ -463,6 +477,7 @@ class SolicitudesControllerTest extends TestCase {
         ] ) );
 
         $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( 'no_capitan', $response->get_data()['code'] );
     }
 
     public function test_listar_unexpected_exception_returns_generic_500_and_logs_identifiers(): void {

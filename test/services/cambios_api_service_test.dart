@@ -284,12 +284,17 @@ void main() {
       );
     });
 
-    test('a generic 403 no_autorizado throws CambiosApiException', () async {
+    // Backend contract (Rest\HandlesCapitanAuthorization): a 403 is now ONLY
+    // `no_capitan` — the caller is authenticated fine, just not the captain
+    // of this team/season. ProdeApiService.request()'s 401-interceptor never
+    // touches a 403, so this reaches CambiosApiService's own error mapping
+    // unchanged.
+    test('a 403 no_capitan throws CambiosApiException', () async {
       final repo = await _repoWithAccessToken();
       final service = _makeService(
         repo,
         MockClient((_) async => _jsonResponse({
-              'code': 'no_autorizado',
+              'code': 'no_capitan',
               'message': 'No estás autorizado.',
             }, 403)),
       );
@@ -298,7 +303,7 @@ void main() {
         service.fetchPlazas(seasonId: 7, teamId: 1),
         throwsA(isA<CambiosApiException>()
             .having((e) => e.statusCode, 'statusCode', 403)
-            .having((e) => e.code, 'code', 'no_autorizado')),
+            .having((e) => e.code, 'code', 'no_capitan')),
       );
     });
   });

@@ -104,7 +104,7 @@ final class CapitanController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         $playerId = (int) ( $claims['player_id'] ?? 0 );

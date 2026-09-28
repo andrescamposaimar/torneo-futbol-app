@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Rest;
 
+use EntreRedes\Cambios\Auth\Exception\TokenExpiredException;
 use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
+use EntreRedes\Cambios\Capitania\Exception\AuthorizationDeniedException;
+use EntreRedes\Cambios\Capitania\Exception\NotCaptainException;
+use EntreRedes\Cambios\Capitania\Exception\SessionRevokedException;
 
 /**
  * Shared authorization + error-envelope plumbing for every captain-facing
@@ -29,6 +33,31 @@ use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
  * the body, it never logs, so every call site logs its OWN identifiers
  * (season/team/plaza/fecha) rather than a fixed subset this trait would have
  * to guess at.
+ *
+ * *** THE STATUS CODE AND `code` NOW DISTINGUISH THE FAILURE, THE MESSAGE
+ * STILL DOES NOT *** An earlier version of this trait answered a hardcoded
+ * 403 `no_autorizado` for every AuthorizationDeniedException subtype alike.
+ * That broke the Flutter client's transport contract (see
+ * `lib/services/prode_api_service.dart`, `ProdeApiService.request()`): its
+ * 401-interceptor is what triggers a silent token refresh on `token_expired`
+ * and a hard sign-out on `session_revoked` — neither ever engaged, because
+ * this trait never answered 401 at all, so a merely expired token surfaced
+ * to the captain as an opaque, permanent "no autorizado". `respuestaNoAutorizada()`
+ * now maps each subtype to the SAME status/code pair
+ * `entre-redes-prode`'s own `Auth\AuthMiddleware::validateToken()` already
+ * uses for the identical condition (invalid/expired token → 401
+ * `token_invalid`/`token_expired`; revoked session → 401 `session_revoked`),
+ * plus one this plugin adds for its own captaincy check (not captain of
+ * this team/season → 403 `no_capitan`, kept distinct from the other three
+ * because it is not a token/session problem at all). This leaks NOTHING a
+ * prober could not already deduce on their own: a caller only ever learns
+ * about the state of their OWN Bearer token and their OWN captaincy —
+ * information they already had before making the request — never about
+ * another team, another season, or another player's session. The
+ * human-readable `message` stays the ONE deliberately generic caller-facing
+ * text regardless of which case fired (see AuthorizationDeniedException's
+ * own docblock) — it is the status and `code` that now carry the precision,
+ * not the prose a captain reads.
  *
  * A dictamen that does not `procede()` is NEVER represented by either of
  * these two responses — see Dictamen\Dictamen's own docblock, "a dictamen is
@@ -99,20 +128,58 @@ trait HandlesCapitanAuthorization {
     }
 
     /**
-     * THE single 403 body every captain endpoint returns for EVERY
-     * authorization failure — see class docblock: the caller-facing text
-     * must never reveal which of the three AuthorizationDeniedException
-     * subtypes fired (invalid token, revoked session, or not captain of
-     * THIS team).
+     * The single body-shaping fan-out every captain endpoint calls for an
+     * `AuthorizationDeniedException` — see class docblock, "THE STATUS CODE
+     * AND `code` NOW DISTINGUISH THE FAILURE". The `message` is always the
+     * one generic text; `status` and `code` vary by subtype:
+     *
+     *   - `NotCaptainException`     → 403 `no_capitan`
+     *   - `SessionRevokedException` → 401 `session_revoked`
+     *   - `InvalidTokenException`   → 401 `token_expired` when the wrapped
+     *     `TokenVerificationException` (via `getPrevious()`) is specifically
+     *     a `TokenExpiredException`; 401 `token_invalid` for every other
+     *     token failure (bad signature, malformed, wrong `typ`, not yet
+     *     valid) — mirrors `entre-redes-prode`'s own
+     *     `Auth\AuthMiddleware::validateToken()` mapping exactly, so
+     *     `ProdeApiService.request()`'s 401-interceptor on the Flutter side
+     *     recognizes both codes without a second, cambios-specific spelling.
      */
-    private function respuestaNoAutorizada(): \WP_REST_Response {
+    private function respuestaNoAutorizada( AuthorizationDeniedException $e ): \WP_REST_Response {
+        if ( $e instanceof NotCaptainException ) {
+            return $this->envelopeNoAutorizado( 403, 'no_capitan' );
+        }
+
+        if ( $e instanceof SessionRevokedException ) {
+            return $this->envelopeNoAutorizado( 401, 'session_revoked' );
+        }
+
+        // The remaining subtype is InvalidTokenException — see
+        // CapitanAuthorizer::authorize()'s own @throws list, which names
+        // exactly these three. TokenVerifier::verify() wraps every rejection
+        // it throws into InvalidTokenException via getPrevious() (see
+        // CapitanAuthorizer::verifyIdentity()); only TokenExpiredException
+        // gets its own code, everything else collapses into 'token_invalid'
+        // — the client cannot act differently on "bad signature" vs
+        // "malformed" vs "wrong type" anyway, and entre-redes-prode's own
+        // AuthMiddleware makes the identical collapse.
+        $code = $e->getPrevious() instanceof TokenExpiredException ? 'token_expired' : 'token_invalid';
+
+        return $this->envelopeNoAutorizado( 401, $code );
+    }
+
+    /**
+     * Builds the actual `WP_REST_Response` body for
+     * respuestaNoAutorizada() — the ONE generic caller-facing `message`,
+     * paired with whichever `$status`/`$code` the caller resolved above.
+     */
+    private function envelopeNoAutorizado( int $status, string $code ): \WP_REST_Response {
         return new \WP_REST_Response(
             [
-                'code'    => 'no_autorizado',
+                'code'    => $code,
                 'message' => 'No estás autorizado para realizar esta acción en este equipo y temporada.',
-                'data'    => [ 'status' => 403 ],
+                'data'    => [ 'status' => $status ],
             ],
-            403
+            $status
         );
     }
 

@@ -56,7 +56,15 @@ class CapitanControllerTest extends TestCase {
     // Identity failures — verifyIdentity(), never authorize()
     // -------------------------------------------------------------------------
 
-    public function test_listar_returns_403_for_an_invalid_token_without_touching_the_repository(): void {
+    /**
+     * UPDATED for FIX 1 of the slice 5 task brief: an invalid token (no
+     * wrapped TokenVerificationException, exactly like a missing/malformed
+     * Authorization header) now returns 401 `token_invalid`, not the old
+     * blanket 403 `no_autorizado` — see
+     * Rest\HandlesCapitanAuthorization::respuestaNoAutorizada()'s own
+     * docblock for the full mapping.
+     */
+    public function test_listar_returns_401_for_an_invalid_token_without_touching_the_repository(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->expects( $this->once() )
             ->method( 'verifyIdentity' )
@@ -69,13 +77,18 @@ class CapitanControllerTest extends TestCase {
 
         $response = $controller->listar( $this->requestConToken( 'a-bad-jwt' ) );
 
-        $this->assertSame( 403, $response->get_status() );
-        $this->assertSame( 'no_autorizado', $response->get_data()['code'] );
+        $this->assertSame( 401, $response->get_status() );
+        $this->assertSame( 'token_invalid', $response->get_data()['code'] );
         $this->assertTrue( $this->eventLog->has( 'rest.autorizacion_denegada' ) );
         $this->assertSame( InvalidTokenException::class, $this->eventLog->last()['contexto']['excepcion'] );
     }
 
-    public function test_listar_returns_403_for_a_revoked_session(): void {
+    /**
+     * UPDATED for FIX 1: a revoked session now returns 401
+     * `session_revoked`, matching entre-redes-prode's own contract for the
+     * identical condition — never 403.
+     */
+    public function test_listar_returns_401_for_a_revoked_session(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'verifyIdentity' )->willThrowException( new SessionRevokedException() );
 
@@ -86,7 +99,8 @@ class CapitanControllerTest extends TestCase {
 
         $response = $controller->listar( $this->requestConToken( 'a-revoked-jwt' ) );
 
-        $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( 401, $response->get_status() );
+        $this->assertSame( 'session_revoked', $response->get_data()['code'] );
         $this->assertSame( SessionRevokedException::class, $this->eventLog->last()['contexto']['excepcion'] );
     }
 

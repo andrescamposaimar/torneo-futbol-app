@@ -176,7 +176,7 @@ class PlazasController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         try {
@@ -315,7 +315,7 @@ class PlazasController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         try {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/cambios_candidato.dart';
+import '../models/cambios_fecha_abierta.dart';
 import '../models/cambios_mis_equipos.dart';
 import '../models/cambios_plaza.dart';
 import '../models/cambios_solicitud.dart';
@@ -12,12 +13,16 @@ import 'prode_api_service.dart';
 /// transport did not already turn into a more specific exception.
 ///
 /// [code] is the machine-readable `code` from the response body (via
-/// [ProdeApiService.extractErrorCode]) — notably `'no_autorizado'` for the
-/// generic 403 every captain-facing Cambios endpoint returns on ANY
-/// authorization failure (invalid token, revoked session, or "not captain of
-/// this team/season") — see `Rest\HandlesCapitanAuthorization`'s docblock on
-/// the backend. Screens must render a friendly, generic message for this,
-/// never the raw code or the server's `message`.
+/// [ProdeApiService.extractErrorCode]) — notably `'no_capitan'` for the 403
+/// every captain-facing Cambios endpoint returns when the caller is
+/// authenticated fine but is not the captain of this team/season. A token or
+/// session failure never reaches here as a 403 any more — see
+/// `Rest\HandlesCapitanAuthorization`'s docblock on the backend: those are
+/// now 401 (`token_expired`, `token_invalid`, `session_revoked`), which
+/// [ProdeApiService.request] already intercepts before a response ever
+/// reaches this class (silent refresh on `token_expired`, [ProdeAuthRequired]
+/// otherwise). Screens must still render a friendly, generic message for a
+/// 403 `no_capitan`, never the raw code or the server's `message`.
 class CambiosApiException implements Exception {
   final int statusCode;
   final String code;
@@ -51,18 +56,22 @@ class CambiosMalformedResponseException implements Exception {
 /// would inevitably drift from the one in [ProdeApiService] — see this
 /// slice's own task brief.
 ///
-/// *** WHY A 401-TRIGGERED REFRESH NEVER ACTUALLY FIRES FOR THIS API ***
-/// `Rest\HandlesCapitanAuthorization` (the backend trait every Cambios
-/// controller uses) maps EVERY authorization failure — including a merely
-/// EXPIRED token — to a generic 403 `no_autorizado`, never a 401. That means
-/// [ProdeApiService.request]'s 401-interceptor (which is what triggers the
-/// silent refresh) never engages for these endpoints: an expired-but-not-yet
-/// -refreshed token surfaces here as an opaque 403, not a transparent retry.
-/// This is a real gap in the backend's contract with this client, not a bug
-/// in this service — flagged here so a future reader doesn't "fix" this
-/// class by inventing its own 403-triggered refresh (which would try to
-/// distinguish "expired" from "not captain of this team" when the backend
-/// deliberately does not say which one happened).
+/// *** THE 401-TRIGGERED REFRESH NOW ACTUALLY FIRES FOR THIS API ***
+/// An earlier version of `Rest\HandlesCapitanAuthorization` (the backend
+/// trait every Cambios controller uses) mapped EVERY authorization failure —
+/// including a merely EXPIRED token — to a generic 403 `no_autorizado`,
+/// never a 401. That meant [ProdeApiService.request]'s 401-interceptor
+/// (which is what triggers the silent refresh) never engaged for these
+/// endpoints: an expired-but-not-yet-refreshed token surfaced here as an
+/// opaque, unrecoverable 403. That backend/client mismatch is fixed: the
+/// trait now answers 401 `token_expired` / `token_invalid` / `session_revoked`
+/// for a token or session failure, and reserves 403 for `no_capitan` alone
+/// (authenticated fine, just not captain of this team/season) — exactly the
+/// codes [ProdeApiService.request] already knows how to act on. Flagged
+/// here so a future reader doesn't reintroduce a second, cambios-specific
+/// 403-triggered refresh in THIS class: the backend contract now matches
+/// [ProdeApiService]'s existing 401 handling, so there is nothing left for
+/// this service to do differently.
 class CambiosApiService {
   final String _baseUrl;
   final ProdeApiService _prodeApi;
@@ -88,6 +97,47 @@ class CambiosApiService {
 
     try {
       return CambiosMisEquipos.fromJson(_decodeBody(response));
+    } catch (_) {
+      throw const CambiosMalformedResponseException();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // GET /fecha-abierta
+  // ---------------------------------------------------------------------------
+
+  /// Fetches the season's currently open fecha — the one `POST /solicitudes`
+  /// requires a `fecha_id` for, and the ONE route that exposes it (see
+  /// `Calendario\FechaRepository::listBySeason()` on the backend, wired to
+  /// no other route).
+  ///
+  /// Returns `null` when the backend answers `{"fecha": null}` — the season
+  /// has no unresolved fecha right now. That is a normal state, never an
+  /// exception: the "Pedir cambio" screen renders it as a sentence, exactly
+  /// like the honest gap banner it already showed before this endpoint
+  /// existed.
+  Future<CambiosFechaAbierta?> fetchFechaAbierta({required int seasonId}) async {
+    final uri = Uri.parse('$_baseUrl/fecha-abierta').replace(queryParameters: {
+      'season_id': '$seasonId',
+    });
+    final req = http.Request('GET', uri)..headers['Accept'] = 'application/json';
+    final response = await _prodeApi.request(req).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode != 200) {
+      throw _errorFor(response);
+    }
+
+    final body = _decodeBody(response);
+    final raw = body['fecha'];
+
+    if (raw == null) return null;
+
+    if (raw is! Map) {
+      throw const CambiosMalformedResponseException();
+    }
+
+    try {
+      return CambiosFechaAbierta.fromJson(raw.cast<String, dynamic>());
     } catch (_) {
       throw const CambiosMalformedResponseException();
     }
