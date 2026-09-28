@@ -107,6 +107,61 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 0, $plazas[1]['fechas_faltantes_liberacion'] );
     }
 
+    /**
+     * FIX 2: `titular_nombre` / `ocupante_nombre` resolve to the real post
+     * title when one is set, and fall back to "Jugador #<id>" — never an
+     * empty string — when it is not (plaza 2's titular, 888, has no title
+     * seeded here).
+     */
+    public function test_listar_shapes_titular_and_ocupante_names_with_fallback(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Juan Pérez', 999 => 'Martín Gómez' ];
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
+                [ 'id' => 1, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
+                [ 'id' => 2, 'tipo' => 'suplente', 'titular_player_id' => 888, 'closed_at' => null ],
+            ] );
+            $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
+                [ 1, [
+                    [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 777, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+                ] ],
+                [ 2, [
+                    [ 'id' => 2, 'plaza_id' => 2, 'player_id' => 888, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => 4, 'cerrada_por' => 'reemplazada' ],
+                    [ 'id' => 3, 'plaza_id' => 2, 'player_id' => 999, 'es_genesis' => 0, 'fecha_desde_id' => 5, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+                ] ],
+            ] );
+
+            $fechaRepository = $this->createMock( FechaRepository::class );
+            $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
+            $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 5 );
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+            $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+            ] ) );
+
+            $plazas = $response->get_data()['plazas'];
+
+            // Plaza 1: titular AND ocupante are both player 777 — real title.
+            $this->assertSame( 'Juan Pérez', $plazas[0]['titular_nombre'] );
+            $this->assertSame( 'Juan Pérez', $plazas[0]['ocupante_nombre'] );
+
+            // Plaza 2: titular is 888 (no title seeded => fallback), ocupante
+            // is 999 (real title).
+            $this->assertSame( 'Jugador #888', $plazas[1]['titular_nombre'] );
+            $this->assertSame( 'Martín Gómez', $plazas[1]['ocupante_nombre'] );
+        } finally {
+            $wp_test_post_titles = [];
+        }
+    }
+
     public function test_listar_reads_fechas_faltantes_as_null_when_ocupaciones_could_not_be_read(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
@@ -333,6 +388,10 @@ class PlazasControllerTest extends TestCase {
 
     private const PLAZA_ID = 1;
 
+    /**
+     * FIX 2: `nombre` resolves alongside `player_id` for every candidato —
+     * both fall back to "Jugador #<id>" here since no title is seeded.
+     */
     public function test_listar_candidatos_happy_path_shapes_every_candidato(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
@@ -363,8 +422,8 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
-                [ 'player_id' => 801, 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
             ],
             $response->get_data()['candidatos']
         );

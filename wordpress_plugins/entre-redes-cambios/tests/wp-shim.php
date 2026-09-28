@@ -875,6 +875,29 @@ if ( ! function_exists( 'get_the_title' ) ) {
     }
 }
 
+if ( ! function_exists( 'get_posts' ) ) {
+    /**
+     * Minimal shim for Rest\PlazasController::primePlayerTitles() /
+     * Rest\CapitanController — real WordPress builds get_posts() on
+     * WP_Query, which this plugin's SQLite test shim has no equivalent for
+     * (see Plazas\CandidatosResolver's own docblock on why WP_Query is
+     * avoided in this codebase entirely). In real WordPress, calling this
+     * primes the post object cache as a SIDE EFFECT so a later
+     * get_post()/get_the_title() for the same id is served from cache
+     * instead of a fresh query — that priming has nothing to prime in this
+     * shim, because get_the_title() above is already a flat lookup against
+     * $wp_test_post_titles with no cache layer underneath it. This exists
+     * ONLY so the production call does not fatal against this shim; its
+     * return value is never used by either caller.
+     *
+     * @param array<string, mixed> $args
+     * @return array<int, mixed>
+     */
+    function get_posts( array $args = [] ): array {
+        return [];
+    }
+}
+
 // ─── WP_Post / get_post / revision shims (ResultChangeListener, ADR-G7-1) ─────
 // Data-driven via $wp_test_posts, keyed by post ID, so tests can reproduce the
 // exact shapes ResultChangeListener::onSavePost() reads: post_type, post_status.

@@ -206,8 +206,41 @@ class PlazasController {
 
             $cadenaResolver = new CadenaResolver( $countResolvedFechasSinceFn );
 
+            // Ocupaciones/vigente are resolved ONCE per plaza here, BEFORE
+            // any name is looked up, so every player id this response will
+            // need a name for — titular AND ocupante — is known up front and
+            // handed to primePlayerTitles() in a single batch, instead of
+            // shapePlaza() resolving each plaza's own ocupante id one at a
+            // time inside its own per-row loop. See primePlayerTitles()'s
+            // docblock for why this matters more on listarCandidatos() below,
+            // but the same discipline is kept here for consistency.
+            $ocupacionesPorPlaza = [];
+            $vigentePorPlaza     = [];
+            $playerIds           = [];
+
+            foreach ( $plazas as $plaza ) {
+                $plazaId     = (int) $plaza['id'];
+                $ocupaciones = $this->plazaRepository->listOcupaciones( $plazaId );
+                $vigente     = $this->vigente( $ocupaciones );
+
+                $ocupacionesPorPlaza[ $plazaId ] = $ocupaciones;
+                $vigentePorPlaza[ $plazaId ]     = $vigente;
+
+                $playerIds[] = (int) $plaza['titular_player_id'];
+                if ( null !== $vigente ) {
+                    $playerIds[] = (int) $vigente['player_id'];
+                }
+            }
+
+            $this->primePlayerTitles( array_values( array_unique( $playerIds ) ) );
+
             $resultado = array_map(
-                fn ( array $plaza ): array => $this->shapePlaza( $plaza, $cadenaResolver ),
+                fn ( array $plaza ): array => $this->shapePlaza(
+                    $plaza,
+                    $cadenaResolver,
+                    $ocupacionesPorPlaza[ (int) $plaza['id'] ],
+                    $vigentePorPlaza[ (int) $plaza['id'] ]
+                ),
                 $plazas
             );
 
@@ -227,7 +260,7 @@ class PlazasController {
     /**
      * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..
      *
-     * Response 200: { candidatos: [ { player_id, es_padre, puntaje,
+     * Response 200: { candidatos: [ { player_id, nombre, es_padre, puntaje,
      *         viable, motivo }, ... ] }
      *
      * THE single endpoint the captain's screen calls to know who is
@@ -285,6 +318,16 @@ class PlazasController {
 
             $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
 
+            // Names are primed for the whole candidate pool BEFORE shaping —
+            // see primePlayerTitles()'s own docblock for why resolving each
+            // one's name with an unprimed get_the_title() would cost one
+            // query PER CANDIDATE, and a season's pool can run into the
+            // hundreds.
+            $this->primePlayerTitles( array_map(
+                static fn ( CandidatoEstado $c ): int => $c->playerId(),
+                $candidatos
+            ) );
+
             return new \WP_REST_Response(
                 [ 'candidatos' => array_map( [ $this, 'shapeCandidato' ], $candidatos ) ],
                 200
@@ -310,6 +353,7 @@ class PlazasController {
     private function shapeCandidato( CandidatoEstado $c ): array {
         return [
             'player_id' => $c->playerId(),
+            'nombre'    => $this->nombreJugador( $c->playerId() ),
             'es_padre'  => $c->esPadre(),
             'puntaje'   => null !== $c->puntaje() ? $c->puntaje()->toDecimal() : null,
             'viable'    => $c->viable(),
@@ -320,12 +364,16 @@ class PlazasController {
     /**
      * @param array<string, mixed> $plaza As returned by
      *        PlazaRepository::listPlazasByEquipo().
+     * @param array<int, array<string, mixed>> $ocupaciones As returned by
+     *        PlazaRepository::listOcupaciones( $plaza['id'] ) — resolved by
+     *        the caller, once for every plaza, BEFORE primePlayerTitles()
+     *        runs (see listar()).
+     * @param array<string, mixed>|null $vigente The vigent ocupación within
+     *        $ocupaciones, or null — also resolved by the caller.
      * @return array<string, mixed>
      */
-    private function shapePlaza( array $plaza, CadenaResolver $cadenaResolver ): array {
-        $plazaId     = (int) $plaza['id'];
-        $ocupaciones = $this->plazaRepository->listOcupaciones( $plazaId );
-        $vigente     = $this->vigente( $ocupaciones );
+    private function shapePlaza( array $plaza, CadenaResolver $cadenaResolver, array $ocupaciones, ?array $vigente ): array {
+        $plazaId = (int) $plaza['id'];
 
         [ $fechasFaltantes, $indeterminado ] = $this->resolveFechasFaltantes( $plazaId, $ocupaciones, $cadenaResolver );
 
@@ -333,13 +381,58 @@ class PlazasController {
             'plaza_id'                                   => $plazaId,
             'tipo'                                        => (string) $plaza['tipo'],
             'titular_player_id'                           => (int) $plaza['titular_player_id'],
+            'titular_nombre'                              => $this->nombreJugador( (int) $plaza['titular_player_id'] ),
             'ocupante_player_id'                          => null !== $vigente ? (int) $vigente['player_id'] : null,
+            'ocupante_nombre'                              => null !== $vigente ? $this->nombreJugador( (int) $vigente['player_id'] ) : null,
             'es_titular_el_ocupante'                      => null !== $vigente
                 && (int) $vigente['player_id'] === (int) $plaza['titular_player_id'],
             'cerrada'                                      => null !== $plaza['closed_at'],
             'fechas_faltantes_liberacion'                  => $fechasFaltantes,
             'fechas_faltantes_liberacion_indeterminado'    => $indeterminado,
         ];
+    }
+
+    /**
+     * Bulk-primes WordPress's post object cache for every id in
+     * $playerIds, so the get_the_title() calls nombreJugador() makes right
+     * after this — one per plaza/candidato — hit cache instead of issuing
+     * one fresh query PER PLAYER. Mirrors the fetch-then-resolve shape
+     * `entre-redes-api`'s own `/goleadores` handler uses (`get_posts()`
+     * with `post__in`), without that handler's `update_meta_cache()` call —
+     * this class never reads player postmeta, only the title, so there is
+     * nothing else worth priming.
+     *
+     * listarCandidatos() is the endpoint this actually matters for: a
+     * season's candidate pool can run into the hundreds (see
+     * Plazas\CandidatosResolver's own class docblock, "COST: THIS IS N+1 BY
+     * DESIGN") — resolving each one's name with an unprimed get_the_title()
+     * would add one more uncached query per candidate on top of that.
+     *
+     * @param array<int, int> $playerIds
+     */
+    private function primePlayerTitles( array $playerIds ): void {
+        if ( empty( $playerIds ) ) {
+            return;
+        }
+
+        get_posts( [
+            'post_type'      => 'sp_player',
+            'post__in'       => $playerIds,
+            'posts_per_page' => -1,
+        ] );
+    }
+
+    /**
+     * @return string The trimmed post title for $playerId, or
+     *         "Jugador #<id>" when it comes back empty (or the post does
+     *         not exist) — a screen must never render a blank name for a
+     *         player. Same fallback discipline as
+     *         Admin\BandejaPage::nombrePost().
+     */
+    private function nombreJugador( int $playerId ): string {
+        $titulo = trim( (string) get_the_title( $playerId ) );
+
+        return '' !== $titulo ? $titulo : 'Jugador #' . $playerId;
     }
 
     /**
