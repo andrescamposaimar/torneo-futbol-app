@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Migrations;
 
 /**
- * Creates (or upgrades) all 4 cambios_ tables.
+ * Creates (or upgrades) all 6 cambios_ tables.
  *
  * Uses dbDelta() for idempotent CREATE TABLE; safe to re-run on every plugin
  * upgrade — dbDelta only alters schema when columns differ.
@@ -79,6 +79,8 @@ class InitialSchema {
             self::sqlCambiosFechaPartido( $p, $charset_collate ),
             self::sqlCambiosSettings( $p, $charset_collate ),
             self::sqlCambiosCapitan( $p, $charset_collate ),
+            self::sqlCambiosPlaza( $p, $charset_collate ),
+            self::sqlCambiosOcupacion( $p, $charset_collate ),
         ];
 
         $results = [];
@@ -231,6 +233,121 @@ class InitialSchema {
   revocado_at DATETIME NULL DEFAULT NULL,
   PRIMARY KEY  (id),
   KEY idx_season_team (season_id, team_id),
+  KEY idx_player (player_id)
+) ENGINE=InnoDB $charset;";
+    }
+
+    /**
+     * cambios_plaza — one row per PLAZA of a team's roster (9 `campo` + 2
+     * `suplente` per team, by reglamento). The plaza, NOT the solicitud, is
+     * the aggregate slice 2 models — see Plazas\CadenaResolver's class
+     * docblock for the full reasoning.
+     *
+     * `titular_player_id` is the PERMANENT owner: by reglamento a titular
+     * never changes team, and this column is never reassigned after
+     * `openPlaza()` creates the plaza — a return of the titular inserts a new
+     * `cambios_ocupacion` row for this same player_id, it never rewrites this
+     * column.
+     *
+     * `puntaje_techo` is the ceiling SNAPSHOTTED at conformación (March) —
+     * see Plazas\Puntaje for the ×2 integer encoding. It NEVER moves for the
+     * lifetime of the plaza, no matter who occupies it later; only the
+     * ocupación changes, never the plaza's ceiling.
+     *
+     * `closed_at` exists for a plaza that stops existing entirely (e.g. the
+     * team is dissolved) — it is NOT how an ocupación record ends; that is
+     * `cambios_ocupacion.fecha_hasta_id` (see that table's docblock). Nothing
+     * in this slice ever sets it — no closure workflow is in scope here — but
+     * the column exists so a later slice does not need a schema change to add
+     * one.
+     */
+    private static function sqlCambiosPlaza( string $p, string $charset ): string {
+        return "CREATE TABLE {$p}cambios_plaza (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  season_id BIGINT UNSIGNED NOT NULL,
+  team_id BIGINT UNSIGNED NOT NULL,
+  titular_player_id BIGINT UNSIGNED NOT NULL,
+  puntaje_techo SMALLINT UNSIGNED NOT NULL,
+  tipo ENUM('campo','suplente') NOT NULL,
+  created_at DATETIME NOT NULL,
+  closed_at DATETIME NULL DEFAULT NULL,
+  PRIMARY KEY  (id),
+  KEY idx_season_team (season_id, team_id),
+  KEY idx_titular (titular_player_id)
+) ENGINE=InnoDB $charset;";
+    }
+
+    /**
+     * cambios_ocupacion — one row per LINK in a plaza's chain of successive
+     * occupations (titular → suplente → suplente → ... → titular again, and
+     * so on). See Plazas\CadenaResolver's class docblock for how this chain
+     * is read; this docblock only covers the columns.
+     *
+     * `es_genesis` marks the very first link of every chain — the plaza's
+     * founding ocupación, inserted by `PlazaRepository::openPlaza()` in the
+     * same transaction as the plaza itself. It is `1` on exactly one row per
+     * plaza, ever, and `0` on every other link, including a later link opened
+     * by `closeOcupacionByRegresoTitular()` when the titular returns — that
+     * link is of the titular's player_id but is NOT the genesis row, so it is
+     * NOT flagged again.
+     *
+     * THIS COLUMN DOES NOT ANSWER "WHO IS THE TITULAR" — it was previously
+     * named `es_titular`, which claimed exactly that and was wrong: after any
+     * regreso del titular, the returning titular's row is inserted with this
+     * flag `0` (see previous paragraph), so `WHERE es_titular = 1` silently
+     * returned zero rows for a plaza that HAD had a substitution. The real,
+     * current source of truth for "who is the titular of this plaza" is
+     * `cambios_plaza.titular_player_id`, which never changes for the
+     * lifetime of the plaza — read that column, never this one, to find or
+     * compare against the titular.
+     *
+     * `fecha_desde_id` / `fecha_hasta_id` are `cambios_fecha.id` values — a
+     * LOGICAL FK, never `orden` (see Calendario\FechaRepository's class
+     * docblock INVARIANT section for why `orden` must never be persisted as
+     * an identity reference).
+     *
+     * THE INTERVAL IS HALF-OPEN: [fecha_desde_id, fecha_hasta_id). An
+     * ocupación covers the fecha it starts on and every fecha up to, but NOT
+     * including, the one recorded in `fecha_hasta_id` — which is exactly the
+     * fecha its successor starts on. So the fechas an ocupación actually
+     * covered are counted as "resolved fechas from fecha_desde_id, exclusive
+     * of fecha_hasta_id", never as `hasta - desde + 1`.
+     *
+     * This matters more here than it looks. The whole feature is a counting
+     * rule — three resolved fechas before a titular may return — so an
+     * off-by-one in how an interval is read is an off-by-one in the business
+     * answer. Half-open was chosen because the closed alternative ("the last
+     * fecha actually occupied") would require looking up the fecha BEFORE the
+     * successor's, and the calendar has gaps: weekends with no fecha at all.
+     * That lookup is not a subtraction, and every caller would have to get it
+     * right. Here the successor's start IS the predecessor's end, with
+     * nothing in between to resolve. `fecha_hasta_id IS NULL` marks the currently
+     * VIGENT ocupación — see PlazaRepository's class docblock for the
+     * invariant that at most one such row exists per plaza, defended in code
+     * exactly like `cambios_capitan`'s vigent-row invariant, for the same
+     * reason (the SQLite test shim drops every KEY/UNIQUE KEY, so nothing
+     * here is enforced by a DB constraint).
+     *
+     * `cerrada_por` records WHY a link closed: `regreso_titular` (the titular
+     * came back), `reemplazada` (a new occupant took over while this one was
+     * still within its rights), or `trunca` (this occupant left before
+     * meeting the 3-fecha minimum, and is therefore blocked from re-entering
+     * until the plaza's single, derived liberation moment — see
+     * Plazas\CadenaResolver). `NULL` on the vigent row: it has not closed for
+     * any reason yet.
+     */
+    private static function sqlCambiosOcupacion( string $p, string $charset ): string {
+        return "CREATE TABLE {$p}cambios_ocupacion (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  plaza_id BIGINT UNSIGNED NOT NULL,
+  player_id BIGINT UNSIGNED NOT NULL,
+  es_genesis TINYINT(1) NOT NULL DEFAULT 0,
+  fecha_desde_id BIGINT UNSIGNED NOT NULL,
+  fecha_hasta_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  cerrada_por ENUM('regreso_titular','reemplazada','trunca') NULL DEFAULT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY  (id),
+  KEY idx_plaza (plaza_id),
   KEY idx_player (player_id)
 ) ENGINE=InnoDB $charset;";
     }
