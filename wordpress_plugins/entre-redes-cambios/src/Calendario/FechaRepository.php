@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Calendario;
 
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Support\ChecksReads;
 use EntreRedes\Cambios\Support\OpensTransactions;
 
 /**
@@ -64,10 +65,28 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * until another human changes it again — a nightly reseed job (or a
  * postponement) must never silently flip a committee's ruling back to
  * 'programada'.
+ *
+ * *** READ FAILURES MUST NEVER READ AS "NO ROWS" / "NOT FOUND" ***
+ * `listBySeason()` is the sole data source for `Rest\FechaController` (the
+ * captain-facing "which fecha is open" bootstrap): a failed
+ * `$wpdb->get_results()` misread as "this season has no fechas" would render
+ * as a calm `{"fecha": null}` — a captain entitled to request a change
+ * silently blocked, with no error and no log entry anywhere. Every method
+ * below that returns a COLLECTION (`listBySeason()`, `recalculateOrden()`,
+ * `findFechaIdByMatchIds()`) is routed through `Support\ChecksReads`, exactly
+ * like `Plazas\PlazaRepository`. Every method that returns a SINGLE row or a
+ * scalar (`findById()`, `findByOrden()`, `nextFreeOrden()`,
+ * `countResolvedFechasSince()`, `upsertPartido()`, and the re-read inside
+ * `upsertFecha()`) uses
+ * `assertRowReadSucceeded()` instead — `$wpdb->get_row()` / `get_var()`
+ * already return `null` for a GENUINE "no such row" too, so those methods
+ * check ONLY `$wpdb->last_error`, never nullness, to avoid turning a
+ * legitimate "fecha_id does not exist" into a false failure.
  */
 class FechaRepository {
 
     use OpensTransactions;
+    use ChecksReads;
 
     private EventLog $eventLog;
 
@@ -126,6 +145,17 @@ class FechaRepository {
                 ARRAY_A
             );
 
+            // findFechaIdByMatchIds() just confirmed this row exists — a
+            // `null` here therefore does NOT mean "not found" the way it can
+            // for a fresh lookup (see findById()); it can only mean the query
+            // itself failed. Reading it as "not found" would silently corrupt
+            // the update below (`(string) null['play_date']` casts to '',
+            // making `$playDate > ''` always true — every re-seed would bump
+            // `veces_postergada` — and `estado_origen` would never match
+            // 'derivado', so a legitimate `estado` change would silently stop
+            // being applied). See class docblock, "READ FAILURES...".
+            $this->assertRowReadSucceeded( 'upsertFecha', [ 'fecha_id' => $fechaId ] );
+
             $update = [
                 'torneo_liga_ids' => (string) $fecha['torneo_liga_ids'],
                 'torneo_label'    => (string) $fecha['torneo_label'],
@@ -180,7 +210,11 @@ class FechaRepository {
      *
      * @param array<int, int> $matchIds
      * @throws \RuntimeException When the match_ids resolve to more than one
-     *         distinct fecha_id — see class docblock ("MERGE DETECTION").
+     *         distinct fecha_id — see class docblock ("MERGE DETECTION") — or
+     *         when the query fails at the wpdb level (see class docblock,
+     *         "READ FAILURES..."). A failed read misread as "no existing
+     *         fecha" would make upsertFecha() INSERT A DUPLICATE row for a
+     *         jornada that already exists, not merely deny something.
      */
     public function findFechaIdByMatchIds( array $matchIds ): ?int {
         if ( empty( $matchIds ) ) {
@@ -198,6 +232,8 @@ class FechaRepository {
             ),
             ARRAY_A
         );
+
+        $this->assertReadSucceeded( $rows, 'findFechaIdByMatchIds', [ 'match_ids_count' => count( $matchIds ) ] );
 
         $fechaIds = array_values( array_unique( array_map(
             static fn( array $r ): int => (int) $r['fecha_id'],
@@ -217,7 +253,13 @@ class FechaRepository {
     }
 
     /**
-     * @return array<string, mixed>|null
+     * @return array<string, mixed>|null Null for a genuine "no such
+     *         fecha_id" — every current caller (`Dictamen\DictamenContextAssembler::assemble()`,
+     *         `Calendario\SeedTemporadaService::seed()`) treats that as a
+     *         reason to refuse/report, never as permission — see
+     *         `assertRowReadSucceeded()`'s own docblock for why a wpdb-level
+     *         query failure is still distinguished and thrown instead.
+     * @throws \RuntimeException When the query fails at the wpdb level.
      */
     public function findById( int $fechaId ): ?array {
         $wpdb = $this->wpdb;
@@ -231,6 +273,8 @@ class FechaRepository {
             ARRAY_A
         );
 
+        $this->assertRowReadSucceeded( 'findById', [ 'fecha_id' => $fechaId ] );
+
         return empty( $row ) ? null : $row;
     }
 
@@ -243,6 +287,12 @@ class FechaRepository {
      *
      * @return int Number of cambios_fecha rows whose orden or
      *         numero_en_torneo actually changed value.
+     * @throws \RuntimeException When the query fails at the wpdb level — see
+     *         class docblock, "READ FAILURES...". A failed read misread as
+     *         "this season has no fechas yet" would silently skip reordering
+     *         a season that actually needs it, leaving `orden` stale — the
+     *         exact value `Rest\FechaController` trusts to find "the earliest
+     *         unresolved fecha".
      */
     public function recalculateOrden( int $seasonId ): int {
         $wpdb = $this->wpdb;
@@ -257,6 +307,8 @@ class FechaRepository {
             ),
             ARRAY_A
         );
+
+        $this->assertReadSucceeded( $rows, 'recalculateOrden', [ 'season_id' => $seasonId ] );
 
         if ( empty( $rows ) ) {
             return 0;
@@ -364,19 +416,28 @@ class FechaRepository {
      *
      * Not concurrency-safe by itself, and deliberately so: the seeder runs
      * single-threaded from cron or WP-CLI, never from two requests at once.
+     *
+     * @throws \RuntimeException When the query fails at the wpdb level. A
+     *         failed `MAX(orden)` read cast through `(int) null` would come
+     *         back `0`, handing out `orden = 1` as "free" while the season
+     *         already has dozens of rows using it — recalculateOrden()'s
+     *         parking pass would then silently collide with (overwrite the
+     *         `orden` of) fechas nobody meant to touch.
      */
     private function nextFreeOrden( int $seasonId ): int {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $max = (int) $wpdb->get_var(
+        $max = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT MAX(orden) FROM {$p}cambios_fecha WHERE season_id = %d",
                 $seasonId
             )
         );
 
-        return $max + 1;
+        $this->assertRowReadSucceeded( 'nextFreeOrden', [ 'season_id' => $seasonId ] );
+
+        return (int) $max + 1;
     }
 
     /**
@@ -415,7 +476,9 @@ class FechaRepository {
     }
 
     /**
-     * @return array<string, mixed>|null
+     * @return array<string, mixed>|null Null for a genuine "no fecha at this
+     *         orden" — see `findById()`'s docblock for the same distinction.
+     * @throws \RuntimeException When the query fails at the wpdb level.
      */
     public function findByOrden( int $seasonId, int $orden ): ?array {
         $wpdb = $this->wpdb;
@@ -432,6 +495,8 @@ class FechaRepository {
             ARRAY_A
         );
 
+        $this->assertRowReadSucceeded( 'findByOrden', [ 'season_id' => $seasonId, 'orden' => $orden ] );
+
         return empty( $row ) ? null : $row;
     }
 
@@ -439,7 +504,17 @@ class FechaRepository {
      * All fechas of a season, ordered by `orden` ASC (the continuous,
      * arithmetic-safe field — see cambios_fecha's column docs).
      *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** This is
+     * the sole data source for `Rest\FechaController::fechaAbiertaDe()` — a
+     * failed read here previously came back `?: []`, which that controller
+     * read as "this season has no unresolved fecha" and answered `{"fecha":
+     * null}` with a plain 200: a calm, correct-looking answer for a captain
+     * who was actually entitled to request a change, with no error and no
+     * `EventLog` entry anywhere to explain why. See class docblock, "READ
+     * FAILURES...".
+     *
      * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level.
      */
     public function listBySeason( int $seasonId ): array {
         $wpdb = $this->wpdb;
@@ -455,7 +530,9 @@ class FechaRepository {
             ARRAY_A
         );
 
-        return $rows ?: [];
+        $this->assertReadSucceeded( $rows, 'listBySeason', [ 'season_id' => $seasonId ] );
+
+        return $rows;
     }
 
     /**
@@ -470,8 +547,26 @@ class FechaRepository {
      * INVARIANT section. `orden` is resolved internally, fresh, on every
      * call, so callers never risk holding a stale snapshot of it.
      *
-     * @throws \InvalidArgumentException When fechaId does not exist, or
-     *         does not belong to seasonId.
+     * @throws \InvalidArgumentException When fechaId genuinely does not
+     *         exist, or does not belong to seasonId — i.e. the orden lookup
+     *         came back empty with NO wpdb-level error.
+     * @throws \RuntimeException When either query fails at the wpdb level —
+     *         see class docblock, "READ FAILURES...". A failed COUNT(*) cast
+     *         through `(int) null` would silently come back `0`, which every
+     *         current consumer of this count (`Plazas\CadenaResolver`, via
+     *         `Calendario\BoundedFechaCounter`) reads as "0 resolved fechas
+     *         have passed" — the single MOST conservative value the "at
+     *         least N resolved fechas" gate can receive, so a naive read
+     *         would only ever tighten a business rule, never loosen one.
+     *         Thrown anyway, rather than left as a documented "denial-only"
+     *         exception (contrast `Capitania\CapitanRepository::findCapitanVigente()`):
+     *         `CadenaResolver` and `BoundedFechaCounter` are already built to
+     *         translate a thrown failure into an honest, fail-closed
+     *         `FechaCountUnavailableException` — silently returning `0`
+     *         instead reports a WRONG number (e.g. "3 fechas faltantes" to a
+     *         captain who asked "how long until I can return") as if it were
+     *         a known fact, rather than routing it through the exception path
+     *         this feature already has for exactly this failure mode.
      */
     public function countResolvedFechasSince( int $seasonId, int $fechaId ): int {
         $wpdb = $this->wpdb;
@@ -487,6 +582,8 @@ class FechaRepository {
             ),
             ARRAY_A
         );
+
+        $this->assertRowReadSucceeded( 'countResolvedFechasSince', [ 'season_id' => $seasonId, 'fecha_id' => $fechaId ] );
 
         if ( empty( $row ) ) {
             throw new \InvalidArgumentException(
@@ -507,12 +604,47 @@ class FechaRepository {
             )
         );
 
+        $this->assertRowReadSucceeded( 'countResolvedFechasSince', [ 'season_id' => $seasonId, 'fecha_id' => $fechaId, 'orden_desde' => $ordenDesde ] );
+
         return (int) $count;
     }
 
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * The `get_row()` / `get_var()` analogue of `Support\ChecksReads::assertReadSucceeded()`
+     * — see class docblock, "READ FAILURES...". `$wpdb->get_row()` and
+     * `get_var()` already return `null` for a GENUINE "no such row" — unlike
+     * `get_results()`, there is no `[]` vs `null` distinction to lean on — so
+     * this checks ONLY `$wpdb->last_error`, immediately after the query,
+     * NEVER the nullness of the value the caller got back. A caller that
+     * treats a genuine `null` as "not found" (e.g. `findById()`) keeps that
+     * behaviour untouched; only an actual wpdb-level failure throws here.
+     *
+     * @throws \RuntimeException When the query failed at the wpdb level.
+     */
+    private function assertRowReadSucceeded( string $operacion, array $contexto ): void {
+        $lastError = (string) ( $this->wpdb->last_error ?? '' );
+
+        if ( '' === $lastError ) {
+            return;
+        }
+
+        $this->eventLog->record( 'lectura.fallida', array_merge( $contexto, [
+            'operacion'  => $operacion,
+            'last_error' => $this->wpdb->last_error,
+        ] ) );
+
+        throw new \RuntimeException(
+            sprintf(
+                'FechaRepository::%s(): the query failed at the wpdb level (%s).',
+                $operacion,
+                $lastError
+            )
+        );
+    }
 
     /**
      * @param array<int, array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int}> $partidos
@@ -583,6 +715,16 @@ class FechaRepository {
 
     /**
      * @param array{match_id:int, liga_id:int, zona?:string, kickoff:string, tiene_resultado?:bool|int} $partido
+     * @throws \RuntimeException When the SELECT-then-insert lookup fails at
+     *         the wpdb level — see class docblock, "READ FAILURES...". A
+     *         failed read misread as "no existing row" would fall through to
+     *         the INSERT branch below and create a SECOND partido row for a
+     *         match_id that already has one: `uq_match` catches this in
+     *         production, but the SQLite test shim drops it (see this
+     *         method's own comment below), so a silently swallowed failure
+     *         here corrupts the "one partido row per match_id" invariant with
+     *         no error anywhere in the environment this guard actually exists
+     *         to protect.
      */
     private function upsertPartido( int $fechaId, array $partido ): void {
         $wpdb    = $this->wpdb;
@@ -602,6 +744,8 @@ class FechaRepository {
                 $matchId
             )
         );
+
+        $this->assertRowReadSucceeded( 'upsertPartido', [ 'fecha_id' => $fechaId, 'match_id' => $matchId ] );
 
         $data = [
             'fecha_id'        => $fechaId,

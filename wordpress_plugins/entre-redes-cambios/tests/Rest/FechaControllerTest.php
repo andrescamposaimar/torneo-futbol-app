@@ -261,9 +261,79 @@ class FechaControllerTest extends TestCase {
         $this->assertTrue( $this->eventLog->has( 'rest.fecha_abierta_fallida' ) );
     }
 
+    /**
+     * THE test that actually closes the gap the read-failure audit called
+     * out: `test_unexpected_exception_returns_generic_500_and_logs_identifiers()`
+     * above only proves the CONTROLLER handles a throw — it mocks
+     * FechaRepository entirely, so it can never catch a regression where
+     * `FechaRepository::listBySeason()` itself goes back to swallowing a
+     * wpdb-level failure into `[]`. This test drives the REAL repository
+     * against the SQLite test shim, with a `\wpdb` double that fails ONLY
+     * `listBySeason()`'s own query, and asserts the endpoint answers a real
+     * error — never the calm `{"fecha": null}` a captain would otherwise see
+     * with no explanation anywhere.
+     */
+    public function test_get_fecha_abierta_returns_a_real_error_when_the_underlying_read_fails(): void {
+        global $wpdb;
+
+        $this->seedFecha( 3, 1, '2026-01-10', 'programada' );
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'verifyIdentity' )->willReturn( [ 'player_id' => 777 ] );
+
+        $failingWpdb            = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY orden ASC' );
+        $failingFechaRepository = new FechaRepository( $failingWpdb, $this->eventLog );
+
+        $now        = ( new \DateTimeImmutable( '2026-01-05 12:00:00', new \DateTimeZone( 'UTC' ) ) )->getTimestamp();
+        $controller = new FechaController( $authorizer, $failingFechaRepository, $this->settings, $this->eventLog, fn (): int => $now );
+
+        $response = $controller->fechaAbierta( $this->requestConToken( 'a-valid-jwt', [ 'season_id' => self::SEASON_ID ] ) );
+
+        $this->assertSame( 500, $response->get_status() );
+        $this->assertNotSame(
+            [ 'fecha' => null ],
+            $response->get_data(),
+            'A failed read must never look identical to "no fecha open right now".'
+        );
+        $this->assertTrue( $this->eventLog->has( 'rest.fecha_abierta_fallida' ) );
+        $this->assertTrue( $this->eventLog->has( 'lectura.fallida' ), 'FechaRepository::listBySeason() must log its own read failure too.' );
+    }
+
     // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
+
+    /**
+     * A `\wpdb` subclass whose get_results() sets $wpdb->last_error and
+     * returns [] whenever the SQL contains $mustContain — the same double
+     * `Plazas\PlazaRepositoryTest::wpdbThatFailsGetResults()` uses, copied
+     * here so this suite can drive a REAL `FechaRepository` into a genuine
+     * read failure instead of mocking the repository away.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
 
     private function newController( CapitanAuthorizer $authorizer, int $now ): FechaController {
         return new FechaController( $authorizer, $this->fechaRepository, $this->settings, $this->eventLog, fn (): int => $now );
