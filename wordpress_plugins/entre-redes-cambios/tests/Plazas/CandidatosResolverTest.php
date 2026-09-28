@@ -127,7 +127,14 @@ class CandidatosResolverTest extends TestCase {
         );
     }
 
-    /** @param array<string, mixed>|null $metrics Null = no sp_metrics row at all. */
+    /**
+     * @param array<string, mixed>|null $metrics Null = no `sp_metrics` row
+     *        and no `caracter` row at all. A `caracter` key, if present, is
+     *        written as its own un-serialized ACF postmeta row — NOT nested
+     *        inside `sp_metrics` — matching how JugadorMetricasReader now
+     *        reads it (see its class docblock, "Reads TWO independent
+     *        postmeta values").
+     */
     private function seedPlayer( int $playerId, int $seasonId, ?array $metrics ): void {
         global $wpdb;
         $p = $wpdb->prefix;
@@ -136,6 +143,11 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->insert( $p . 'term_relationships', [ 'object_id' => $playerId, 'term_taxonomy_id' => $seasonId ] );
 
         if ( null !== $metrics ) {
+            if ( array_key_exists( 'caracter', $metrics ) ) {
+                $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'caracter', 'meta_value' => (string) $metrics['caracter'] ] );
+                unset( $metrics['caracter'] );
+            }
+
             $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'sp_metrics', 'meta_value' => serialize( $metrics ) ] );
         }
     }

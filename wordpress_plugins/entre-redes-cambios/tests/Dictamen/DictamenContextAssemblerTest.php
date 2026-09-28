@@ -140,9 +140,29 @@ class DictamenContextAssemblerTest extends TestCase {
         );
     }
 
-    /** @param array<string, mixed> $metrics */
+    /**
+     * Writes `sp_metrics` (for `puntaje`) and, if `$metrics` carries a
+     * `caracter` key, ALSO writes it as a separate, un-serialized `caracter`
+     * postmeta row — matching how JugadorMetricasReader now reads it (see
+     * its class docblock, "Reads TWO independent postmeta values"). Kept as
+     * one helper so every existing call site keeps its original shape.
+     *
+     * @param array<string, mixed> $metrics
+     */
     private function putSpMetrics( int $playerId, array $metrics ): void {
         global $wpdb;
+
+        if ( array_key_exists( 'caracter', $metrics ) ) {
+            $wpdb->insert(
+                $wpdb->prefix . 'postmeta',
+                [
+                    'post_id'    => $playerId,
+                    'meta_key'   => 'caracter',
+                    'meta_value' => (string) $metrics['caracter'],
+                ]
+            );
+            unset( $metrics['caracter'] );
+        }
 
         $wpdb->insert(
             $wpdb->prefix . 'postmeta',

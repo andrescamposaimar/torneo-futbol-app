@@ -51,10 +51,10 @@ final class DictamenContext {
     /**
      * Whether the entrante is a "padre" — see
      * Plazas\JugadorMetricasReader's docblock for how that is decided from
-     * `sp_metrics.caracter`. `false` for a `regreso` (no entrante at all,
-     * same convention as entrantePuntaje() being null) and `false` when the
-     * entrante's `sp_metrics` row could not resolve a caracter either —
-     * never a fabricated guess.
+     * the dedicated ACF `caracter` field. `false` for a `regreso` (no
+     * entrante at all, same convention as entrantePuntaje() being null) and
+     * `false` when the entrante's `caracter` field could not resolve one
+     * either — never a fabricated guess.
      */
     private bool $entranteEsPadre;
 

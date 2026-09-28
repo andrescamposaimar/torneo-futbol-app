@@ -296,28 +296,31 @@ system to reject it. The backend decides; the app displays.
 
 ### How a parent is recognised, and why the blank counts as "not a parent"
 
-`sp_metrics.caracter` is free text. The historical dump holds some two dozen
-distinct values, several unrelated to the distinction — including one that is a
-playing position mis-entered into the field. Every recent export holds only
-`Padre Activo` or nothing. So a candidate counts as a parent when the value
-starts with `padre`, case-insensitively; anything else, blank included, counts
-as not a parent. This policy takes something away, and an ambiguous record must
-never be the reason someone gains an advantage.
+`caracter` is a dedicated ACF field on the player (`acf.caracter` on
+`wp-json/wp/v2/sp_player/{id}`), populated deliberately across the whole
+roster — a clean, consistent vocabulary, not the free-text mess an older
+SportsPress metric field used to be. So a candidate counts as a parent when
+the value starts with `padre`, case-insensitively; anything else, blank
+included, counts as not a parent. This policy takes something away, and an
+ambiguous record must never be the reason someone gains an advantage.
 
-### The data gap that gates turning this on
+### The data gap that used to gate turning this on — closed
 
-> In the March 2026 players export, **691 of 1059 players have `caracter`
-> empty** — 65%. Only 368 carry `Padre Activo`.
+> Verified against live production data (1105 players, `acf.caracter`):
+> `Padre Alumno` 570, `Padre Ex-Alumno` 268, `Invitado` 129, empty 114,
+> `Personal Colegio` 22, `Socio Fundador` 2. The ACF field is **90%
+> populated**, with a clean vocabulary — not the 65%-empty legacy field this
+> section used to report.
 
-With the rule as written, empty means "not a parent". Turning this policy ON
-today would therefore treat two thirds of the tournament as guests, barring them
-from any plaza where a single `Padre Activo` happens to be viable. That is
-almost certainly a data-entry gap rather than the truth about who these people
-are.
+With the rule as written, empty still means "not a parent" — that has not
+changed. But the field it reads from is no longer mostly empty: turning this
+policy ON today would classify the large majority of the roster correctly,
+with only the genuinely unfilled 10% defaulting to "not a parent", exactly as
+the policy always intended for an ambiguous record.
 
-**The switch exists; the data does not yet support flipping it.** Populating
-`caracter` for the active roster is a prerequisite, not a nice-to-have — and it
-is a WordPress data task, not a code change.
+**The data gap that used to block enabling this policy is closed.** Whether
+to turn `prioridad_padres_activa` on is now a product decision, not one
+blocked by missing data.
 
 ## Scope of this slice (slice 0)
 

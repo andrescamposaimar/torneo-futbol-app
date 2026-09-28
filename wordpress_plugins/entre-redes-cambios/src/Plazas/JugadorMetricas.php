@@ -5,11 +5,15 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Plazas;
 
 /**
- * The two facts this feature reads off a player's `sp_metrics` postmeta:
- * their puntaje (may be unresolvable — see Puntaje's own docblock and
- * JugadorMetricasReader's, "NEVER DEFAULTS TO 0") and whether they are a
- * "padre" — see JugadorMetricasReader::esPadreDesdeCaracter() for exactly how
- * that is decided from the free-text `caracter` field.
+ * The two facts this feature needs about a player, read from TWO independent
+ * postmeta sources — see JugadorMetricasReader's class docblock for exactly
+ * where each one lives:
+ *   - their puntaje, from the `sp_metrics` postmeta blob (may be
+ *     unresolvable — see Puntaje's own docblock and JugadorMetricasReader's,
+ *     "NEVER DEFAULTS TO 0");
+ *   - whether they are a "padre", from the dedicated ACF `caracter` field —
+ *     see JugadorMetricasReader::esPadreDesdeCaracter() for exactly how that
+ *     is decided from its value.
  *
  * A plain value object, not an array, so every reader of "is this player a
  * padre" goes through the SAME classification instead of each call site
@@ -30,9 +34,10 @@ final class JugadorMetricas {
     }
 
     /**
-     * No `sp_metrics` row at all, or one that decoded to nothing usable —
-     * never a padre, never a resolvable puntaje. Distinct from "the row
-     * exists but omits `caracter`", which is ALSO `esPadre() === false` (see
+     * No `sp_metrics` row and no ACF `caracter` row at all, or either one
+     * that decoded/read to nothing usable — never a padre, never a
+     * resolvable puntaje. Distinct from "the `caracter` row exists but is
+     * blank", which is ALSO `esPadre() === false` (see
      * JugadorMetricasReader), so this factory is just a readable shorthand
      * for that same outcome, not a third state.
      */
