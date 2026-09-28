@@ -11,6 +11,7 @@ import '../utils/url_launcher_helper.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/prode_identity_card.dart';
 import 'anuarios_screen.dart';
+import 'cambios/cambios_auth_gate.dart';
 import 'campeones_screen.dart';
 import 'listas_screen.dart';
 import 'prode/prode_auth_gate.dart';
@@ -180,6 +181,21 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => const ProdeAuthGate(),
+                    ),
+                  ),
+                ),
+                // Captain-only: authenticates with the same Prode session
+                // (see CambiosAuthGate's own docblock) — gated on the same
+                // features.prode flag since it depends on that same auth
+                // infrastructure being configured for this tenant.
+                _tile(
+                  context,
+                  'Cambios de jugadores',
+                  Icons.swap_horizontal_circle,
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CambiosAuthGate(),
                     ),
                   ),
                 ),
