@@ -50,7 +50,7 @@ class DictamenPipelineTest extends TestCase {
 
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
-        $this->fechaRepository = new FechaRepository( $wpdb );
+        $this->fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
         $settings              = new Settings( $wpdb );
 
         $assembler = new DictamenContextAssembler(

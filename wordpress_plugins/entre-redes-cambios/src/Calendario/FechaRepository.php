@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Calendario;
 
+use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Support\OpensTransactions;
+
 /**
  * Encapsulates all wpdb persistence for cambios_fecha + cambios_fecha_partido.
  *
@@ -64,6 +67,10 @@ namespace EntreRedes\Cambios\Calendario;
  */
 class FechaRepository {
 
+    use OpensTransactions;
+
+    private EventLog $eventLog;
+
     /**
      * The only 4 values `cambios_fecha.estado` may ever hold. MySQL's
      * ENUM('programada','jugada','dirimida','suspendida') is not a reliable
@@ -79,8 +86,9 @@ class FechaRepository {
 
     private \wpdb $wpdb;
 
-    public function __construct( \wpdb $wpdb ) {
-        $this->wpdb = $wpdb;
+    public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
+        $this->wpdb     = $wpdb;
+        $this->eventLog = $eventLog;
     }
 
     /**
@@ -311,7 +319,7 @@ class FechaRepository {
         // instead of leaving it parked. Both tables are InnoDB (transactional
         // in production), and tests/wp-shim.php maps START TRANSACTION to
         // SQLite's BEGIN, so this is exercised here too.
-        $wpdb->query( 'START TRANSACTION' );
+        $this->beginTransaction( __FUNCTION__ );
 
         try {
             $park = $this->nextFreeOrden( $seasonId );
