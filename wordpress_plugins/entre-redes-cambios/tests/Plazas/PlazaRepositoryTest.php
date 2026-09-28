@@ -956,4 +956,164 @@ class PlazaRepositoryTest extends TestCase {
         $this->repo->closePlaza( 999999, '2026-04-01 10:00:00' );
     }
 
+    // -------------------------------------------------------------------------
+    // Slice 4b — dictamen context queries: fail loud, never silently empty
+    // -------------------------------------------------------------------------
+
+    /**
+     * A \wpdb subclass whose get_results() sets $wpdb->last_error and
+     * returns [] (its declared return type is non-nullable `array`, so it
+     * cannot itself return null — see PlazaRepository's class docblock,
+     * "READ FAILURES...", for why checking last_error is what makes this
+     * simulable at all) whenever the SQL contains $mustContain. Every other
+     * get_results() call — including the internal ones this same test still
+     * relies on for setup — passes through to the real, working
+     * implementation.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    // --- listOcupacionesVigentesDeJugador -------------------------------------
+
+    public function test_list_ocupaciones_vigentes_de_jugador_returns_vigent_rows_across_plazas(): void {
+        // 777 is only ever succeeded IN to plazaB here — it must not also
+        // be plazaA's titular, or it would (correctly) show up as vigent
+        // there too, defeating the "exactly one" assertion below.
+        $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 100, 888, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaB, 777, 5, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $vigentes = $this->repo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 777 );
+
+        $this->assertCount( 1, $vigentes );
+        $this->assertSame( $plazaB, (int) $vigentes[0]['plaza_id'] );
+        $this->assertSame( 777, (int) $vigentes[0]['player_id'] );
+    }
+
+    public function test_list_ocupaciones_vigentes_de_jugador_excludes_the_given_plaza(): void {
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $vigentes = $this->repo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 777, $plazaA );
+
+        $this->assertSame( [], $vigentes );
+    }
+
+    public function test_list_ocupaciones_vigentes_de_jugador_returns_an_empty_array_when_genuinely_none(): void {
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $vigentes = $this->repo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 999999 );
+
+        $this->assertSame( [], $vigentes );
+    }
+
+    public function test_list_ocupaciones_vigentes_de_jugador_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_ocupacion' );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 777 );
+    }
+
+    public function test_list_ocupaciones_vigentes_de_jugador_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_ocupacion' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new PlazaRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 777 );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'listOcupacionesVigentesDeJugador', $failingEventLog->last()['contexto']['operacion'] );
+        $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
+    }
+
+    // --- listPlazasConCierreTruncadoDeJugador ---------------------------------
+
+    public function test_list_plazas_con_cierre_truncado_de_jugador_returns_one_full_chain_per_plaza(): void {
+        // succeedOcupacion()'s cerrada_por describes how the OUTGOING
+        // (previously vigent) link ended — so to give player 888 a trunca
+        // closure, 888 must first BE the vigent occupant succeeded away,
+        // not the incoming player of the succession that produces it.
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaA, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaA, 555, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaB, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaB, 333, 7, 'reemplazada', '2026-05-01 10:00:00' );
+
+        $chains = $this->repo->listPlazasConCierreTruncadoDeJugador( self::SEASON_ID, 888 );
+
+        $this->assertCount( 1, $chains, 'Only plazaA has a trunca closure for player 888 — plazaB closed it reemplazada.' );
+        $this->assertCount( 3, $chains[0], 'The FULL chain must come back, not just the trunca link.' );
+        $this->assertSame( $plazaA, (int) $chains[0][0]['plaza_id'] );
+        $this->assertSame( 888, (int) $chains[0][1]['player_id'] );
+        $this->assertSame( 'trunca', (string) $chains[0][1]['cerrada_por'] );
+    }
+
+    public function test_list_plazas_con_cierre_truncado_de_jugador_returns_an_empty_array_when_genuinely_none(): void {
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+
+        $chains = $this->repo->listPlazasConCierreTruncadoDeJugador( self::SEASON_ID, 888 );
+
+        $this->assertSame( [], $chains );
+    }
+
+    public function test_list_plazas_con_cierre_truncado_de_jugador_throws_when_the_plaza_id_lookup_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, "cerrada_por = 'trunca'" );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->listPlazasConCierreTruncadoDeJugador( self::SEASON_ID, 888 );
+    }
+
+    public function test_list_plazas_con_cierre_truncado_de_jugador_throws_when_a_chain_fetch_fails(): void {
+        global $wpdb;
+
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaA, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaA, 555, 7, 'trunca', '2026-05-01 10:00:00' );
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY fecha_desde_id ASC' );
+        $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->listPlazasConCierreTruncadoDeJugador( self::SEASON_ID, 888 );
+    }
+
 }
