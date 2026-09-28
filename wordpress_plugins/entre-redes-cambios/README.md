@@ -304,6 +304,9 @@ the value starts with `padre`, case-insensitively; anything else, blank
 included, counts as not a parent. This policy takes something away, and an
 ambiguous record must never be the reason someone gains an advantage.
 
+A consistent vocabulary is not the same thing as correct data, and the
+difference is not hypothetical here — see the next section.
+
 ### The data gap that used to gate turning this on — closed
 
 > Verified against live production data (1105 players, `acf.caracter`):
@@ -319,8 +322,40 @@ with only the genuinely unfilled 10% defaulting to "not a parent", exactly as
 the policy always intended for an ambiguous record.
 
 **The data gap that used to block enabling this policy is closed.** Whether
-to turn `prioridad_padres_activa` on is now a product decision, not one
+to turn `prioridad_padres_activa` on is a product decision now, not one
 blocked by missing data.
+
+### But the values are not all CORRECT, and one category is known bad
+
+Of the 24 players carrying `Personal Colegio` or `Socio Fundador`, only three
+are registered in the current season at all — the other 21 are in the
+"no inscriptos" pseudo-team, which does NOT carry the season taxonomy term
+and therefore never reaches the candidate pool (see the pool's own note
+below). The process owner reviewed those three by name, and **all three are
+mislabelled**: two are padres de alumno, one is an invitado. None is school
+staff.
+
+So every in-pool record of that category is wrong. That matters more than the
+count suggests, because two of them are padres the rule would currently treat
+as NOT padres — penalising the exact people the policy exists to favour. A
+rule that classifies people wrongly is worse than no rule, so this is a
+correction to make in WordPress before the policy is ever enabled, not
+something to special-case in code.
+
+It also says something about the field as a whole: `caracter` being
+well-formed does not make it accurate. The 90% figure above measures how much
+of it is FILLED. Nobody has yet measured how much of it is RIGHT, and the one
+category anyone has audited came back entirely wrong.
+
+### One more unknown in the same neighbourhood
+
+The player also carries an ACF `estado` (`Habilitado` for 588 of 1105, blank
+for 517). In the current season's pool, 43 of the 96 players on the waiting
+list do NOT have it set. Nothing in this plugin reads that field, so if
+`Habilitado` encodes something like medical clearance or a confirmed
+registration, the captain's candidate list is currently offering people it
+should not. Its meaning is an open question for the process owner — recorded
+here rather than guessed at.
 
 ## Scope of this slice (slice 0)
 
