@@ -36,9 +36,21 @@ namespace EntreRedes\Cambios\Calendario;
  * is timezone-invariant by construction — that is what makes it civil. The
  * timezone becomes load-bearing at computeUtc(), which resolves those same
  * plazos to absolute instants. That is the method to use when comparing
- * against a clock, because WordPress hands out UTC (current_time('mysql')),
- * and comparing a Buenos Aires civil deadline against a UTC now is the classic
- * three-hour off-by-one.
+ * against a clock.
+ *
+ * A CORRECTION WORTH FLAGGING EXPLICITLY, because an earlier version of this
+ * docblock got it backwards: WordPress's `current_time('mysql')` hands out
+ * the SITE'S LOCAL civil time, NOT UTC — UTC only comes back when the
+ * caller passes the second argument, `current_time('mysql', true)`. See
+ * `Auth\TokenVerifier::verify()`'s own docblock for the concrete incident
+ * that exact confusion caused elsewhere in this codebase (`current_time
+ * ('mysql')` read as UTC, silently shifting "now" by the site's offset).
+ * Comparing a Buenos Aires civil deadline against a *local* `current_time
+ * ('mysql')` string that happens to ALSO be expressed in Buenos Aires time
+ * would actually agree by coincidence; the classic three-hour off-by-one
+ * this class defends against is comparing it against a value that is
+ * genuinely UTC — `time()`, `gmdate()`, or `current_time('mysql', true)` —
+ * without first calling computeUtc().
  *
  * An earlier implementation of this class computed plazos as elapsed seconds
  * from midnight so that $tz would visibly change compute()'s output. It did,
@@ -101,9 +113,12 @@ final class PlazosCalculator {
      * The same four plazos as compute(), resolved to absolute UTC instants.
      *
      * Use this — not compute() — whenever a plazo is compared against a clock
-     * or persisted next to UTC timestamps. WordPress's current_time('mysql')
-     * returns UTC, so comparing it against compute()'s civil output would be
-     * wrong by the zone's offset.
+     * or persisted next to UTC timestamps: every DATETIME column this plugin
+     * persists is UTC (see the README), and `time()` / `gmdate()` /
+     * `current_time('mysql', true)` are all UTC too — comparing any of them
+     * against compute()'s civil output would be wrong by the zone's offset.
+     * (`current_time('mysql')` WITHOUT that second argument is NOT UTC — it
+     * is the site's local civil time — see class docblock's correction.)
      *
      * Unlike compute(), this output DOES differ per timezone: the same civil
      * deadline is a different real-world instant in each zone.

@@ -449,7 +449,11 @@ class InitialSchema {
     private static function seedSettings( string $p ): void {
         global $wpdb;
 
-        $now = current_time( 'mysql' );
+        // Every DATETIME column this plugin persists is UTC — see this
+        // plugin's README ("Datetime columns are UTC") — so `$gmt = true` is
+        // mandatory here, never the default `current_time('mysql')`, which
+        // hands out the site's LOCAL civil time instead.
+        $now = current_time( 'mysql', true );
         foreach ( self::SEED_DEFAULTS as $key => $value ) {
             $wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
                 $wpdb->prepare(
