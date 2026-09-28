@@ -199,7 +199,20 @@ class SolicitudRepository {
         return $id;
     }
 
-    /** @return array<string, mixed>|null */
+    /**
+     * *** WHY A FAILED READ HERE STILL READS AS "NOT FOUND" *** Every current
+     * caller (`transicionar()` — i.e. `aprobar()`/`rechazar()`/`anular()` —
+     * and `publicarLote()`'s pre-flight loop) treats a `null` return as a
+     * reason to REFUSE: `transicionar()` throws `\RuntimeException`, and
+     * `publicarLote()` aborts the whole lote via `abortarLote()`. Neither
+     * ever treats "not found" as permission to proceed, so misreading a
+     * wpdb-level failure as "not found" here can only ever produce a
+     * wrongful denial — same reasoning as
+     * `Capitania\CapitanRepository::findCapitanVigente()` — and this read is
+     * deliberately NOT routed through `assertReadSucceeded()`.
+     *
+     * @return array<string, mixed>|null
+     */
     public function findSolicitud( int $id ): ?array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
