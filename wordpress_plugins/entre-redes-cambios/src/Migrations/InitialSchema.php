@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Migrations;
 
 /**
- * Creates (or upgrades) all 3 cambios_ tables.
+ * Creates (or upgrades) all 4 cambios_ tables.
  *
  * Uses dbDelta() for idempotent CREATE TABLE; safe to re-run on every plugin
  * upgrade — dbDelta only alters schema when columns differ.
@@ -78,6 +78,7 @@ class InitialSchema {
             self::sqlCambiosFecha( $p, $charset_collate ),
             self::sqlCambiosFechaPartido( $p, $charset_collate ),
             self::sqlCambiosSettings( $p, $charset_collate ),
+            self::sqlCambiosCapitan( $p, $charset_collate ),
         ];
 
         $results = [];
@@ -184,6 +185,53 @@ class InitialSchema {
   setting_value TEXT NOT NULL,
   updated_at DATETIME NOT NULL,
   PRIMARY KEY  (setting_key)
+) ENGINE=InnoDB $charset;";
+    }
+
+    /**
+     * cambios_capitan — one row per captaincy DESIGNATION, not per team.
+     * `revocado_at IS NULL` marks the currently-vigent row for a
+     * `(season_id, team_id)` pair; every prior designation for that pair is
+     * left in place with `revocado_at` set, so the table doubles as the
+     * captaincy's audit history.
+     *
+     * `player_id` is the `sp_player` post id — the same value the prode JWT
+     * carries as its `player_id` claim (see Auth\TokenVerifier), which is
+     * exactly what makes `Capitania\CapitanAuthorizer` able to compare a
+     * token's claim against this table directly, with no extra lookup.
+     *
+     * *** WHY THIS IS NOT A UNIQUE KEY ***
+     * The business rule is "at most one VIGENT captain per (season_id,
+     * team_id)" — but that is not expressible as `UNIQUE (season_id,
+     * team_id)`, because the table is also the history: a revoked row for the
+     * same pair must be allowed to coexist with the new vigent one. Scoping
+     * the unique key to `revocado_at` (e.g. `UNIQUE (season_id, team_id,
+     * revocado_at)`) does not work either — MySQL treats every NULL in a
+     * UNIQUE index as distinct from every other NULL, so it would allow
+     * multiple simultaneously-vigent rows for the same team, defeating the
+     * whole point. The invariant is therefore defended the same way
+     * Calendario\FechaRepository defends `uq_season_orden`: a SELECT-then-
+     * insert guard in Capitania\CapitanRepository::designateCapitan() (find and
+     * revoke the current vigent row, in a transaction, before inserting the
+     * new one), verified by a test that asserts the PROPERTY ("never two
+     * vigent rows for the same pair"), not a constraint. And — same as every
+     * other table in this file — the SQLite test shim drops every KEY/INDEX
+     * line below, so `idx_season_team` and `idx_player` are query-plan
+     * optimizations only; nothing about the uniqueness invariant depends on
+     * them being enforced by the test DB.
+     */
+    private static function sqlCambiosCapitan( string $p, string $charset ): string {
+        return "CREATE TABLE {$p}cambios_capitan (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  season_id BIGINT UNSIGNED NOT NULL,
+  team_id BIGINT UNSIGNED NOT NULL,
+  player_id BIGINT UNSIGNED NOT NULL,
+  designado_por BIGINT UNSIGNED NULL DEFAULT NULL,
+  designado_at DATETIME NOT NULL,
+  revocado_at DATETIME NULL DEFAULT NULL,
+  PRIMARY KEY  (id),
+  KEY idx_season_team (season_id, team_id),
+  KEY idx_player (player_id)
 ) ENGINE=InnoDB $charset;";
     }
 
