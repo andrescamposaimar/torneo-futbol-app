@@ -229,6 +229,36 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertNotContains( $idOtraSeason, array_map( static fn ( $r ) => (int) $r['id'], array_merge( $pendientes, $aprobadas ) ) );
     }
 
+    /**
+     * listByEquipo() backs the CAPTAIN's own request tray (slice 4d's
+     * `GET /cambios/solicitudes`) — unlike listPendientes()/listAprobadas(),
+     * which exist for the PROCESS OWNER's tray and are scoped to one estado
+     * at a time, a captain must see every solicitud their team has ever
+     * made, in ANY estado.
+     */
+    public function test_list_by_equipo_returns_every_estado_for_the_team_only(): void {
+        $now = '2026-05-27 10:00:00';
+
+        $idA          = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 1, 888, 5, time() ), 777, Dictamen::from( [] ), $now );
+        $idB          = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 2, 889, 5, time() ), 777, Dictamen::from( [] ), $now );
+        $idOtroEquipo = $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 200, 3, 890, 5, time() ), 777, Dictamen::from( [] ), $now );
+
+        $this->repo->aprobar( $idB, 42, null, $now );
+        $this->repo->rechazar( $idA, 42, 'no cumple', $now );
+
+        $solicitudes = $this->repo->listByEquipo( self::SEASON_ID, 100 );
+
+        $this->assertCount( 2, $solicitudes );
+        $ids = array_map( static fn ( $r ) => (int) $r['id'], $solicitudes );
+        $this->assertContains( $idA, $ids );
+        $this->assertContains( $idB, $ids );
+        $this->assertNotContains( $idOtroEquipo, $ids );
+
+        $estados = array_column( $solicitudes, 'estado' );
+        sort( $estados );
+        $this->assertSame( [ EstadoSolicitud::APROBADA, EstadoSolicitud::RECHAZADA ], $estados );
+    }
+
     // -------------------------------------------------------------------------
     // aprobar() / rechazar() / anular() — the estado machine
     // -------------------------------------------------------------------------

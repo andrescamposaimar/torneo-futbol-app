@@ -212,6 +212,40 @@ class SolicitudRepository {
     }
 
     /**
+     * EVERY solicitud of ($seasonId, $teamId), in ANY estado, ordered the
+     * same way as listByEstado() — this is what a captain's own request tray
+     * needs (slice 4d's `GET /cambios/solicitudes`): unlike listPendientes()/
+     * listAprobadas(), which exist for the PROCESS OWNER's tray and are
+     * therefore scoped to one estado at a time, a captain wants to see every
+     * solicitud they have ever made for their team, whatever happened to it
+     * since.
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level —
+     *         same "READ FAILURES MUST NEVER READ AS 'NO ROWS'" discipline as
+     *         listByEstado().
+     */
+    public function listByEquipo( int $seasonId, int $teamId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}cambios_solicitud
+                  WHERE season_id = %d AND team_id = %d
+                  ORDER BY solicitada_at ASC, id ASC",
+                $seasonId,
+                $teamId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listByEquipo', [ 'season_id' => $seasonId, 'team_id' => $teamId ] );
+
+        return $rows;
+    }
+
+    /**
      * Flips a `pendiente` (or still-`aprobada`) solicitud to `aprobada` —
      * see class docblock, "APROBAR IS NOT PUBLICAR": this NEVER touches
      * `PlazaRepository`. No ocupación is opened or closed here.
