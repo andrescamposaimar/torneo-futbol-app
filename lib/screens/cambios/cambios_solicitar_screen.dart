@@ -186,47 +186,11 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
               ),
             ),
             Expanded(
-              child: Consumer(
-                builder: (context, ref, _) {
-                  final state = ref.watch(cambiosCandidatosControllerProvider(_candidatosParams));
-                  return switch (state) {
-                    CambiosCandidatosLoading() =>
-                      const LoadingSeccion(texto: 'Buscando candidatos...'),
-                    CambiosCandidatosError() => _CandidatosErrorView(
-                        onRetry: () => ref
-                            .read(cambiosCandidatosControllerProvider(_candidatosParams).notifier)
-                            .load(query: _searchController.text),
-                      ),
-                    CambiosCandidatosLoaded(:final candidatos) => candidatos.isEmpty
-                        ? const _CandidatosEmptyView()
-                        : ListView.builder(
-                            key: const Key('candidatos_list'),
-                            itemCount: candidatos.length,
-                            itemBuilder: (context, i) {
-                              final c = candidatos[i];
-                              final isSelected = _selectedPlayerId == c.playerId;
-                              return ListTile(
-                                key: Key('candidato_${c.playerId}'),
-                                selected: isSelected,
-                                onTap: () => setState(() => _selectedPlayerId = c.playerId),
-                                trailing: isSelected
-                                    ? Icon(Icons.check_circle,
-                                        color: Theme.of(context).colorScheme.primary)
-                                    : const Icon(Icons.radio_button_unchecked),
-                                title: Text(c.nombre),
-                                subtitle: Text(
-                                  [
-                                    if (c.esPadre) 'Padre',
-                                    c.puntaje != null
-                                        ? 'Puntaje: ${c.puntaje}'
-                                        : 'Puntaje: sin datos',
-                                  ].join(' · '),
-                                ),
-                              );
-                            },
-                          ),
-                  };
-                },
+              child: _CandidatosList(
+                params: _candidatosParams,
+                searchQuery: _searchController.text,
+                selectedPlayerId: _selectedPlayerId,
+                onSelect: (playerId) => setState(() => _selectedPlayerId = playerId),
               ),
             ),
           ] else
@@ -301,6 +265,64 @@ class _PlazaHeader extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The candidate list for a `sustitucion` — loading/error/empty/loaded states
+/// of [cambiosCandidatosControllerProvider], plus per-row selection state and
+/// the trailing icon/subtitle. Its own widget (rather than inline in
+/// [CambiosSolicitarScreen]'s `Column`) for the same reason every other
+/// state in this file already got one: [_PlazaHeader], [_FechaGapBanner],
+/// [_VentanaCerradaBanner], [_CandidatosErrorView], [_CandidatosEmptyView].
+class _CandidatosList extends ConsumerWidget {
+  final CambiosCandidatosParams params;
+  final String searchQuery;
+  final int? selectedPlayerId;
+  final ValueChanged<int> onSelect;
+
+  const _CandidatosList({
+    required this.params,
+    required this.searchQuery,
+    required this.selectedPlayerId,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(cambiosCandidatosControllerProvider(params));
+
+    return switch (state) {
+      CambiosCandidatosLoading() => const LoadingSeccion(texto: 'Buscando candidatos...'),
+      CambiosCandidatosError() => _CandidatosErrorView(
+          onRetry: () =>
+              ref.read(cambiosCandidatosControllerProvider(params).notifier).load(query: searchQuery),
+        ),
+      CambiosCandidatosLoaded(:final candidatos) => candidatos.isEmpty
+          ? const _CandidatosEmptyView()
+          : ListView.builder(
+              key: const Key('candidatos_list'),
+              itemCount: candidatos.length,
+              itemBuilder: (context, i) {
+                final c = candidatos[i];
+                final isSelected = selectedPlayerId == c.playerId;
+                return ListTile(
+                  key: Key('candidato_${c.playerId}'),
+                  selected: isSelected,
+                  onTap: () => onSelect(c.playerId),
+                  trailing: isSelected
+                      ? Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary)
+                      : const Icon(Icons.radio_button_unchecked),
+                  title: Text(c.nombre),
+                  subtitle: Text(
+                    [
+                      if (c.esPadre) 'Padre',
+                      c.puntaje != null ? 'Puntaje: ${c.puntaje}' : 'Puntaje: sin datos',
+                    ].join(' · '),
+                  ),
+                );
+              },
+            ),
+    };
   }
 }
 

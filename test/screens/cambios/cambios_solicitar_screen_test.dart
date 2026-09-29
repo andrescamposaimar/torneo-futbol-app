@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -262,6 +264,55 @@ void main() {
         find.byKey(const Key('confirmar_solicitud_button')),
       );
       expect(confirmButton.onPressed, isNull);
+    });
+
+    testWidgets(
+        '_FechaLoadingBanner shows while cambiosFechaAbiertaProvider has not resolved yet '
+        '(FIX 7)', (tester) async {
+      // Unlike _pumpScreen (which always overrides with an already-resolved
+      // Future.value(...) and pumps twice to let it settle before any
+      // assertion), this uses a Completer that never completes during the
+      // test, so the FutureProvider stays in its loading state and
+      // _FechaLoadingBanner (key 'fecha_loading_banner') is actually observed
+      // instead of being settled past before the first expect().
+      final completer = Completer<CambiosFechaAbierta?>();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            cambiosCandidatosControllerProvider(_params)
+                .overrideWith((ref) => _StubCandidatosController(const CambiosCandidatosLoaded(
+                      candidatos: [],
+                      query: '',
+                    ))),
+            cambiosPlantelControllerProvider(_scope).overrideWith((ref) => _StubPlantelController()),
+            cambiosFechaAbiertaProvider(_scope.seasonId).overrideWith((ref) => completer.future),
+          ],
+          child: MaterialApp(
+            home: CambiosSolicitarScreen(
+              seasonId: 7,
+              teamId: 1,
+              plaza: _plaza,
+              tipo: CambiosSolicitudTipo.sustitucion,
+            ),
+          ),
+        ),
+      );
+      await tester.pump(); // one frame only: the future is still pending here.
+
+      expect(find.byKey(const Key('fecha_loading_banner')), findsOneWidget);
+      expect(find.byKey(const Key('fecha_gap_banner')), findsNothing);
+      expect(find.byKey(const Key('ventana_cerrada_banner')), findsNothing);
+
+      final confirmButton = tester.widget<ElevatedButton>(
+        find.byKey(const Key('confirmar_solicitud_button')),
+      );
+      expect(confirmButton.onPressed, isNull);
+
+      // Resolve the Future before the test ends so the FutureProvider does
+      // not leave a dangling subscription across tests.
+      completer.complete(null);
+      await tester.pump();
     });
 
     testWidgets('sustitucion window already closed -> shows the ventana cerrada banner and '

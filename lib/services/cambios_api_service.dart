@@ -12,8 +12,12 @@ import 'prode_api_service.dart';
 /// Thrown by any [CambiosApiService] method on a non-200 response the
 /// transport did not already turn into a more specific exception.
 ///
-/// [code] is the machine-readable `code` from the response body (via
-/// [ProdeApiService.extractErrorCode]) — notably `'no_capitan'` for the 403
+/// [code] is the machine-readable `code` from the response body, extracted by
+/// this class's own private `_extractErrorCode` (a deliberate duplicate of
+/// [ProdeApiService.extractErrorCode]'s logic — that method is
+/// `@visibleForTesting` and scoped to its own library plus tests, so it
+/// cannot be called from here; see `_extractErrorCode`'s own docblock) —
+/// notably `'no_capitan'` for the 403
 /// every captain-facing Cambios endpoint returns when the caller is
 /// authenticated fine but is not the captain of this team/season. A token or
 /// session failure never reaches here as a 403 any more — see
