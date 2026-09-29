@@ -57,7 +57,32 @@ class MigrationRunner {
             update_option( self::DB_VERSION_OPTION, $current );
         }
 
+        self::generateCodeSecret();
         self::checkRuntimeLimits( $eventLog );
+    }
+
+    /**
+     * Generates and persists `credencial_code_secret` — the HMAC key design
+     * D4's Code\RotatingCode::seedFor() derives every credential's
+     * `code_seed` from — exactly once. Subsequent activations are a no-op,
+     * same "generate once, never rotate silently" pattern as
+     * entre-redes-prode's own MigrationRunner::generateDniPepper(): rotating
+     * this secret would invalidate every already-cached client-side seed at
+     * once, which is an operational decision, never an accidental side
+     * effect of reactivating the plugin.
+     */
+    private static function generateCodeSecret(): void {
+        if ( get_option( 'credencial_code_secret' ) ) {
+            return;
+        }
+
+        try {
+            $secret = bin2hex( random_bytes( 32 ) );
+        } catch ( \Exception $e ) {
+            $secret = wp_generate_password( 64, true, true );
+        }
+
+        update_option( 'credencial_code_secret', $secret, false );
     }
 
     /**

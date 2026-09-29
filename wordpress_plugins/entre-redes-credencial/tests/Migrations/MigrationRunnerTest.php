@@ -109,6 +109,26 @@ class MigrationRunnerTest extends TestCase {
         $this->assertNotEmpty( array_filter( $problems, static fn ( $p ) => str_contains( $p, 'post_max_size' ) ) );
     }
 
+    public function test_run_generates_a_code_secret_when_none_exists(): void {
+        delete_option( 'credencial_code_secret' );
+
+        MigrationRunner::run( new InMemoryEventLog() );
+
+        $secret = get_option( 'credencial_code_secret' );
+        $this->assertIsString( $secret );
+        $this->assertNotSame( '', $secret );
+    }
+
+    public function test_run_never_regenerates_an_existing_code_secret(): void {
+        MigrationRunner::run( new InMemoryEventLog() );
+        $first = get_option( 'credencial_code_secret' );
+
+        MigrationRunner::run( new InMemoryEventLog() );
+        $second = get_option( 'credencial_code_secret' );
+
+        $this->assertSame( $first, $second );
+    }
+
     public function test_run_never_throws_even_when_runtime_limits_are_low(): void {
         // run() reads the REAL php.ini via the default ini_get-backed reader —
         // this only pins that run() completes and updates the version option
