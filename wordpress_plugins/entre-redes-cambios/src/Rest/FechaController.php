@@ -28,15 +28,13 @@ use EntreRedes\Cambios\Observability\EventLog;
  * the first place. Identity alone (a valid, non-revoked Prode session) is
  * enough.
  *
- * *** "THE OPEN FECHA" IS THE EARLIEST UNRESOLVED ONE, REUSING THE SAME
- * NOTION OF "RESOLVED" `Calendario\BoundedFechaCounter` ALREADY USES ***
- * A fecha counts as resolved when its `estado` is `jugada` or `dirimida` —
- * see `BoundedFechaCounter::countTotalResolvedFechas()`'s own private
- * predicate, which this controller mirrors exactly rather than writing a
- * second "what counts as resolved" definition that could drift from it.
- * `FechaRepository::listBySeason()` already returns rows ordered by `orden`
- * ASC, so the first row that is NOT resolved is, by construction, the
- * earliest one — no extra sort needed here.
+ * *** "THE OPEN FECHA" IS THE EARLIEST UNRESOLVED ONE *** "Resolved" has
+ * exactly ONE definition in this codebase — `FechaRepository::esResuelta()`,
+ * backed by `FechaRepository::ESTADOS_RESUELTOS` — and this controller calls
+ * that predicate rather than holding a second copy of the estado list that
+ * could drift from it. `FechaRepository::listBySeason()` already returns
+ * rows ordered by `orden` ASC, so the first row that is NOT resolved is, by
+ * construction, the earliest one — no extra sort needed here.
  *
  * *** AN EMPTY ANSWER IS A NORMAL 200, NEVER A 404 OR AN ERROR *** — "the
  * season is over" or "nothing is scheduled yet" are real states the screen
@@ -68,15 +66,6 @@ use EntreRedes\Cambios\Observability\EventLog;
 class FechaController {
 
     use HandlesCapitanAuthorization;
-
-    /**
-     * The only `cambios_fecha.estado` values that count as resolved — see
-     * class docblock. Kept in lockstep with
-     * `Calendario\BoundedFechaCounter::countTotalResolvedFechas()`'s own
-     * private predicate; if that list ever changes, this one must change
-     * with it.
-     */
-    private const ESTADOS_RESUELTOS = [ 'jugada', 'dirimida' ];
 
     private CapitanAuthorizer $authorizer;
     private FechaRepository $fechaRepository;
@@ -186,7 +175,7 @@ class FechaController {
      */
     private function fechaAbiertaDe( int $seasonId ): ?array {
         foreach ( $this->fechaRepository->listBySeason( $seasonId ) as $fecha ) {
-            if ( ! in_array( (string) ( $fecha['estado'] ?? '' ), self::ESTADOS_RESUELTOS, true ) ) {
+            if ( ! FechaRepository::esResuelta( (string) ( $fecha['estado'] ?? '' ) ) ) {
                 return $fecha;
             }
         }

@@ -103,11 +103,34 @@ class FechaRepository {
      */
     private const VALID_ESTADOS = [ 'programada', 'jugada', 'dirimida', 'suspendida' ];
 
+    /**
+     * The `cambios_fecha.estado` values that count as RESOLVED — the single
+     * definition of that business rule in this codebase. Every consumer that
+     * needs to know "has this fecha already happened" calls `esResuelta()`
+     * below instead of holding its own copy of this list:
+     * `countResolvedFechasSince()`'s own SQL builds its `IN (...)` clause
+     * from this constant (via `prepare()` placeholders, never a hardcoded
+     * SQL literal), and `Calendario\BoundedFechaCounter` /
+     * `Rest\FechaController` both call `esResuelta()`. Change the list here,
+     * once, and every caller moves with it.
+     */
+    public const ESTADOS_RESUELTOS = [ 'jugada', 'dirimida' ];
+
     private \wpdb $wpdb;
 
     public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
         $this->wpdb     = $wpdb;
         $this->eventLog = $eventLog;
+    }
+
+    /**
+     * Whether $estado counts as RESOLVED — see ESTADOS_RESUELTOS's docblock.
+     * The single predicate every caller in this codebase asks instead of
+     * re-implementing the `in_array( ..., [ 'jugada', 'dirimida' ], true )`
+     * comparison itself.
+     */
+    public static function esResuelta( ?string $estado ): bool {
+        return in_array( (string) $estado, self::ESTADOS_RESUELTOS, true );
     }
 
     /**
@@ -536,8 +559,9 @@ class FechaRepository {
     }
 
     /**
-     * Count RESOLVED fechas (estado IN ('jugada','dirimida')) at or after
-     * the `orden` of a given fecha_id. This is the method the rest of the
+     * Count RESOLVED fechas (estado IN ESTADOS_RESUELTOS — see that
+     * constant's docblock) at or after the `orden` of a given fecha_id.
+     * This is the method the rest of the
      * "cambios" feature uses to check the "at least 3 resolved fechas"
      * business minimum — see the slice task description's domain fact #4
      * ("el contador que importa al negocio es cuántas fechas RESUELTAS
@@ -593,14 +617,19 @@ class FechaRepository {
 
         $ordenDesde = (int) $row['orden'];
 
+        // Built from ESTADOS_RESUELTOS, never a hardcoded SQL literal — see
+        // that constant's docblock — so this stays in lockstep with
+        // esResuelta() by construction rather than by two people remembering
+        // to edit both.
+        $placeholders = implode( ', ', array_fill( 0, count( self::ESTADOS_RESUELTOS ), '%s' ) );
+
         $count = $wpdb->get_var(
             $wpdb->prepare(
                 "SELECT COUNT(*) FROM {$p}cambios_fecha
                   WHERE season_id = %d
                     AND orden >= %d
-                    AND estado IN ('jugada','dirimida')",
-                $seasonId,
-                $ordenDesde
+                    AND estado IN ({$placeholders})",
+                array_merge( [ $seasonId, $ordenDesde ], self::ESTADOS_RESUELTOS )
             )
         );
 

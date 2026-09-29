@@ -432,6 +432,43 @@ class FechaRepositoryTest extends TestCase {
         $this->assertSame( 2, $this->repo->countResolvedFechasSince( 359, $idA ) );
     }
 
+    /**
+     * The test that actually catches "resolved" drifting apart between its
+     * two implementations: for EVERY value in the estado vocabulary, the SQL
+     * path (`countResolvedFechasSince()`, whose `IN (...)` clause is built
+     * from `FechaRepository::ESTADOS_RESUELTOS`) and the PHP path
+     * (`FechaRepository::esResuelta()`) must classify a fecha in that estado
+     * identically. A test that only checked today's two resolved values
+     * against today's constant would pass whether or not the two paths share
+     * a definition — this one fails the moment a future estado is added to
+     * one path and not the other.
+     *
+     * @dataProvider estadoVocabularyProvider
+     */
+    public function test_sql_path_and_php_path_agree_on_every_estado( string $estado ): void {
+        $idA = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $this->repo->setEstadoManual( $idA, $estado, null, '2026-05-30 20:00:00' );
+
+        $countedAsResolved = 1 === $this->repo->countResolvedFechasSince( 359, $idA );
+
+        $this->assertSame(
+            FechaRepository::esResuelta( $estado ),
+            $countedAsResolved,
+            "estado '{$estado}': countResolvedFechasSince() and esResuelta() disagree."
+        );
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function estadoVocabularyProvider(): array {
+        return [
+            'programada' => [ 'programada' ],
+            'jugada'     => [ 'jugada' ],
+            'dirimida'   => [ 'dirimida' ],
+            'suspendida' => [ 'suspendida' ],
+        ];
+    }
+
     // -------------------------------------------------------------------------
     // orden uniqueness under reordering
     // -------------------------------------------------------------------------
