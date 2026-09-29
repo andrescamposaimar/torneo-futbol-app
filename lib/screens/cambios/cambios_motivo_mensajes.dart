@@ -33,7 +33,13 @@ String cambiosMotivoMensaje(String codigo) {
     case 'fuera_de_plazo':
       return 'El pedido se hizo fuera del plazo permitido (revisá los días de cierre del cambio o del regreso).';
     case 'plaza_sin_ocupacion_vigente':
-      return 'Esta plaza no tiene a nadie ocupándola actualmente, así que no hay de quién pedir el regreso.';
+      // Tipo-neutral wording deliberately: this rule fires for BOTH a
+      // `regreso` and a `sustitucion` (see PlazaConOcupacionVigente.php's
+      // docblock, "Applies to BOTH tipos"), so the sentence must not name
+      // either request type — the same convention already used below for
+      // 'plaza_cerrada' and 'fuera_de_plazo', the other two codes that also
+      // apply to both tipos.
+      return 'Esta plaza no tiene a nadie ocupándola actualmente, así que el pedido no se puede evaluar.';
     default:
       return 'El pedido no cumple con una de las reglas del reglamento.';
   }
