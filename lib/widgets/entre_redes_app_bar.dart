@@ -11,11 +11,16 @@ class EntreRedesAppBar extends ConsumerWidget implements PreferredSizeWidget {
   final bool? centerTitle;
   final PreferredSizeWidget? bottom;
 
+  /// Trailing app bar actions (e.g. a logout button). Null by default, same
+  /// as the plain [AppBar] this wraps — most callers have none.
+  final List<Widget>? actions;
+
   const EntreRedesAppBar({
     super.key,
     required this.title,
     this.centerTitle,
     this.bottom,
+    this.actions,
   });
 
   @override
@@ -36,6 +41,7 @@ class EntreRedesAppBar extends ConsumerWidget implements PreferredSizeWidget {
       title: Text(title),
       centerTitle: centerTitle,
       bottom: bottom,
+      actions: actions,
     );
   }
 
