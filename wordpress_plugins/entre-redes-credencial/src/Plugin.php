@@ -88,6 +88,24 @@ final class Plugin {
             ( new Rest\RestController( $credencialController, $photoUploadController ) )->register_routes();
         } );
 
+        // "Credenciales > Fotos pendientes" (design D12) — only in wp-admin,
+        // same is_admin() gate as entre-redes-prode/entre-redes-cambios's own
+        // Plugin::boot(), so a plain front-end or REST request never pays for
+        // constructing the admin page or its collaborators.
+        if ( is_admin() ) {
+            add_action( 'admin_menu', static function (): void {
+                global $wpdb;
+
+                $eventLog      = new Observability\WpEventLog();
+                $requests      = new Approval\ApprovalRequestRepository( $wpdb, $eventLog );
+                $media         = new Photo\WpMediaWriter();
+                $reviewService = new Approval\ApprovalReviewService( $requests, $media, $eventLog );
+                $pendingPhotos = new Admin\PendingPhotosPage( $requests, $reviewService, $media );
+
+                ( new Admin\AdminMenu( $pendingPhotos ) )->register();
+            } );
+        }
+
         load_plugin_textdomain(
             'entre-redes-credencial',
             false,

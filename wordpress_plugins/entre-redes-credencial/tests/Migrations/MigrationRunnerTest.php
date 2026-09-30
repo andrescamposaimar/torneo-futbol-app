@@ -129,6 +129,78 @@ class MigrationRunnerTest extends TestCase {
         $this->assertSame( $first, $second );
     }
 
+    // -------------------------------------------------------------------------
+    // Extra (slice 2b): missing PHP extensions the upload pipeline needs
+    // (PhotoValidator's finfo/getimagesizefromstring, GdPhotoReencoder's GD
+    // calls) — same tolerant, non-blocking pattern as the ini limits above.
+    // -------------------------------------------------------------------------
+
+    public function test_all_required_extensions_present_records_nothing(): void {
+        $eventLog = new InMemoryEventLog();
+
+        MigrationRunner::checkRuntimeLimits(
+            $eventLog,
+            static fn ( string $key ): string => match ( $key ) {
+                'memory_limit'        => '256M',
+                'upload_max_filesize' => '8M',
+                'post_max_size'       => '8M',
+                default               => '',
+            },
+            static fn ( string $extension ): bool => true
+        );
+
+        $this->assertFalse( $eventLog->has( 'runtime.limits_low' ) );
+    }
+
+    public function test_a_missing_gd_extension_is_reported(): void {
+        $eventLog = new InMemoryEventLog();
+
+        MigrationRunner::checkRuntimeLimits(
+            $eventLog,
+            static fn ( string $key ): string => match ( $key ) {
+                'memory_limit'        => '256M',
+                'upload_max_filesize' => '8M',
+                'post_max_size'       => '8M',
+                default               => '',
+            },
+            static fn ( string $extension ): bool => 'gd' !== $extension
+        );
+
+        $this->assertTrue( $eventLog->has( 'runtime.limits_low' ) );
+        $problems = $eventLog->last()['contexto']['problems'];
+        $this->assertNotEmpty( array_filter( $problems, static fn ( $p ) => str_contains( $p, 'gd' ) ) );
+    }
+
+    public function test_missing_exif_and_fileinfo_are_both_reported(): void {
+        $eventLog = new InMemoryEventLog();
+
+        MigrationRunner::checkRuntimeLimits(
+            $eventLog,
+            static fn ( string $key ): string => match ( $key ) {
+                'memory_limit'        => '256M',
+                'upload_max_filesize' => '8M',
+                'post_max_size'       => '8M',
+                default               => '',
+            },
+            static fn ( string $extension ): bool => ! in_array( $extension, [ 'exif', 'fileinfo' ], true )
+        );
+
+        $problems = $eventLog->last()['contexto']['problems'];
+        $this->assertNotEmpty( array_filter( $problems, static fn ( $p ) => str_contains( $p, 'exif' ) ) );
+        $this->assertNotEmpty( array_filter( $problems, static fn ( $p ) => str_contains( $p, 'fileinfo' ) ) );
+    }
+
+    public function test_a_missing_extension_never_throws_and_defaults_to_the_real_extension_loaded(): void {
+        // No $extensionLoadedFn injected — must fall back to the real
+        // extension_loaded(), and never throw regardless of this
+        // environment's actual extensions.
+        $eventLog = new InMemoryEventLog();
+
+        MigrationRunner::checkRuntimeLimits( $eventLog );
+
+        $this->addToAssertionCount( 1 ); // Reaching here without a fatal is the assertion.
+    }
+
     public function test_run_never_throws_even_when_runtime_limits_are_low(): void {
         // run() reads the REAL php.ini via the default ini_get-backed reader —
         // this only pins that run() completes and updates the version option

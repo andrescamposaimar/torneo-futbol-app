@@ -194,4 +194,226 @@ final class ApprovalRequestRepository {
             )
         );
     }
+
+    // -------------------------------------------------------------------------
+    // Slice 2b: design D11 approve/reject.
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array{id:int, type:string, target_player_id:?int, requested_by:int, status:string, attachment_id:?int, review_note:?string, reviewed_by:?int, reviewed_at:?string, created_at:string}|null
+     */
+    public function findById( int $id ): ?array {
+        $p   = $this->wpdb->prefix;
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare( "SELECT * FROM {$p}credencial_approval_request WHERE id = %d", $id )
+        );
+
+        if ( null === $row ) {
+            return null;
+        }
+
+        return [
+            'id'               => (int) $row['id'],
+            'type'             => (string) $row['type'],
+            'target_player_id' => null === $row['target_player_id'] ? null : (int) $row['target_player_id'],
+            'requested_by'     => (int) $row['requested_by'],
+            'status'           => (string) $row['status'],
+            'attachment_id'    => null === $row['attachment_id'] ? null : (int) $row['attachment_id'],
+            'review_note'      => $row['review_note'] ?? null,
+            'reviewed_by'      => null === ( $row['reviewed_by'] ?? null ) ? null : (int) $row['reviewed_by'],
+            'reviewed_at'      => $row['reviewed_at'] ?? null,
+            'created_at'       => (string) $row['created_at'],
+        ];
+    }
+
+    /**
+     * Design D11 step (e), the CLAIM: `UPDATE ... SET status='approved',
+     * attachment_id=?, reviewed_by=?, reviewed_at=NOW() WHERE id=? AND
+     * status='pending'`. Returns true only when exactly this call moved the
+     * row from pending to approved — false means a concurrent run already
+     * decided it (approved OR rejected); the caller re-reads to find out
+     * which (design: "0 rows -> re-read the request").
+     */
+    public function claimApproval( int $id, int $reviewerUserId, int $attachmentId, int $now ): bool {
+        $p      = $this->wpdb->prefix;
+        $nowSql = gmdate( 'Y-m-d H:i:s', $now );
+
+        $affected = $this->wpdb->query(
+            $this->wpdb->prepare(
+                "UPDATE {$p}credencial_approval_request
+                    SET status = 'approved', attachment_id = %d, reviewed_by = %d, reviewed_at = %s
+                  WHERE id = %d AND status = 'pending'",
+                $attachmentId,
+                $reviewerUserId,
+                $nowSql,
+                $id
+            )
+        );
+
+        if ( false === $affected ) {
+            $this->eventLog->record( 'approve.claim_query_failed', [ 'request_id' => $id, 'db_error' => $this->wpdb->last_error ] );
+
+            throw new ApprovalPersistenceException( "Could not run the approval claim for request {$id}." );
+        }
+
+        return $affected > 0;
+    }
+
+    /**
+     * Publish-tail step (f).2: re-points an already-approved row at a
+     * different attachment (e.g. its original attachment vanished and had to
+     * be re-created). Unconditional by design — unlike claimApproval(), there
+     * is no pending/approved race to guard here; only the tail itself calls
+     * this, one player-keyed run at a time.
+     */
+    public function setAttachmentId( int $id, int $attachmentId ): void {
+        $p = $this->wpdb->prefix;
+
+        $this->wpdb->query(
+            $this->wpdb->prepare(
+                "UPDATE {$p}credencial_approval_request SET attachment_id = %d WHERE id = %d",
+                $attachmentId,
+                $id
+            )
+        );
+    }
+
+    /**
+     * Design D11 reject: `UPDATE ... SET status='rejected', reviewed_by,
+     * reviewed_at, review_note WHERE id=? AND status='pending'`. Returns
+     * false on 0 rows ("already decided" — a no-op, design: "Nothing else is
+     * touched").
+     */
+    public function rejectPending( int $id, int $reviewerUserId, ?string $note, int $now ): bool {
+        $p      = $this->wpdb->prefix;
+        $nowSql = gmdate( 'Y-m-d H:i:s', $now );
+
+        $affected = $this->wpdb->query(
+            $this->wpdb->prepare(
+                "UPDATE {$p}credencial_approval_request
+                    SET status = 'rejected', reviewed_by = %d, reviewed_at = %s, review_note = %s
+                  WHERE id = %d AND status = 'pending'",
+                $reviewerUserId,
+                $nowSql,
+                $note ?? '',
+                $id
+            )
+        );
+
+        if ( false === $affected ) {
+            $this->eventLog->record( 'reject.query_failed', [ 'request_id' => $id, 'db_error' => $this->wpdb->last_error ] );
+
+            throw new ApprovalPersistenceException( "Could not run the reject for request {$id}." );
+        }
+
+        return $affected > 0;
+    }
+
+    /** The pending photo bytes for $requestId (design D8), or null once purged. */
+    public function getBlobBinary( int $requestId ): ?string {
+        $p   = $this->wpdb->prefix;
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare( "SELECT photo_binary FROM {$p}credencial_approval_blob WHERE request_id = %d", $requestId )
+        );
+
+        return null === $row ? null : (string) $row['photo_binary'];
+    }
+
+    /**
+     * Design D11 step (g): purges the blob once a request is decided (or
+     * already published). A purge failure is logged, never thrown — losing a
+     * blob AFTER the decision it backed is recorded does not undo that
+     * decision (design: "A purge failure is logged").
+     */
+    public function deleteBlob( int $requestId ): void {
+        $p = $this->wpdb->prefix;
+
+        $ok = $this->wpdb->query(
+            $this->wpdb->prepare( "DELETE FROM {$p}credencial_approval_blob WHERE request_id = %d", $requestId )
+        );
+
+        if ( false === $ok ) {
+            $this->eventLog->record( 'approve.blob_purge_failed', [ 'request_id' => $requestId, 'db_error' => $this->wpdb->last_error ] );
+        }
+    }
+
+    /**
+     * Design D12: every pending request of $type, oldest first — the "Fotos
+     * pendientes" admin page's Pending rows.
+     *
+     * @return array<int, array{id:int, target_player_id:?int, requested_by:int, created_at:string}>
+     */
+    public function findPendingByType( string $type ): array {
+        $p    = $this->wpdb->prefix;
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                "SELECT id, target_player_id, requested_by, created_at FROM {$p}credencial_approval_request
+                  WHERE type = %s AND status = 'pending' ORDER BY created_at ASC",
+                $type
+            )
+        );
+
+        return array_map(
+            static fn( array $row ): array => [
+                'id'               => (int) $row['id'],
+                'target_player_id' => null === $row['target_player_id'] ? null : (int) $row['target_player_id'],
+                'requested_by'     => (int) $row['requested_by'],
+                'created_at'       => (string) $row['created_at'],
+            ],
+            $rows
+        );
+    }
+
+    /**
+     * Distinct player ids with at least one approved $type request — the
+     * Admin\PendingPhotosPage "Approved, not yet published" list iterates
+     * these and asks isUnpublished() (a media-aware caller check, design
+     * D11/D12 rev 8) per player, rather than trying to express that
+     * cross-table check in one query here.
+     *
+     * @return int[]
+     */
+    public function findApprovedPlayerIds( string $type ): array {
+        $p    = $this->wpdb->prefix;
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                "SELECT DISTINCT target_player_id FROM {$p}credencial_approval_request
+                  WHERE type = %s AND status = 'approved'",
+                $type
+            )
+        );
+
+        return array_map( static fn( array $row ): int => (int) $row['target_player_id'], $rows );
+    }
+
+    /**
+     * Every $type request that still has a blob row — backs
+     * Approval\ApprovalReviewService::sweepBlobs() (design D11 step (g): "On
+     * every Fotos pendientes load, a sweep deletes blobs of requests that are
+     * neither pending nor isUnpublished"). The sweep itself decides which of
+     * these to purge; this method only reports what still has bytes to purge.
+     *
+     * @return array<int, array{id:int, status:string, target_player_id:?int}>
+     */
+    public function findRequestIdsWithBlob( string $type ): array {
+        $p    = $this->wpdb->prefix;
+        $rows = $this->wpdb->get_results(
+            $this->wpdb->prepare(
+                "SELECT r.id AS id, r.status AS status, r.target_player_id AS target_player_id
+                   FROM {$p}credencial_approval_request r
+                   INNER JOIN {$p}credencial_approval_blob b ON b.request_id = r.id
+                  WHERE r.type = %s",
+                $type
+            )
+        );
+
+        return array_map(
+            static fn( array $row ): array => [
+                'id'               => (int) $row['id'],
+                'status'           => (string) $row['status'],
+                'target_player_id' => null === $row['target_player_id'] ? null : (int) $row['target_player_id'],
+            ],
+            $rows
+        );
+    }
 }
