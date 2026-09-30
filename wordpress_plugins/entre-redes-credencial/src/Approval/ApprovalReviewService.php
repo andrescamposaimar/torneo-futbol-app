@@ -274,11 +274,6 @@ final class ApprovalReviewService {
         try {
             $this->media->setFeaturedImage( $playerId, $attachmentId );
 
-            $sha = $this->media->getAttachmentSha256( $attachmentId );
-            if ( null !== $sha && $sha !== $this->media->getPlayerSha256Meta( $playerId ) ) {
-                $this->media->setPlayerSha256Meta( $playerId, $sha );
-            }
-
             do_action( 'save_post_sp_player', $playerId );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'approve.publish_failed', [

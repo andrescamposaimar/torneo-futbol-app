@@ -87,7 +87,6 @@ class ApprovalReviewServiceTest extends TestCase {
         $this->assertNotNull( $attachmentId );
         $this->assertSame( $attachmentId, $this->media->getFeaturedImageId( self::PLAYER ) );
         $this->assertTrue( $this->media->metadataWasGenerated( $attachmentId ) );
-        $this->assertSame( hash( 'sha256', 'photo-bytes' ), $this->media->getPlayerSha256Meta( self::PLAYER ) );
     }
 
     public function test_approve_fires_the_cache_invalidation_hook(): void {

@@ -34,12 +34,7 @@ interface MediaWriter {
     /**
      * Design D11 step (b): uploads $binary as a NEW, unlinked attachment with
      * a random 128-bit hex filename (never player-derived), tagged with meta
-     * `_credencial_request_id = $requestId`. Also records the sha256 of
-     * $binary as attachment meta `_credencial_sha256` (this plugin's own
-     * source of truth for "what does the live thumbnail's sha compare
-     * against", read back via getAttachmentSha256() — never re-derived from
-     * the approval blob, which may already be purged by the time the publish
-     * tail retries).
+     * `_credencial_request_id = $requestId`.
      *
      * @throws MediaWriteException On any failure. If the attachment insert
      *         fails after the file was already written, the file is deleted
@@ -66,12 +61,4 @@ interface MediaWriter {
 
     /** `set_post_thumbnail($playerId, $attachmentId)` (design D11 step (f).3). */
     public function setFeaturedImage( int $playerId, int $attachmentId ): void;
-
-    /** The sha256 recorded on $attachmentId at createAttachment() time, or null. */
-    public function getAttachmentSha256( int $attachmentId ): ?string;
-
-    /** The player's own `_credencial_sha256` meta (design D11 step (f).4), or null. */
-    public function getPlayerSha256Meta( int $playerId ): ?string;
-
-    public function setPlayerSha256Meta( int $playerId, string $sha256 ): void;
 }

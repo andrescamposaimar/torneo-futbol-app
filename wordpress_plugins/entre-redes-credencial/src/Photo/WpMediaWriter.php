@@ -15,16 +15,10 @@ use EntreRedes\Credencial\Photo\Exception\MediaWriteException;
  * `_credencial_request_id` (meta, design D11 step (b)) tags an unlinked
  * attachment with the approval request that created it — the ONLY way
  * Approval\ApprovalReviewService finds it again across retries.
- * `_credencial_sha256` (meta) is written on the ATTACHMENT at createAttachment()
- * time and read back by the publish tail, rather than re-hashed from the
- * approval blob — the blob may already be purged by the time a "Finish
- * publishing" retry runs (design D11 step (g): the blob is purged once the
- * request is decided, independently of whether the tail already succeeded).
  */
 final class WpMediaWriter implements MediaWriter {
 
     private const META_REQUEST_ID = '_credencial_request_id';
-    private const META_SHA256     = '_credencial_sha256';
 
     public function findAttachmentsTaggedWithRequest( int $requestId ): array {
         $ids = get_posts( [
@@ -73,7 +67,6 @@ final class WpMediaWriter implements MediaWriter {
         }
 
         update_post_meta( $attachmentId, self::META_REQUEST_ID, $requestId );
-        update_post_meta( $attachmentId, self::META_SHA256, hash( 'sha256', $binary ) );
 
         return $attachmentId;
     }
@@ -114,22 +107,6 @@ final class WpMediaWriter implements MediaWriter {
 
     public function setFeaturedImage( int $playerId, int $attachmentId ): void {
         set_post_thumbnail( $playerId, $attachmentId );
-    }
-
-    public function getAttachmentSha256( int $attachmentId ): ?string {
-        $sha = get_post_meta( $attachmentId, self::META_SHA256, true );
-
-        return '' === $sha ? null : (string) $sha;
-    }
-
-    public function getPlayerSha256Meta( int $playerId ): ?string {
-        $sha = get_post_meta( $playerId, self::META_SHA256, true );
-
-        return '' === $sha ? null : (string) $sha;
-    }
-
-    public function setPlayerSha256Meta( int $playerId, string $sha256 ): void {
-        update_post_meta( $playerId, self::META_SHA256, $sha256 );
     }
 
     private function deleteUploadedFile( string $file ): void {
