@@ -72,6 +72,20 @@ if ( ! class_exists( 'wpdb' ) ) {
             $sql = preg_replace( '/\bINSERT\s+IGNORE\b/i', 'INSERT OR IGNORE', $sql );
             // MySQL `START TRANSACTION` → SQLite `BEGIN`.
             $sql = preg_replace( '/^\s*START\s+TRANSACTION\b/i', 'BEGIN', $sql );
+            // Credencial-specific (design D4): IssuanceRepository's
+            // "ensure a row exists" idiom is EXACTLY
+            // `INSERT ... ON DUPLICATE KEY UPDATE player_id = player_id` — a
+            // deliberate no-op update used only to make the statement
+            // succeed on a duplicate key. SQLite's equivalent is
+            // `ON CONFLICT DO NOTHING` (conflict target is optional for
+            // DO NOTHING since SQLite 3.24). Matched narrowly on this exact
+            // no-op shape so a future call site with a REAL update clause is
+            // never silently swallowed by this translation.
+            $sql = preg_replace(
+                '/\bON DUPLICATE KEY UPDATE\s+player_id\s*=\s*player_id\b/i',
+                'ON CONFLICT DO NOTHING',
+                $sql
+            );
             return $sql;
         }
 
@@ -580,6 +594,24 @@ if ( ! class_exists( 'WP_Error' ) ) {
             $this->message = $message;
             $this->data    = $data;
         }
+
+        // Credencial-plugin addition (slice 1b, Rest\CredencialController):
+        // the real WP_Error stores code/message/data behind these accessor
+        // methods, not public properties — CredencialController must call
+        // them to behave correctly against REAL WordPress, not just this
+        // shim's simplified public-property model (which only ever holds
+        // the single error CredencialAuthorizer::authorize() constructs).
+        public function get_error_code(): string {
+            return $this->code;
+        }
+
+        public function get_error_message( string $code = '' ): string {
+            return $this->message;
+        }
+
+        public function get_error_data( string $code = '' ): mixed {
+            return $this->data;
+        }
     }
 }
 
@@ -851,8 +883,29 @@ if ( ! function_exists( 'add_query_arg' ) ) {
 // through the RosterResolverInterface seam (fake resolver injected in tests).
 
 if ( ! function_exists( 'get_the_post_thumbnail_url' ) ) {
+    // Credencial-plugin addition (slice 1b, CredencialService's photo gate):
+    // data-driven via $wp_test_post_thumbnail_urls, keyed by post id, instead
+    // of the shared shim's hardcoded `false` — that default is preserved for
+    // any post id the test never sets. Kept in the SAME global as
+    // has_post_thumbnail() below so a test only ever has to set one array to
+    // control both "does this player have an approved photo" and "what is
+    // its URL".
     function get_the_post_thumbnail_url( int|string $post = 0, mixed $size = 'post-thumbnail' ): string|false {
-        return false;
+        global $wp_test_post_thumbnail_urls;
+
+        return $wp_test_post_thumbnail_urls[ (int) $post ] ?? false;
+    }
+}
+
+if ( ! function_exists( 'has_post_thumbnail' ) ) {
+    // Credencial-plugin addition (slice 1b): a player "has an approved
+    // photo" exactly when get_the_post_thumbnail_url() would return a real
+    // URL for it — same $wp_test_post_thumbnail_urls global, so a test can
+    // never set one without the other silently disagreeing.
+    function has_post_thumbnail( int|string $post = 0 ): bool {
+        global $wp_test_post_thumbnail_urls;
+
+        return false !== ( $wp_test_post_thumbnail_urls[ (int) $post ] ?? false );
     }
 }
 
@@ -885,16 +938,30 @@ if ( ! class_exists( 'WP_Post' ) ) {
         public int $ID;
         public string $post_type;
         public string $post_status;
+        public string $post_title;
+        public string $post_date;
 
-        public function __construct( int $id, string $post_type, string $post_status ) {
+        public function __construct(
+            int $id,
+            string $post_type,
+            string $post_status,
+            string $post_title = '',
+            string $post_date = ''
+        ) {
             $this->ID          = $id;
             $this->post_type   = $post_type;
             $this->post_status = $post_status;
+            $this->post_title  = $post_title;
+            $this->post_date   = $post_date;
         }
     }
 }
 
 if ( ! function_exists( 'get_post' ) ) {
+    // post_title / post_date are credencial-plugin additions (PlayerReader,
+    // slice 1b) on top of the shared shim this file was copied from —
+    // defaulted to '' so the pre-existing ResultChangeListener-style fixtures
+    // (post_type/post_status only) keep working unchanged.
     function get_post( int $post_id ): ?WP_Post {
         global $wp_test_posts;
 
@@ -903,7 +970,13 @@ if ( ! function_exists( 'get_post' ) ) {
             return null;
         }
 
-        return new WP_Post( $post_id, $row['post_type'], $row['post_status'] );
+        return new WP_Post(
+            $post_id,
+            $row['post_type'],
+            $row['post_status'],
+            (string) ( $row['post_title'] ?? '' ),
+            (string) ( $row['post_date'] ?? '' )
+        );
     }
 }
 
