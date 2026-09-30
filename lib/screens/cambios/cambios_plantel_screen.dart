@@ -252,7 +252,7 @@ class _PlazaCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    plaza.tipoLabel,
+                    plaza.titularNombre,
                     style: theme.textTheme.labelLarge
                         ?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.bold),
                   ),
@@ -269,8 +269,6 @@ class _PlazaCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 6),
-              Text('Titular: ${plaza.titularNombre}', style: theme.textTheme.bodyMedium),
-              const SizedBox(height: 2),
               Text(
                 plaza.esTitularElOcupante
                     ? 'El titular está jugando esta plaza.'

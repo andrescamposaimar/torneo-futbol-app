@@ -196,7 +196,7 @@ class DictamenContextAssemblerTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_assemble_builds_a_complete_context_for_a_favorable_sustitucion(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
 
@@ -224,7 +224,7 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     public function test_assemble_never_queries_entrante_data_for_a_regreso(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
 
         $solicitud = SolicitudDeCambio::regreso(
@@ -258,7 +258,7 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     public function test_assemble_throws_when_the_fecha_does_not_exist(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 999999, time() );
 
@@ -273,7 +273,7 @@ class DictamenContextAssemblerTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_assemble_computes_plazos_in_utc_not_civil_time(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
 
         $solicitud = SolicitudDeCambio::regreso( self::SEASON_ID, 100, $plazaId, 5, time() );
@@ -317,7 +317,7 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     public function test_entrante_puntaje_is_null_when_sp_metrics_row_is_missing_entirely(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         // Deliberately no putSpMetrics() call.
 
@@ -353,7 +353,7 @@ class DictamenContextAssemblerTest extends TestCase {
      * @param array<string, mixed> $metrics
      */
     private function assembleWithEntrante( array $metrics ): \EntreRedes\Cambios\Dictamen\DictamenContext {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, $metrics );
 
@@ -374,7 +374,7 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
         $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
 
-        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $plazaA, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $plazaA, 999, 7, 'trunca', '2026-05-01 10:00:00' );
 
@@ -393,11 +393,11 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->seedFecha( 4, self::SEASON_ID, '2026-04-01' );
         $this->seedFecha( 7, self::SEASON_ID, '2026-05-01' );
 
-        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $plazaA, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $plazaA, 999, 7, 'trunca', '2026-05-01 10:00:00' );
 
-        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 222, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 8, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
 
@@ -418,7 +418,7 @@ class DictamenContextAssemblerTest extends TestCase {
         // Only 2 resolved fechas exist in the season (plus fecha 1, seeded
         // 'programada' by setUp() — not resolved, so it does not count).
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         global $wpdb;
         $inflatingFechaRepository = new class( $wpdb, new InMemoryEventLog() ) extends FechaRepository {
@@ -451,7 +451,7 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->seedFecha( 11, self::SEASON_ID, '2026-01-10', 'jugada' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-02-01' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $solicitud = SolicitudDeCambio::regreso( self::SEASON_ID, 100, $plazaId, 5, time() );
         $ctx       = $this->assembler->assemble( $solicitud );
@@ -464,7 +464,7 @@ class DictamenContextAssemblerTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_end_to_end_a_clean_sustitucion_procede(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
@@ -488,7 +488,7 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     public function test_end_to_end_a_sustitucion_over_the_techo_and_out_of_plazo_does_not_procede_with_both_motivos(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
         // A puntaje well above the plaza's techo (3.0, effective techo 3.0).
@@ -532,7 +532,7 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     public function test_entrante_es_padre_is_false_for_a_regreso(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
 
         $solicitud = SolicitudDeCambio::regreso( self::SEASON_ID, 100, $plazaId, 5, time() );
@@ -546,7 +546,7 @@ class DictamenContextAssemblerTest extends TestCase {
         // falls back to its OFF default. A viable padre genuinely exists in
         // the season roster below, but the assembler must never spend the
         // CandidatosResolver query to find it while the policy is off.
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
 
@@ -562,7 +562,7 @@ class DictamenContextAssemblerTest extends TestCase {
     public function test_padres_viables_counts_a_viable_padre_when_the_policy_is_on(): void {
         $this->putSetting( 'prioridad_padres_activa', '1' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
 
@@ -578,7 +578,7 @@ class DictamenContextAssemblerTest extends TestCase {
     public function test_padres_viables_stays_zero_when_the_entrante_is_already_a_padre(): void {
         $this->putSetting( 'prioridad_padres_activa', '1' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] ); // padre entrante
 
@@ -604,7 +604,7 @@ class DictamenContextAssemblerTest extends TestCase {
     public function test_contar_padres_viables_is_never_called_when_the_policy_is_off(): void {
         global $wpdb;
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
 
@@ -630,7 +630,7 @@ class DictamenContextAssemblerTest extends TestCase {
 
         $this->putSetting( 'prioridad_padres_activa', '1' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] ); // padre entrante
 
@@ -656,7 +656,7 @@ class DictamenContextAssemblerTest extends TestCase {
 
         $this->putSetting( 'prioridad_padres_activa', '1' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
 
@@ -689,7 +689,7 @@ class DictamenContextAssemblerTest extends TestCase {
     public function test_the_resolver_and_the_rule_agree_on_the_same_scenario(): void {
         $this->putSetting( 'prioridad_padres_activa', '1' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
 
@@ -737,7 +737,7 @@ class DictamenContextAssemblerTest extends TestCase {
 
         $this->putSetting( 'prioridad_padres_activa', '1' );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID );
         $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] ); // non-padre entrante
 

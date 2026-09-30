@@ -227,7 +227,6 @@ class PlazaRepositoryTest extends TestCase {
             100,
             777,
             Puntaje::fromDecimal( 3.0 ),
-            'campo',
             1,
             '2026-03-01 10:00:00'
         );
@@ -238,7 +237,6 @@ class PlazaRepositoryTest extends TestCase {
         $this->assertNotNull( $plaza );
         $this->assertSame( 777, (int) $plaza['titular_player_id'] );
         $this->assertSame( 6, (int) $plaza['puntaje_techo'] );
-        $this->assertSame( 'campo', (string) $plaza['tipo'] );
 
         $vigente = $this->repo->findOcupacionVigente( $plazaId );
         $this->assertNotNull( $vigente );
@@ -251,12 +249,6 @@ class PlazaRepositoryTest extends TestCase {
         $this->assertSame( 1, $this->countOcupacionesFor( $plazaId ) );
     }
 
-    public function test_open_plaza_rejects_an_invalid_tipo(): void {
-        $this->expectException( \InvalidArgumentException::class );
-
-        $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'banco', 1, '2026-03-01 10:00:00' );
-    }
-
     public function test_open_plaza_rolls_back_when_the_FIRST_insert_fails(): void {
         global $wpdb;
 
@@ -264,7 +256,7 @@ class PlazaRepositoryTest extends TestCase {
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
-            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
             $this->fail( 'Expected PlazaPersistenceException.' );
         } catch ( PlazaPersistenceException $e ) {
             // expected
@@ -321,7 +313,7 @@ class PlazaRepositoryTest extends TestCase {
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
-            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
             $this->fail( 'Expected PlazaPersistenceException.' );
         } catch ( PlazaPersistenceException $e ) {
             // expected
@@ -339,7 +331,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_never_two_vigent_ocupaciones_across_a_chain_of_successions(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
         $this->assertSame( 1, $this->countVigentesFor( $plazaId ) );
@@ -407,7 +399,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_succeed_ocupacion_fails_instead_of_creating_a_second_vigente_when_it_loses_the_close_race(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $racingWpdb = $this->wpdbThatRacesToCloseConcurrently( $wpdb );
         $racingRepo = new PlazaRepository( $racingWpdb, new InMemoryEventLog() );
@@ -440,7 +432,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_find_ocupacion_vigente_throws_when_more_than_one_row_is_vigent(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         // Insert a SECOND vigent ocupación for the same plaza directly —
         // corrupted data no code path reachable through the public API
@@ -477,7 +469,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_find_ocupacion_vigente_throws_when_the_query_fails(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_ocupacion' );
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
@@ -490,7 +482,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_find_ocupacion_vigente_records_a_lectura_fallida_event_before_throwing(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_ocupacion' );
         $failingEventLog = new InMemoryEventLog();
@@ -513,7 +505,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_succeed_ocupacion_closes_the_previous_link_as_reemplazada(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $newId = $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
@@ -533,7 +525,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_closes_the_previous_link_as_trunca(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'trunca', '2026-04-01 10:00:00' );
 
         $cadena = $this->repo->listOcupaciones( $plazaId );
@@ -541,7 +533,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_rejects_regreso_titular_as_a_reason(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->expectException( \InvalidArgumentException::class );
 
@@ -549,7 +541,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_throws_when_the_plaza_has_no_vigent_ocupacion(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->closeEveryVigenteRawSql( $plazaId );
 
         $this->expectException( \RuntimeException::class );
@@ -564,7 +556,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_close_by_regreso_titular_opens_a_link_of_the_titular_not_the_suplente(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 999, 9, 'reemplazada', '2026-05-01 10:00:00' );
 
@@ -581,7 +573,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_by_regreso_titular_is_idempotent_when_titular_already_vigent(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $vigenteBefore = $this->repo->findOcupacionVigente( $plazaId );
 
@@ -599,7 +591,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_by_regreso_titular_throws_when_the_plaza_has_no_vigent_ocupacion(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->closeEveryVigenteRawSql( $plazaId );
 
         $this->expectException( \RuntimeException::class );
@@ -619,7 +611,7 @@ class PlazaRepositoryTest extends TestCase {
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
 
         try {
-            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $failingRepo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
             $this->fail( 'Expected PlazaPersistenceException.' );
         } catch ( PlazaPersistenceException $e ) {
             // expected
@@ -635,7 +627,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_succeed_ocupacion_rolls_back_when_the_new_insert_fails(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsOn( $wpdb, 'insert' );
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
@@ -656,7 +648,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_succeed_ocupacion_rolls_back_when_the_close_update_fails(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsCloseOcupacion( $wpdb );
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
@@ -681,7 +673,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_list_ocupaciones_orders_chronologically_by_fecha_desde_id(): void {
-        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 999, 9, 'reemplazada', '2026-05-01 10:00:00' );
 
@@ -715,7 +707,6 @@ class PlazaRepositoryTest extends TestCase {
             100,
             777,
             Puntaje::fromDecimal( 3.0 ),
-            'campo',
             1,
             '2026-03-01 10:00:00'
         );
@@ -749,18 +740,18 @@ class PlazaRepositoryTest extends TestCase {
         $this->expectException( \InvalidArgumentException::class );
         $this->expectExceptionMessage( 'fecha_desde_id 99999 does not exist in cambios_fecha' );
 
-        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 99999, '2026-03-01 10:00:00' );
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 99999, '2026-03-01 10:00:00' );
     }
 
     public function test_open_plaza_rejects_a_fecha_desde_id_from_another_season(): void {
         $this->expectException( \InvalidArgumentException::class );
         $this->expectExceptionMessage( 'fecha_desde_id 900 belongs to season ' . self::OTHER_SEASON_ID );
 
-        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 900, '2026-03-01 10:00:00' );
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 900, '2026-03-01 10:00:00' );
     }
 
     public function test_succeed_ocupacion_rejects_a_nonexistent_fecha_id(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->expectException( \InvalidArgumentException::class );
         $this->expectExceptionMessage( 'fecha_id 99999 does not exist in cambios_fecha' );
@@ -769,7 +760,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_rejects_a_fecha_id_from_another_season(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->expectException( \InvalidArgumentException::class );
         $this->expectExceptionMessage( 'fecha_id 900 belongs to season ' . self::OTHER_SEASON_ID );
@@ -778,7 +769,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_by_regreso_titular_rejects_a_nonexistent_fecha_id(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $this->expectException( \InvalidArgumentException::class );
@@ -788,7 +779,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_by_regreso_titular_rejects_a_fecha_id_from_another_season(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $this->expectException( \InvalidArgumentException::class );
@@ -802,7 +793,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_open_plaza_records_an_audit_event(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->assertTrue( $this->eventLog->has( 'plaza.abierta' ) );
         $event = $this->eventLog->last();
@@ -813,7 +804,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_records_an_audit_event(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $newId   = $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $this->assertTrue( $this->eventLog->has( 'ocupacion.sucedida' ) );
@@ -826,7 +817,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_by_regreso_titular_records_an_audit_event_on_a_real_change(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $this->repo->closeOcupacionByRegresoTitular( $plazaId, 9, '2026-05-01 10:00:00' );
@@ -838,7 +829,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_by_regreso_titular_records_no_event_on_the_idempotent_no_op(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->repo->closeOcupacionByRegresoTitular( $plazaId, 5, '2026-04-01 10:00:00' );
 
@@ -852,20 +843,8 @@ class PlazaRepositoryTest extends TestCase {
     // EventLog — failure events recorded BEFORE the exception propagates
     // -------------------------------------------------------------------------
 
-    public function test_open_plaza_records_the_failure_event_before_throwing_on_an_invalid_tipo(): void {
-        try {
-            $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'banco', 1, '2026-03-01 10:00:00' );
-            $this->fail( 'Expected InvalidArgumentException.' );
-        } catch ( \InvalidArgumentException $e ) {
-            // expected
-        }
-
-        $this->assertTrue( $this->eventLog->has( 'escritura.fallida' ) );
-        $this->assertSame( 'openPlaza', $this->eventLog->last()['contexto']['operacion'] );
-    }
-
     public function test_succeed_ocupacion_records_the_failure_event_before_throwing_when_no_vigente(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->closeEveryVigenteRawSql( $plazaId );
 
         try {
@@ -889,7 +868,7 @@ class PlazaRepositoryTest extends TestCase {
         $failingRepo = new PlazaRepository( $failingWpdb, $failingEventLog );
 
         try {
-            $failingRepo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+            $failingRepo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
             $this->fail( 'Expected PlazaPersistenceException.' );
         } catch ( PlazaPersistenceException $e ) {
             // expected
@@ -907,7 +886,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_undo_last_ocupacion_deletes_the_last_link_and_reopens_the_previous_one(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $newId   = $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $this->repo->undoLastOcupacion( $plazaId, '2026-04-02 10:00:00' );
@@ -926,7 +905,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_undo_last_ocupacion_refuses_a_chain_of_a_single_genesis_link(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->expectException( \RuntimeException::class );
         $this->expectExceptionMessage( 'has only its genesis ocupación' );
@@ -937,7 +916,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_undo_last_ocupacion_rolls_back_when_the_reopen_write_fails(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $failingWpdb = new class( $this->pdoOf( $wpdb ), $wpdb->prefix ) extends \wpdb {
@@ -980,7 +959,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_close_plaza_sets_closed_at(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $this->repo->closePlaza( $plazaId, '2026-04-01 10:00:00' );
 
@@ -1040,7 +1019,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_list_ocupaciones_throws_when_the_query_fails(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY fecha_desde_id ASC' );
         $failingRepo = new PlazaRepository( $failingWpdb, new InMemoryEventLog() );
@@ -1053,7 +1032,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_list_ocupaciones_records_a_lectura_fallida_event_before_throwing(): void {
         global $wpdb;
 
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY fecha_desde_id ASC' );
         $failingEventLog = new InMemoryEventLog();
@@ -1115,8 +1094,8 @@ class PlazaRepositoryTest extends TestCase {
         // 777 is only ever succeeded IN to plazaB here — it must not also
         // be plazaA's titular, or it would (correctly) show up as vigent
         // there too, defeating the "exactly one" assertion below.
-        $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
-        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 100, 888, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 100, 888, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaB, 777, 5, 'reemplazada', '2026-04-01 10:00:00' );
 
         $vigentes = $this->repo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 777 );
@@ -1127,7 +1106,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_list_ocupaciones_vigentes_de_jugador_excludes_the_given_plaza(): void {
-        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $vigentes = $this->repo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 777, $plazaA );
 
@@ -1135,7 +1114,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_list_ocupaciones_vigentes_de_jugador_returns_an_empty_array_when_genuinely_none(): void {
-        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $vigentes = $this->repo->listOcupacionesVigentesDeJugador( self::SEASON_ID, 999999 );
 
@@ -1179,11 +1158,11 @@ class PlazaRepositoryTest extends TestCase {
         // (previously vigent) link ended — so to give player 888 a trunca
         // closure, 888 must first BE the vigent occupant succeeded away,
         // not the incoming player of the succession that produces it.
-        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaA, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaA, 555, 7, 'trunca', '2026-05-01 10:00:00' );
 
-        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaB, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaB, 333, 7, 'reemplazada', '2026-05-01 10:00:00' );
 
@@ -1197,7 +1176,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_list_plazas_con_cierre_truncado_de_jugador_returns_an_empty_array_when_genuinely_none(): void {
-        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $this->repo->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $chains = $this->repo->listPlazasConCierreTruncadoDeJugador( self::SEASON_ID, 888 );
 
@@ -1218,7 +1197,7 @@ class PlazaRepositoryTest extends TestCase {
     public function test_list_plazas_con_cierre_truncado_de_jugador_throws_when_a_chain_fetch_fails(): void {
         global $wpdb;
 
-        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaA, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaA, 555, 7, 'trunca', '2026-05-01 10:00:00' );
 
@@ -1236,7 +1215,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_succeed_ocupacion_within_transaction_applies_the_write_but_logs_nothing(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $newId = $this->repo->succeedOcupacionWithinTransaction( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
 
@@ -1249,7 +1228,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_ocupacion_by_regreso_titular_within_transaction_applies_the_write_but_logs_nothing(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
 
         $newId = $this->repo->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, 5, '2026-05-01 10:00:00' );
@@ -1262,7 +1241,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_ocupacion_by_regreso_titular_within_transaction_is_idempotent_and_logs_nothing(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $vigenteAntes = $this->repo->findOcupacionVigente( $plazaId );
         $newId        = $this->repo->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, 4, '2026-04-01 10:00:00' );
@@ -1280,8 +1259,8 @@ class PlazaRepositoryTest extends TestCase {
      * one whose own write happened to fail.
      */
     public function test_within_transaction_variants_share_an_ambient_transaction_and_roll_back_together(): void {
-        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
-        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 101, 222, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaA = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $plazaB = $this->repo->openPlaza( self::SEASON_ID, 101, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         global $wpdb;
         $wpdb->query( 'START TRANSACTION' );
@@ -1308,7 +1287,7 @@ class PlazaRepositoryTest extends TestCase {
     // -------------------------------------------------------------------------
 
     public function test_succeed_ocupacion_refuses_to_write_over_a_closed_plaza(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->closePlaza( $plazaId, '2026-03-15 10:00:00' );
 
         $this->expectException( \RuntimeException::class );
@@ -1318,7 +1297,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_within_transaction_refuses_to_write_over_a_closed_plaza(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->closePlaza( $plazaId, '2026-03-15 10:00:00' );
 
         $this->expectException( \RuntimeException::class );
@@ -1328,7 +1307,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_ocupacion_by_regreso_titular_refuses_to_write_over_a_closed_plaza(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->closePlaza( $plazaId, '2026-04-15 10:00:00' );
 
@@ -1339,7 +1318,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_close_ocupacion_by_regreso_titular_within_transaction_refuses_to_write_over_a_closed_plaza(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->repo->closePlaza( $plazaId, '2026-04-15 10:00:00' );
 
@@ -1350,7 +1329,7 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     public function test_succeed_ocupacion_on_a_closed_plaza_records_the_failure_event(): void {
-        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->repo->closePlaza( $plazaId, '2026-03-15 10:00:00' );
 
         try {

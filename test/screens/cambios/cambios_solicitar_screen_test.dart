@@ -109,7 +109,6 @@ class _FakeSubmitService extends CambiosApiService {
 
 final _plaza = CambiosPlaza(
   plazaId: 10,
-  tipo: 'campo',
   titularPlayerId: 100,
   titularNombre: 'Juan Pérez',
   ocupantePlayerId: 200,

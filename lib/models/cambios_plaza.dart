@@ -16,10 +16,6 @@ import 'package:flutter/foundation.dart';
 class CambiosPlaza {
   final int plazaId;
 
-  /// `'campo'` or `'suplente'` — kept as the raw wire value; see [tipoLabel]
-  /// for the friendly Spanish label.
-  final String tipo;
-
   final int titularPlayerId;
   final String titularNombre;
 
@@ -34,7 +30,6 @@ class CambiosPlaza {
 
   const CambiosPlaza({
     required this.plazaId,
-    required this.tipo,
     required this.titularPlayerId,
     required this.titularNombre,
     this.ocupantePlayerId,
@@ -44,21 +39,6 @@ class CambiosPlaza {
     this.fechasFaltantesLiberacion,
     this.fechasFaltantesLiberacionIndeterminado = false,
   });
-
-  /// `'campo'` → "Campo", `'suplente'` → "Suplente", anything else → the raw
-  /// value with the first letter capitalized (defensive — never blank).
-  String get tipoLabel {
-    switch (tipo) {
-      case 'campo':
-        return 'Campo';
-      case 'suplente':
-        return 'Suplente';
-      default:
-        return tipo.isEmpty
-            ? 'Plaza'
-            : tipo[0].toUpperCase() + tipo.substring(1);
-    }
-  }
 
   /// Whether this plaza is open for a "pedir regreso" action: someone other
   /// than the titular occupies it, it is not closed, and we KNOW (not just
@@ -73,7 +53,6 @@ class CambiosPlaza {
   factory CambiosPlaza.fromJson(Map<String, dynamic> json) {
     return CambiosPlaza(
       plazaId: (json['plaza_id'] as int?) ?? 0,
-      tipo: (json['tipo'] as String?) ?? '',
       titularPlayerId: (json['titular_player_id'] as int?) ?? 0,
       titularNombre: (json['titular_nombre'] as String?) ?? '',
       ocupantePlayerId: json['ocupante_player_id'] as int?,
@@ -92,7 +71,6 @@ class CambiosPlaza {
       other is CambiosPlaza &&
           runtimeType == other.runtimeType &&
           plazaId == other.plazaId &&
-          tipo == other.tipo &&
           titularPlayerId == other.titularPlayerId &&
           titularNombre == other.titularNombre &&
           ocupantePlayerId == other.ocupantePlayerId &&
@@ -106,7 +84,6 @@ class CambiosPlaza {
   @override
   int get hashCode => Object.hash(
         plazaId,
-        tipo,
         titularPlayerId,
         titularNombre,
         ocupantePlayerId,
@@ -119,6 +96,6 @@ class CambiosPlaza {
 
   @override
   String toString() =>
-      'CambiosPlaza(plazaId: $plazaId, tipo: $tipo, titular: $titularNombre, '
+      'CambiosPlaza(plazaId: $plazaId, titular: $titularNombre, '
       'ocupante: $ocupanteNombre, cerrada: $cerrada)';
 }

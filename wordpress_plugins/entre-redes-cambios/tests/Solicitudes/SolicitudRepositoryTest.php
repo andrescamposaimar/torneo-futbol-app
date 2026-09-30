@@ -265,7 +265,7 @@ class SolicitudRepositoryTest extends TestCase {
 
     public function test_aprobar_no_crea_ni_modifica_ninguna_ocupacion(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
 
         $antes = $this->plazaRepository->findOcupacionVigente( $plazaId );
 
@@ -316,7 +316,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_rechazar_una_solicitud_publicada_lanza(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );
@@ -343,7 +343,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_publicar_lote_aplica_sustitucion(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );
@@ -382,7 +382,7 @@ class SolicitudRepositoryTest extends TestCase {
         $regresoPlayDate = '2026-06-13';
         $this->seedFecha( 8, self::SEASON_ID, $regresoPlayDate );
 
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-01-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-01-01 00:00:00' );
         $this->plazaRepository->succeedOcupacion( $plazaId, 999, 2, 'reemplazada', '2026-01-05 00:00:00' );
 
         $epoch     = $this->instanteEnPlazo( $regresoPlayDate );
@@ -416,9 +416,9 @@ class SolicitudRepositoryTest extends TestCase {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
 
-        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
-        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, 101, 555, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
-        $plazaC = $this->plazaRepository->openPlaza( self::SEASON_ID, 102, 333, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, 101, 555, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $plazaC = $this->plazaRepository->openPlaza( self::SEASON_ID, 102, 333, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
 
         $this->seedPuntaje( 888, 2.5 );
         $this->seedPuntaje( 999, 2.5 );
@@ -478,7 +478,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_publicar_lote_detecta_y_registra_divergencia_cuando_el_dictamen_cambio(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );
@@ -508,8 +508,8 @@ class SolicitudRepositoryTest extends TestCase {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
 
-        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
-        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, 101, 555, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, 101, 555, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
 
         $this->seedPuntaje( 888, 2.5 );
         $this->seedPuntaje( 999, 2.5 );
@@ -565,7 +565,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_publicar_lote_aborta_prolijamente_cuando_el_dictamen_original_es_json_corrupto(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );
@@ -611,8 +611,8 @@ class SolicitudRepositoryTest extends TestCase {
         $this->seedFecha( 101, $otherSeasonId, '2026-05-16' );
         $this->seedFecha( 105, $otherSeasonId, '2026-05-30' );
 
-        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
-        $plazaB = $this->plazaRepository->openPlaza( $otherSeasonId, 200, 555, Puntaje::fromDecimal( 3.0 ), 'campo', 101, '2026-03-01 00:00:00' );
+        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $plazaB = $this->plazaRepository->openPlaza( $otherSeasonId, 200, 555, Puntaje::fromDecimal( 3.0 ), 101, '2026-03-01 00:00:00' );
 
         $this->seedPuntaje( 888, 2.5 );
         $this->seedPuntaje( 999, 2.5 );
@@ -649,7 +649,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_publicar_lote_guarda_el_ocupacion_id_resultante_en_la_solicitud(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );
@@ -706,7 +706,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_publicar_lote_lanza_cuando_el_commit_falla(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );
@@ -830,8 +830,8 @@ class SolicitudRepositoryTest extends TestCase {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
 
-        $plazaIdA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
-        $plazaIdB = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 778, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaIdA = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $plazaIdB = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 778, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
         $this->seedPuntaje( 889, 2.5 );
 
@@ -913,7 +913,7 @@ class SolicitudRepositoryTest extends TestCase {
     public function test_publicar_lote_no_aplica_nada_si_falla_el_registro_de_una_decision(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $epoch     = $this->instanteEnPlazo( '2026-05-30' );

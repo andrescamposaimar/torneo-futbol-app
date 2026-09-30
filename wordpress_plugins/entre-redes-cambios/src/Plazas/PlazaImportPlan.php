@@ -26,17 +26,17 @@ final class PlazaImportPlan {
     /** @var array<int, string> */
     private array $warnings;
 
-    /** @var array<int, array{team_id:int, team_label:string, campo:int, suplente:int, estado:string, lines:array<int,int>}> */
+    /** @var array<int, array{team_id:int, team_label:string, plazas:int, estado:string, lines:array<int,int>}> */
     private array $teamSummaries;
 
-    /** @var array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, tipo:string, puntaje:Puntaje}> */
+    /** @var array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, puntaje:Puntaje}> */
     private array $rowsToOpen;
 
     /**
      * @param array<int, string> $errors
      * @param array<int, string> $warnings
-     * @param array<int, array{team_id:int, team_label:string, campo:int, suplente:int, estado:string, lines:array<int,int>}> $teamSummaries
-     * @param array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, tipo:string, puntaje:Puntaje}> $rowsToOpen
+     * @param array<int, array{team_id:int, team_label:string, plazas:int, estado:string, lines:array<int,int>}> $teamSummaries
+     * @param array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, puntaje:Puntaje}> $rowsToOpen
      */
     public function __construct( array $errors, array $warnings, array $teamSummaries, array $rowsToOpen ) {
         $this->errors        = $errors;
@@ -64,7 +64,7 @@ final class PlazaImportPlan {
      * imported, skipped as already-imported, or could not be summarized
      * because one of its own rows failed validation.
      *
-     * @return array<int, array{team_id:int, team_label:string, campo:int, suplente:int, estado:string, lines:array<int,int>}>
+     * @return array<int, array{team_id:int, team_label:string, plazas:int, estado:string, lines:array<int,int>}>
      */
     public function teamSummaries(): array {
         return $this->teamSummaries;
@@ -76,7 +76,7 @@ final class PlazaImportPlan {
      * contributes NOTHING here (see class docblock on `Plazas\PlazaImporter`,
      * "IDEMPOTENCY KEY").
      *
-     * @return array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, tipo:string, puntaje:Puntaje}>
+     * @return array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, puntaje:Puntaje}>
      */
     public function rowsToOpen(): array {
         return $this->rowsToOpen;

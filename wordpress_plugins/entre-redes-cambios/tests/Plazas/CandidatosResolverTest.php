@@ -153,7 +153,6 @@ class CandidatosResolverTest extends TestCase {
             100,
             700,
             Puntaje::fromHalfPoints( $puntajeTechoHalfPoints ),
-            'campo',
             1,
             '2026-03-01 10:00:00'
         );
@@ -233,7 +232,7 @@ class CandidatosResolverTest extends TestCase {
         $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
 
         // 800 already vigently occupies a SECOND plaza this season.
-        $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 800, Puntaje::fromDecimal( 3.0 ), 'suplente', 1, '2026-03-01 10:00:00' );
+        $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 800, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
 
         $plaza      = $this->plazaRepository->findPlaza( $plazaId );
         $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
@@ -261,7 +260,7 @@ class CandidatosResolverTest extends TestCase {
 
         // 800 left ANOTHER plaza 'trunca' — only 2 resolved fechas have
         // passed since (< 3, TOPE_TRES_FECHAS keeps them blocked).
-        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 200, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
 
@@ -296,7 +295,7 @@ class CandidatosResolverTest extends TestCase {
         // other plaza itself has not liberated, so under
         // hastaLiberacionDePlaza() 800 stays blocked regardless of how many
         // fechas passed since 800's OWN closure.
-        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
 
@@ -317,7 +316,7 @@ class CandidatosResolverTest extends TestCase {
         $plazaId = $this->plaza();
         $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
 
-        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $otraPlazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $otraPlazaId, 800, 4, 'reemplazada', '2026-04-01 10:00:00' );
         $this->plazaRepository->succeedOcupacion( $otraPlazaId, 999, 7, 'trunca', '2026-05-01 10:00:00' );
 

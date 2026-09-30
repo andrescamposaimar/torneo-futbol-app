@@ -11,15 +11,15 @@ use EntreRedes\Cambios\Support\OpensTransactions;
 
 /**
  * Backfills a season's `cambios_plaza` roster from a CSV — the one-time
- * import that turns the process owner's spreadsheet into the 11 plazas
- * (9 `campo` + 2 `suplente`, by reglamento) every team needs before a single
- * captain screen can show anything real. See `Plazas\PlazaRepository::openPlaza()`
- * for what a plaza actually is; this class only resolves a CSV row into the
- * arguments that method needs, validates the WHOLE file, and — only once
- * nothing in it is wrong — opens every plaza in one atomic batch.
+ * import that turns the process owner's spreadsheet into the 11 titular
+ * plazas every team needs before a single captain screen can show anything
+ * real. See `Plazas\PlazaRepository::openPlaza()` for what a plaza actually
+ * is; this class only resolves a CSV row into the arguments that method
+ * needs, validates the WHOLE file, and — only once nothing in it is wrong —
+ * opens every plaza in one atomic batch.
  *
- * *** THE FOUR CSV COLUMNS, AND WHAT IS DELIBERATELY NOT ONE ***
- * `equipo`, `titular`, `tipo`, `puntaje_techo` — see
+ * *** THE THREE CSV COLUMNS, AND WHAT IS DELIBERATELY NOT ONE ***
+ * `equipo`, `titular`, `puntaje_techo` — see
  * `Plazas\PlazaImportCsvParser`'s class docblock for the full column
  * contract. `season_id` and `fecha_desde_id` are NOT columns: every plaza a
  * single run of this importer opens shares the same season and the same
@@ -63,28 +63,27 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * Per team, `planificar()` compares the SET of titular ids the CSV lists
  * against the SET already open (`closed_at IS NULL`) for that team:
  *   - Nothing open yet for the team -> every CSV row for it is queued to open.
- *   - The two sets match EXACTLY, same `tipo` and `puntaje_techo` per titular
- *     -> the team is already imported; NOTHING is queued for it, and this is
+ *   - The two sets match EXACTLY, same `puntaje_techo` per titular -> the
+ *     team is already imported; NOTHING is queued for it, and this is
  *     reported as a no-op, never an error. This is what makes a second
  *     `--apply` run of an already-succeeded import open nothing (see
  *     `aplicar()`).
- *   - Anything else (some overlap, a different `tipo`/`puntaje_techo` for
- *     the same titular, an extra or missing titular) -> a hard error naming
- *     the team and its rows. Silently accepting this would either duplicate
- *     a plaza or silently apply a change to data this importer did not
- *     create — a human must look at it. A CLOSED plaza (`closed_at` set)
- *     never counts as "already open" here: `PlazaRepository::closePlaza()`'s
- *     own docblock says a closed plaza "stops existing entirely", so a fresh
+ *   - Anything else (some overlap, a different `puntaje_techo` for the same
+ *     titular, an extra or missing titular) -> a hard error naming the team
+ *     and its rows. Silently accepting this would either duplicate a plaza
+ *     or silently apply a change to data this importer did not create — a
+ *     human must look at it. A CLOSED plaza (`closed_at` set) never counts
+ *     as "already open" here: `PlazaRepository::closePlaza()`'s own
+ *     docblock says a closed plaza "stops existing entirely", so a fresh
  *     import for that same titular is exactly what re-opening a mistakenly
  *     closed slot looks like, not a duplicate.
  *
- * *** THE 9+2 CHECK IS A WARNING, NEVER AN ERROR ***
- * Counted straight from the CSV's own `tipo` column per team (independent of
- * whether `titular`/`puntaje_techo` resolved) — see `planificar()`'s
- * docblock. A mid-season roster legitimately drifting from 9 `campo` + 2
- * `suplente` is real (see this feature's own task brief); refusing the whole
- * import over it would block the very backfill this importer exists to
- * enable.
+ * *** THE "EXACTLY 11 PLAZAS" CHECK IS A WARNING, NEVER AN ERROR ***
+ * Counted straight from the CSV's rows per team (independent of whether
+ * `titular`/`puntaje_techo` resolved) — see `planificar()`'s docblock. A
+ * mid-season roster legitimately drifting from 11 is real (see this
+ * feature's own task brief); refusing the whole import over it would block
+ * the very backfill this importer exists to enable.
  */
 class PlazaImporter {
 
@@ -116,7 +115,7 @@ class PlazaImporter {
      * of everything wrong, never a partial one that stopped at the first
      * problem.
      *
-     * @param array<int, array{line:int, equipo:string, titular:string, tipo:string, puntaje_techo:string}> $parsedRows
+     * @param array<int, array{line:int, equipo:string, titular:string, puntaje_techo:string}> $parsedRows
      */
     public function planificar( array $parsedRows, int $seasonId, int $fechaDesdeId ): PlazaImportPlan {
         $errors   = [];
@@ -144,19 +143,12 @@ class PlazaImporter {
                 $titularsByLine[ $line ] = $titularId;
             }
 
-            $tipo = strtolower( trim( (string) $row['tipo'] ) );
-            if ( ! in_array( $tipo, [ 'campo', 'suplente' ], true ) ) {
-                $errors[] = "Fila {$line}: tipo '" . (string) $row['tipo'] . "' invalido (debe ser 'campo' o 'suplente').";
-                $tipo     = null;
-            }
-
             $puntaje = $this->resolvePuntaje( (string) $row['puntaje_techo'], $line, $errors );
 
-            if ( null !== $teamId && null !== $titularId && null !== $tipo && null !== $puntaje ) {
+            if ( null !== $teamId && null !== $titularId && null !== $puntaje ) {
                 $resolved[ $line ] = [
                     'team_id'            => $teamId,
                     'titular_player_id'  => $titularId,
-                    'tipo'               => $tipo,
                     'puntaje'            => $puntaje,
                 ];
             }
@@ -170,8 +162,8 @@ class PlazaImporter {
         // Pass 3 — every resolved titular must be registered THIS season.
         $this->checkTitularesRegistradosEnTemporada( $resolved, $seasonId, $errors );
 
-        // Pass 4 — group by team: the 9+2 warning (from raw tipo counts,
-        // independent of whether other columns resolved) and the
+        // Pass 4 — group by team: the "exactly 11 plazas" warning (from raw
+        // row counts, independent of whether other columns resolved) and the
         // already-imported / would-duplicate check (only for teams whose
         // OWN rows are all otherwise clean — see buildTeamSummaries()).
         [ $teamSummaries, $rowsToOpen, $teamErrors ] =
@@ -231,7 +223,6 @@ class PlazaImporter {
                     $row['team_id'],
                     $row['titular_player_id'],
                     $row['puntaje'],
-                    $row['tipo'],
                     $fechaDesdeId,
                     $now
                 );
@@ -371,7 +362,7 @@ class PlazaImporter {
     }
 
     /**
-     * @param array<int, array{team_id:int, titular_player_id:int, tipo:string, puntaje:Puntaje}> $resolved line => fields
+     * @param array<int, array{team_id:int, titular_player_id:int, puntaje:Puntaje}> $resolved line => fields
      * @param array<int, string> $errors
      */
     private function checkTitularesRegistradosEnTemporada( array $resolved, int $seasonId, array &$errors ): void {
@@ -399,33 +390,29 @@ class PlazaImporter {
     // -------------------------------------------------------------------------
 
     /**
-     * @param array<int, array{line:int, equipo:string, titular:string, tipo:string, puntaje_techo:string}> $parsedRows
-     * @param array<int, array{team_id:int, titular_player_id:int, tipo:string, puntaje:Puntaje}> $resolved line => fields
+     * @param array<int, array{line:int, equipo:string, titular:string, puntaje_techo:string}> $parsedRows
+     * @param array<int, array{team_id:int, titular_player_id:int, puntaje:Puntaje}> $resolved line => fields
      * @param array<int, string> $warnings
-     * @return array{0: array<int, array{team_id:int, team_label:string, campo:int, suplente:int, estado:string, lines:array<int,int>}>, 1: array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, tipo:string, puntaje:Puntaje}>, 2: array<int, string>}
+     * @return array{0: array<int, array{team_id:int, team_label:string, plazas:int, estado:string, lines:array<int,int>}>, 1: array<int, array{line:int, team_id:int, team_label:string, titular_player_id:int, puntaje:Puntaje}>, 2: array<int, string>}
      */
     private function buildTeamSummaries( array $parsedRows, array $resolved, int $seasonId, array &$warnings ): array {
-        // Raw tipo counts per team, straight from the CSV — see class
-        // docblock, "THE 9+2 CHECK". team_id here is only known when
-        // 'equipo' itself resolved; a row whose team could not be resolved
-        // contributes to no team's count (it already has its own row error).
-        $rawTipoCounts = []; // team_id => ['campo'=>n, 'suplente'=>n, 'lines'=>[...]]
+        // Raw row counts per team, straight from the CSV — see class
+        // docblock, "THE 'EXACTLY 11 PLAZAS' CHECK". team_id here is only
+        // known when 'equipo' itself resolved; a row whose team could not be
+        // resolved contributes to no team's count (it already has its own
+        // row error).
+        $rawRowCounts = []; // team_id => ['count'=>n, 'lines'=>[...]]
 
         foreach ( $parsedRows as $row ) {
             $line = (int) $row['line'];
-            $tipo = strtolower( trim( (string) $row['tipo'] ) );
-            if ( ! in_array( $tipo, [ 'campo', 'suplente' ], true ) ) {
-                continue;
-            }
 
             $teamId = $this->quietlyResolveTeamId( (string) $row['equipo'] );
             if ( null === $teamId ) {
                 continue;
             }
 
-            $rawTipoCounts[ $teamId ]['campo']    = ( $rawTipoCounts[ $teamId ]['campo'] ?? 0 ) + ( 'campo' === $tipo ? 1 : 0 );
-            $rawTipoCounts[ $teamId ]['suplente'] = ( $rawTipoCounts[ $teamId ]['suplente'] ?? 0 ) + ( 'suplente' === $tipo ? 1 : 0 );
-            $rawTipoCounts[ $teamId ]['lines'][]  = $line;
+            $rawRowCounts[ $teamId ]['count']    = ( $rawRowCounts[ $teamId ]['count'] ?? 0 ) + 1;
+            $rawRowCounts[ $teamId ]['lines'][]  = $line;
         }
 
         // Fully-resolved rows, grouped by team — the only rows that could
@@ -439,12 +426,12 @@ class PlazaImporter {
         $rowsToOpen    = [];
         $teamErrors    = [];
 
-        foreach ( $rawTipoCounts as $teamId => $counts ) {
+        foreach ( $rawRowCounts as $teamId => $counts ) {
             $label = $this->teamLabel( $teamId );
 
-            if ( 9 !== ( $counts['campo'] ?? 0 ) || 2 !== ( $counts['suplente'] ?? 0 ) ) {
-                $warnings[] = "Equipo '{$label}' (id={$teamId}): " . ( $counts['campo'] ?? 0 ) . ' campo + '
-                    . ( $counts['suplente'] ?? 0 ) . ' suplente (se esperaban 9 campo + 2 suplente, por reglamento).';
+            if ( 11 !== ( $counts['count'] ?? 0 ) ) {
+                $warnings[] = "Equipo '{$label}' (id={$teamId}): " . ( $counts['count'] ?? 0 )
+                    . ' plaza(s) (se esperaban 11, por reglamento).';
             }
 
             $teamRows = $resolvedByTeam[ $teamId ] ?? [];
@@ -458,8 +445,7 @@ class PlazaImporter {
                 $teamSummaries[] = [
                     'team_id'    => $teamId,
                     'team_label' => $label,
-                    'campo'      => $counts['campo'] ?? 0,
-                    'suplente'   => $counts['suplente'] ?? 0,
+                    'plazas'     => $counts['count'] ?? 0,
                     'estado'     => 'con_errores',
                     'lines'      => $counts['lines'],
                 ];
@@ -479,7 +465,6 @@ class PlazaImporter {
                         'team_id'            => $teamId,
                         'team_label'         => $label,
                         'titular_player_id'  => $r['titular_player_id'],
-                        'tipo'               => $r['tipo'],
                         'puntaje'            => $r['puntaje'],
                     ];
                 }
@@ -488,8 +473,7 @@ class PlazaImporter {
             $teamSummaries[] = [
                 'team_id'    => $teamId,
                 'team_label' => $label,
-                'campo'      => $counts['campo'] ?? 0,
-                'suplente'   => $counts['suplente'] ?? 0,
+                'plazas'     => $counts['count'] ?? 0,
                 'estado'     => $estado,
                 'lines'      => $counts['lines'],
             ];
@@ -499,7 +483,7 @@ class PlazaImporter {
     }
 
     /**
-     * @param array<int, array{team_id:int, titular_player_id:int, tipo:string, puntaje:Puntaje}> $teamRows line => fields
+     * @param array<int, array{team_id:int, titular_player_id:int, puntaje:Puntaje}> $teamRows line => fields
      * @return array{0:string, 1:?string} [estado ('a_importar'|'ya_importado'|'conflicto'), error message or null]
      */
     private function compareAgainstExisting( int $seasonId, int $teamId, string $label, array $teamRows ): array {
@@ -532,8 +516,7 @@ class PlazaImporter {
             $matches = true;
             foreach ( $csvByTitular as $titularId => $r ) {
                 $existingRow = $existingByTitular[ $titularId ];
-                if ( (string) $existingRow['tipo'] !== $r['tipo']
-                    || (int) $existingRow['puntaje_techo'] !== $r['puntaje']->halfPoints() ) {
+                if ( (int) $existingRow['puntaje_techo'] !== $r['puntaje']->halfPoints() ) {
                     $matches = false;
                     break;
                 }

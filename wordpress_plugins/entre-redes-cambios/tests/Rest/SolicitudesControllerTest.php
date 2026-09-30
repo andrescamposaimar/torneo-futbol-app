@@ -125,7 +125,6 @@ class SolicitudesControllerTest extends TestCase {
             self::TEAM_ID,
             self::PLAYER_ID,
             Puntaje::fromDecimal( 3.0 ),
-            'campo',
             self::PLAZA_ID_GENESIS_FECHA,
             '2026-01-01 00:00:00'
         );

@@ -49,8 +49,8 @@ class PlazasControllerTest extends TestCase {
             ->method( 'listPlazasByEquipo' )
             ->with( self::SEASON_ID, self::TEAM_ID )
             ->willReturn( [
-                [ 'id' => 1, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
-                [ 'id' => 2, 'tipo' => 'suplente', 'titular_player_id' => 888, 'closed_at' => '2026-01-01 00:00:00' ],
+                [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
+                [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => '2026-01-01 00:00:00' ],
             ] );
 
         $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
@@ -123,8 +123,8 @@ class PlazasControllerTest extends TestCase {
 
             $plazaRepository = $this->createMock( PlazaRepository::class );
             $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-                [ 'id' => 1, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
-                [ 'id' => 2, 'tipo' => 'suplente', 'titular_player_id' => 888, 'closed_at' => null ],
+                [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
+                [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null ],
             ] );
             $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
                 [ 1, [
@@ -179,7 +179,7 @@ class PlazasControllerTest extends TestCase {
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-            [ 'id' => 9, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
+            [ 'id' => 9, 'titular_player_id' => 777, 'closed_at' => null ],
         ] );
         $plazaRepository->method( 'listOcupaciones' )->willReturn( [] );
 
@@ -214,8 +214,8 @@ class PlazasControllerTest extends TestCase {
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-            [ 'id' => 1, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
-            [ 'id' => 2, 'tipo' => 'campo', 'titular_player_id' => 888, 'closed_at' => null ],
+            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
+            [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null ],
         ] );
         $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
             [ 1, [
@@ -279,7 +279,7 @@ class PlazasControllerTest extends TestCase {
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-            [ 'id' => 1, 'tipo' => 'titular', 'titular_player_id' => 777, 'closed_at' => null ],
+            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
         ] );
         $plazaRepository->method( 'listOcupaciones' )->willReturn( [
             [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 888, 'es_genesis' => 0, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],

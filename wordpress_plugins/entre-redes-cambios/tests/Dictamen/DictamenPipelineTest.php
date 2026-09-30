@@ -96,7 +96,7 @@ class DictamenPipelineTest extends TestCase {
     }
 
     public function test_evaluate_returns_a_dictamen_for_a_clean_regreso(): void {
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 10:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
         $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
 
         $solicitud = SolicitudDeCambio::regreso(

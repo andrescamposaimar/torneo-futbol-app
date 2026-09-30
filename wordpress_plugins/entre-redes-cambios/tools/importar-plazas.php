@@ -5,9 +5,9 @@ declare(strict_types=1);
 /**
  * CLI: backfills a season's `cambios_plaza` roster from a CSV — see
  * `Plazas\PlazaImporter`'s class docblock for the full model this script
- * drives (column contract, resolution rules, idempotency key, the 9+2
- * warning). This file is a THIN entry point on purpose: it only parses CLI
- * arguments, bootstraps WordPress, and prints what `PlazaImporter` reports —
+ * drives (column contract, resolution rules, idempotency key, the "exactly
+ * 11 plazas" warning). This file is a THIN entry point on purpose: it only
+ * parses CLI arguments, bootstraps WordPress, and prints what `PlazaImporter` reports —
  * every decision (what counts as a valid row, what already-imported means,
  * what gets written) lives in `src/Plazas/PlazaImporter.php` and
  * `src/Plazas/PlazaImportCsvParser.php`, which this plugin's whole suite can
@@ -44,7 +44,7 @@ USO:
 ARGUMENTOS:
   --csv=<archivo.csv>       Obligatorio. Ruta al CSV a importar. Ver
                              templates/plazas-import-template.csv para el
-                             formato exacto (columnas: equipo, titular, tipo,
+                             formato exacto (columnas: equipo, titular,
                              puntaje_techo).
   --fecha-desde-id=<id>     Obligatorio. El id de cambios_fecha desde el cual
                              arranca la ocupación génesis de CADA plaza que
@@ -63,12 +63,10 @@ ARGUMENTOS:
   --help, -h                 Muestra esta ayuda y termina (no requiere
                              WordPress ni una base de datos).
 
-COLUMNAS DEL CSV (equipo, titular, tipo, puntaje_techo):
+COLUMNAS DEL CSV (equipo, titular, puntaje_techo):
   - equipo / titular: el id de WordPress del equipo/jugador, O su nombre
     EXACTO (post_title) tal como figura publicado en el sitio. Un nombre
     ambiguo o inexistente es un error — nunca se adivina.
-  - tipo: 'campo' o 'suplente' (suplente = el banco, NUNCA el jugador que
-    reemplaza).
   - puntaje_techo: uno de 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5 (coma o punto).
 
   Filas cuya primera celda empieza con '#' se ignoran (ejemplos comentados).
@@ -78,7 +76,7 @@ COMPORTAMIENTO:
   - Se valida el archivo COMPLETO antes de escribir una sola fila. Si hay
     CUALQUIER error, no se abre NINGUNA plaza — un plantel a medias es peor
     que ninguno.
-  - Un equipo cuyas 9 campo + 2 suplente no cierran genera una ADVERTENCIA,
+  - Un equipo cuyas filas no suman exactamente 11 genera una ADVERTENCIA,
     no un error — el plantel real puede legítimamente diferir a mitad de
     temporada.
   - Reintentar --apply después de una importación exitosa no abre nada
@@ -230,7 +228,7 @@ try {
 // ─── Plan, por equipo ────────────────────────────────────────────────────
 
 echo "=== Plan por equipo ===\n";
-printf( "%-30s %6s %6s %8s %-16s\n", 'equipo', 'campo', 'suplente', 'filas', 'estado' );
+printf( "%-30s %8s %8s %-16s\n", 'equipo', 'plazas', 'filas', 'estado' );
 
 $estadoLabel = [
     'a_importar'   => 'A importar',
@@ -241,10 +239,9 @@ $estadoLabel = [
 
 foreach ( $plan->teamSummaries() as $team ) {
     printf(
-        "%-30s %6d %8d %8d %-16s\n",
+        "%-30s %8d %8d %-16s\n",
         $team['team_label'] . ' (id=' . $team['team_id'] . ')',
-        $team['campo'],
-        $team['suplente'],
+        $team['plazas'],
         count( $team['lines'] ),
         $estadoLabel[ $team['estado'] ] ?? $team['estado']
     );

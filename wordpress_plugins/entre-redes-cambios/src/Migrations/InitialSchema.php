@@ -246,10 +246,25 @@ class InitialSchema {
     }
 
     /**
-     * cambios_plaza — one row per PLAZA of a team's roster (9 `campo` + 2
-     * `suplente` per team, by reglamento). The plaza, NOT the solicitud, is
-     * the aggregate slice 2 models — see Plazas\CadenaResolver's class
-     * docblock for the full reasoning.
+     * cambios_plaza — one row per PLAZA of a team's roster (11 per team, by
+     * reglamento). Every plaza is a TITULAR plaza: there is no `tipo` column
+     * splitting the 11 into "campo" and "suplente" plazas, because the
+     * reglamento does not make that distinction either — 9 players on the
+     * pitch and 2 on the bench describes an INSTANT during a match (which
+     * rotates constantly via unlimited in-match substitutions), never a
+     * fixed property of a plaza. An earlier version of this schema did carry
+     * such a column; it was removed directly from this CREATE TABLE
+     * statement, never as a separate versioned migration, because
+     * `cambios_plaza` was still EMPTY in production at the time — there was
+     * no row to migrate. This is safe ONLY because of that emptiness: `dbDelta()`
+     * (see `Migrations\MigrationRunner`) adds and widens columns on an
+     * upgrade, but it does NOT drop one — an install where this table had
+     * already been created with the old column would keep it as a harmless,
+     * unused leftover until manually dropped. A future column removal
+     * against a table that already holds data needs an explicit migration
+     * step in `MigrationRunner`, never a silent edit here. The plaza, NOT
+     * the solicitud, is the aggregate slice 2 models — see
+     * Plazas\CadenaResolver's class docblock for the full reasoning.
      *
      * `titular_player_id` is the PERMANENT owner: by reglamento a titular
      * never changes team, and this column is never reassigned after
@@ -276,7 +291,6 @@ class InitialSchema {
   team_id BIGINT UNSIGNED NOT NULL,
   titular_player_id BIGINT UNSIGNED NOT NULL,
   puntaje_techo SMALLINT UNSIGNED NOT NULL,
-  tipo ENUM('campo','suplente') NOT NULL,
   created_at DATETIME NOT NULL,
   closed_at DATETIME NULL DEFAULT NULL,
   PRIMARY KEY  (id),
