@@ -7,12 +7,11 @@ namespace EntreRedes\Credencial;
 /**
  * Main plugin class — wires all hooks and bootstraps subsystems.
  *
- * Slice 1b scope: registers the ONLY REST endpoint this slice ships — GET
- * /entre-redes/v1/credencial/credencial (Rest\CredencialController) — on
- * `rest_api_init`, with manual constructor injection, no container,
- * mirroring exactly how entre-redes-cambios's own Plugin::boot() wires its
- * `/cambios/*` routes. POST /credencial/foto (slice 2a) is added to this same
- * closure later.
+ * Registers every /entre-redes/v1/credencial/* route on `rest_api_init`,
+ * with manual constructor injection, no container, mirroring exactly how
+ * entre-redes-cambios's own Plugin::boot() wires its `/cambios/*` routes: GET
+ * /credencial/credencial (Rest\CredencialController, slice 1b) and POST
+ * /credencial/foto (Rest\PhotoUploadController, slice 2a).
  *
  * Every service this closure needs is built here and ONLY here — never at
  * the top level of boot() — so a request that never hits the REST surface
@@ -73,7 +72,20 @@ final class Plugin {
 
             $credencialController = new Rest\CredencialController( $authorizer, $credencialService, $eventLog );
 
-            ( new Rest\RestController( $credencialController ) )->register_routes();
+            $approvalRequestRepository = new Approval\ApprovalRequestRepository( $wpdb, $eventLog );
+
+            $photoUploadController = new Rest\PhotoUploadController(
+                $authorizer,
+                $playerReader,
+                new Photo\UploadBodyReader(),
+                new Photo\PhotoValidator(),
+                new Photo\MemoryGuard(),
+                new Photo\GdPhotoReencoder(),
+                $approvalRequestRepository,
+                $eventLog
+            );
+
+            ( new Rest\RestController( $credencialController, $photoUploadController ) )->register_routes();
         } );
 
         load_plugin_textdomain(

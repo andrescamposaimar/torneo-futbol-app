@@ -25,8 +25,13 @@ use EntreRedes\Credencial\Observability\EventLog;
  * "never leak an exception message/class/trace to the caller" discipline as
  * every other controller in this codebase; the real reason is always logged
  * via EventLog BEFORE this method decides what to answer.
+ *
+ * `HandlesCredencialAuthorization` (shared with PhotoUploadController) owns
+ * the WP_Error passthrough and the generic 500 body — see that trait's own
+ * docblock.
  */
 final class CredencialController {
+    use HandlesCredencialAuthorization;
 
     private CredencialAuthorizer $authorizer;
     private CredencialService $service;
@@ -81,7 +86,7 @@ final class CredencialController {
         );
 
         if ( $authResult instanceof \WP_Error ) {
-            return self::fromWpError( $authResult );
+            return self::respuestaDesdeWpError( $authResult );
         }
 
         try {
@@ -94,34 +99,7 @@ final class CredencialController {
                 'mensaje'   => $e->getMessage(),
             ] );
 
-            return new \WP_REST_Response(
-                [
-                    'code'    => 'error_interno',
-                    'message' => 'Ocurrió un error al procesar la solicitud. Probá de nuevo en unos minutos.',
-                    'data'    => [ 'status' => 500 ],
-                ],
-                500
-            );
+            return self::respuestaErrorInterno();
         }
-    }
-
-    /**
-     * Reads via the real WP_Error accessor methods (get_error_code() etc.),
-     * NEVER via public properties — real WordPress's WP_Error stores these
-     * behind accessors; CredencialAuthorizer's own return-type docblock only
-     * promises a WP_Error, not this test suite's simplified shim shape.
-     */
-    private static function fromWpError( \WP_Error $error ): \WP_REST_Response {
-        $data   = $error->get_error_data();
-        $status = (int) ( is_array( $data ) ? ( $data['status'] ?? 401 ) : 401 );
-
-        return new \WP_REST_Response(
-            [
-                'code'    => $error->get_error_code(),
-                'message' => $error->get_error_message(),
-                'data'    => [ 'status' => $status ],
-            ],
-            $status
-        );
     }
 }

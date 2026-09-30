@@ -9,9 +9,15 @@ use EntreRedes\Credencial\Credencial\CredencialService;
 use EntreRedes\Credencial\Credencial\IssuanceRepository;
 use EntreRedes\Credencial\Migrations\InitialSchema;
 use EntreRedes\Credencial\Observability\InMemoryEventLog;
+use EntreRedes\Credencial\Approval\ApprovalRequestRepository;
+use EntreRedes\Credencial\Photo\GdPhotoReencoder;
+use EntreRedes\Credencial\Photo\MemoryGuard;
+use EntreRedes\Credencial\Photo\PhotoValidator;
+use EntreRedes\Credencial\Photo\UploadBodyReader;
 use EntreRedes\Credencial\Player\PlayerReader;
 use EntreRedes\Credencial\Player\TeamResolver;
 use EntreRedes\Credencial\Rest\CredencialController;
+use EntreRedes\Credencial\Rest\PhotoUploadController;
 use EntreRedes\Credencial\Rest\RestController;
 use EntreRedes\Credencial\Tests\Support\FaultInjectingWpdb;
 use PHPUnit\Framework\TestCase;
@@ -162,7 +168,7 @@ class CredencialControllerTest extends TestCase {
         $authorizer = $this->createMock( CredencialAuthorizer::class );
         $controller = $this->newController( $authorizer );
 
-        ( new RestController( $controller ) )->register_routes();
+        ( new RestController( $controller, $this->minimalPhotoUploadController( $authorizer ) ) )->register_routes();
 
         $routes = $GLOBALS['_prode_test_registered_routes'] ?? [];
         $match  = array_filter(
@@ -173,5 +179,26 @@ class CredencialControllerTest extends TestCase {
         );
 
         $this->assertNotEmpty( $match, 'GET /entre-redes/v1/credencial/credencial must be registered.' );
+    }
+
+    /**
+     * RestController now wires BOTH routes together — a minimal, otherwise
+     * uninteresting PhotoUploadController is enough here since this test
+     * only asserts the GET route made it through; PhotoUploadControllerTest
+     * owns its own behavior in depth.
+     */
+    private function minimalPhotoUploadController( CredencialAuthorizer $authorizer ): PhotoUploadController {
+        global $wpdb;
+
+        return new PhotoUploadController(
+            $authorizer,
+            new PlayerReader(),
+            new UploadBodyReader(),
+            new PhotoValidator(),
+            new MemoryGuard(),
+            new GdPhotoReencoder(),
+            new ApprovalRequestRepository( $wpdb, new InMemoryEventLog() ),
+            new InMemoryEventLog()
+        );
     }
 }
