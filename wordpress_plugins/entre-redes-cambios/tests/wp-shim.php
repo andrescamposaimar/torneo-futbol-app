@@ -941,9 +941,9 @@ if ( ! function_exists( 'wp_is_post_revision' ) ) {
 // `wp_posts` is a real WordPress core table this shim does not create as part
 // of its own schema (unlike wp_options, which is emulated above via
 // get_option()/update_option()). Several test files need it — CandidatosResolver
-// and Plazas\Eleccion\EleccionImporter both run raw SQL joins against `{$p}posts`,
-// keyed on post_type/post_status, and EleccionImporter additionally resolves
-// players/teams by post_title. Because the SQLite shim backs the ENTIRE PHPUnit process with
+// and Plazas\Alta\TitularesListImporter both run raw SQL joins against `{$p}posts`,
+// keyed on post_type/post_status, to check that a team_id/titular_player_id the
+// input CSV names actually exists. Because the SQLite shim backs the ENTIRE PHPUnit process with
 // one shared connection, letting each test file `CREATE TABLE IF NOT EXISTS`
 // its own narrower version of this table made the schema depend on whichever
 // test file's setUp() happened to run first — a hazard, not a convenience.
