@@ -48,6 +48,18 @@ class CredencialStateTest extends TestCase {
         );
     }
 
+    public function test_no_photo_can_carry_a_pending_photo_request(): void {
+        $state = CredencialState::noPhoto(
+            [ 'id' => 3, 'status' => 'pending', 'created_at' => '2026-01-01 00:00:00' ]
+        );
+
+        $this->assertSame(
+            [ 'id' => 3, 'status' => 'pending', 'created_at' => '2026-01-01 00:00:00' ],
+            $state->toArray()['photo_request']
+        );
+        $this->assertNull( $state->toArray()['credential'] );
+    }
+
     public function test_not_a_player_has_no_credential_and_no_photo_request(): void {
         $this->assertSame(
             [ 'state' => 'not_a_player', 'photo_request' => null, 'credential' => null ],

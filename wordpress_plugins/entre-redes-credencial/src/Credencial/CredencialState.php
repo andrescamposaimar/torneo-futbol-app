@@ -34,8 +34,15 @@ final class CredencialState {
         return new self( 'blocked', null, null );
     }
 
-    public static function noPhoto(): self {
-        return new self( 'no_photo', null, null );
+    /**
+     * @param array{id:int, status:string, created_at:string}|null $photoRequest
+     *        A pending replacement upload (spec "First upload") — engram
+     *        1589: `no_photo` can carry a pending photo_request the same way
+     *        `active` does, since a player with no approved photo yet can
+     *        still have one under review.
+     */
+    public static function noPhoto( ?array $photoRequest = null ): self {
+        return new self( 'no_photo', $photoRequest, null );
     }
 
     public static function notAPlayer(): self {
