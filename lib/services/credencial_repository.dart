@@ -101,10 +101,21 @@ class CredencialRepository {
   /// between the two steps can never leave a JSON pointer to a photo that
   /// does not exist yet. If the photo write fails, this method throws and
   /// the JSON is never persisted — the previous cache (if any) stays intact.
+  ///
   /// Garbage collection of stale photo files ([CredencialPhotoStore
   /// .deleteAllExcept]) runs AFTER the JSON write, per the same design line
-  /// ("gc AFTER").
-  Future<void> save(CredencialResponse response, {Uint8List? photoBytes}) async {
+  /// ("gc AFTER") — but ONLY when the file for the NEW `sha256` is actually
+  /// present and hash-verified on disk (CRITICAL fix, verify-report 1575
+  /// slice-3b section): if [photoBytes] was not supplied AND no verified
+  /// file already exists for this response's `sha256` (e.g. a caller saved
+  /// a fresh `active` response after a failed/skipped photo download), this
+  /// method must NEVER delete the other cached photo files — doing so would
+  /// permanently destroy the last known-good verified photo over a single
+  /// transient failure. Callers that legitimately want the old photo
+  /// removed (blocked/no_photo/not_a_player/logout) must call [clear]
+  /// instead of relying on this side effect.
+  Future<void> save(CredencialResponse response,
+      {Uint8List? photoBytes}) async {
     final sha256 = response.credential?.photo.sha256;
 
     if (response.credential != null && photoBytes != null && sha256 != null) {
@@ -117,8 +128,39 @@ class CredencialRepository {
       iOptions: _iosOptions,
     );
 
+    if (response.credential == null) {
+      // No active credential in this response at all — there is no photo to
+      // protect, so any previously cached photo files are simply stale.
+      await _photoStore.deleteAllExcept(null);
+      return;
+    }
+
+    if (sha256 == null) return;
+
+    final verified = await _photoStore.readVerified(sha256);
+    if (verified == null) {
+      // The photo for this response's sha256 is not actually available on
+      // disk (write skipped, or the write silently produced a mismatched
+      // file) — keep every existing photo file, including any previously
+      // verified one for a different sha256, untouched.
+      return;
+    }
+
     await _photoStore.deleteAllExcept(sha256);
   }
+
+  /// Reads back the verified bytes for a photo already persisted by [save]
+  /// (re-hashes on load, same contract as [CredencialPhotoStore.readVerified]
+  /// — returns `null` when the file is missing or no longer matches
+  /// [sha256]).
+  ///
+  /// Used by [CredencialController] to hand [CredencialActive] its
+  /// `photoBytes` by construction (decision 1523: never a valid card
+  /// without verified photo bytes) instead of the screen re-reading the
+  /// file asynchronously at render time (verify-report 1575, slice 3b, NEW
+  /// WARNING 1).
+  Future<Uint8List?> readVerifiedPhoto(String sha256) =>
+      _photoStore.readVerified(sha256);
 
   /// Wipes both the secure-storage key and the photo directory (design D5:
   /// "Logout, revoke or player mismatch wipes both the key and the dir").
