@@ -143,6 +143,8 @@ The following are real gaps this slice leaves open. None of them is implemented 
 
 `tools/importar-eleccion.php` is the one-time bridge from the two sources that already have this data — the election spreadsheet (an `.xlsx`, read via PhpSpreadsheet) and WordPress itself — to this plugin's own tables. It replaces an earlier CSV-transcription importer that asked an operator to retype 330 rows by hand; see `Plazas\Eleccion\EleccionImporter`'s own class docblock for the full model.
 
+`phpoffice/phpspreadsheet` lives in `require-dev`, not `require`: this script is the only thing that uses it (nothing under `src/` references `PhpOffice`), so it never needs to load on a live WordPress request. A production install (`composer install --no-dev`) will not have it; running the importer there fails fast with a message naming `composer install` as the fix, instead of a bare "class not found" fatal.
+
 ### The two sheets
 
 - **`x Equipo`** (`Vuelta | Equipo | id | Nombre | Celular | mail | Fijo`) names, per team, 11 rows — `Vuelta` is `CAP` for the captain, then `1`..`10`. `id`, `Celular`, `mail` and `Fijo` are never read by this importer (no personal data is held in memory or written anywhere). The sheet interleaves repeated header rows between teams; `Plazas\Eleccion\EleccionSheetParser::parseEquipoSheet()` discards them and hard-errors any team whose block is not exactly 11 rows with exactly `CAP,1..10`.

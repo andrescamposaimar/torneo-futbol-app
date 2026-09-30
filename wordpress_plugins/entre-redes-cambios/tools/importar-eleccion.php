@@ -18,6 +18,15 @@ declare(strict_types=1);
  * other — see `EleccionImporter::aplicarPlazas()` / `::aplicarCapitanes()`'s
  * own docblocks for why they are independent.
  *
+ * `phpoffice/phpspreadsheet` is deliberately a `require-dev` dependency in
+ * `composer.json`, not a `require` one: it is only ever used by this one-time
+ * backfill script, never by the plugin at runtime (nothing under `src/`
+ * references `PhpOffice`). Shipping it to production would mean every
+ * WordPress request pays for autoloading a spreadsheet library to serve a
+ * CLI command that runs once. A production install (`composer install
+ * --no-dev`) will not have it — this script checks for that below and fails
+ * with an actionable message instead of a bare fatal error.
+ *
  * Usage:
  *   php tools/importar-eleccion.php --excel=<archivo.xlsx> --fecha-desde-id=<id>
  *       [--season-id=<id>] [--overrides=<archivo.csv>] [--apply] [--apply-capitanes]
@@ -131,6 +140,25 @@ if ( ! empty( $args['help'] ) ) {
     exit( 0 );
 }
 
+$autoloadPath = __DIR__ . '/../vendor/autoload.php';
+
+if ( ! file_exists( $autoloadPath ) ) {
+    fwrite( STDERR, "No existe vendor/autoload.php. Ejecute 'composer install' desde el directorio del plugin (" . dirname( __DIR__ ) . ") antes de correr este comando.\n" );
+    exit( 1 );
+}
+
+require_once $autoloadPath;
+
+// PhpSpreadsheet is a `require-dev` dependency on purpose (see this file's
+// own docblock): it is needed ONLY for this one-time import, never at
+// runtime, so a production install (`composer install --no-dev`) will not
+// have it. Fail with an actionable message here, before touching any
+// argument or file, instead of a bare "class not found" fatal later.
+if ( ! class_exists( \PhpOffice\PhpSpreadsheet\IOFactory::class ) ) {
+    fwrite( STDERR, "Falta la dependencia 'phpoffice/phpspreadsheet'. Es una dependencia de desarrollo a proposito (solo se usa para esta importacion puntual, nunca en produccion). Ejecute 'composer install' (sin --no-dev) desde el directorio del plugin (" . dirname( __DIR__ ) . ") para instalarla, y vuelva a correr este comando.\n" );
+    exit( 1 );
+}
+
 if ( empty( $args['excel'] ) ) {
     fwrite( STDERR, "Falta --excel=<archivo.xlsx>.\n\n" . USAGE );
     exit( 1 );
@@ -147,8 +175,6 @@ if ( ! is_readable( $excelPath ) ) {
     fwrite( STDERR, "No se puede leer el archivo Excel: {$excelPath}\n" );
     exit( 1 );
 }
-
-require_once __DIR__ . '/../vendor/autoload.php';
 
 // ─── Read the two sheets ──────────────────────────────────────────────────
 
