@@ -126,7 +126,7 @@ The 3-fecha minimum (counted in RESOLVED fechas via `Calendario\FechaRepository:
 ### Explicitly out of scope
 
 - **The dictamen engine** — deciding whether a solicitud de cambio is approved — is slice 3's pure function, built on top of `CadenaResolver`'s derivations. This slice only models the data and the chain; it makes no approval decisions.
-- **Backfilling the in-progress season's real occupancy** — who occupies which plaza today lives only in the process owner's spreadsheet, not in any system this plugin can read. No importer is included; a later slice needs that data supplied by the process owner before it can seed real plazas.
+- **Backfilling the in-progress season's real occupancy** — who occupies which plaza today lived only in the process owner's spreadsheet, not in any system this plugin could read. Closed by the CSV importer — see "Importing plazas from a CSV backfill" below.
 
 ### Conditions of entry for slice 3 — known gaps, deliberately not closed here
 
@@ -136,6 +136,36 @@ The following are real gaps this slice leaves open. None of them is implemented 
 2. **No observability.** There is not a single `error_log()` call or WordPress action hook anywhere in this plugin. A `PlazaPersistenceException`, a `RuntimeException` from a broken invariant, or a fail-closed `FechaCountUnavailableException` today leaves no trace anywhere except the caller's own exception handling (or lack of it) — a production failure is invisible until someone notices the business symptom.
 3. **No correction primitive.** There is no way to undo or repair a wrongly-loaded plaza or ocupación — no "delete this link", no "reopen this plaza" — short of a direct SQL fix. This is acceptable ONLY because no UI exists yet to make the mistake in the first place; it becomes a blocker the moment slice 3 (or any admin screen) lets a human load real data.
 4. **No check that the tables are actually InnoDB.** Every invariant this slice defends inside a transaction (at most one vigent ocupación, atomic close-then-insert) silently depends on `ENGINE=InnoDB` actually taking effect. If a hosting provider's `dbDelta()` run substitutes a non-transactional engine (some managed MySQL configurations do this transparently), `START TRANSACTION` / `ROLLBACK` become no-ops and every invariant in this README degrades without any error ever being raised.
+
+## Importing plazas from a CSV backfill
+
+`cambios_plaza` is empty until this runs. Nothing else in this plugin opens a plaza on its own — no REST route, no admin screen, no cron ever calls `PlazaRepository::openPlaza()` / `::openPlazaWithinTransaction()` — so until the backfill happens, every captain's own plantel screen in the app is legitimately empty (`lib/screens/cambios/cambios_plantel_screen.dart` has its own explicit empty state for exactly this reason, not a bug). `tools/importar-plazas.php` is the one-time bridge from the process owner's spreadsheet to this plugin's own tables: `Plazas\PlazaImportCsvParser` turns the CSV into rows, `Plazas\PlazaImporter::planificar()` resolves and validates them into a `Plazas\PlazaImportPlan`, and the CLI script prints that plan and (only with `--apply`) writes it via `PlazaImporter::aplicar()`, which opens each plaza through `PlazaRepository::openPlazaWithinTransaction()`.
+
+### The CSV contract
+
+Four columns, matched by name — case-insensitively and in any order — against the header: `equipo`, `titular`, `tipo`, `puntaje_techo` (`Plazas\PlazaImportCsvParser::REQUIRED_COLUMNS`). A `#` in a row's first cell (after trimming) skips that row entirely, so `templates/plazas-import-template.csv`'s worked examples can stay in the file or be deleted without affecting a real import.
+
+- **`equipo` / `titular`** accept either a bare WordPress post id or the post's EXACT `post_title` — never a fuzzy match. An id that does not resolve to a published `sp_team` / `sp_player`, a title matching zero posts, or a title matching more than one, are all hard errors naming the offending row.
+- **`tipo`** is `campo` or `suplente` — `suplente` is the bench slot, never "the player who replaces someone".
+- **`puntaje_techo`** is one of the 9 valid puntajes (1..5 in 0.5 steps, comma or dot decimal).
+- **`season_id` and `fecha_desde_id` are deliberately NOT columns.** Every plaza a single run opens shares the same season and the same starting fecha — the roster's "conformación" happens once, on one day, for the whole league — so both are passed once to the CLI (`--season-id`, defaulting to `Calendario\Settings::seasonId()`, and the required `--fecha-desde-id`) instead of being repeated on every row. Repeating either 300 times would only be 300 chances to get one of them wrong, with the CSV's own shape unable to catch it.
+
+### How to run it
+
+```bash
+php tools/importar-plazas.php --csv=<archivo.csv> --fecha-desde-id=<id> [--season-id=<id>] [--apply]
+```
+
+Dry-run is the default: without `--apply`, the command only validates the file and prints the plan — nothing is written. Point `--csv` at `templates/plazas-import-template.csv` for the exact column shape and two worked examples (by name and by id). `php tools/importar-plazas.php --help` prints the full contract and needs neither WordPress nor a database connection.
+
+### The safety properties, and why each exists
+
+- **The whole file is validated before a single row is written.** `PlazaImporter::planificar()` performs only reads and resolves every row independently of every other row's outcome, so one bad row never hides a second, unrelated bad row behind it. `aplicar()` refuses outright when the plan has any error, and every plaza it does open is written as ONE atomic transaction. A partially imported roster is worse than none: the captain screens would show some teams a plausible, wrong squad, and nobody would notice until a captain requested a change against a plaza that does not exist.
+- **It is idempotent on `(season_id, team_id, titular_player_id)`.** `titular_player_id` is the column `Migrations\InitialSchema::sqlCambiosPlaza()`'s own docblock calls the PERMANENT owner of a plaza — by reglamento a titular never changes team, and the column is never reassigned after the plaza is created — which makes it the one fact about a plaza that can never drift once opened, and so the natural key for "does this already exist". Per team, `planificar()` compares the set of titular ids the CSV lists against the set already open (`closed_at IS NULL`): an exact match (same `tipo` and `puntaje_techo` per titular) is reported as a no-op, so retrying `--apply` after a successful import opens nothing new, while a partial import completes only what is missing without duplicating what already ran. Any other overlap — a different `tipo`/`puntaje_techo` for the same titular, an extra or missing titular — is a hard error naming the team: silently accepting it would either duplicate a plaza or apply a change to data this importer did not create.
+
+### What is a warning, not an error
+
+A team whose CSV rows are not exactly 9 `campo` + 2 `suplente` gets a warning, never an error. The reglamento says 11 total, but a real squad mid-season may legitimately differ — refusing the entire import over it would block the very backfill this importer exists to enable.
 
 ## The dictamen engine (slice 3)
 
