@@ -5,7 +5,8 @@
     "license": "GPL-2.0-or-later",
     "require": {
         "php": ">=8.0",
-        "firebase/php-jwt": "^7.0"
+        "firebase/php-jwt": "^7.0",
+        "phpoffice/phpspreadsheet": "^5.10"
     },
     "require-dev": {
         "phpunit/phpunit": "^10.5",
