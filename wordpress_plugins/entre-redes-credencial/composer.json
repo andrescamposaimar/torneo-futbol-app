@@ -1,0 +1,34 @@
+{
+    "name": "entre-redes/credencial",
+    "description": "WordPress plugin: virtual player credential (photo, rotating liveness code, offline cache) for the Entre Redes football league",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "php": ">=8.0",
+        "firebase/php-jwt": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5",
+        "yoast/phpunit-polyfills": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "EntreRedes\\Credencial\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EntreRedes\\Credencial\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2.33"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit"
+    }
+}
