@@ -1,7 +1,130 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:torneo_futbol_app/config/prode_auth_config.dart';
+import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/screens/prode/prode_auth_view.dart';
+import 'package:torneo_futbol_app/screens/prode/prode_fixtures_screen.dart';
+import 'package:torneo_futbol_app/services/prode_api_service.dart';
+import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
+import 'package:torneo_futbol_app/services/prode_fixtures_controller.dart';
+import 'package:torneo_futbol_app/services/prode_history_controller.dart';
+import 'package:torneo_futbol_app/services/prode_ranking_controller.dart';
+
+// ---------------------------------------------------------------------------
+// Fakes / stubs for the Authenticated arm's default destination
+// (ProdeChamiScreen) — no network, fixed initial states, mirrors the
+// convention already used in prode_fixtures_screen_test.dart /
+// prode_history_list_test.dart.
+// ---------------------------------------------------------------------------
+
+class _FakeApiService extends ProdeApiService {
+  _FakeApiService()
+      : super(
+          config: const ProdeAuthConfig(
+            prodeApiBaseUrl: 'https://nowhere.test',
+            googleWebClientId: 'test',
+            appleTeamId: 'TEST',
+          ),
+          authRepo: ProdeAuthRepository(),
+        );
+}
+
+class _StubHistoryController extends ProdeHistoryController {
+  _StubHistoryController(ProdeHistoryState initialState) : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  Future<void> loadMore() async {}
+}
+
+class _StubRankingController extends ProdeRankingController {
+  _StubRankingController(ProdeRankingState initialState) : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+}
+
+class _StubFechaRankingController extends ProdeFechaRankingController {
+  _StubFechaRankingController(ProdeRankingState initialState) : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+}
+
+class _StubFixturesController extends ProdeFixturesController {
+  _StubFixturesController(ProdeFixturesState initialState) : super(_FakeApiService()) {
+    state = initialState;
+  }
+
+  @override
+  Future<void> load() async {}
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  Future<void> selectFecha(int fechaId) async {}
+}
+
+/// Pumps ProdeAuthView in the Authenticated state with NO authenticatedBuilder
+/// (the default), wrapped in a [ProviderScope] with every controller
+/// [ProdeChamiScreen] reads stubbed to a fixed, no-network state.
+Future<void> _pumpAuthenticatedDefault(
+  WidgetTester tester, {
+  required bool stale,
+  required VoidCallback onLogout,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        prodeApiServiceProvider.overrideWithValue(_FakeApiService()),
+        prodeHistoryControllerProvider.overrideWith(
+          (ref) => _StubHistoryController(
+            const ProdeHistoryState(phase: ProdeHistoryPhase.ready, items: []),
+          ),
+        ),
+        prodeRankingControllerProvider.overrideWith(
+          (ref) => _StubRankingController(const ProdeRankingLoading()),
+        ),
+        prodeFechaRankingControllerProvider.overrideWith(
+          (ref) => _StubFechaRankingController(const ProdeRankingLoading()),
+        ),
+        prodeFixturesControllerProvider.overrideWith(
+          (ref) => _StubFixturesController(const ProdeFixturesEmpty()),
+        ),
+      ],
+      child: MaterialApp(
+        home: Scaffold(
+          body: ProdeAuthView(
+            state: ProdeAuthAuthenticated(
+              user: const ProdeUser(userId: 1, playerId: 2, name: 'Ana', sessionVersion: 1),
+              stale: stale,
+            ),
+            onLogout: onLogout,
+            onRetry: () {},
+            onGoogleSignIn: () {},
+            onAppleSignIn: null,
+            onConfirmDni: (_) async => null,
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pump(); // settle initState microtasks (guarded, so no real load fires)
+}
 
 void main() {
   // Pumps ProdeAuthView with [state] and returns counters for the callbacks so
@@ -41,15 +164,117 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
-    // NOTE: The three Authenticated-arm tests that previously asserted on
+    // NOTE: the three Authenticated-arm tests that previously asserted on
     // _ProdeHome copy ('¡Hola, Ana!', 'Sincronizando tus datos…', 'Cerrar sesión')
-    // have been removed here (B-6). Those scenarios are now fully covered by
-    // the ProdeFixturesScreen widget tests in prode_fixtures_screen_test.dart
-    // (B-4), which pump ProdeFixturesScreen directly with a scoped provider
-    // and assert on the stale banner, logout button, and match list.
-    // The Authenticated arm in ProdeAuthView now renders a ConsumerStatefulWidget
-    // (ProdeFixturesScreen) that requires a ProviderScope — pumping it inside
-    // a bare MaterialApp without one would cause a ProviderScope not found error.
+    // were removed here (B-6); those scenarios stay covered by the
+    // ProdeFixturesScreen widget tests in prode_fixtures_screen_test.dart
+    // (B-4). What follows instead is specific to ProdeAuthView's OWN Authenticated
+    // arm — the `authenticatedBuilder != null ? authenticatedBuilder!(stale,
+    // onLogout) : ProdeChamiScreen(stale: stale, onLogout: onLogout)` branch —
+    // which had zero coverage: neither branch, nor whether the arguments each
+    // one receives are the right ones in the right order.
+    group('Authenticated arm routing (authenticatedBuilder)', () {
+      testWidgets(
+          'default (no builder) renders ProdeChamiScreen with the given stale flag',
+          (tester) async {
+        await _pumpAuthenticatedDefault(tester, stale: true, onLogout: () {});
+
+        final chami = tester.widget<ProdeChamiScreen>(find.byType(ProdeChamiScreen));
+        expect(chami.stale, isTrue);
+        // Cross-check via the UI itself, not just the widget's field: the
+        // stale banner only renders when ProdeChamiScreen actually received
+        // stale=true.
+        expect(find.text('Sincronizando tus datos…'), findsOneWidget);
+      });
+
+      testWidgets('default (no builder) forwards stale=false too (no stray banner)',
+          (tester) async {
+        await _pumpAuthenticatedDefault(tester, stale: false, onLogout: () {});
+
+        final chami = tester.widget<ProdeChamiScreen>(find.byType(ProdeChamiScreen));
+        expect(chami.stale, isFalse);
+        expect(find.text('Sincronizando tus datos…'), findsNothing);
+      });
+
+      testWidgets(
+          'default onLogout reaches the callback ProdeAuthView was constructed with',
+          (tester) async {
+        var logoutCalls = 0;
+        await _pumpAuthenticatedDefault(tester, stale: false, onLogout: () => logoutCalls++);
+
+        // Segment 0 (Anteriores) is the default and has no logout affordance;
+        // "A Jugarse" (ProdeFixturesScreen, Empty state) does.
+        await tester.tap(find.byKey(const Key('prode_segment_1')));
+        await tester.pump();
+
+        await tester.tap(find.text('Cerrar sesión'));
+        expect(logoutCalls, equals(1));
+      });
+
+      testWidgets('supplied builder receives the correct stale value', (tester) async {
+        bool? builderStale;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ProdeAuthView(
+                state: const ProdeAuthAuthenticated(
+                  user: ProdeUser(userId: 1, playerId: 2, name: 'Ana', sessionVersion: 1),
+                  stale: true,
+                ),
+                onLogout: () {},
+                onRetry: () {},
+                onGoogleSignIn: () {},
+                onAppleSignIn: null,
+                onConfirmDni: (_) async => null,
+                authenticatedBuilder: (stale, onLogout) {
+                  builderStale = stale;
+                  return Text('builder stale=$stale');
+                },
+              ),
+            ),
+          ),
+        );
+
+        expect(builderStale, isTrue);
+        expect(find.text('builder stale=true'), findsOneWidget);
+        expect(find.byType(ProdeChamiScreen), findsNothing);
+      });
+
+      testWidgets(
+          'supplied builder receives the SAME onLogout ProdeAuthView was constructed '
+          'with — not onRetry or any other callback', (tester) async {
+        var logoutCalls = 0;
+        var retryCalls = 0;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ProdeAuthView(
+                state: const ProdeAuthAuthenticated(
+                  user: ProdeUser(userId: 1, playerId: 2, name: 'Ana', sessionVersion: 1),
+                ),
+                onLogout: () => logoutCalls++,
+                onRetry: () => retryCalls++,
+                onGoogleSignIn: () {},
+                onAppleSignIn: null,
+                onConfirmDni: (_) async => null,
+                authenticatedBuilder: (stale, onLogout) => ElevatedButton(
+                  onPressed: onLogout,
+                  child: const Text('builder logout button'),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('builder logout button'));
+
+        // The assertion that catches a swap: if the builder had been handed
+        // onRetry instead of onLogout, this would fire retryCalls instead.
+        expect(logoutCalls, equals(1));
+        expect(retryCalls, equals(0));
+      });
+    });
 
     testWidgets('Unauthenticated shows Google; Apple hidden when unavailable',
         (tester) async {

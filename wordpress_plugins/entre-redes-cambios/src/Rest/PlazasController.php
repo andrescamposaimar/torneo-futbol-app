@@ -30,19 +30,36 @@ use EntreRedes\Cambios\Plazas\PlazaRepository;
  * Rest\HandlesCapitanAuthorization's own docblock; same discipline as
  * Rest\SolicitudesController.
  *
- * *** THIS IS A READ. A SINGLE PLAZA'S CALCULATION FAILING DOES NOT FAIL
- * THE WHOLE RESPONSE. *** `Plazas\CadenaResolver::countFechasUntilLiberacion()`
- * can throw `FechaCountUnavailableException` for one specific plaza (a
- * broken counter, an unreachable fecha) while every other plaza in the same
- * team is perfectly fine to compute. Letting that one exception bubble up
- * to `listar()`'s generic `\Throwable` catch would turn ONE plaza's problem
- * into a 500 for the captain's ENTIRE roster — eleven plazas hidden because
- * one could not be counted, when a READ carries no risk of authorizing
- * anything: there is nothing to protect by refusing to show the other ten.
- * `shapePlaza()` therefore catches that exception per plaza, logs it, and
- * degrades that ONE row to `fechas_faltantes_liberacion: null` plus an
- * explicit `fechas_faltantes_liberacion_indeterminado: true` marker — never
- * a silently wrong `0`.
+ * *** THIS IS A READ. ONE KIND OF PER-PLAZA FAILURE DOES NOT FAIL THE WHOLE
+ * RESPONSE — A READ THAT CANNOT EVEN LOAD THE PLAZA'S DATA DOES. ***
+ * `Plazas\CadenaResolver::countFechasUntilLiberacion()` can throw
+ * `FechaCountUnavailableException` for one specific plaza (a broken counter,
+ * an unreachable fecha) while every other plaza in the same team is
+ * perfectly fine to compute. Letting that one exception bubble up to
+ * `listar()`'s generic `\Throwable` catch would turn ONE plaza's problem into
+ * a 500 for the captain's ENTIRE roster — eleven plazas hidden because one
+ * could not be counted, when this specific failure carries no risk of
+ * authorizing anything: there is nothing to protect by refusing to show the
+ * other ten. `resolveFechasFaltantes()` therefore catches THAT exception per
+ * plaza, logs it, and degrades that ONE row to `fechas_faltantes_liberacion:
+ * null` plus an explicit `fechas_faltantes_liberacion_indeterminado: true`
+ * marker — never a silently wrong `0`.
+ *
+ * A failed READ of the roster or chain data itself
+ * (`Plazas\PlazaRepository::listPlazasByEquipo()` / `listOcupaciones()`) is
+ * NOT given this same per-row tolerance: both now throw on a wpdb-level
+ * failure (see their own docblocks — a prior version of this class's
+ * docblock claimed `listOcupaciones()` read a failure as "no rows"; that is
+ * no longer true), and `listar()`'s outer `\Throwable` catch turns that into
+ * a 500 for the WHOLE response, logged as `rest.plazas_listar_fallida`. This
+ * is a deliberate, coarser failure mode than the per-row degradation above:
+ * a plaza whose OWN chain cannot be read at all has no honest partial
+ * answer to show for `ocupante_player_id` — showing `null` there would be
+ * indistinguishable from "this plaza genuinely has no occupant", which
+ * `PlazaRepository::openPlaza()`'s invariant says can never happen. Failing
+ * the whole request is the honest choice; degrading only that one row would
+ * require inventing a NEW "indeterminado" marker for `ocupante_player_id`
+ * this class does not have today.
  *
  * *** THIS TOLERANCE DOES NOT EXTEND TO WRITES *** — creating a solicitud,
  * or publishing the Friday lote, still fails closed and loud on the exact
@@ -140,20 +157,18 @@ class PlazasController {
      * `ocupante_player_id` is null only when the plaza somehow has no vigent
      * ocupación (should not happen once PlazaRepository::openPlaza() has
      * run, but this endpoint does not assume it — see
-     * PlazaRepository::findOcupacionVigente()'s own docblock).
+     * PlazaRepository::findOcupacionVigente()'s own docblock). A plaza whose
+     * ocupaciones chain could not even be READ never reaches this shape at
+     * all — PlazaRepository::listOcupaciones() throws on a wpdb-level
+     * failure, which aborts the WHOLE response (see this class's docblock,
+     * "THIS IS A READ") rather than rendering as a fabricated `null`.
      *
-     * `fechas_faltantes_liberacion` is null in TWO distinct cases, both
-     * still an honest "unknown", never a fabricated 0 — `fechas_faltantes_
-     * liberacion_indeterminado` tells them apart:
-     *   - `indeterminado: false` — the plaza's own ocupaciones chain could
-     *     not be READ (PlazaRepository::listOcupaciones() reads a wpdb-level
-     *     failure as "no rows" rather than throwing — see that method's
-     *     docblock, "WHY listOcupaciones() ITSELF WAS NOT CHANGED").
-     *   - `indeterminado: true` — the chain WAS read, but the liberation
-     *     count itself could not be trusted (CadenaResolver's own injected
-     *     counter threw `FechaCountUnavailableException`) — see this class's
-     *     docblock, "THIS IS A READ", for why that failure degrades only
-     *     THIS plaza's row instead of failing the whole response.
+     * `fechas_faltantes_liberacion` is null, with `fechas_faltantes_
+     * liberacion_indeterminado: true`, when the chain WAS read but the
+     * liberation count itself could not be trusted (CadenaResolver's own
+     * injected counter threw `FechaCountUnavailableException`) — see this
+     * class's docblock, "THIS IS A READ", for why that ONE failure degrades
+     * only THIS plaza's row instead of failing the whole response.
      */
     public function listar( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -176,7 +191,7 @@ class PlazasController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         try {
@@ -206,8 +221,41 @@ class PlazasController {
 
             $cadenaResolver = new CadenaResolver( $countResolvedFechasSinceFn );
 
+            // Ocupaciones/vigente are resolved ONCE per plaza here, BEFORE
+            // any name is looked up, so every player id this response will
+            // need a name for — titular AND ocupante — is known up front and
+            // handed to primePlayerTitles() in a single batch, instead of
+            // shapePlaza() resolving each plaza's own ocupante id one at a
+            // time inside its own per-row loop. See primePlayerTitles()'s
+            // docblock for why this matters more on listarCandidatos() below,
+            // but the same discipline is kept here for consistency.
+            $ocupacionesPorPlaza = [];
+            $vigentePorPlaza     = [];
+            $playerIds           = [];
+
+            foreach ( $plazas as $plaza ) {
+                $plazaId     = (int) $plaza['id'];
+                $ocupaciones = $this->plazaRepository->listOcupaciones( $plazaId );
+                $vigente     = $this->vigente( $ocupaciones );
+
+                $ocupacionesPorPlaza[ $plazaId ] = $ocupaciones;
+                $vigentePorPlaza[ $plazaId ]     = $vigente;
+
+                $playerIds[] = (int) $plaza['titular_player_id'];
+                if ( null !== $vigente ) {
+                    $playerIds[] = (int) $vigente['player_id'];
+                }
+            }
+
+            $this->primePlayerTitles( array_values( array_unique( $playerIds ) ) );
+
             $resultado = array_map(
-                fn ( array $plaza ): array => $this->shapePlaza( $plaza, $cadenaResolver ),
+                fn ( array $plaza ): array => $this->shapePlaza(
+                    $plaza,
+                    $cadenaResolver,
+                    $ocupacionesPorPlaza[ (int) $plaza['id'] ],
+                    $vigentePorPlaza[ (int) $plaza['id'] ]
+                ),
                 $plazas
             );
 
@@ -225,9 +273,9 @@ class PlazasController {
     }
 
     /**
-     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..
+     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&incluir_no_viables=1][&search=..]
      *
-     * Response 200: { candidatos: [ { player_id, es_padre, puntaje,
+     * Response 200: { candidatos: [ { player_id, nombre, es_padre, puntaje,
      *         viable, motivo }, ... ] }
      *
      * THE single endpoint the captain's screen calls to know who is
@@ -243,6 +291,21 @@ class PlazasController {
      * `rest.plazas_candidatos_fallida`) exactly like it would make the
      * dictamen engine refuse, instead of this screen showing an optimistic
      * list the engine would then reject.
+     *
+     * *** FILTERING HAPPENS HERE, NEVER IN CandidatosResolver ***
+     * `paraPlaza()` stays the single, unfiltered source of truth (see its
+     * own docblock) — `Reglas\PrioridadDePadresRespetada` needs that FULL
+     * pool to count viable padres, so `CandidatosResolver` itself must never
+     * change to accommodate this endpoint's own presentation needs. Instead:
+     *   - By DEFAULT, only VIABLE candidates are returned — a captain cannot
+     *     act on a non-viable one, and a season's full candidate pool can run
+     *     into the hundreds (see CandidatosResolver's own docblock, "COST:
+     *     THIS IS N+1 BY DESIGN"), most of it not actionable.
+     *   - `?incluir_no_viables=1` opts back into the FULL list, `viable` and
+     *     `motivo` intact — for the committee's own tooling, which may want
+     *     to see WHY someone was excluded.
+     *   - `?search=<text>` narrows whatever set the two rules above already
+     *     produced to names containing $text, case-insensitively.
      */
     public function listarCandidatos( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -267,7 +330,7 @@ class PlazasController {
                 'excepcion' => get_class( $e ),
             ] );
 
-            return $this->respuestaNoAutorizada();
+            return $this->respuestaNoAutorizada( $e );
         }
 
         try {
@@ -284,6 +347,31 @@ class PlazasController {
             $countResolvedFechasSinceFn = $boundedFechaCounter->boundedCountResolvedFechasSinceFn( $seasonId );
 
             $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
+
+            $incluirNoViables = '1' === (string) $request->get_param( 'incluir_no_viables' );
+
+            $candidatos = array_values( array_filter(
+                $candidatos,
+                static fn ( CandidatoEstado $c ): bool => $incluirNoViables || $c->viable()
+            ) );
+
+            // Names are primed for exactly the set that survived the
+            // viable/incluir_no_viables filter above — the only ids this
+            // response could still need, whether to search against or to
+            // finally shape. See primePlayerTitles()'s own docblock.
+            $this->primePlayerTitles( array_map(
+                static fn ( CandidatoEstado $c ): int => $c->playerId(),
+                $candidatos
+            ) );
+
+            $search = trim( (string) ( $request->get_param( 'search' ) ?? '' ) );
+
+            if ( '' !== $search ) {
+                $candidatos = array_values( array_filter(
+                    $candidatos,
+                    fn ( CandidatoEstado $c ): bool => false !== mb_stripos( $this->nombreJugador( $c->playerId() ), $search )
+                ) );
+            }
 
             return new \WP_REST_Response(
                 [ 'candidatos' => array_map( [ $this, 'shapeCandidato' ], $candidatos ) ],
@@ -310,6 +398,7 @@ class PlazasController {
     private function shapeCandidato( CandidatoEstado $c ): array {
         return [
             'player_id' => $c->playerId(),
+            'nombre'    => $this->nombreJugador( $c->playerId() ),
             'es_padre'  => $c->esPadre(),
             'puntaje'   => null !== $c->puntaje() ? $c->puntaje()->toDecimal() : null,
             'viable'    => $c->viable(),
@@ -320,12 +409,16 @@ class PlazasController {
     /**
      * @param array<string, mixed> $plaza As returned by
      *        PlazaRepository::listPlazasByEquipo().
+     * @param array<int, array<string, mixed>> $ocupaciones As returned by
+     *        PlazaRepository::listOcupaciones( $plaza['id'] ) — resolved by
+     *        the caller, once for every plaza, BEFORE primePlayerTitles()
+     *        runs (see listar()).
+     * @param array<string, mixed>|null $vigente The vigent ocupación within
+     *        $ocupaciones, or null — also resolved by the caller.
      * @return array<string, mixed>
      */
-    private function shapePlaza( array $plaza, CadenaResolver $cadenaResolver ): array {
-        $plazaId     = (int) $plaza['id'];
-        $ocupaciones = $this->plazaRepository->listOcupaciones( $plazaId );
-        $vigente     = $this->vigente( $ocupaciones );
+    private function shapePlaza( array $plaza, CadenaResolver $cadenaResolver, array $ocupaciones, ?array $vigente ): array {
+        $plazaId = (int) $plaza['id'];
 
         [ $fechasFaltantes, $indeterminado ] = $this->resolveFechasFaltantes( $plazaId, $ocupaciones, $cadenaResolver );
 
@@ -333,7 +426,9 @@ class PlazasController {
             'plaza_id'                                   => $plazaId,
             'tipo'                                        => (string) $plaza['tipo'],
             'titular_player_id'                           => (int) $plaza['titular_player_id'],
+            'titular_nombre'                              => $this->nombreJugador( (int) $plaza['titular_player_id'] ),
             'ocupante_player_id'                          => null !== $vigente ? (int) $vigente['player_id'] : null,
+            'ocupante_nombre'                              => null !== $vigente ? $this->nombreJugador( (int) $vigente['player_id'] ) : null,
             'es_titular_el_ocupante'                      => null !== $vigente
                 && (int) $vigente['player_id'] === (int) $plaza['titular_player_id'],
             'cerrada'                                      => null !== $plaza['closed_at'],
@@ -343,15 +438,64 @@ class PlazasController {
     }
 
     /**
-     * The per-plaza degradation this class's docblock describes
-     * ("A SINGLE PLAZA'S CALCULATION FAILING DOES NOT FAIL THE WHOLE
-     * RESPONSE"). An empty $ocupaciones chain is the pre-existing "no rows
-     * read" case (PlazaRepository::listOcupaciones()'s own docblock) — still
-     * an honest `null`, not this method's concern to log, since nothing was
-     * even attempted. A THROWN FechaCountUnavailableException is different:
-     * something WAS attempted and could not be trusted, so it is logged here
-     * — once, with the plaza id — before degrading, exactly like every other
-     * failure path in this plugin logs before answering conservatively.
+     * Bulk-primes WordPress's post object cache for every id in
+     * $playerIds, so the get_the_title() calls nombreJugador() makes right
+     * after this — one per plaza/candidato — hit cache instead of issuing
+     * one fresh query PER PLAYER. Mirrors the fetch-then-resolve shape
+     * `entre-redes-api`'s own `/goleadores` handler uses (`get_posts()`
+     * with `post__in`), without that handler's `update_meta_cache()` call —
+     * this class never reads player postmeta, only the title, so there is
+     * nothing else worth priming.
+     *
+     * listarCandidatos() is the endpoint this actually matters for: a
+     * season's candidate pool can run into the hundreds (see
+     * Plazas\CandidatosResolver's own class docblock, "COST: THIS IS N+1 BY
+     * DESIGN") — resolving each one's name with an unprimed get_the_title()
+     * would add one more uncached query per candidate on top of that.
+     *
+     * @param array<int, int> $playerIds
+     */
+    private function primePlayerTitles( array $playerIds ): void {
+        if ( empty( $playerIds ) ) {
+            return;
+        }
+
+        get_posts( [
+            'post_type'      => 'sp_player',
+            'post__in'       => $playerIds,
+            'posts_per_page' => -1,
+        ] );
+    }
+
+    /**
+     * @return string The trimmed post title for $playerId, or
+     *         "Jugador #<id>" when it comes back empty (or the post does
+     *         not exist) — a screen must never render a blank name for a
+     *         player. Same fallback discipline as
+     *         Admin\BandejaPage::nombrePost().
+     */
+    private function nombreJugador( int $playerId ): string {
+        $titulo = trim( (string) get_the_title( $playerId ) );
+
+        return '' !== $titulo ? $titulo : 'Jugador #' . $playerId;
+    }
+
+    /**
+     * The per-plaza degradation this class's docblock describes ("ONE KIND
+     * OF PER-PLAZA FAILURE DOES NOT FAIL THE WHOLE RESPONSE"). An empty
+     * $ocupaciones chain reaching THIS method is no longer a "read failed"
+     * case — PlazaRepository::listOcupaciones() throws before `listar()`
+     * ever builds this array, which aborts the whole response instead (see
+     * that method's own docblock). An empty chain here would mean a plaza
+     * was genuinely persisted with none, which
+     * PlazaRepository::openPlaza()'s invariant says should never happen;
+     * this branch is kept as a defensive fallback, not a documented normal
+     * case, and returns the same honest "unknown" rather than guessing. A
+     * THROWN FechaCountUnavailableException is the real per-row failure this
+     * method exists to degrade: something WAS attempted and could not be
+     * trusted, so it is logged here — once, with the plaza id — before
+     * degrading, exactly like every other failure path in this plugin logs
+     * before answering conservatively.
      *
      * @param array<int, array<string, mixed>> $ocupaciones
      * @return array{0: int|null, 1: bool} [fechas_faltantes_liberacion,

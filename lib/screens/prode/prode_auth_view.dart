@@ -36,6 +36,13 @@ class ProdeAuthView extends StatelessWidget {
   /// Returns null on success, or a user-facing error message to show inline.
   final Future<String?> Function(String dni) onConfirmDni;
 
+  /// Overrides what renders for the Authenticated state. Defaults to
+  /// [ProdeChamiScreen] (the Prode landing) when null — other authenticated
+  /// features gated behind this same Prode session (e.g. Cambios) reuse this
+  /// view for every OTHER state (sign-in, DNI confirmation, revoked, error)
+  /// without duplicating that UI, and supply their own destination here.
+  final Widget Function(bool stale, VoidCallback onLogout)? authenticatedBuilder;
+
   const ProdeAuthView({
     super.key,
     required this.state,
@@ -44,6 +51,7 @@ class ProdeAuthView extends StatelessWidget {
     required this.onGoogleSignIn,
     required this.onAppleSignIn,
     required this.onConfirmDni,
+    this.authenticatedBuilder,
   });
 
   @override
@@ -52,8 +60,9 @@ class ProdeAuthView extends StatelessWidget {
       ProdeAuthHydrating() ||
       ProdeAuthAuthenticating() =>
         const _Centered(child: CircularProgressIndicator()),
-      ProdeAuthAuthenticated(:final stale) =>
-        ProdeChamiScreen(stale: stale, onLogout: onLogout),
+      ProdeAuthAuthenticated(:final stale) => authenticatedBuilder != null
+          ? authenticatedBuilder!(stale, onLogout)
+          : ProdeChamiScreen(stale: stale, onLogout: onLogout),
       ProdeAuthUnauthenticated() => _SignInView(
           onGoogleSignIn: onGoogleSignIn,
           onAppleSignIn: onAppleSignIn,

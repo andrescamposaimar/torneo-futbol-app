@@ -6,6 +6,7 @@ namespace EntreRedes\Cambios\Capitania;
 
 use EntreRedes\Cambios\Capitania\Exception\CapitanPersistenceException;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Support\ChecksReads;
 use EntreRedes\Cambios\Support\OpensTransactions;
 
 /**
@@ -43,6 +44,7 @@ use EntreRedes\Cambios\Support\OpensTransactions;
 class CapitanRepository {
 
     use OpensTransactions;
+    use ChecksReads;
 
     private \wpdb $wpdb;
     private EventLog $eventLog;
@@ -186,6 +188,19 @@ class CapitanRepository {
     }
 
     /**
+     * *** WHY A FAILED READ HERE STILL READS AS "NO CAPTAIN", UNLIKE
+     * listEquiposByCapitan() BELOW *** This method backs isCapitanVigente(),
+     * which every team/season-scoped authorization check goes through
+     * (CapitanAuthorizer::authorize()). An authorization check must fail
+     * CLOSED — misreading a failed read as "nobody captains this team" only
+     * ever produces a wrongful DENIAL (NotCaptainException), never a
+     * wrongful grant, so leaving get_row()'s `null` (which wpdb also
+     * returns on a genuine query failure) as "no captain" is the safe
+     * failure mode here and this method is deliberately NOT routed through
+     * Support\ChecksReads. listEquiposByCapitan() cannot make the same
+     * argument — see its own docblock for why the same failure shape is
+     * wrong there.
+     *
      * @return array<string, mixed>|null The vigent (`revocado_at IS NULL`)
      *         row for ($seasonId, $teamId), or null when the team currently
      *         has no captain.
@@ -221,6 +236,21 @@ class CapitanRepository {
      *         stops the same person from captaining more than one team at
      *         once, and hiding that here would just move the surprise
      *         somewhere else.
+     *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** This
+     * feeds `Rest\CapitanController`'s `/cambios/mis-equipos` bootstrap
+     * endpoint — the ONLY thing a real captain has to learn which team(s)
+     * they may act on. Unlike findCapitanVigente()/isCapitanVigente() (see
+     * that method's own docblock for why THEY stay fail-closed), this is
+     * not an authorization check: a failed read misread as "captains
+     * nothing" would tell an actual captain they are not one and hide the
+     * whole feature behind an empty list, with no error anywhere for
+     * anyone to notice. Routed through Support\ChecksReads so a wpdb-level
+     * failure surfaces as a thrown \RuntimeException instead.
+     *
+     * @throws \RuntimeException When the query fails at the wpdb level. A
+     *         genuine "captains nothing" ($rows === [] with no
+     *         `$wpdb->last_error`) is NOT a failure — see ChecksReads.
      */
     public function listEquiposByCapitan( int $seasonId, int $playerId ): array {
         $wpdb = $this->wpdb;
@@ -236,7 +266,9 @@ class CapitanRepository {
             ARRAY_A
         );
 
-        return array_map( static fn( array $r ): int => (int) $r['team_id'], $rows ?: [] );
+        $this->assertReadSucceeded( $rows, 'listEquiposByCapitan', [ 'season_id' => $seasonId, 'player_id' => $playerId ] );
+
+        return array_map( static fn( array $r ): int => (int) $r['team_id'], $rows );
     }
 
     /**

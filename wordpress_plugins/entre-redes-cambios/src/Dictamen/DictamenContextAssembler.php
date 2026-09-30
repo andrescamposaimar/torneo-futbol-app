@@ -33,18 +33,24 @@ use EntreRedes\Cambios\Plazas\PlazaRepository;
  * a half-built context: a `Regla` can never distinguish "no conflict" from
  * "I could not look".
  *
- * *** WHY listOcupaciones() ITSELF WAS NOT CHANGED ***
+ * *** listOcupaciones() NOW THROWS TOO (read-failure audit) ***
  * The plaza's OWN chain (`DictamenContext::ocupaciones()`, read via
- * `PlazaRepository::listOcupaciones()`, unchanged from slice 2) is not
- * covered by the same throw-on-failure discipline as the two NEW repository
- * queries this assembler also calls. That is deliberate, not an oversight:
+ * `PlazaRepository::listOcupaciones()`) used to be exempt from the
+ * throw-on-failure discipline the two NEW repository queries below follow:
  * an empty `ocupaciones()` chain does NOT read as "no conflict" anywhere in
  * this ruleset — `DictamenContext::vigente()` returns null for an empty
  * chain, and `Reglas\PlazaConOcupacionVigente` treats "no vigent link" as
- * its own REJECTING motivo (`plaza_sin_ocupacion_vigente`). A silently
- * failed fetch of the plaza's own chain therefore already fails CLOSED by
- * construction of the existing ruleset, unlike the two new queries this
- * class was specifically written to guard.
+ * its own REJECTING motivo (`plaza_sin_ocupacion_vigente`) — so a silently
+ * failed fetch already failed CLOSED by construction of the existing
+ * ruleset. That reasoning was correct but incomplete: it covered the
+ * dictamen engine, but not `Rest\PlazasController::listar()`, which reads
+ * this SAME method's empty-on-failure result as the FACT "this plaza has no
+ * current occupant" for a captain's roster screen. `PlazaRepository::listOcupaciones()`
+ * now throws on a wpdb-level failure — see that method's own docblock — which
+ * this assembler's `assemble()` lets propagate exactly like the two queries
+ * below: `DictamenPipeline::evaluate()` catches it, logs `dictamen.fallido`,
+ * and re-throws, so the failure reaches an honest 500, not a 200 rejection
+ * with the wrong Motivo.
  *
  * *** THE PLAZOS FRAME IS UTC, ON PURPOSE ***
  * `Calendario\PlazosCalculator::computeUtc()` is used here, NEVER

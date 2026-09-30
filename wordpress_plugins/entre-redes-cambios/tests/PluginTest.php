@@ -50,7 +50,7 @@ class PluginTest extends TestCase {
         $this->resetPluginBootState();
     }
 
-    public function test_boot_registers_the_three_captain_endpoints(): void {
+    public function test_boot_registers_every_captain_endpoint(): void {
         Plugin::boot();
         do_action( 'rest_api_init' );
 
@@ -59,6 +59,12 @@ class PluginTest extends TestCase {
         $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/solicitudes', \WP_REST_Server::CREATABLE );
         $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/solicitudes', \WP_REST_Server::READABLE );
         $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/plazas', \WP_REST_Server::READABLE );
+        $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/mis-equipos', \WP_REST_Server::READABLE );
+        // FIX 2 (slice 5 task brief): the fecha bootstrap endpoint —
+        // Calendario\FechaRepository::listBySeason() existed and was wired to
+        // no route at all before this, so POST /cambios/solicitudes' required
+        // `fecha_id` had no way for the client to discover it.
+        $this->assertRouteRegistered( $routes, 'entre-redes/v1', '/cambios/fecha-abierta', \WP_REST_Server::READABLE );
     }
 
     /**
@@ -90,7 +96,10 @@ class PluginTest extends TestCase {
         $request = new \WP_REST_Request();
         // Deliberately no Authorization header — TokenVerifier receives an
         // empty string and rejects it as malformed, exactly like any other
-        // bad token (see Capitania\Exception\InvalidTokenException).
+        // bad token (see Capitania\Exception\InvalidTokenException). No
+        // wrapped TokenExpiredException here, so this collapses into
+        // `token_invalid` (see HandlesCapitanAuthorization's own docblock,
+        // FIX 1 of the slice 5 task brief), 401, never the old blanket 403.
         $request->set_param( 'season_id', 359 );
         $request->set_param( 'team_id', 100 );
         $request->set_param( 'plaza_id', 1 );
@@ -101,8 +110,8 @@ class PluginTest extends TestCase {
         $response = $callback( $request );
 
         $this->assertInstanceOf( \WP_REST_Response::class, $response );
-        $this->assertSame( 403, $response->get_status() );
-        $this->assertSame( 'no_autorizado', $response->get_data()['code'] );
+        $this->assertSame( 401, $response->get_status() );
+        $this->assertSame( 'token_invalid', $response->get_data()['code'] );
 
         $countAfter = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_solicitud" );
         $this->assertSame( 0, $countAfter, 'SolicitudRepository::crear() must never run when authorization fails.' );

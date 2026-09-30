@@ -432,6 +432,43 @@ class FechaRepositoryTest extends TestCase {
         $this->assertSame( 2, $this->repo->countResolvedFechasSince( 359, $idA ) );
     }
 
+    /**
+     * The test that actually catches "resolved" drifting apart between its
+     * two implementations: for EVERY value in the estado vocabulary, the SQL
+     * path (`countResolvedFechasSince()`, whose `IN (...)` clause is built
+     * from `FechaRepository::ESTADOS_RESUELTOS`) and the PHP path
+     * (`FechaRepository::esResuelta()`) must classify a fecha in that estado
+     * identically. A test that only checked today's two resolved values
+     * against today's constant would pass whether or not the two paths share
+     * a definition — this one fails the moment a future estado is added to
+     * one path and not the other.
+     *
+     * @dataProvider estadoVocabularyProvider
+     */
+    public function test_sql_path_and_php_path_agree_on_every_estado( string $estado ): void {
+        $idA = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $this->repo->setEstadoManual( $idA, $estado, null, '2026-05-30 20:00:00' );
+
+        $countedAsResolved = 1 === $this->repo->countResolvedFechasSince( 359, $idA );
+
+        $this->assertSame(
+            FechaRepository::esResuelta( $estado ),
+            $countedAsResolved,
+            "estado '{$estado}': countResolvedFechasSince() and esResuelta() disagree."
+        );
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function estadoVocabularyProvider(): array {
+        return [
+            'programada' => [ 'programada' ],
+            'jugada'     => [ 'jugada' ],
+            'dirimida'   => [ 'dirimida' ],
+            'suspendida' => [ 'suspendida' ],
+        ];
+    }
+
     // -------------------------------------------------------------------------
     // orden uniqueness under reordering
     // -------------------------------------------------------------------------
@@ -470,6 +507,278 @@ class FechaRepositoryTest extends TestCase {
         $this->repo->recalculateOrden( 359 );
 
         $this->assertSame( 0, $this->repo->recalculateOrden( 359 ), 'second run must move nothing' );
+    }
+
+    // -------------------------------------------------------------------------
+    // Read-failure audit — every read in this class must fail loud, never
+    // silently read a wpdb-level failure as "no rows" / "not found". See
+    // class docblock, "READ FAILURES MUST NEVER READ AS 'NO ROWS' / 'NOT
+    // FOUND'".
+    // -------------------------------------------------------------------------
+
+    /**
+     * A `\wpdb` subclass whose get_results() sets $wpdb->last_error and
+     * returns [] whenever the SQL contains $mustContain — same double as
+     * `Plazas\PlazaRepositoryTest::wpdbThatFailsGetResults()`.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    /**
+     * A `\wpdb` subclass whose get_row() sets $wpdb->last_error and returns
+     * null whenever the SQL contains $mustContain — the get_row() analogue of
+     * wpdbThatFailsGetResults() above.
+     */
+    private function wpdbThatFailsGetRow( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_row( string $sql, string $output = OBJECT ): ?array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_row failure for test';
+                    return null;
+                }
+
+                return parent::get_row( $sql, $output );
+            }
+        };
+    }
+
+    /**
+     * A `\wpdb` subclass whose get_var() sets $wpdb->last_error and returns
+     * null whenever the SQL contains $mustContain — the get_var() analogue,
+     * same double as `Plazas\JugadorMetricasReaderTest::wpdbThatFailsGetVar()`.
+     */
+    private function wpdbThatFailsGetVar( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_var( string $sql ): ?string {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_var failure for test';
+                    return null;
+                }
+
+                return parent::get_var( $sql );
+            }
+        };
+    }
+
+    // --- listBySeason (CRITICAL — the sole source for Rest\FechaController) --
+
+    public function test_list_by_season_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY orden ASC' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->listBySeason( 359 );
+    }
+
+    public function test_list_by_season_records_a_lectura_fallida_event_before_throwing(): void {
+        global $wpdb;
+
+        $failingWpdb     = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY orden ASC' );
+        $failingEventLog = new InMemoryEventLog();
+        $failingRepo     = new FechaRepository( $failingWpdb, $failingEventLog );
+
+        try {
+            $failingRepo->listBySeason( 359 );
+            $this->fail( 'Expected RuntimeException.' );
+        } catch ( \RuntimeException $e ) {
+            // expected
+        }
+
+        $this->assertTrue( $failingEventLog->has( 'lectura.fallida' ) );
+        $this->assertSame( 'listBySeason', $failingEventLog->last()['contexto']['operacion'] );
+    }
+
+    // --- findFechaIdByMatchIds ------------------------------------------------
+
+    public function test_find_fecha_id_by_match_ids_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_fecha_partido' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->findFechaIdByMatchIds( [ 100, 101 ] );
+    }
+
+    // --- upsertFecha's re-read of an existing fecha ---------------------------
+
+    public function test_upsert_fecha_throws_when_the_reread_of_an_existing_fecha_fails(): void {
+        global $wpdb;
+
+        $fechaId = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), $this->samplePartidos() );
+
+        $failingWpdb = $this->wpdbThatFailsGetRow( $wpdb, 'play_date, veces_postergada, estado_origen' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        // Same match_ids as $fechaId — findFechaIdByMatchIds() resolves it,
+        // then the immediate re-read (the one under test) fails.
+        $failingRepo->upsertFecha( $this->sampleFecha( 359, 1, '2026-06-06' ), $this->samplePartidos() );
+    }
+
+    // --- recalculateOrden ------------------------------------------------------
+
+    public function test_recalculate_orden_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $failingWpdb = $this->wpdbThatFailsGetResults( $wpdb, 'ORDER BY play_date ASC, id ASC' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->recalculateOrden( 359 );
+    }
+
+    // --- nextFreeOrden (private — exercised via upsertFecha()'s INSERT path) --
+
+    public function test_upsert_fecha_throws_when_next_free_orden_lookup_fails_on_insert(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetVar( $wpdb, 'MAX(orden)' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        // Brand-new match_ids — findFechaIdByMatchIds() resolves null, so
+        // upsertFecha() takes the INSERT path, which calls nextFreeOrden().
+        $failingRepo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), $this->samplePartidos() );
+    }
+
+    // --- upsertPartido's SELECT-then-insert guard ---------------------------
+
+    public function test_upsert_fecha_throws_when_the_partido_existence_lookup_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetVar( $wpdb, 'SELECT id FROM' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), $this->samplePartidos() );
+    }
+
+    // --- findById --------------------------------------------------------------
+
+    public function test_find_by_id_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $fechaId = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $failingWpdb = $this->wpdbThatFailsGetRow( $wpdb, 'SELECT * FROM' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->findById( $fechaId );
+    }
+
+    public function test_find_by_id_still_returns_null_when_genuinely_not_found(): void {
+        $this->assertNull( $this->repo->findById( 999999 ) );
+    }
+
+    // --- findByOrden -------------------------------------------------------
+
+    public function test_find_by_orden_throws_when_the_query_fails(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetRow( $wpdb, 'AND orden =' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->findByOrden( 359, 1 );
+    }
+
+    // --- countResolvedFechasSince ------------------------------------------
+
+    public function test_count_resueltas_throws_when_the_orden_lookup_fails(): void {
+        global $wpdb;
+
+        $idA = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $failingWpdb = $this->wpdbThatFailsGetRow( $wpdb, 'SELECT orden FROM' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->countResolvedFechasSince( 359, $idA );
+    }
+
+    public function test_count_resueltas_throws_when_the_count_query_fails(): void {
+        global $wpdb;
+
+        $idA = $this->repo->upsertFecha( $this->sampleFecha( 359, 1, '2026-05-30' ), [] );
+
+        $failingWpdb = $this->wpdbThatFailsGetVar( $wpdb, 'SELECT COUNT(*)' );
+        $failingRepo = new FechaRepository( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingRepo->countResolvedFechasSince( 359, $idA );
+    }
+
+    public function test_count_resueltas_still_throws_invalid_argument_when_genuinely_not_found(): void {
+        // No wpdb failure involved here — this must stay an
+        // \InvalidArgumentException, not be swallowed into the new
+        // \RuntimeException path (see countResolvedFechasSince()'s docblock).
+        $this->expectException( \InvalidArgumentException::class );
+
+        $this->repo->countResolvedFechasSince( 359, 999999 );
     }
 
 }

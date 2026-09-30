@@ -22,7 +22,16 @@ final class DictamenContext {
     /** @var array<string, mixed> As returned by Plazas\PlazaRepository::findPlaza(). */
     private array $plaza;
 
-    /** @var array<int, array<string, mixed>> The plaza's own chain, as Plazas\PlazaRepository::listOcupaciones(). */
+    /**
+     * The plaza's own chain, as Plazas\PlazaRepository::listOcupaciones()
+     * returns it. That method THROWS on a wpdb-level read failure — see its
+     * own docblock — so this is never a silently-empty stand-in for "the read
+     * failed"; a genuinely empty array here would mean the plaza truly has no
+     * ocupaciones, which `vigente()` below still treats as the
+     * `Reglas\PlazaConOcupacionVigente` rejection it always has.
+     *
+     * @var array<int, array<string, mixed>>
+     */
     private array $ocupaciones;
 
     private ?Puntaje $entrantePuntaje;

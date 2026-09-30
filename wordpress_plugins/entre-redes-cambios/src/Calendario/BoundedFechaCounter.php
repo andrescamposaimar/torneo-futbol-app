@@ -97,7 +97,7 @@ final class BoundedFechaCounter {
 
         return count( array_filter(
             $fechas,
-            static fn ( array $f ): bool => in_array( (string) ( $f['estado'] ?? '' ), [ 'jugada', 'dirimida' ], true )
+            static fn ( array $f ): bool => FechaRepository::esResuelta( (string) ( $f['estado'] ?? '' ) )
         ) );
     }
 }

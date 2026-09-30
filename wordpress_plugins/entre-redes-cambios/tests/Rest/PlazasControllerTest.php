@@ -107,7 +107,73 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 0, $plazas[1]['fechas_faltantes_liberacion'] );
     }
 
-    public function test_listar_reads_fechas_faltantes_as_null_when_ocupaciones_could_not_be_read(): void {
+    /**
+     * FIX 2: `titular_nombre` / `ocupante_nombre` resolve to the real post
+     * title when one is set, and fall back to "Jugador #<id>" — never an
+     * empty string — when it is not (plaza 2's titular, 888, has no title
+     * seeded here).
+     */
+    public function test_listar_shapes_titular_and_ocupante_names_with_fallback(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Juan Pérez', 999 => 'Martín Gómez' ];
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
+                [ 'id' => 1, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
+                [ 'id' => 2, 'tipo' => 'suplente', 'titular_player_id' => 888, 'closed_at' => null ],
+            ] );
+            $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
+                [ 1, [
+                    [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 777, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+                ] ],
+                [ 2, [
+                    [ 'id' => 2, 'plaza_id' => 2, 'player_id' => 888, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => 4, 'cerrada_por' => 'reemplazada' ],
+                    [ 'id' => 3, 'plaza_id' => 2, 'player_id' => 999, 'es_genesis' => 0, 'fecha_desde_id' => 5, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+                ] ],
+            ] );
+
+            $fechaRepository = $this->createMock( FechaRepository::class );
+            $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
+            $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 5 );
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+            $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+            ] ) );
+
+            $plazas = $response->get_data()['plazas'];
+
+            // Plaza 1: titular AND ocupante are both player 777 — real title.
+            $this->assertSame( 'Juan Pérez', $plazas[0]['titular_nombre'] );
+            $this->assertSame( 'Juan Pérez', $plazas[0]['ocupante_nombre'] );
+
+            // Plaza 2: titular is 888 (no title seeded => fallback), ocupante
+            // is 999 (real title).
+            $this->assertSame( 'Jugador #888', $plazas[1]['titular_nombre'] );
+            $this->assertSame( 'Martín Gómez', $plazas[1]['ocupante_nombre'] );
+        } finally {
+            $wp_test_post_titles = [];
+        }
+    }
+
+    /**
+     * `PlazaRepository::listOcupaciones()` now THROWS on a wpdb-level read
+     * failure (see its own docblock) — a genuinely empty chain reaching
+     * `shapePlaza()` is therefore only the DEFENSIVE fallback for a plaza
+     * that was somehow persisted with no ocupaciones at all, never a stand-in
+     * for "the read failed" (see `resolveFechasFaltantes()`'s own docblock).
+     * This test mocks that empty array directly, which still exercises the
+     * fallback branch; `test_listar_returns_a_real_error_when_the_underlying_read_fails()`
+     * below is what actually proves a REAL read failure now aborts the whole
+     * response instead of reaching this branch at all.
+     */
+    public function test_listar_defensively_reads_fechas_faltantes_as_null_when_ocupaciones_is_empty(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
@@ -115,9 +181,6 @@ class PlazasControllerTest extends TestCase {
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
             [ 'id' => 9, 'tipo' => 'campo', 'titular_player_id' => 777, 'closed_at' => null ],
         ] );
-        // PlazaRepository::listOcupaciones() itself reads a wpdb-level query
-        // failure as "no rows" rather than throwing (see its own docblock) —
-        // this endpoint must answer "unknown", never a fabricated 0.
         $plazaRepository->method( 'listOcupaciones' )->willReturn( [] );
 
         $fechaRepository = $this->createMock( FechaRepository::class );
@@ -265,11 +328,14 @@ class PlazasControllerTest extends TestCase {
     }
 
     /**
-     * THE WIRING GUARANTEE, same as SolicitudesControllerTest: an
-     * authorization failure returns 403 and NEVER touches PlazaRepository —
-     * asserted with a double that fails the test if called.
+     * THE WIRING GUARANTEE, same as SolicitudesControllerTest, UPDATED for
+     * FIX 1 of the slice 5 task brief: an invalid token (no wrapped
+     * TokenVerificationException, exactly like a missing/malformed
+     * Authorization header) now returns 401 `token_invalid`, not the old
+     * blanket 403 — and NEVER touches PlazaRepository, asserted with a
+     * double that fails the test if called.
      */
-    public function test_listar_returns_403_without_touching_the_repository(): void {
+    public function test_listar_returns_401_token_invalid_without_touching_the_repository(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willThrowException( new InvalidTokenException() );
 
@@ -286,12 +352,12 @@ class PlazasControllerTest extends TestCase {
             'team_id'   => self::TEAM_ID,
         ] ) );
 
-        $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( 401, $response->get_status() );
         $this->assertSame(
             [
-                'code'    => 'no_autorizado',
+                'code'    => 'token_invalid',
                 'message' => 'No estás autorizado para realizar esta acción en este equipo y temporada.',
-                'data'    => [ 'status' => 403 ],
+                'data'    => [ 'status' => 401 ],
             ],
             $response->get_data()
         );
@@ -327,13 +393,95 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( \RuntimeException::class, $logged['excepcion'] );
     }
 
+    /**
+     * THE test that closes the read-failure audit's gap for `/plazas`,
+     * mirroring `Rest\FechaControllerTest`'s own real-repository test: every
+     * OTHER test in this class mocks `PlazaRepository` entirely, which proves
+     * the CONTROLLER handles a throw but never that
+     * `PlazaRepository::listPlazasByEquipo()` itself actually throws now.
+     * This drives a REAL `PlazaRepository` against the SQLite test shim, with
+     * a `\wpdb` double that fails ONLY that method's own query, and asserts
+     * the endpoint answers a real error — never a 200 with an empty roster a
+     * captain with real plazas would otherwise see with no explanation
+     * anywhere.
+     */
+    public function test_listar_returns_a_real_error_when_the_underlying_read_fails(): void {
+        InitialSchema::up();
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+        $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $failingWpdb            = $this->wpdbThatFailsGetResults( $wpdb, 'cambios_plaza' );
+            $failingPlazaRepository = new PlazaRepository( $failingWpdb, $this->eventLog );
+
+            $fechaRepository = $this->createMock( FechaRepository::class );
+
+            $controller = new PlazasController( $authorizer, $failingPlazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+            $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+            ] ) );
+
+            $this->assertSame( 500, $response->get_status() );
+            $this->assertNotSame(
+                [ 'plazas' => [] ],
+                $response->get_data(),
+                'A failed read must never look identical to "this team genuinely has no plazas".'
+            );
+            $this->assertTrue( $this->eventLog->has( 'rest.plazas_listar_fallida' ) );
+            $this->assertTrue(
+                $this->eventLog->has( 'lectura.fallida' ),
+                'PlazaRepository::listPlazasByEquipo() must log its own read failure too.'
+            );
+        } finally {
+            $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
+        }
+    }
+
     // -------------------------------------------------------------------------
     // listarCandidatos()
     // -------------------------------------------------------------------------
 
     private const PLAZA_ID = 1;
 
-    public function test_listar_candidatos_happy_path_shapes_every_candidato(): void {
+    /**
+     * @return CandidatosResolver&\PHPUnit\Framework\MockObject\MockObject
+     */
+    private function candidatosResolverConDosCandidatos(): CandidatosResolver {
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'paraPlaza' )
+            ->willReturn( [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
+            ] );
+
+        return $candidatosResolver;
+    }
+
+    /** @param array<string, mixed> $extraParams */
+    private function requestParaCandidatos( array $extraParams = [] ): \WP_REST_Request {
+        return $this->requestConToken( 'a-valid-jwt', array_merge(
+            [
+                'season_id' => self::SEASON_ID,
+                'team_id'   => self::TEAM_ID,
+                'plaza_id'  => self::PLAZA_ID,
+            ],
+            $extraParams
+        ) );
+    }
+
+    /**
+     * FIX 3: viable-only by default — a captain cannot act on a non-viable
+     * candidate, so 801 (puntaje_indeterminado, not viable) is excluded
+     * unless `incluir_no_viables=1` is passed (see the next test).
+     */
+    public function test_listar_candidatos_default_returns_only_viable_candidatos(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
@@ -342,32 +490,131 @@ class PlazasControllerTest extends TestCase {
             'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
         ] );
 
-        $fechaRepository = $this->createMock( FechaRepository::class );
-
-        $candidatosResolver = $this->createMock( CandidatosResolver::class );
-        $candidatosResolver->expects( $this->once() )
-            ->method( 'paraPlaza' )
-            ->willReturn( [
-                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
-                new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
-            ] );
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->candidatosResolverConDosCandidatos();
 
         $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
-        $response = $controller->listarCandidatos( $this->requestConToken( 'a-valid-jwt', [
-            'season_id' => self::SEASON_ID,
-            'team_id'   => self::TEAM_ID,
-            'plaza_id'  => self::PLAZA_ID,
-        ] ) );
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
 
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
-                [ 'player_id' => 801, 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
             ],
             $response->get_data()['candidatos']
         );
+    }
+
+    /**
+     * FIX 3: `?incluir_no_viables=1` opts back into the FULL list — the
+     * committee's own tooling may want to see WHY a candidate was excluded.
+     */
+    public function test_listar_candidatos_incluir_no_viables_returns_the_full_list_with_motivo(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'incluir_no_viables' => '1' ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame(
+            [
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+            ],
+            $response->get_data()['candidatos']
+        );
+    }
+
+    /**
+     * FIX 3: `?search=` narrows on the player's name, case-insensitively —
+     * both candidates are viable here (via incluir_no_viables=1, but search
+     * alone is what this test asserts), only one matches the needle.
+     */
+    public function test_listar_candidatos_search_filters_case_insensitively(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 800 => 'Juan Pérez', 801 => 'Martín Gómez' ];
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+            ] );
+
+            $fechaRepository    = $this->createMock( FechaRepository::class );
+            $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+            $response = $controller->listarCandidatos(
+                $this->requestParaCandidatos( [ 'incluir_no_viables' => '1', 'search' => 'gómez' ] )
+            );
+
+            $this->assertSame( 200, $response->get_status() );
+            $this->assertSame(
+                [
+                    [ 'player_id' => 801, 'nombre' => 'Martín Gómez', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+                ],
+                $response->get_data()['candidatos']
+            );
+        } finally {
+            $wp_test_post_titles = [];
+        }
+    }
+
+    /**
+     * FIX 3: `search` is applied ON TOP of the default viable-only filter,
+     * not instead of it — a search matching a NON-viable candidate's name
+     * must still exclude them when incluir_no_viables was not requested.
+     */
+    public function test_listar_candidatos_search_combined_with_default_viable_only_filter(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 800 => 'Juan Pérez', 801 => 'Martín Gómez' ];
+
+        try {
+            $authorizer = $this->createMock( CapitanAuthorizer::class );
+            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+            $plazaRepository = $this->createMock( PlazaRepository::class );
+            $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
+                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+            ] );
+
+            $fechaRepository    = $this->createMock( FechaRepository::class );
+            $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+            // "gómez" matches candidate 801's name, but 801 is not viable and
+            // incluir_no_viables was NOT passed — it must stay excluded.
+            $responseGomez = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'search' => 'gómez' ] ) );
+            $this->assertSame( [], $responseGomez->get_data()['candidatos'] );
+
+            // "pérez" matches candidate 800's name, and 800 IS viable — it
+            // must come through.
+            $responsePerez = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'search' => 'pérez' ] ) );
+            $this->assertSame(
+                [
+                    [ 'player_id' => 800, 'nombre' => 'Juan Pérez', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                ],
+                $responsePerez->get_data()['candidatos']
+            );
+        } finally {
+            $wp_test_post_titles = [];
+        }
     }
 
     public function test_listar_candidatos_missing_fields_returns_400(): void {
@@ -387,7 +634,7 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 400, $response->get_status() );
     }
 
-    public function test_listar_candidatos_returns_403_without_touching_the_resolver(): void {
+    public function test_listar_candidatos_returns_401_token_invalid_without_touching_the_resolver(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willThrowException( new InvalidTokenException() );
 
@@ -406,7 +653,8 @@ class PlazasControllerTest extends TestCase {
             'plaza_id'  => self::PLAZA_ID,
         ] ) );
 
-        $this->assertSame( 403, $response->get_status() );
+        $this->assertSame( 401, $response->get_status() );
+        $this->assertSame( 'token_invalid', $response->get_data()['code'] );
     }
 
     public function test_listar_candidatos_returns_400_when_the_plaza_does_not_match_season_or_team(): void {
@@ -532,6 +780,39 @@ class PlazasControllerTest extends TestCase {
 
         return $request;
     }
+
+    /**
+     * A `\wpdb` subclass whose get_results() sets $wpdb->last_error and
+     * returns [] whenever the SQL contains $mustContain — same double as
+     * `Plazas\PlazaRepositoryTest::wpdbThatFailsGetResults()`, copied here so
+     * this suite can drive a REAL `PlazaRepository` into a genuine read
+     * failure instead of mocking the repository away.
+     */
+    private function wpdbThatFailsGetResults( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
     /**
      * @return array<int, array<string, mixed>> $n fechas already resolved,
      *         the shape Calendario\FechaRepository::listBySeason() returns and
