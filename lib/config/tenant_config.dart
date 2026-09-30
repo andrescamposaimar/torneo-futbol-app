@@ -35,12 +35,21 @@ class TenantFeatures {
   /// `/campeones/historia`.
   final bool campeones;
 
+  /// Whether the virtual player credential ("Mi Credencial") feature is
+  /// enabled for this tenant. Defaults to false, exactly mirroring [prode]
+  /// and [campeones]: a tenant without the entre-redes-credencial WordPress
+  /// plugin would 404 on `/credencial/credencial`. Stays false through
+  /// slices 1a-3b of the credencial-virtual change and is only flipped once
+  /// the plugin is deployed and manually verified end to end (slice 4).
+  final bool credencial;
+
   const TenantFeatures({
     this.waitingLists = false,
     this.newsTab = true,
     this.ads = true,
     this.prode = false,
     this.campeones = false,
+    this.credencial = false,
   });
 }
 
