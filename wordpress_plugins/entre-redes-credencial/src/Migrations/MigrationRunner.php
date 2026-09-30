@@ -44,6 +44,16 @@ class MigrationRunner {
     private const MIN_MEMORY_LIMIT_BYTES = 128 * 1024 * 1024; // 128M
     private const MIN_UPLOAD_BYTES       = 6 * 1024 * 1024;   // 6M
 
+    /**
+     * Extra (slice 2b): the upload pipeline's OWN dependencies beyond ini
+     * limits — PhotoValidator needs `fileinfo` (finfo) and `exif` (the
+     * dimension/orientation check runs BEFORE any GD decode); GdPhotoReencoder
+     * needs `gd` for the decode/rotate/re-encode itself. Verified present on
+     * `gd` in production (bundled 2.1.0); `exif`/`fileinfo` were not
+     * independently confirmed there — see task 4.7.
+     */
+    private const REQUIRED_EXTENSIONS = [ 'gd', 'exif', 'fileinfo' ];
+
     public static function run( EventLog $eventLog ): void {
         $installed = get_option( self::DB_VERSION_OPTION, '0' );
         $current   = ENTRE_REDES_CREDENCIAL_VERSION;
@@ -104,15 +114,23 @@ class MigrationRunner {
      *        so every branch (low memory, low upload size, unlimited) is
      *        exercised deterministically regardless of the PHP process
      *        actually running the suite.
+     * @param null|callable(string): bool $extensionLoadedFn Defaults to a
+     *        thin wrapper around the real `extension_loaded()`. Tests inject
+     *        a fake reader so a missing `gd`/`exif`/`fileinfo` can be
+     *        exercised deterministically regardless of what this environment
+     *        actually has installed.
      *
-     * @return string[] The offending settings, human-readable — empty when
-     *         every limit clears its floor.
+     * @return string[] The offending settings/extensions, human-readable —
+     *         empty when every limit clears its floor and every required
+     *         extension is loaded.
      */
-    public static function checkRuntimeLimits( EventLog $eventLog, ?callable $iniGetFn = null ): array {
+    public static function checkRuntimeLimits( EventLog $eventLog, ?callable $iniGetFn = null, ?callable $extensionLoadedFn = null ): array {
         $read = $iniGetFn ?? static function ( string $key ): string {
             $value = ini_get( $key );
             return false === $value ? '' : $value;
         };
+
+        $hasExtension = $extensionLoadedFn ?? static fn ( string $extension ): bool => extension_loaded( $extension );
 
         $problems = [];
 
@@ -138,6 +156,15 @@ class MigrationRunner {
                 'post_max_size=%s (mínimo recomendado 6M)',
                 $read( 'post_max_size' )
             );
+        }
+
+        foreach ( self::REQUIRED_EXTENSIONS as $extension ) {
+            if ( ! $hasExtension( $extension ) ) {
+                $problems[] = sprintf(
+                    'extensión PHP faltante: %s (requerida por la subida de fotos)',
+                    $extension
+                );
+            }
         }
 
         if ( empty( $problems ) ) {
