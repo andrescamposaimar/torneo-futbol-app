@@ -79,7 +79,8 @@ class _ThrowingWritePhotoStore extends CredencialPhotoStore {
 }
 
 void _setUpFakeStorage(Map<String, String> store) {
-  FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform(store);
+  FlutterSecureStoragePlatform.instance =
+      TestFlutterSecureStoragePlatform(store);
 }
 
 CredencialResponse _activeResponse({String sha256 = 'validsha'}) {
@@ -124,7 +125,8 @@ void main() {
       expect(await repo.readCached(), isNull);
     });
 
-    test('save then readCached round-trips an active credential with a verified photo',
+    test(
+        'save then readCached round-trips an active credential with a verified photo',
         () async {
       final bytes = Uint8List.fromList('photo-bytes'.codeUnits);
       // Real sha256 of the bytes above — readVerified() re-hashes on load, so
@@ -141,7 +143,8 @@ void main() {
       expect(result, equals(response));
     });
 
-    test('readCached returns null when the credential has no matching photo on disk',
+    test(
+        'readCached returns null when the credential has no matching photo on disk',
         () async {
       // Save the JSON without ever writing the matching photo bytes.
       final response = _activeResponse(sha256: 'missing-photo-hash');
@@ -150,7 +153,8 @@ void main() {
       expect(await repo.readCached(), isNull);
     });
 
-    test('readCached returns the response unchanged for non-active states (no photo to verify)',
+    test(
+        'readCached returns the response unchanged for non-active states (no photo to verify)',
         () async {
       const response = CredencialResponse(state: CredencialCardState.blocked);
       // Directly exercise save()/readCached() round trip for a null-credential state.
@@ -159,7 +163,8 @@ void main() {
       expect(await repo.readCached(), equals(response));
     });
 
-    test('malformed JSON in storage deletes the key and returns null', () async {
+    test('malformed JSON in storage deletes the key and returns null',
+        () async {
       store['credencial_v1'] = 'not valid json {{{';
 
       final result = await repo.readCached();
@@ -168,10 +173,12 @@ void main() {
       expect(store.containsKey('credencial_v1'), isFalse);
     });
 
-    test('a secure-storage decrypt exception on read deletes the key and returns null',
+    test(
+        'a secure-storage decrypt exception on read deletes the key and returns null',
         () async {
       final throwingStore = {'credencial_v1': 'irrelevant-because-read-throws'};
-      final fakePlatform = _ThrowingReadFlutterSecureStoragePlatform(throwingStore);
+      final fakePlatform =
+          _ThrowingReadFlutterSecureStoragePlatform(throwingStore);
       FlutterSecureStoragePlatform.instance = fakePlatform;
 
       final throwingRepo = CredencialRepository(photoStore: photoStore);
@@ -182,7 +189,8 @@ void main() {
       expect(throwingStore.containsKey('credencial_v1'), isFalse);
     });
 
-    test('save writes the photo bytes before the JSON key: a photo-write failure leaves no JSON persisted',
+    test(
+        'save writes the photo bytes before the JSON key: a photo-write failure leaves no JSON persisted',
         () async {
       final throwingPhotoStore = _ThrowingWritePhotoStore();
       final orderedRepo = CredencialRepository(photoStore: throwingPhotoStore);
@@ -225,6 +233,77 @@ void main() {
 
       expect(await photoStore.readVerified(oldHash), isNull);
       expect(await photoStore.readVerified(newHash), isNotNull);
+    });
+
+    test(
+        'CRITICAL (verify-report 1575, slice 3b): save() with photoBytes:null '
+        'for a NEW sha256 that was never written must NOT delete the '
+        'previously-verified photo for the OLD sha256', () async {
+      const oldHash =
+          'cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4';
+      final oldBytes = Uint8List.fromList('old'.codeUnits);
+
+      final first = _activeResponse(sha256: oldHash);
+      await repo.save(first, photoBytes: oldBytes);
+      expect(await photoStore.readVerified(oldHash), isNotNull);
+
+      // Simulates a failed/skipped photo download during a sha rotation: the
+      // new response is persisted, but no bytes were ever written for the
+      // NEW sha256 — so no verified file exists for it yet.
+      final second = _activeResponse(sha256: 'newsha-never-downloaded');
+      await repo.save(second, photoBytes: null);
+
+      expect(
+        await photoStore.readVerified(oldHash),
+        isNotNull,
+        reason: 'the last known-good verified photo must survive a failed '
+            'download, not be garbage-collected out from under the player',
+      );
+      expect(await photoStore.readVerified('newsha-never-downloaded'), isNull);
+    });
+
+    test(
+        'NEW WARNING 2 (verify-report 1575, slice 3b re-verify): save() with '
+        'an active credential whose photo.sha256 is null returns before gc, '
+        'never deleting an existing verified photo for a different sha',
+        () async {
+      const oldHash =
+          'cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4';
+      final oldBytes = Uint8List.fromList('old'.codeUnits);
+      await repo.save(_activeResponse(sha256: oldHash), photoBytes: oldBytes);
+      expect(await photoStore.readVerified(oldHash), isNotNull);
+
+      final responseWithNoSha = CredencialResponse(
+        state: CredencialCardState.active,
+        credential: Credencial(
+          id: 'cred-2',
+          issuedAt: '2026-09-29 00:00:00',
+          expiresAt: '2027-09-29 00:00:00',
+          playerId: 1,
+          fullName: 'Juan Perez',
+          dni: '30111222',
+          photo: const CredencialPhoto(
+              url: 'https://example.com/p.jpg', sha256: null),
+          codeSeed: 'c2VlZA',
+          code: const CredencialCode(alg: 'SHA256', step: 30, digits: 6),
+        ),
+      );
+
+      // This exercises the early-return branch directly (`if (sha256 ==
+      // null) return;`, ~line 137): before this test, no caller in the
+      // codebase ever reached this branch (CredencialController always
+      // short-circuits to CredencialPhotoUnavailable before calling save()
+      // when sha256 is null), so it was correct-by-source-read but
+      // unverified by any test.
+      await repo.save(responseWithNoSha, photoBytes: null);
+
+      expect(
+        await photoStore.readVerified(oldHash),
+        isNotNull,
+        reason: 'save() must do the SAFE thing (skip gc) when sha256 is '
+            'null on an active credential, not the old unconditional-gc '
+            'behavior that would destroy an unrelated verified photo',
+      );
     });
   });
 }

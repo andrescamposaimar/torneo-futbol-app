@@ -13,6 +13,7 @@ import '../widgets/prode_identity_card.dart';
 import 'anuarios_screen.dart';
 import 'cambios/cambios_auth_gate.dart';
 import 'campeones_screen.dart';
+import 'credencial/credencial_screen.dart';
 import 'listas_screen.dart';
 import 'prode/prode_auth_gate.dart';
 import 'scorers_screen.dart';
@@ -196,6 +197,29 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                     context,
                     MaterialPageRoute<void>(
                       builder: (_) => const CambiosAuthGate(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // 2b. Credencial (feature-flagged; stays off through slice 3b —
+          // flipped tenant-by-tenant only once the plugin is deployed and
+          // manually verified end to end per slice 4).
+          if (features.credencial) ...[
+            _SectionCard(
+              title: 'Credencial',
+              children: [
+                _tile(
+                  context,
+                  'Mi Credencial',
+                  Icons.badge,
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CredencialScreen(),
                     ),
                   ),
                 ),

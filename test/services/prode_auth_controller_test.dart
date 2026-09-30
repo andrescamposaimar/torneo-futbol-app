@@ -328,6 +328,26 @@ void main() {
       expect(controller.state, isA<ProdeAuthUnauthenticated>());
       expect(await repo.readAccessToken(), isNull);
     });
+
+    test('logout calls onLoggedOut after state transitions to Unauthenticated',
+        () async {
+      var called = false;
+      controller.onLoggedOut = () async {
+        called = true;
+        // The hook must run after the state machine has already settled.
+        expect(controller.state, isA<ProdeAuthUnauthenticated>());
+      };
+
+      await controller.logout();
+
+      expect(called, isTrue);
+    });
+
+    test('logout with no onLoggedOut hook wired does not throw', () async {
+      controller.onLoggedOut = null;
+      await controller.logout();
+      expect(controller.state, isA<ProdeAuthUnauthenticated>());
+    });
   });
 
   group('ProdeAuthController.onAuthRequired()', () {

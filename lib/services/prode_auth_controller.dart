@@ -57,6 +57,14 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
   /// backend only supports the native flow).
   final Future<AppleCredential?> Function()? _appleIdentityToken;
 
+  /// Optional hook invoked at the end of [logout], after tokens are cleared
+  /// and the state transitions to Unauthenticated (design D6: "logout ->
+  /// wipe via an onLoggedOut hook in the prode auth flow"). Wired by the
+  /// provider layer to clear feature-specific caches (e.g.
+  /// [CredencialRepository.clear]) that must not survive a sign-out but that
+  /// this controller has no reason to know about directly.
+  Future<void> Function()? onLoggedOut;
+
   ProdeAuthController({
     required ProdeAuthRepository repository,
     required ProdeApiService service,
@@ -172,6 +180,7 @@ class ProdeAuthController extends StateNotifier<ProdeAuthState> {
       await _repository.clear();
       _service.invalidateTokenCache();
       state = const ProdeAuthUnauthenticated();
+      await onLoggedOut?.call();
     } on PlatformException catch (e) {
       state = ProdeAuthError(
         code: e.code,
