@@ -1117,12 +1117,38 @@ if ( ! function_exists( 'is_admin' ) ) {
     }
 }
 
+// ─── WP-Cron recurring-event shim ─────────────────────────────────────────
+// A real, mutable store (unlike wp_schedule_single_event's append-only log
+// above) — Calendario\Cron\SeedCalendarioCron::schedule()/unschedule() are
+// tested directly against these, so wp_next_scheduled() must actually
+// reflect what wp_schedule_event()/wp_clear_scheduled_hook() did, not return
+// a fixed value. One occurrence per hook is enough for every cron this
+// plugin schedules — none of them carry args.
 if ( ! function_exists( 'wp_next_scheduled' ) ) {
-    // Return a future timestamp so Plugin::boot() does NOT call scheduleCrons(),
-    // which would require wp_schedule_event() and other cron functions not
-    // needed for admin wiring tests.
+    $GLOBALS['_prode_test_cron_schedule'] = [];
+
     function wp_next_scheduled( string $hook, array $args = [] ): int|false {
-        return time() + 3600;
+        return $GLOBALS['_prode_test_cron_schedule'][ $hook ]['timestamp'] ?? false;
+    }
+
+    function wp_schedule_event( int $timestamp, string $recurrence, string $hook, array $args = [] ): bool {
+        $GLOBALS['_prode_test_cron_schedule'][ $hook ] = [
+            'timestamp'  => $timestamp,
+            'recurrence' => $recurrence,
+            'args'       => $args,
+        ];
+        return true;
+    }
+
+    function wp_unschedule_event( int $timestamp, string $hook, array $args = [] ): bool {
+        unset( $GLOBALS['_prode_test_cron_schedule'][ $hook ] );
+        return true;
+    }
+
+    function wp_clear_scheduled_hook( string $hook, array $args = [] ): int|false {
+        $existed = isset( $GLOBALS['_prode_test_cron_schedule'][ $hook ] );
+        unset( $GLOBALS['_prode_test_cron_schedule'][ $hook ] );
+        return $existed ? 1 : 0;
     }
 }
 
