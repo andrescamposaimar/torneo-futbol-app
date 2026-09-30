@@ -114,18 +114,22 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * the way this section used to claim; that was a stale claim in this
  * docblock, corrected here.
  *
- * *** "WithinTransaction" VARIANTS (slice 4c) ***
+ * *** "WithinTransaction" VARIANTS (slice 4c, widened for the plaza importer) ***
  * `succeedOcupacionWithinTransaction()` and
  * `closeOcupacionByRegresoTitularWithinTransaction()` exist for exactly one
  * caller: `Solicitudes\SolicitudRepository::publicarLote()`, which must
  * apply an entire Friday lote of solicitudes as ONE atomic database
  * transaction — a nested `START TRANSACTION` per plaza change is not safe
- * across engines (see those methods' own docblocks). They share every
- * validation guard with their normal counterparts via
- * `prepareSucceedOcupacion()` / `prepareRegresoTitular()`, but perform the
- * write directly against whatever transaction the caller already opened,
- * and do NOT record their own EventLog event — the caller does, once its
- * own COMMIT has actually succeeded.
+ * across engines (see those methods' own docblocks). `openPlazaWithinTransaction()`
+ * exists for the same reason, for `Plazas\PlazaImporter`: a roster backfill
+ * opens many plazas across many teams from one CSV, and that whole batch
+ * must be all-or-nothing — the same "half-applied is worse than none"
+ * reasoning as the Friday lote. All three share every validation guard with
+ * their normal counterparts via `prepareSucceedOcupacion()` /
+ * `prepareRegresoTitular()` / `validateOpenPlaza()`, but perform the write
+ * directly against whatever transaction the caller already opened, and do
+ * NOT record their own EventLog event — the caller does, once its own
+ * COMMIT has actually succeeded.
  */
 class PlazaRepository {
 
@@ -181,75 +185,10 @@ class PlazaRepository {
         int $fechaDesdeId,
         string $now
     ): int {
-        if ( ! in_array( $tipo, self::VALID_TIPOS, true ) ) {
-            $this->eventLog->record( 'escritura.fallida', [
-                'operacion'  => 'openPlaza',
-                'motivo'     => 'tipo invalido',
-                'season_id'  => $seasonId,
-                'team_id'    => $teamId,
-                'tipo'       => $tipo,
-            ] );
-
-            throw new \InvalidArgumentException(
-                "PlazaRepository::openPlaza(): '{$tipo}' is not a valid tipo. "
-                . 'Valid values are: ' . implode( ', ', self::VALID_TIPOS ) . '.'
-            );
-        }
-
-        $this->assertFechaExistsInSeason( $fechaDesdeId, $seasonId, 'openPlaza', 'fecha_desde_id' );
-
-        $wpdb = $this->wpdb;
-        $p    = $wpdb->prefix;
-
         $this->beginTransaction( __FUNCTION__ );
 
         try {
-            $plazaResult = $wpdb->insert(
-                $p . 'cambios_plaza',
-                [
-                    'season_id'         => $seasonId,
-                    'team_id'           => $teamId,
-                    'titular_player_id' => $titularPlayerId,
-                    'puntaje_techo'     => $puntajeTecho->halfPoints(),
-                    'tipo'              => $tipo,
-                    'created_at'        => $now,
-                    'closed_at'         => null,
-                ]
-            );
-
-            if ( false === $plazaResult ) {
-                $this->eventLog->record( 'escritura.fallida', [
-                    'operacion'  => 'openPlaza',
-                    'motivo'     => 'insert cambios_plaza fallo',
-                    'season_id'  => $seasonId,
-                    'team_id'    => $teamId,
-                    'last_error' => $wpdb->last_error,
-                ] );
-
-                throw new PlazaPersistenceException( 'insert cambios_plaza', $wpdb->last_error );
-            }
-
-            $plazaId = (int) $wpdb->insert_id;
-
-            if ( $plazaId <= 0 ) {
-                $this->eventLog->record( 'escritura.fallida', [
-                    'operacion'  => 'openPlaza',
-                    'motivo'     => 'insert cambios_plaza devolvio insert_id <= 0',
-                    'season_id'  => $seasonId,
-                    'team_id'    => $teamId,
-                    'last_error' => $wpdb->last_error,
-                ] );
-
-                throw new PlazaPersistenceException( 'insert cambios_plaza', $wpdb->last_error );
-            }
-
-            $this->insertOcupacion(
-                $plazaId,
-                $titularPlayerId,
-                true,
-                $fechaDesdeId,
-                $now
-            );
+            $plazaId = $this->doOpenPlaza( $seasonId, $teamId, $titularPlayerId, $puntajeTecho, $tipo, $fechaDesdeId, $now );
         } catch ( \Throwable $e ) {
             $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
@@ -267,6 +206,34 @@ class PlazaRepository {
         ] );
 
         return $plazaId;
+    }
+
+    /**
+     * Same operation as openPlaza(), but for a caller already running its own
+     * transaction spanning more than this one call — `Plazas\PlazaImporter`,
+     * which must open every plaza of a CSV backfill as ONE atomic batch. See
+     * class docblock, "'WithinTransaction' VARIANTS", and
+     * succeedOcupacionWithinTransaction()'s docblock for the full reasoning
+     * (nested `START TRANSACTION` is not safe across engines, and success is
+     * not known until the CALLER's own COMMIT) — both apply here identically.
+     *
+     * Does NOT record `plaza.abierta` — the caller does, once its own
+     * transaction has actually committed. Every validation guard (invalid
+     * $tipo, unknown/foreign $fechaDesdeId) still runs and still logs
+     * `escritura.fallida` exactly like openPlaza().
+     *
+     * @throws \InvalidArgumentException|PlazaPersistenceException Same as openPlaza().
+     */
+    public function openPlazaWithinTransaction(
+        int $seasonId,
+        int $teamId,
+        int $titularPlayerId,
+        Puntaje $puntajeTecho,
+        string $tipo,
+        int $fechaDesdeId,
+        string $now
+    ): int {
+        return $this->doOpenPlaza( $seasonId, $teamId, $titularPlayerId, $puntajeTecho, $tipo, $fechaDesdeId, $now );
     }
 
     /**
@@ -930,6 +897,101 @@ class PlazaRepository {
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * The validation AND the write openPlaza() / openPlazaWithinTransaction()
+     * both need — shared here, exactly like prepareSucceedOcupacion() /
+     * prepareRegresoTitular() below, so the two public entry points can never
+     * drift on what counts as a valid call or how the two rows get written.
+     * The operation name logged on every guard below is always the literal
+     * `'openPlaza'`, regardless of which public method called this — mirrors
+     * prepareSucceedOcupacion()'s own choice to log `'succeedOcupacion'`
+     * unconditionally.
+     *
+     * @throws \InvalidArgumentException When $tipo is not one of
+     *         self::VALID_TIPOS, or $fechaDesdeId does not exist in
+     *         cambios_fecha or belongs to a different season.
+     * @throws PlazaPersistenceException When either insert fails at the wpdb
+     *         level.
+     */
+    private function doOpenPlaza(
+        int $seasonId,
+        int $teamId,
+        int $titularPlayerId,
+        Puntaje $puntajeTecho,
+        string $tipo,
+        int $fechaDesdeId,
+        string $now
+    ): int {
+        if ( ! in_array( $tipo, self::VALID_TIPOS, true ) ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'openPlaza',
+                'motivo'     => 'tipo invalido',
+                'season_id'  => $seasonId,
+                'team_id'    => $teamId,
+                'tipo'       => $tipo,
+            ] );
+
+            throw new \InvalidArgumentException(
+                "PlazaRepository::openPlaza(): '{$tipo}' is not a valid tipo. "
+                . 'Valid values are: ' . implode( ', ', self::VALID_TIPOS ) . '.'
+            );
+        }
+
+        $this->assertFechaExistsInSeason( $fechaDesdeId, $seasonId, 'openPlaza', 'fecha_desde_id' );
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $plazaResult = $wpdb->insert(
+            $p . 'cambios_plaza',
+            [
+                'season_id'         => $seasonId,
+                'team_id'           => $teamId,
+                'titular_player_id' => $titularPlayerId,
+                'puntaje_techo'     => $puntajeTecho->halfPoints(),
+                'tipo'              => $tipo,
+                'created_at'        => $now,
+                'closed_at'         => null,
+            ]
+        );
+
+        if ( false === $plazaResult ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'openPlaza',
+                'motivo'     => 'insert cambios_plaza fallo',
+                'season_id'  => $seasonId,
+                'team_id'    => $teamId,
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new PlazaPersistenceException( 'insert cambios_plaza', $wpdb->last_error );
+        }
+
+        $plazaId = (int) $wpdb->insert_id;
+
+        if ( $plazaId <= 0 ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'openPlaza',
+                'motivo'     => 'insert cambios_plaza devolvio insert_id <= 0',
+                'season_id'  => $seasonId,
+                'team_id'    => $teamId,
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new PlazaPersistenceException( 'insert cambios_plaza', $wpdb->last_error );
+        }
+
+        $this->insertOcupacion(
+            $plazaId,
+            $titularPlayerId,
+            true,
+            $fechaDesdeId,
+            $now
+        );
+
+        return $plazaId;
+    }
 
     /**
      * Every validation guard succeedOcupacion() / succeedOcupacionWithinTransaction()
