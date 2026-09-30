@@ -45,9 +45,10 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  *   1. The process owner's confirmation that the exception is real policy,
  *      not just informal understanding.
  *   2. A MODEL FIELD that does not exist yet: nothing in `cambios_plaza`
- *      marks a plaza as "the goalkeeper's plaza" — `tipo` only distinguishes
- *      'campo' vs 'suplente', and goalkeeper-ness lives on `sp_position`
- *      (SportsPress), a concept this schema never joins against. Adding a
+ *      marks a plaza as "the goalkeeper's plaza" — no column on that
+ *      table distinguishes playing position at all, and goalkeeper-ness
+ *      lives on `sp_position` (SportsPress), a concept this schema never
+ *      joins against. Adding a
  *      one-off `if ($esArquero)` here without that column would mean
  *      guessing at a data point that plainly is not there — see this
  *      slice's task instructions: "no inventes el dato".

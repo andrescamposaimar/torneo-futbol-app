@@ -194,7 +194,7 @@ class BandejaPageTest extends TestCase {
 
     public function test_ejecutarAprobar_cambia_el_estado_sin_tocar_ninguna_ocupacion(): void {
         $this->seedFecha( 1 );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $antes   = $this->plazaRepository->findOcupacionVigente( $plazaId );
 
         $id = $this->solicitudRepository->crear(
@@ -231,7 +231,7 @@ class BandejaPageTest extends TestCase {
     public function test_ejecutarPublicarLote_aplica_los_cambios(): void {
         $this->seedFecha( 1 );
         $this->seedFecha( 5 );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
         $this->seedPuntaje( 888, 2.5 );
 
         $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, $this->instanteEnPlazo() );
@@ -253,7 +253,7 @@ class BandejaPageTest extends TestCase {
 
     public function test_ejecutarPublicarLote_sin_confirmacion_no_aplica_nada(): void {
         $this->seedFecha( 1 );
-        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 'campo', 1, '2026-03-01 00:00:00' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
 
         $id = $this->solicitudRepository->crear(
             SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),

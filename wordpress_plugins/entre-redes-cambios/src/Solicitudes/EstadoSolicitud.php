@@ -19,7 +19,7 @@ use EntreRedes\Cambios\Solicitudes\Exception\TransicionInvalidaException;
  *
  * *** WHY THIS IS NOT A DB CONSTRAINT ***
  * Same reasoning as `Calendario\FechaRepository::VALID_ESTADOS` and
- * `Plazas\PlazaRepository::VALID_TIPOS`: `cambios_solicitud.estado` is
+ * `Plazas\PlazaRepository::VALID_CERRADA_POR`: `cambios_solicitud.estado` is
  * declared as an `ENUM` in `Migrations\InitialSchema` for readability in a
  * real MySQL schema, but the SQLite test shim rewrites every `ENUM` column to
  * `TEXT` (see that class's own docblock), and even a real, non-strict MySQL

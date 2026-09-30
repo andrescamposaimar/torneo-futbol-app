@@ -136,19 +136,13 @@ class PlazaRepository {
     use OpensTransactions;
 
     /**
-     * The only 2 values `cambios_plaza.tipo` may ever hold. See
-     * Calendario\FechaRepository::VALID_ESTADOS's docblock for why an
-     * ENUM-backed column still needs a code-level whitelist: non-strict MySQL
-     * silently truncates an out-of-range ENUM value, and the SQLite test shim
-     * rewrites every ENUM column to TEXT, so nothing but this whitelist
-     * actually guards `tipo` in tests.
-     */
-    private const VALID_TIPOS = [ 'campo', 'suplente' ];
-
-    /**
      * The only 3 values `cambios_ocupacion.cerrada_por` may ever hold — see
      * this table's docblock in Migrations\InitialSchema for what each one
-     * means. Same ENUM-is-not-a-guard rationale as VALID_TIPOS above.
+     * means. See Calendario\FechaRepository::VALID_ESTADOS's docblock for why
+     * an ENUM-backed column still needs a code-level whitelist: non-strict
+     * MySQL silently truncates an out-of-range ENUM value, and the SQLite
+     * test shim rewrites every ENUM column to TEXT, so nothing but this
+     * whitelist actually guards `cerrada_por` in tests.
      */
     private const VALID_CERRADA_POR = [ 'regreso_titular', 'reemplazada', 'trunca' ];
 
@@ -168,8 +162,7 @@ class PlazaRepository {
      * moves again for the lifetime of the plaza — see
      * Migrations\InitialSchema::sqlCambiosPlaza()'s docblock.
      *
-     * @throws \InvalidArgumentException When $tipo is not one of
-     *         self::VALID_TIPOS, or $fechaDesdeId does not exist in
+     * @throws \InvalidArgumentException When $fechaDesdeId does not exist in
      *         cambios_fecha or belongs to a different season.
      * @throws PlazaPersistenceException When either insert fails at the wpdb
      *         level — thrown BEFORE the COMMIT, so the transaction rolls
@@ -181,14 +174,13 @@ class PlazaRepository {
         int $teamId,
         int $titularPlayerId,
         Puntaje $puntajeTecho,
-        string $tipo,
         int $fechaDesdeId,
         string $now
     ): int {
         $this->beginTransaction( __FUNCTION__ );
 
         try {
-            $plazaId = $this->doOpenPlaza( $seasonId, $teamId, $titularPlayerId, $puntajeTecho, $tipo, $fechaDesdeId, $now );
+            $plazaId = $this->doOpenPlaza( $seasonId, $teamId, $titularPlayerId, $puntajeTecho, $fechaDesdeId, $now );
         } catch ( \Throwable $e ) {
             $this->rollbackTransaction( __FUNCTION__, $e );
             throw $e;
@@ -201,7 +193,6 @@ class PlazaRepository {
             'season_id'          => $seasonId,
             'team_id'            => $teamId,
             'titular_player_id'  => $titularPlayerId,
-            'tipo'               => $tipo,
             'fecha_desde_id'     => $fechaDesdeId,
         ] );
 
@@ -218,8 +209,8 @@ class PlazaRepository {
      * not known until the CALLER's own COMMIT) — both apply here identically.
      *
      * Does NOT record `plaza.abierta` — the caller does, once its own
-     * transaction has actually committed. Every validation guard (invalid
-     * $tipo, unknown/foreign $fechaDesdeId) still runs and still logs
+     * transaction has actually committed. Every validation guard
+     * (unknown/foreign $fechaDesdeId) still runs and still logs
      * `escritura.fallida` exactly like openPlaza().
      *
      * @throws \InvalidArgumentException|PlazaPersistenceException Same as openPlaza().
@@ -229,11 +220,10 @@ class PlazaRepository {
         int $teamId,
         int $titularPlayerId,
         Puntaje $puntajeTecho,
-        string $tipo,
         int $fechaDesdeId,
         string $now
     ): int {
-        return $this->doOpenPlaza( $seasonId, $teamId, $titularPlayerId, $puntajeTecho, $tipo, $fechaDesdeId, $now );
+        return $this->doOpenPlaza( $seasonId, $teamId, $titularPlayerId, $puntajeTecho, $fechaDesdeId, $now );
     }
 
     /**
@@ -908,8 +898,7 @@ class PlazaRepository {
      * prepareSucceedOcupacion()'s own choice to log `'succeedOcupacion'`
      * unconditionally.
      *
-     * @throws \InvalidArgumentException When $tipo is not one of
-     *         self::VALID_TIPOS, or $fechaDesdeId does not exist in
+     * @throws \InvalidArgumentException When $fechaDesdeId does not exist in
      *         cambios_fecha or belongs to a different season.
      * @throws PlazaPersistenceException When either insert fails at the wpdb
      *         level.
@@ -919,25 +908,9 @@ class PlazaRepository {
         int $teamId,
         int $titularPlayerId,
         Puntaje $puntajeTecho,
-        string $tipo,
         int $fechaDesdeId,
         string $now
     ): int {
-        if ( ! in_array( $tipo, self::VALID_TIPOS, true ) ) {
-            $this->eventLog->record( 'escritura.fallida', [
-                'operacion'  => 'openPlaza',
-                'motivo'     => 'tipo invalido',
-                'season_id'  => $seasonId,
-                'team_id'    => $teamId,
-                'tipo'       => $tipo,
-            ] );
-
-            throw new \InvalidArgumentException(
-                "PlazaRepository::openPlaza(): '{$tipo}' is not a valid tipo. "
-                . 'Valid values are: ' . implode( ', ', self::VALID_TIPOS ) . '.'
-            );
-        }
-
         $this->assertFechaExistsInSeason( $fechaDesdeId, $seasonId, 'openPlaza', 'fecha_desde_id' );
 
         $wpdb = $this->wpdb;
@@ -950,7 +923,6 @@ class PlazaRepository {
                 'team_id'           => $teamId,
                 'titular_player_id' => $titularPlayerId,
                 'puntaje_techo'     => $puntajeTecho->halfPoints(),
-                'tipo'              => $tipo,
                 'created_at'        => $now,
                 'closed_at'         => null,
             ]

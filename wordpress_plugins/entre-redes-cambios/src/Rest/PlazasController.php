@@ -149,7 +149,7 @@ class PlazasController {
     /**
      * GET /entre-redes/v1/cambios/plazas?season_id=..&team_id=..
      *
-     * Response 200: { plazas: [ { plaza_id, tipo, titular_player_id,
+     * Response 200: { plazas: [ { plaza_id, titular_player_id,
      *         ocupante_player_id, es_titular_el_ocupante, cerrada,
      *         fechas_faltantes_liberacion,
      *         fechas_faltantes_liberacion_indeterminado }, ... ] }
@@ -424,7 +424,6 @@ class PlazasController {
 
         return [
             'plaza_id'                                   => $plazaId,
-            'tipo'                                        => (string) $plaza['tipo'],
             'titular_player_id'                           => (int) $plaza['titular_player_id'],
             'titular_nombre'                              => $this->nombreJugador( (int) $plaza['titular_player_id'] ),
             'ocupante_player_id'                          => null !== $vigente ? (int) $vigente['player_id'] : null,

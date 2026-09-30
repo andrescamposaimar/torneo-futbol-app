@@ -35,7 +35,6 @@ trait BuildsDictamenFixtures {
                 'team_id'           => 10,
                 'titular_player_id' => 777,
                 'puntaje_techo'     => 6, // Puntaje::fromDecimal(3.0)
-                'tipo'              => 'campo',
                 'created_at'        => '2026-01-01 00:00:00',
                 'closed_at'         => null,
             ],

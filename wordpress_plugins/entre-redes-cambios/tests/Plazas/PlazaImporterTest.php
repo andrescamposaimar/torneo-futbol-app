@@ -128,14 +128,14 @@ class PlazaImporterTest extends TestCase {
     }
 
     private function csv( string $body ): array {
-        return PlazaImportCsvParser::parse( "equipo,titular,tipo,puntaje_techo\n" . $body );
+        return PlazaImportCsvParser::parse( "equipo,titular,puntaje_techo\n" . $body );
     }
 
     // -------------------------------------------------------------------------
     // Happy path
     // -------------------------------------------------------------------------
 
-    public function test_happy_path_opens_the_right_plazas_with_titular_tipo_and_techo(): void {
+    public function test_happy_path_opens_the_right_plazas_with_titular_and_techo(): void {
         $this->seedTeam( 100, 'Boca Juniors' );
         $this->seedPlayer( 111, 'Juan Perez' );
         $this->seedPlayer( 222, 'Martin Gomez' );
@@ -143,8 +143,8 @@ class PlazaImporterTest extends TestCase {
         // Mixes id- and title-based resolution for both columns, and both
         // decimal separators Puntaje::fromDecimal() must accept.
         $rows = $this->csv(
-            "Boca Juniors,111,campo,3\n"
-            . "100,Martin Gomez,suplente,\"2,5\"\n"
+            "Boca Juniors,111,3\n"
+            . "100,Martin Gomez,\"2,5\"\n"
         );
 
         $plan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
@@ -165,9 +165,7 @@ class PlazaImporterTest extends TestCase {
             $byTitular[ (int) $p['titular_player_id'] ] = $p;
         }
 
-        $this->assertSame( 'campo', (string) $byTitular[111]['tipo'] );
         $this->assertSame( 6, (int) $byTitular[111]['puntaje_techo'] ); // 3.0 -> 6 half-points
-        $this->assertSame( 'suplente', (string) $byTitular[222]['tipo'] );
         $this->assertSame( 5, (int) $byTitular[222]['puntaje_techo'] ); // 2.5 -> 5 half-points
 
         $vigente = $this->plazaRepository->findOcupacionVigente( (int) $byTitular[111]['id'] );
@@ -197,26 +195,24 @@ class PlazaImporterTest extends TestCase {
 
         $rows = $this->csv(
             // Fila 2: unknown team id.
-            "99999,111,campo,3\n"
+            "99999,111,3\n"
             // Fila 3: unknown team title.
-            . "Equipo Fantasma,111,campo,3\n"
+            . "Equipo Fantasma,111,3\n"
             // Fila 4: ambiguous team title.
-            . "Racing,111,campo,3\n"
+            . "Racing,111,3\n"
             // Fila 5: unknown player id.
-            . "100,88888,campo,3\n"
+            . "100,88888,3\n"
             // Fila 6: unknown player title.
-            . "100,Jugador Fantasma,campo,3\n"
+            . "100,Jugador Fantasma,3\n"
             // Fila 7: ambiguous player title.
-            . "100,Pedro Lopez,campo,3\n"
+            . "100,Pedro Lopez,3\n"
             // Fila 8: player not registered this season.
-            . "100,400,campo,3\n"
+            . "100,400,3\n"
             // Fila 9: invalid puntaje_techo.
-            . "100,222,campo,2.3\n"
-            // Fila 10: invalid tipo.
-            . "100,222,banco,3\n"
-            // Filas 11-12: same titular twice.
-            . "100,111,campo,3\n"
-            . "200,111,suplente,3\n"
+            . "100,222,2.3\n"
+            // Filas 10-11: same titular twice.
+            . "100,111,3\n"
+            . "200,111,3\n"
         );
 
         $plan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
@@ -234,12 +230,10 @@ class PlazaImporterTest extends TestCase {
         $this->assertStringContainsString( 'Fila 8', $errors );
         $this->assertStringContainsString( 'no esta registrado', $errors );
         $this->assertStringContainsString( 'Fila 9', $errors );
-        $this->assertStringContainsString( 'Fila 10', $errors );
-        $this->assertStringContainsString( 'tipo', $errors );
         $this->assertStringContainsString( '111', $errors );
         $this->assertStringContainsString( 'mas de una fila', $errors );
+        $this->assertStringContainsString( '10', $errors ); // line 10
         $this->assertStringContainsString( '11', $errors ); // line 11
-        $this->assertStringContainsString( '12', $errors ); // line 12
 
         // Nothing is queued, and refusing to apply is enforced, not just advised.
         $this->assertSame( [], $plan->rowsToOpen() );
@@ -257,10 +251,10 @@ class PlazaImporterTest extends TestCase {
 
         $rows = $this->csv(
             // Team 100 is entirely clean on its own...
-            "100,111,campo,3\n"
-            . "100,222,suplente,\"2,5\"\n"
+            "100,111,3\n"
+            . "100,222,\"2,5\"\n"
             // ...but team 200's only row is broken.
-            . "200,333,campo,no-es-un-numero\n"
+            . "200,333,no-es-un-numero\n"
         );
 
         $plan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
@@ -278,9 +272,9 @@ class PlazaImporterTest extends TestCase {
 
         // A plaza already exists for team 100 with a DIFFERENT titular than
         // what the CSV is about to bring.
-        $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3 ), 'campo', self::FECHA_DESDE_ID, self::NOW );
+        $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3 ), self::FECHA_DESDE_ID, self::NOW );
 
-        $rows = $this->csv( "100,222,campo,3\n" );
+        $rows = $this->csv( "100,222,3\n" );
 
         $plan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
 
@@ -300,8 +294,8 @@ class PlazaImporterTest extends TestCase {
         $this->seedPlayer( 222, 'Martin Gomez' );
 
         $rows = $this->csv(
-            "100,111,campo,3\n"
-            . "100,222,suplente,\"2,5\"\n"
+            "100,111,3\n"
+            . "100,222,\"2,5\"\n"
         );
 
         $firstPlan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
@@ -331,11 +325,11 @@ class PlazaImporterTest extends TestCase {
         $this->seedPlayer( 222, 'Martin Gomez' );
 
         // Team 100 was already imported by a prior run; team 200 was not.
-        $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3 ), 'campo', self::FECHA_DESDE_ID, self::NOW );
+        $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3 ), self::FECHA_DESDE_ID, self::NOW );
 
         $rows = $this->csv(
-            "100,111,campo,3\n"
-            . "200,222,campo,3\n"
+            "100,111,3\n"
+            . "200,222,3\n"
         );
 
         $plan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
@@ -351,20 +345,20 @@ class PlazaImporterTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
-    // 9+2 — warning, never an error
+    // Exactly 11 plazas — warning, never an error
     // -------------------------------------------------------------------------
 
-    public function test_a_9_plus_2_mismatch_warns_without_blocking_the_import(): void {
+    public function test_a_non_11_count_warns_without_blocking_the_import(): void {
         $this->seedTeam( 100, 'Boca Juniors' );
         $this->seedPlayer( 111, 'Jugador Uno' );
         $this->seedPlayer( 222, 'Jugador Dos' );
         $this->seedPlayer( 333, 'Jugador Tres' );
 
-        // Only 1 campo + 2 suplente — a legitimate, if incomplete, roster.
+        // Only 3 rows — a legitimate, if incomplete, roster.
         $rows = $this->csv(
-            "100,111,campo,3\n"
-            . "100,222,suplente,3\n"
-            . "100,333,suplente,3\n"
+            "100,111,3\n"
+            . "100,222,3\n"
+            . "100,333,3\n"
         );
 
         $plan = $this->importer->planificar( $rows, self::SEASON_ID, self::FECHA_DESDE_ID );
@@ -372,7 +366,7 @@ class PlazaImporterTest extends TestCase {
         $this->assertFalse( $plan->hasErrors(), implode( "\n", $plan->errors() ) );
         $this->assertNotEmpty( $plan->warnings() );
         $this->assertStringContainsString( 'Boca Juniors', $plan->warnings()[0] );
-        $this->assertStringContainsString( '9 campo', $plan->warnings()[0] );
-        $this->assertCount( 3, $plan->rowsToOpen(), 'A 9+2 mismatch is a warning, not a reason to refuse the rows.' );
+        $this->assertStringContainsString( '11', $plan->warnings()[0] );
+        $this->assertCount( 3, $plan->rowsToOpen(), 'A non-11 count is a warning, not a reason to refuse the rows.' );
     }
 }

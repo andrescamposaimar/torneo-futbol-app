@@ -257,11 +257,9 @@ class _PlazaHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(plaza.tipoLabel,
+          Text(plaza.titularNombre,
               style: theme.textTheme.labelLarge
                   ?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text('Titular: ${plaza.titularNombre}', style: theme.textTheme.bodyMedium),
         ],
       ),
     );

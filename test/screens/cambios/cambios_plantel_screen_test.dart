@@ -17,7 +17,6 @@ import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 
 CambiosPlaza _plaza({
   int plazaId = 1,
-  String tipo = 'campo',
   String titularNombre = 'Juan Pérez',
   String? ocupanteNombre = 'Pedro Gómez',
   int? ocupantePlayerId = 200,
@@ -28,7 +27,6 @@ CambiosPlaza _plaza({
 }) {
   return CambiosPlaza(
     plazaId: plazaId,
-    tipo: tipo,
     titularPlayerId: 100,
     titularNombre: titularNombre,
     ocupantePlayerId: ocupantePlayerId,

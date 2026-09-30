@@ -101,7 +101,6 @@ void main() {
             'plazas': [
               {
                 'plaza_id': 10,
-                'tipo': 'campo',
                 'titular_player_id': 100,
                 'titular_nombre': 'Juan Pérez',
                 'ocupante_player_id': 200,
@@ -120,7 +119,7 @@ void main() {
 
       expect(plazas, hasLength(1));
       expect(plazas.single.plazaId, 10);
-      expect(plazas.single.tipoLabel, 'Campo');
+      expect(plazas.single.titularNombre, 'Juan Pérez');
       expect(plazas.single.regresoElegible, isFalse); // 2 fechas faltantes
     });
 

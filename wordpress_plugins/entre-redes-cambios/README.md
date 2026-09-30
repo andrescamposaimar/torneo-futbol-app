@@ -105,7 +105,7 @@ Slice 2 models the domain data behind a player change: which plaza belongs to wh
 
 ### The aggregate is the plaza, not the solicitud
 
-A team is a set of 11 `cambios_plaza` rows (9 `campo` + 2 `suplente`). Each plaza has a **permanent titular** (`titular_player_id`, never reassigned) and a **puntaje ceiling snapshotted at conformación** (`puntaje_techo`, which never moves for the plaza's lifetime — only who occupies it changes). See `Migrations\InitialSchema::sqlCambiosPlaza()`'s docblock for the column-level detail.
+A team is a set of 11 `cambios_plaza` rows, ALL of them titular plazas — there is no `tipo` column splitting them into "campo" and "suplente" plazas. An earlier version of this schema did carry such a column; the process owner corrected it: "9 on the pitch, 2 on the bench" describes an INSTANT during a match (which rotates constantly via unlimited in-match substitutions), never a fixed property of a plaza, so the column was removed before the table's backfill ever ran in production. Each plaza has a **permanent titular** (`titular_player_id`, never reassigned) and a **puntaje ceiling snapshotted at conformación** (`puntaje_techo`, which never moves for the plaza's lifetime — only who occupies it changes). See `Migrations\InitialSchema::sqlCambiosPlaza()`'s docblock for the column-level detail.
 
 ### The cadena de ocupaciones
 
@@ -143,10 +143,9 @@ The following are real gaps this slice leaves open. None of them is implemented 
 
 ### The CSV contract
 
-Four columns, matched by name — case-insensitively and in any order — against the header: `equipo`, `titular`, `tipo`, `puntaje_techo` (`Plazas\PlazaImportCsvParser::REQUIRED_COLUMNS`). A `#` in a row's first cell (after trimming) skips that row entirely, so `templates/plazas-import-template.csv`'s worked examples can stay in the file or be deleted without affecting a real import.
+Three columns, matched by name — case-insensitively and in any order — against the header: `equipo`, `titular`, `puntaje_techo` (`Plazas\PlazaImportCsvParser::REQUIRED_COLUMNS`). A `#` in a row's first cell (after trimming) skips that row entirely, so `templates/plazas-import-template.csv`'s worked examples can stay in the file or be deleted without affecting a real import.
 
 - **`equipo` / `titular`** accept either a bare WordPress post id or the post's EXACT `post_title` — never a fuzzy match. An id that does not resolve to a published `sp_team` / `sp_player`, a title matching zero posts, or a title matching more than one, are all hard errors naming the offending row.
-- **`tipo`** is `campo` or `suplente` — `suplente` is the bench slot, never "the player who replaces someone".
 - **`puntaje_techo`** is one of the 9 valid puntajes (1..5 in 0.5 steps, comma or dot decimal).
 - **`season_id` and `fecha_desde_id` are deliberately NOT columns.** Every plaza a single run opens shares the same season and the same starting fecha — the roster's "conformación" happens once, on one day, for the whole league — so both are passed once to the CLI (`--season-id`, defaulting to `Calendario\Settings::seasonId()`, and the required `--fecha-desde-id`) instead of being repeated on every row. Repeating either 300 times would only be 300 chances to get one of them wrong, with the CSV's own shape unable to catch it.
 
@@ -161,11 +160,11 @@ Dry-run is the default: without `--apply`, the command only validates the file a
 ### The safety properties, and why each exists
 
 - **The whole file is validated before a single row is written.** `PlazaImporter::planificar()` performs only reads and resolves every row independently of every other row's outcome, so one bad row never hides a second, unrelated bad row behind it. `aplicar()` refuses outright when the plan has any error, and every plaza it does open is written as ONE atomic transaction. A partially imported roster is worse than none: the captain screens would show some teams a plausible, wrong squad, and nobody would notice until a captain requested a change against a plaza that does not exist.
-- **It is idempotent on `(season_id, team_id, titular_player_id)`.** `titular_player_id` is the column `Migrations\InitialSchema::sqlCambiosPlaza()`'s own docblock calls the PERMANENT owner of a plaza — by reglamento a titular never changes team, and the column is never reassigned after the plaza is created — which makes it the one fact about a plaza that can never drift once opened, and so the natural key for "does this already exist". Per team, `planificar()` compares the set of titular ids the CSV lists against the set already open (`closed_at IS NULL`): an exact match (same `tipo` and `puntaje_techo` per titular) is reported as a no-op, so retrying `--apply` after a successful import opens nothing new, while a partial import completes only what is missing without duplicating what already ran. Any other overlap — a different `tipo`/`puntaje_techo` for the same titular, an extra or missing titular — is a hard error naming the team: silently accepting it would either duplicate a plaza or apply a change to data this importer did not create.
+- **It is idempotent on `(season_id, team_id, titular_player_id)`.** `titular_player_id` is the column `Migrations\InitialSchema::sqlCambiosPlaza()`'s own docblock calls the PERMANENT owner of a plaza — by reglamento a titular never changes team, and the column is never reassigned after the plaza is created — which makes it the one fact about a plaza that can never drift once opened, and so the natural key for "does this already exist". Per team, `planificar()` compares the set of titular ids the CSV lists against the set already open (`closed_at IS NULL`): an exact match (same `puntaje_techo` per titular) is reported as a no-op, so retrying `--apply` after a successful import opens nothing new, while a partial import completes only what is missing without duplicating what already ran. Any other overlap — a different `puntaje_techo` for the same titular, an extra or missing titular — is a hard error naming the team: silently accepting it would either duplicate a plaza or apply a change to data this importer did not create.
 
 ### What is a warning, not an error
 
-A team whose CSV rows are not exactly 9 `campo` + 2 `suplente` gets a warning, never an error. The reglamento says 11 total, but a real squad mid-season may legitimately differ — refusing the entire import over it would block the very backfill this importer exists to enable.
+A team whose CSV does not have exactly 11 rows gets a warning, never an error. A real squad mid-season may legitimately differ from the reglamento's 11 — refusing the entire import over it would block the very backfill this importer exists to enable.
 
 ## The dictamen engine (slice 3)
 
@@ -263,7 +262,7 @@ Slice 4c turns the SOLICITUD DE CAMBIO into a persisted entity with its own life
 
 ### The estado machine
 
-`estado` moves `pendiente` → (`aprobada` | `rechazada` | `anulada`), and `aprobada` → (`publicada` | `rechazada` | `anulada`). `publicada`, `rechazada` and `anulada` are terminal — nothing transitions out of any of them. `EstadoSolicitud` is the single source of truth for this graph, defended in code (never a DB constraint) for the same reason as `Calendario\FechaRepository::VALID_ESTADOS` and `Plazas\PlazaRepository::VALID_TIPOS` — see that class's own docblock.
+`estado` moves `pendiente` → (`aprobada` | `rechazada` | `anulada`), and `aprobada` → (`publicada` | `rechazada` | `anulada`). `publicada`, `rechazada` and `anulada` are terminal — nothing transitions out of any of them. `EstadoSolicitud` is the single source of truth for this graph, defended in code (never a DB constraint) for the same reason as `Calendario\FechaRepository::VALID_ESTADOS` and `Plazas\PlazaRepository::VALID_CERRADA_POR` — see that class's own docblock.
 
 ### Aprobar is not publicar
 
