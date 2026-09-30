@@ -22,7 +22,8 @@ use PHPUnit\Framework\TestCase;
  * SQLite shim — real PlazaRepository, real FechaRepository, real Settings,
  * plus an ad hoc `wp_postmeta` table (a real WordPress core table this
  * plugin's test schema does not otherwise create) for the entrante puntaje
- * lookup.
+ * lookup, and `wp_posts` via wp-shim.php's wp_test_create_posts_table() for
+ * the padres-viables tests below.
  */
 class DictamenContextAssemblerTest extends TestCase {
 
@@ -55,14 +56,9 @@ class DictamenContextAssemblerTest extends TestCase {
 
         // Only needed by the padres-viables tests below (Plazas\CandidatosResolver's
         // own season-roster query) — see CandidatosResolverTest for the same
-        // ad hoc tables applied in isolation.
-        $wpdb->query(
-            "CREATE TABLE IF NOT EXISTS {$p}posts (
-                ID INTEGER PRIMARY KEY,
-                post_type TEXT,
-                post_status TEXT
-            )"
-        );
+        // ad hoc tables applied in isolation. Schema owned by wp-shim.php's
+        // wp_test_create_posts_table() — see its docblock for why.
+        wp_test_create_posts_table( $wpdb );
         $wpdb->query(
             "CREATE TABLE IF NOT EXISTS {$p}term_relationships (
                 object_id INTEGER,
@@ -76,7 +72,6 @@ class DictamenContextAssemblerTest extends TestCase {
                 taxonomy TEXT
             )"
         );
-        $wpdb->query( "DELETE FROM {$p}posts" );
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
         $wpdb->query( "INSERT OR IGNORE INTO {$p}term_taxonomy (term_taxonomy_id, term_id, taxonomy) VALUES (" . self::SEASON_ID . ', ' . self::SEASON_ID . ", 'sp_season')" );

@@ -937,6 +937,39 @@ if ( ! function_exists( 'wp_is_post_revision' ) ) {
     }
 }
 
+// ─── Ad hoc `wp_posts` table helper ───────────────────────────────────────────
+// `wp_posts` is a real WordPress core table this shim does not create as part
+// of its own schema (unlike wp_options, which is emulated above via
+// get_option()/update_option()). Several test files need it — CandidatosResolver
+// and PlazaImporter both run raw SQL joins against `{$p}posts`, keyed on
+// post_type/post_status, and PlazaImporter additionally resolves players/teams
+// by post_title. Because the SQLite shim backs the ENTIRE PHPUnit process with
+// one shared connection, letting each test file `CREATE TABLE IF NOT EXISTS`
+// its own narrower version of this table made the schema depend on whichever
+// test file's setUp() happened to run first — a hazard, not a convenience.
+// This helper is the one owner of that schema (the union of every column any
+// test needs) and callers get a guaranteed-clean, guaranteed-correct table
+// regardless of run order.
+if ( ! function_exists( 'wp_test_create_posts_table' ) ) {
+    function wp_test_create_posts_table( \wpdb $wpdb ): void {
+        $p = $wpdb->prefix;
+
+        // DROP + CREATE, never "IF NOT EXISTS": this must win regardless of
+        // which test file's setUp() runs first, and must always hand back an
+        // empty table so tests never leak rows into each other through the
+        // shared connection.
+        $wpdb->query( "DROP TABLE IF EXISTS {$p}posts" );
+        $wpdb->query(
+            "CREATE TABLE {$p}posts (
+                ID INTEGER PRIMARY KEY,
+                post_type TEXT,
+                post_status TEXT,
+                post_title TEXT
+            )"
+        );
+    }
+}
+
 // ─── WP-Cron scheduling shim ──────────────────────────────────────────────────
 // Records every call so tests can assert what was scheduled — hook, args, and
 // approximate fire time — without a real WP-Cron runtime.

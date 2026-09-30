@@ -15,12 +15,12 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Integration tests for PlazaImporter against the in-memory SQLite shim —
- * real PlazaRepository + FechaRepository, plus ad hoc `wp_posts` /
- * `wp_term_relationships` / `wp_term_taxonomy` tables (WordPress core tables
- * this plugin's own test schema does not otherwise create — see
- * CandidatosResolverTest for the same pattern; this file adds a
- * `post_title` column CandidatosResolverTest's own ad hoc table does not
- * need, since name-based resolution is this class's whole job).
+ * real PlazaRepository + FechaRepository, plus ad hoc `wp_term_relationships` /
+ * `wp_term_taxonomy` tables (WordPress core tables this plugin's own test
+ * schema does not otherwise create — see CandidatosResolverTest for the same
+ * pattern) and `wp_posts` via wp-shim.php's wp_test_create_posts_table(),
+ * whose `post_title` column is what this class's own name-based resolution
+ * relies on.
  */
 class PlazaImporterTest extends TestCase {
 
@@ -45,25 +45,10 @@ class PlazaImporterTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
 
-        // DROP + CREATE, never "IF NOT EXISTS": CandidatosResolverTest and
-        // DictamenContextAssemblerTest each create their OWN ad hoc `posts`
-        // table WITHOUT a `post_title` column, and share the same in-memory
-        // SQLite connection across the whole PHPUnit process — whichever
-        // test file's CREATE runs first would otherwise "win" for the rest
-        // of the run, silently leaving this table without the one column
-        // this class's whole job (name-based resolution) needs. Dropping and
-        // recreating here, unconditionally, makes this schema win regardless
-        // of test execution order; the two extra columns are harmless to
-        // every OTHER test file's own narrower inserts.
-        $wpdb->query( "DROP TABLE IF EXISTS {$p}posts" );
-        $wpdb->query(
-            "CREATE TABLE {$p}posts (
-                ID INTEGER PRIMARY KEY,
-                post_type TEXT,
-                post_status TEXT,
-                post_title TEXT
-            )"
-        );
+        // Schema owned by wp-shim.php's wp_test_create_posts_table() — see
+        // its docblock for why (this class's own name-based resolution is
+        // exactly the reason `post_title` is part of that shared schema).
+        wp_test_create_posts_table( $wpdb );
         $wpdb->query(
             "CREATE TABLE IF NOT EXISTS {$p}term_relationships (
                 object_id INTEGER,
@@ -77,7 +62,6 @@ class PlazaImporterTest extends TestCase {
                 taxonomy TEXT
             )"
         );
-        $wpdb->query( "DELETE FROM {$p}posts" );
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
 
