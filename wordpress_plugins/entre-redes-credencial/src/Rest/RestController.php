@@ -6,8 +6,8 @@ namespace EntreRedes\Credencial\Rest;
 
 /**
  * Registers every /entre-redes/v1/credencial/* REST route this plugin
- * exposes. Slice 1b scope: CredencialController's GET route only (POST
- * /credencial/foto is slice 2a's PhotoUploadController, added here later).
+ * exposes: CredencialController's GET route (slice 1b) and
+ * PhotoUploadController's POST route (slice 2a).
  *
  * Mirrors entre-redes-cambios's own Rest\RestController: one class per route
  * group, each responsible for registering its OWN routes
@@ -19,12 +19,15 @@ final class RestController {
     public const BASE          = 'credencial';
 
     private CredencialController $credencialController;
+    private PhotoUploadController $photoUploadController;
 
-    public function __construct( CredencialController $credencialController ) {
-        $this->credencialController = $credencialController;
+    public function __construct( CredencialController $credencialController, PhotoUploadController $photoUploadController ) {
+        $this->credencialController  = $credencialController;
+        $this->photoUploadController = $photoUploadController;
     }
 
     public function register_routes(): void {
         $this->credencialController->register_routes();
+        $this->photoUploadController->register_routes();
     }
 }

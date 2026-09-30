@@ -12,10 +12,11 @@ use PHPUnit\Framework\TestCase;
  * THE WIRING TEST — mirrors entre-redes-cambios's own PluginTest (see that
  * class's docblock: "proves the CABLE, not the pieces"). Every collaborator
  * Plugin::boot() wires here (CredencialAuthorizer, PlayerReader,
- * EntreRedesApiTeamResolver, IssuanceRepository, CredencialService) already
- * has its own deep unit coverage elsewhere (CredencialControllerTest,
+ * EntreRedesApiTeamResolver, IssuanceRepository, CredencialService,
+ * ApprovalRequestRepository, the Photo\* pipeline) already has its own deep
+ * unit coverage elsewhere (CredencialControllerTest, PhotoUploadControllerTest,
  * IssuanceRepositoryTest, etc.); what none of those can see is boot() itself
- * forgetting to register the route, or the REAL, production-constructed
+ * forgetting to register a route, or the REAL, production-constructed
  * handler skipping authorization.
  */
 class PluginRestWiringTest extends TestCase {
@@ -64,6 +65,41 @@ class PluginRestWiringTest extends TestCase {
         do_action( 'rest_api_init' );
 
         $callback = $this->findRegisteredCallback( 'entre-redes/v1', '/credencial/credencial', \WP_REST_Server::READABLE );
+
+        $response = $callback( new \WP_REST_Request() );
+
+        $this->assertInstanceOf( \WP_REST_Response::class, $response );
+        $this->assertSame( 401, $response->get_status() );
+        $this->assertSame( 'token_missing', $response->get_data()['code'] );
+    }
+
+    public function test_boot_registers_the_post_foto_route(): void {
+        Plugin::boot();
+        do_action( 'rest_api_init' );
+
+        $routes = $GLOBALS['_prode_test_registered_routes'] ?? [];
+
+        $match = array_filter(
+            $routes,
+            static fn ( array $r ): bool => 'entre-redes/v1' === $r['namespace']
+                && '/credencial/foto' === $r['route']
+                && \WP_REST_Server::CREATABLE === ( $r['args']['methods'] ?? null )
+        );
+
+        $this->assertNotEmpty( $match, 'POST /entre-redes/v1/credencial/foto must be registered.' );
+    }
+
+    /**
+     * Same proof as test_boot_wired_handler_rejects_a_request_with_no_authorization_header(),
+     * for the upload route: the REAL, production-wired PhotoUploadController
+     * fails closed with no Authorization header, before ever touching the
+     * upload pipeline.
+     */
+    public function test_boot_wired_upload_handler_rejects_a_request_with_no_authorization_header(): void {
+        Plugin::boot();
+        do_action( 'rest_api_init' );
+
+        $callback = $this->findRegisteredCallback( 'entre-redes/v1', '/credencial/foto', \WP_REST_Server::CREATABLE );
 
         $response = $callback( new \WP_REST_Request() );
 
