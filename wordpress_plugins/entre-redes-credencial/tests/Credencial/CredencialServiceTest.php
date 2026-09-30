@@ -56,6 +56,7 @@ class CredencialServiceTest extends TestCase {
         $GLOBALS['wp_test_posts']               = [];
         $GLOBALS['wp_test_postmeta']             = [];
         $GLOBALS['wp_test_post_thumbnail_urls']  = [];
+        $GLOBALS['wp_test_post_thumbnail_ids']   = [];
 
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_issuance" );
@@ -91,7 +92,7 @@ class CredencialServiceTest extends TestCase {
         };
     }
 
-    private function seedEligiblePlayerWithPhoto( int $id, array $post = [], array $meta = [] ): void {
+    private function seedEligiblePlayerWithPhoto( int $id, array $post = [], array $meta = [], int $thumbnailId = 55 ): void {
         $GLOBALS['wp_test_posts'][ $id ] = array_merge(
             [ 'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador ' . $id, 'post_date' => '2000-01-01 00:00:00' ],
             $post
@@ -100,6 +101,7 @@ class CredencialServiceTest extends TestCase {
             $GLOBALS['wp_test_postmeta'][ $id ][ $key ] = [ $value ];
         }
         $GLOBALS['wp_test_post_thumbnail_urls'][ $id ] = 'https://example.com/photo.jpg';
+        $GLOBALS['wp_test_post_thumbnail_ids'][ $id ]  = $thumbnailId;
     }
 
     public function test_no_matching_sp_player_is_not_a_player(): void {
@@ -121,7 +123,26 @@ class CredencialServiceTest extends TestCase {
         $GLOBALS['wp_test_posts'][1] = [
             'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador 1', 'post_date' => '2000-01-01 00:00:00',
         ];
-        // Deliberately no wp_test_post_thumbnail_urls[1] set.
+        // Deliberately no wp_test_post_thumbnail_urls[1] / ids[1] set.
+
+        $state = $this->service->resolve( 1, 1, self::NOW )->toArray();
+
+        $this->assertSame( 'no_photo', $state['state'] );
+        $this->assertNull( $state['credential'] );
+    }
+
+    /**
+     * Photo gate (design rev 9 Interfaces): thumbnail id AND url are BOTH
+     * required. A URL without a resolvable attachment id (should not happen
+     * in real WordPress, but the gate must not trust the URL alone) is
+     * treated as no_photo.
+     */
+    public function test_url_present_but_no_thumbnail_id_is_no_photo(): void {
+        $GLOBALS['wp_test_posts'][1] = [
+            'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador 1', 'post_date' => '2000-01-01 00:00:00',
+        ];
+        $GLOBALS['wp_test_post_thumbnail_urls'][1] = 'https://example.com/photo.jpg';
+        // Deliberately no wp_test_post_thumbnail_ids[1] set.
 
         $state = $this->service->resolve( 1, 1, self::NOW )->toArray();
 
@@ -141,7 +162,7 @@ class CredencialServiceTest extends TestCase {
         $this->assertSame( 'Jugador 1', $credential['full_name'] );
         $this->assertSame( '30111222', $credential['dni'] );
         $this->assertSame( 'Padre Alumno', $credential['caracter'] );
-        $this->assertSame( 'https://example.com/photo.jpg', $credential['photo']['url'] );
+        $this->assertSame( [ 'id' => 55, 'url' => 'https://example.com/photo.jpg' ], $credential['photo'] );
         $this->assertSame( [ 'id' => 5, 'name' => 'Boca Juniors', 'kind' => 'team' ], $credential['team'] );
         $this->assertSame(
             [ 'alg' => RotatingCode::ALG, 'step' => RotatingCode::STEP, 'digits' => RotatingCode::DIGITS ],
@@ -160,6 +181,16 @@ class CredencialServiceTest extends TestCase {
         $second = $this->service->resolve( 1, 42, self::NOW + 30 )->toArray()['credential']['id'];
 
         $this->assertSame( $first, $second );
+    }
+
+    public function test_credential_id_rotates_when_the_thumbnail_attachment_id_changes(): void {
+        $this->seedEligiblePlayerWithPhoto( 1, [], [], 55 );
+        $first = $this->service->resolve( 1, 42, self::NOW )->toArray()['credential']['id'];
+
+        $this->seedEligiblePlayerWithPhoto( 1, [], [], 56 );
+        $second = $this->service->resolve( 1, 42, self::NOW + 30 )->toArray()['credential']['id'];
+
+        $this->assertNotSame( $first, $second );
     }
 
     public function test_team_unavailable_renders_credential_without_a_team_badge(): void {

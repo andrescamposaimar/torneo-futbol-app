@@ -16,12 +16,22 @@ use EntreRedes\Credencial\Observability\EventLog;
  *
  * resolve() is called on EVERY GET (CredencialService, a later class in this
  * same slice) with the CALLER'S live facts — $liveUserId (from the verified
- * JWT) and $liveApprovedPhotoSha (from the currently published featured
- * image, or null before any photo is approved) — and returns the row that is
- * true RIGHT NOW, rotating the id only when one of those two facts no longer
- * matches what was persisted last time. Every other combination (estado
- * flipping blocked<->active, caracter changing, a new team) leaves the id
- * untouched — those are not fraud levers, so D4 does not rotate on them.
+ * JWT) and $livePhotoAttachmentId (the WordPress attachment id backing the
+ * currently published featured image; only ever called after the photo gate,
+ * so this is always > 0) — and returns the row that is true RIGHT NOW,
+ * rotating the id only when one of those two facts no longer matches what
+ * was persisted last time. Every other combination (estado flipping
+ * blocked<->active, caracter changing, a new team, the featured image's URL
+ * or rendition changing without the underlying attachment changing) leaves
+ * the id untouched — those are not fraud levers, so D4 does not rotate on
+ * them.
+ *
+ * The photo is identified by its attachment id, its real identity in
+ * WordPress: it changes exactly when the face changes (a new upload
+ * approval, or the comisión replacing the featured image directly), and
+ * never on its own for a URL or rendition change. `0` means "legacy row,
+ * live id unknown" — migration 0.2.0 gives pre-existing rows that default,
+ * so each one rotates exactly once on its next GET.
  *
  * $now IS INJECTED AS AN EPOCH, never read from the system clock — same
  * discipline as Player\PlayerReader and Code\RotatingCode in this same
@@ -39,15 +49,15 @@ final class IssuanceRepository {
     }
 
     /**
-     * @return array{player_id:int, credential_id:string, user_id:int, photo_sha256:?string, minted_at:string, updated_at:string}
+     * @return array{player_id:int, credential_id:string, user_id:int, photo_attachment_id:int, minted_at:string, updated_at:string}
      *
      * @throws IssuanceResolutionFailedException When the row cannot be
      *         ensured to exist, or vanishes between the ensure-step and the
      *         SELECT that must follow it (design D4: "No row = 500 +
      *         issuance.resolve_failed").
      */
-    public function resolve( int $playerId, int $liveUserId, ?string $liveApprovedPhotoSha, int $now ): array {
-        $this->ensureRowExists( $playerId, $liveUserId, $liveApprovedPhotoSha, $now );
+    public function resolve( int $playerId, int $liveUserId, int $livePhotoAttachmentId, int $now ): array {
+        $this->ensureRowExists( $playerId, $liveUserId, $livePhotoAttachmentId, $now );
 
         $row = $this->selectRow( $playerId );
 
@@ -62,11 +72,11 @@ final class IssuanceRepository {
             );
         }
 
-        if ( ! $this->needsRotation( $row, $liveUserId, $liveApprovedPhotoSha ) ) {
+        if ( ! $this->needsRotation( $row, $liveUserId, $livePhotoAttachmentId ) ) {
             return $row;
         }
 
-        return $this->rotate( $playerId, $row, $liveUserId, $liveApprovedPhotoSha, $now );
+        return $this->rotate( $playerId, $row, $liveUserId, $livePhotoAttachmentId, $now );
     }
 
     /**
@@ -77,21 +87,21 @@ final class IssuanceRepository {
      * values already in place; on a duplicate, this step touches nothing —
      * rotation (if needed) is decided and applied separately, below.
      */
-    private function ensureRowExists( int $playerId, int $liveUserId, ?string $liveSha, int $now ): void {
-        $p       = $this->wpdb->prefix;
-        $nowSql  = gmdate( 'Y-m-d H:i:s', $now );
-        $newId   = wp_generate_uuid4();
+    private function ensureRowExists( int $playerId, int $liveUserId, int $livePhotoAttachmentId, int $now ): void {
+        $p      = $this->wpdb->prefix;
+        $nowSql = gmdate( 'Y-m-d H:i:s', $now );
+        $newId  = wp_generate_uuid4();
 
         $result = $this->wpdb->query(
             $this->wpdb->prepare(
                 "INSERT INTO {$p}credencial_issuance
-                    (player_id, credential_id, user_id, photo_sha256, minted_at, updated_at)
-                 VALUES (%d, %s, %d, %s, %s, %s)
+                    (player_id, credential_id, user_id, photo_attachment_id, minted_at, updated_at)
+                 VALUES (%d, %s, %d, %d, %s, %s)
                  ON DUPLICATE KEY UPDATE player_id = player_id",
                 $playerId,
                 $newId,
                 $liveUserId,
-                self::shaForStorage( $liveSha ),
+                $livePhotoAttachmentId,
                 $nowSql,
                 $nowSql
             )
@@ -112,28 +122,26 @@ final class IssuanceRepository {
 
     /**
      * Design D4's rotation trigger: the bound user changed, OR the approved
-     * photo's sha changed — nothing else. photo_sha256 is stored as '' for
-     * "no approved photo yet" (see shaForStorage()/shaFromStorage()), so both
-     * sides are normalized back to null before comparing.
+     * photo's attachment id changed — nothing else.
      */
-    private function needsRotation( array $row, int $liveUserId, ?string $liveSha ): bool {
+    private function needsRotation( array $row, int $liveUserId, int $livePhotoAttachmentId ): bool {
         if ( (int) $row['user_id'] !== $liveUserId ) {
             return true;
         }
 
-        return self::shaFromStorage( (string) ( $row['photo_sha256'] ?? '' ) ) !== $liveSha;
+        return (int) $row['photo_attachment_id'] !== $livePhotoAttachmentId;
     }
 
     /**
      * Design D4's rotation statement, exactly:
-     * `UPDATE ... SET credential_id=?new, user_id=?live, photo_sha256=?live,
+     * `UPDATE ... SET credential_id=?new, user_id=?live, photo_attachment_id=?live,
      * updated_at=NOW() WHERE player_id=? AND credential_id=?old`, ALWAYS
      * followed by a re-SELECT — a concurrent winner's UPDATE may have already
      * changed credential_id, making OUR update match 0 rows; the re-SELECT
      * is what makes us return the winner's id instead of throwing or
      * fabricating an answer.
      */
-    private function rotate( int $playerId, array $row, int $liveUserId, ?string $liveSha, int $now ): array {
+    private function rotate( int $playerId, array $row, int $liveUserId, int $livePhotoAttachmentId, int $now ): array {
         $p      = $this->wpdb->prefix;
         $nowSql = gmdate( 'Y-m-d H:i:s', $now );
         $newId  = wp_generate_uuid4();
@@ -141,11 +149,11 @@ final class IssuanceRepository {
         $this->wpdb->query(
             $this->wpdb->prepare(
                 "UPDATE {$p}credencial_issuance
-                    SET credential_id = %s, user_id = %d, photo_sha256 = %s, updated_at = %s
+                    SET credential_id = %s, user_id = %d, photo_attachment_id = %d, updated_at = %s
                   WHERE player_id = %d AND credential_id = %s",
                 $newId,
                 $liveUserId,
-                self::shaForStorage( $liveSha ),
+                $livePhotoAttachmentId,
                 $nowSql,
                 $playerId,
                 $row['credential_id']
@@ -169,7 +177,7 @@ final class IssuanceRepository {
     }
 
     /**
-     * @return array{player_id:int, credential_id:string, user_id:int, photo_sha256:?string, minted_at:string, updated_at:string}|null
+     * @return array{player_id:int, credential_id:string, user_id:int, photo_attachment_id:int, minted_at:string, updated_at:string}|null
      */
     private function selectRow( int $playerId ): ?array {
         $p   = $this->wpdb->prefix;
@@ -183,21 +191,12 @@ final class IssuanceRepository {
         }
 
         return [
-            'player_id'     => (int) $row['player_id'],
-            'credential_id' => (string) $row['credential_id'],
-            'user_id'       => (int) $row['user_id'],
-            'photo_sha256'  => self::shaFromStorage( (string) ( $row['photo_sha256'] ?? '' ) ),
-            'minted_at'     => (string) $row['minted_at'],
-            'updated_at'    => (string) $row['updated_at'],
+            'player_id'           => (int) $row['player_id'],
+            'credential_id'       => (string) $row['credential_id'],
+            'user_id'             => (int) $row['user_id'],
+            'photo_attachment_id' => (int) ( $row['photo_attachment_id'] ?? 0 ),
+            'minted_at'           => (string) $row['minted_at'],
+            'updated_at'          => (string) $row['updated_at'],
         ];
-    }
-
-    /** Nullable photo_sha256 is stored as '' rather than a raw SQL NULL literal — see needsRotation()'s docblock. */
-    private static function shaForStorage( ?string $sha ): string {
-        return $sha ?? '';
-    }
-
-    private static function shaFromStorage( string $stored ): ?string {
-        return '' === $stored ? null : $stored;
     }
 }

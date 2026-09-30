@@ -27,7 +27,7 @@ require_once $autoload;
 
 // ─── Constants expected by the plugin ───────────────────────────────────────
 if ( ! defined( 'ENTRE_REDES_CREDENCIAL_VERSION' ) ) {
-    define( 'ENTRE_REDES_CREDENCIAL_VERSION', '0.1.0' );
+    define( 'ENTRE_REDES_CREDENCIAL_VERSION', '0.2.0' );
 }
 if ( ! defined( 'ENTRE_REDES_CREDENCIAL_FILE' ) ) {
     define( 'ENTRE_REDES_CREDENCIAL_FILE', dirname( __DIR__ ) . '/entre-redes-credencial.php' );

@@ -925,9 +925,8 @@ if ( ! function_exists( 'update_post_meta' ) ) {
     // Credencial-plugin addition (slice 2b, Photo\WpMediaWriter): writes into
     // the SAME $wp_test_postmeta global get_post_meta() already reads, so a
     // test never has to reason about two disagreeing meta stores. Used for
-    // both attachment meta (_credencial_request_id, _credencial_sha256) and
-    // player meta (_credencial_sha256) — attachment ids ARE post ids in real
-    // WordPress, so one global covers both.
+    // attachment meta (_credencial_request_id) — attachment ids ARE post ids
+    // in real WordPress, so one global covers both attachments and players.
     function update_post_meta( int $post_id, string $key, mixed $value ): bool {
         global $wp_test_postmeta;
         $wp_test_postmeta[ $post_id ][ $key ] = [ $value ];
@@ -939,6 +938,27 @@ if ( ! function_exists( 'delete_post_meta' ) ) {
     function delete_post_meta( int $post_id, string $key ): bool {
         global $wp_test_postmeta;
         unset( $wp_test_postmeta[ $post_id ][ $key ] );
+        return true;
+    }
+}
+
+if ( ! function_exists( 'delete_post_meta_by_key' ) ) {
+    /**
+     * Credencial-plugin addition (migration 0.1.0 -> 0.2.0,
+     * Migrations\MigrationRunner): deletes a meta key across EVERY post,
+     * mirroring real WordPress's own `delete_post_meta_by_key()`. Used for
+     * the one-time cleanup of the retired `_credencial_sha256` meta (design
+     * rev 9's removed publish-tail step) — production data predates this
+     * migration and is scattered across every player post, not one caller-
+     * supplied id.
+     */
+    function delete_post_meta_by_key( string $key ): bool {
+        global $wp_test_postmeta;
+
+        foreach ( array_keys( $wp_test_postmeta ?? [] ) as $post_id ) {
+            unset( $wp_test_postmeta[ $post_id ][ $key ] );
+        }
+
         return true;
     }
 }
