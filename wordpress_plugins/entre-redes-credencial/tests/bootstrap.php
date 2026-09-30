@@ -36,7 +36,7 @@ if ( ! defined( 'ENTRE_REDES_CREDENCIAL_DIR' ) ) {
     define( 'ENTRE_REDES_CREDENCIAL_DIR', dirname( __DIR__ ) . '/' );
 }
 if ( ! defined( 'ABSPATH' ) ) {
-    define( 'ABSPATH', dirname( __DIR__ ) . '/../../' );
+    define( 'ABSPATH', __DIR__ . '/fixtures/wordpress/' );
 }
 
 // ─── WP test library path ────────────────────────────────────────────────────

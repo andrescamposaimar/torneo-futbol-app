@@ -921,11 +921,214 @@ if ( ! function_exists( 'get_post_meta' ) ) {
     }
 }
 
+if ( ! function_exists( 'update_post_meta' ) ) {
+    // Credencial-plugin addition (slice 2b, Photo\WpMediaWriter): writes into
+    // the SAME $wp_test_postmeta global get_post_meta() already reads, so a
+    // test never has to reason about two disagreeing meta stores. Used for
+    // both attachment meta (_credencial_request_id, _credencial_sha256) and
+    // player meta (_credencial_sha256) — attachment ids ARE post ids in real
+    // WordPress, so one global covers both.
+    function update_post_meta( int $post_id, string $key, mixed $value ): bool {
+        global $wp_test_postmeta;
+        $wp_test_postmeta[ $post_id ][ $key ] = [ $value ];
+        return true;
+    }
+}
+
+if ( ! function_exists( 'delete_post_meta' ) ) {
+    function delete_post_meta( int $post_id, string $key ): bool {
+        global $wp_test_postmeta;
+        unset( $wp_test_postmeta[ $post_id ][ $key ] );
+        return true;
+    }
+}
+
 if ( ! function_exists( 'get_the_title' ) ) {
     function get_the_title( int|string $post = 0 ): string {
         global $wp_test_post_titles;
 
         return (string) ( $wp_test_post_titles[ (int) $post ] ?? '' );
+    }
+}
+
+// ─── WP media / attachment shims (Photo\WpMediaWriter, slice 2b) ─────────────
+// Faithful enough to real WordPress for design D11's approve pipeline: upload
+// an unlinked attachment, tag it, dedupe, generate metadata, and publish it as
+// a player's featured image. $_prode_test_attachments is keyed by a fake
+// auto-incrementing attachment (post) id; meta for that same id lives in the
+// EXISTING $wp_test_postmeta global (get_post_meta()/update_post_meta()
+// above) — attachment ids ARE post ids in real WordPress.
+
+if ( ! function_exists( 'wp_upload_bits' ) ) {
+    /**
+     * Controllable via $GLOBALS['wp_test_upload_bits_fails']. Records every
+     * written "file" path (never actually touching disk) in
+     * $GLOBALS['_prode_test_uploaded_files'] so a test can assert
+     * WpMediaWriter deletes the file it just wrote when the following
+     * wp_insert_attachment() call fails (design D11 step (b)).
+     */
+    function wp_upload_bits( string $filename, mixed $deprecated, string $bits ): array {
+        global $wp_test_upload_bits_fails;
+
+        if ( $wp_test_upload_bits_fails ?? false ) {
+            return [ 'file' => '', 'url' => '', 'type' => '', 'error' => 'simulated upload failure' ];
+        }
+
+        $file = '/tmp/wp-uploads/' . $filename;
+        $GLOBALS['_prode_test_uploaded_files'][ $file ] = $bits;
+
+        return [ 'file' => $file, 'url' => 'http://example.com/wp-content/uploads/' . $filename, 'type' => 'image/jpeg', 'error' => false ];
+    }
+}
+
+if ( ! function_exists( 'wp_insert_attachment' ) ) {
+    /**
+     * Controllable via $GLOBALS['wp_test_insert_attachment_fails']. Assigns a
+     * fake auto-incrementing id via $GLOBALS['_prode_test_next_attachment_id']
+     * — deliberately a SEPARATE counter from any other post id sequence in
+     * this shim, since real WordPress attachment ids share the wp_posts
+     * sequence with every other post type, and no test in this plugin ever
+     * asserts a specific numeric id, only relative behavior (lowest id wins,
+     * ids differ across uploads).
+     */
+    function wp_insert_attachment( array $args, string $file = '', int $parent = 0 ): int|WP_Error {
+        global $wp_test_insert_attachment_fails;
+
+        if ( $wp_test_insert_attachment_fails ?? false ) {
+            return new WP_Error( 'db_insert_error', 'Could not insert attachment into the database.' );
+        }
+
+        $id = ( $GLOBALS['_prode_test_next_attachment_id'] ?? 0 ) + 1;
+        $GLOBALS['_prode_test_next_attachment_id'] = $id;
+
+        $GLOBALS['_prode_test_attachments'][ $id ] = [
+            'file'           => $file,
+            'post_mime_type' => (string) ( $args['post_mime_type'] ?? '' ),
+        ];
+
+        // Also registered in $wp_test_posts (the SAME global get_post() reads,
+        // see the WP_Post/get_post block above) so WpMediaWriter::attachmentExists()
+        // can use the real get_post() function like any other caller, rather
+        // than reaching into this shim's internal bookkeeping.
+        $GLOBALS['wp_test_posts'][ $id ] = [ 'post_type' => 'attachment', 'post_status' => 'inherit' ];
+
+        return $id;
+    }
+}
+
+if ( ! function_exists( 'wp_delete_attachment' ) ) {
+    function wp_delete_attachment( int $attachment_id, bool $force_delete = false ): mixed {
+        $existed = isset( $GLOBALS['_prode_test_attachments'][ $attachment_id ] );
+
+        if ( $existed ) {
+            $file = $GLOBALS['_prode_test_attachments'][ $attachment_id ]['file'];
+            unset( $GLOBALS['_prode_test_uploaded_files'][ $file ] );
+        }
+
+        unset( $GLOBALS['_prode_test_attachments'][ $attachment_id ] );
+        unset( $GLOBALS['wp_test_posts'][ $attachment_id ] );
+        unset( $GLOBALS['wp_test_postmeta'][ $attachment_id ] );
+        unset( $GLOBALS['wp_test_attachment_metadata'][ $attachment_id ] );
+
+        return $existed ? (object) [ 'ID' => $attachment_id ] : false;
+    }
+}
+
+if ( ! function_exists( 'wp_delete_file' ) ) {
+    function wp_delete_file( string $file ): void {
+        unset( $GLOBALS['_prode_test_uploaded_files'][ $file ] );
+    }
+}
+
+if ( ! function_exists( 'get_attached_file' ) ) {
+    function get_attached_file( int $attachment_id ): string|false {
+        return $GLOBALS['_prode_test_attachments'][ $attachment_id ]['file'] ?? false;
+    }
+}
+
+// wp_generate_attachment_metadata() is deliberately NOT pre-defined here.
+// In real WordPress it lives in wp-admin/includes/image.php, which is not
+// part of the standard bootstrap — WpMediaWriter::ensureMetadataGenerated()
+// must require_once it itself (see the require guard there). Pre-defining it
+// in this always-loaded shim would hide a missing-require regression from
+// the whole test suite (see tests/Photo/WpMediaWriterTest.php's
+// test_ensureMetadataGenerated_only_works_because_it_loads_wp_admin_includes_image_php).
+// The fixture that stands in for the real file lives at the resolved test
+// ABSPATH: tests/fixtures/wordpress/wp-admin/includes/image.php.
+
+if ( ! function_exists( 'wp_update_attachment_metadata' ) ) {
+    function wp_update_attachment_metadata( int $attachment_id, array $data ): bool {
+        $GLOBALS['wp_test_attachment_metadata'][ $attachment_id ] = $data;
+        return true;
+    }
+}
+
+if ( ! function_exists( 'wp_get_attachment_metadata' ) ) {
+    function wp_get_attachment_metadata( int $attachment_id ): array|false {
+        return $GLOBALS['wp_test_attachment_metadata'][ $attachment_id ] ?? false;
+    }
+}
+
+if ( ! function_exists( 'get_post_thumbnail_id' ) ) {
+    function get_post_thumbnail_id( int|string $post = 0 ): int|false {
+        global $wp_test_post_thumbnail_ids;
+
+        return $wp_test_post_thumbnail_ids[ (int) $post ] ?? false;
+    }
+}
+
+if ( ! function_exists( 'set_post_thumbnail' ) ) {
+    /**
+     * Keeps $wp_test_post_thumbnail_ids AND the pre-existing
+     * $wp_test_post_thumbnail_urls (get_the_post_thumbnail_url() /
+     * has_post_thumbnail(), slice 1b) in agreement — a test must never be
+     * able to set one without the other silently disagreeing, same
+     * rationale as those two functions' own docblocks.
+     */
+    function set_post_thumbnail( int|string $post, int $attachment_id ): bool {
+        global $wp_test_post_thumbnail_ids, $wp_test_post_thumbnail_urls;
+
+        $wp_test_post_thumbnail_ids[ (int) $post ]  = $attachment_id;
+        $wp_test_post_thumbnail_urls[ (int) $post ] = 'http://example.com/wp-content/uploads/attachment-' . $attachment_id . '.jpg';
+
+        return true;
+    }
+}
+
+if ( ! function_exists( 'get_posts' ) ) {
+    /**
+     * Minimal subset of real WordPress's get_posts(): only the shape
+     * WpMediaWriter::findAttachmentsTaggedWithRequest() uses —
+     * `post_type => 'attachment'`, a single `meta_key`/`meta_value` pair, and
+     * `fields => 'ids'`. Scans $_prode_test_attachments joined against the
+     * shared $wp_test_postmeta global.
+     *
+     * @param array<string, mixed> $args
+     * @return array<int, int>
+     */
+    function get_posts( array $args = [] ): array {
+        if ( ( $args['post_type'] ?? '' ) !== 'attachment' || ! isset( $args['meta_key'], $args['meta_value'] ) ) {
+            return [];
+        }
+
+        $metaKey   = (string) $args['meta_key'];
+        $metaValue = $args['meta_value'];
+        $matches   = [];
+
+        foreach ( array_keys( $GLOBALS['_prode_test_attachments'] ?? [] ) as $attachmentId ) {
+            $stored = $GLOBALS['wp_test_postmeta'][ $attachmentId ][ $metaKey ][0] ?? null;
+            if ( null !== $stored && (string) $stored === (string) $metaValue ) {
+                $matches[] = $attachmentId;
+            }
+        }
+
+        return $matches;
+    }
+}
+
+if ( ! function_exists( 'wp_create_nonce' ) ) {
+    function wp_create_nonce( int|string $action = -1 ): string {
+        return 'nonce_' . md5( (string) $action );
     }
 }
 
