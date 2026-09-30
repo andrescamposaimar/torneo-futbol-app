@@ -49,9 +49,13 @@ USO:
 
 ARGUMENTOS:
   --excel=<archivo.xlsx>    Obligatorio. Ruta al Excel de la eleccion. Debe
-                             tener las hojas 'x Equipo' y
-                             'Titulares eleccion con datos', con sus columnas
-                             tal como las exporta la eleccion.
+                             tener las hojas 'GRILLA ELECCION' y
+                             'Titulares eleccion con datos', con su formato
+                             tal como lo exporta la eleccion. La hoja
+                             'x Equipo' NUNCA se lee — es una vista derivada
+                             por formulas de 'GRILLA ELECCION' que resuelve
+                             mal al menos dos equipos (ver el docblock de
+                             EleccionSheetParser).
   --fecha-desde-id=<id>     Obligatorio. El id de cambios_fecha desde el cual
                              arranca la ocupacion genesis de CADA plaza que
                              este import abra — el mismo para todas, porque la
@@ -70,8 +74,9 @@ ARGUMENTOS:
                              Con --apply, abre las plazas.
   --apply-capitanes         Opcional. Igual que --apply, pero para la
                              designacion de capitanes (fila 'CAP' de la hoja
-                             'x Equipo'). Independiente de --apply: puede
-                             usarse sola, con --apply, o ninguna de las dos.
+                             'GRILLA ELECCION'). Independiente de --apply:
+                             puede usarse sola, con --apply, o ninguna de las
+                             dos.
   --now="YYYY-MM-DD HH:MM:SS"
                              Opcional. Fuerza el instante registrado como
                              created_at de cada plaza/capitania. Por defecto,
@@ -177,8 +182,14 @@ if ( ! is_readable( $excelPath ) ) {
 }
 
 // ─── Read the two sheets ──────────────────────────────────────────────────
+//
+// 'x Equipo' is NEVER read here, on purpose — see
+// `EleccionSheetParser`'s class docblock, "WHY 'GRILLA ELECCION', NEVER
+// 'x Equipo'": it is a formula-derived view of 'GRILLA ELECCION' confirmed
+// to resolve at least two teams to the wrong person, and whose own
+// placeholder rows are literal Excel `#REF!` errors.
 
-const SHEET_EQUIPO     = 'x Equipo';
+const SHEET_GRILLA     = 'GRILLA ELECCION';
 const SHEET_TITULARES  = 'Titulares eleccion con datos';
 
 try {
@@ -188,11 +199,11 @@ try {
     exit( 1 );
 }
 
-$equipoSheet    = $spreadsheet->getSheetByName( SHEET_EQUIPO );
+$grillaSheet    = $spreadsheet->getSheetByName( SHEET_GRILLA );
 $titularesSheet = $spreadsheet->getSheetByName( SHEET_TITULARES );
 
-if ( null === $equipoSheet ) {
-    fwrite( STDERR, "El Excel no tiene una hoja llamada '" . SHEET_EQUIPO . "'.\n" );
+if ( null === $grillaSheet ) {
+    fwrite( STDERR, "El Excel no tiene una hoja llamada '" . SHEET_GRILLA . "'.\n" );
     exit( 1 );
 }
 if ( null === $titularesSheet ) {
@@ -200,7 +211,7 @@ if ( null === $titularesSheet ) {
     exit( 1 );
 }
 
-$equipoRows    = $equipoSheet->toArray( null, true, true, false );
+$grillaRows    = $grillaSheet->toArray( null, true, true, false );
 $titularesRows = $titularesSheet->toArray( null, true, true, false );
 
 use EntreRedes\Cambios\Plazas\Eleccion\EleccionImporter;
@@ -208,7 +219,7 @@ use EntreRedes\Cambios\Plazas\Eleccion\EleccionOverrides;
 use EntreRedes\Cambios\Plazas\Eleccion\EleccionSheetParser;
 
 try {
-    $equipoParsed    = EleccionSheetParser::parseEquipoSheet( $equipoRows );
+    $equipoParsed    = EleccionSheetParser::parseGrillaSheet( $grillaRows );
     $titularesParsed = EleccionSheetParser::parseTitularesSheet( $titularesRows );
 } catch ( \InvalidArgumentException $e ) {
     fwrite( STDERR, "Error en el Excel: {$e->getMessage()}\n" );

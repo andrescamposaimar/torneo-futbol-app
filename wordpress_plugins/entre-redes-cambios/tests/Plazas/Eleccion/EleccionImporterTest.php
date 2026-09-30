@@ -162,10 +162,11 @@ class EleccionImporterTest extends TestCase {
     }
 
     /**
-     * Builds a valid 11-row "x Equipo" team block: CAP + 10 field titulares.
-     * `$nombres` maps vuelta ('CAP','1'..'10') to the (still un-normalized)
-     * Excel name for that row; missing vueltas are filled with an invented
-     * default so a test only needs to specify what it cares about.
+     * Builds a valid team's `EleccionSheetParser::parseGrillaSheet()`-shaped
+     * output directly: CAP + 10 field titulares. `$nombres` maps vuelta
+     * ('CAP','1'..'10') to the (still un-normalized) Excel name for that
+     * slot; missing vueltas are filled with an invented default so a test
+     * only needs to specify what it cares about.
      *
      * @param array<string, string> $nombres
      * @return array{equipo: string, line: int, titulares: array<string, string>}
@@ -351,11 +352,14 @@ class EleccionImporterTest extends TestCase {
         $this->seedTeam( 100, 'Boca' );
         $this->seedPlayer( 111, 'Alguien, Nombre', 100 );
 
-        $equipoRows = [
-            [ 'Vuelta', 'Equipo', 'id', 'Nombre', 'Celular', 'mail', 'Fijo' ],
-            [ 'CAP', 'Boca', '1', 'Alguien, Nombre', '', '', '' ],
-        ];
-        $parsed = EleccionSheetParser::parseEquipoSheet( $equipoRows );
+        // "GRILLA ELECCION"-shaped: a single team block with ONLY the captain
+        // slot filled — every one of rounds 1..10 is blank, a hard error at
+        // the parser level (see EleccionSheetParserTest for the full-shape
+        // coverage of this sheet).
+        $grillaRows       = array_fill( 0, 23, [ '', '', '' ] );
+        $grillaRows[1]    = [ '', 'Boca', '' ];
+        $grillaRows[2]    = [ '', '1', 'Alguien, Nombre' ];
+        $parsed = EleccionSheetParser::parseGrillaSheet( $grillaRows );
 
         $this->assertNotEmpty( $parsed['errors'] );
 

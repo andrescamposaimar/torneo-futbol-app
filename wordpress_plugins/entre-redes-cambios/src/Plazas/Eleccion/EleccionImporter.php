@@ -24,19 +24,29 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * never touches a file itself.
  *
  * *** THE TWO SOURCES, AND WHAT EACH ONE IS TRUSTED FOR ***
- * The "x Equipo" sheet (`EleccionSheetParser::parseEquipoSheet()`) names,
- * per team, the 11 official titulares for the WHOLE year and which one is
- * captain (`Vuelta` = `CAP`). The "Titulares eleccion con datos" sheet
- * (`EleccionSheetParser::parseTitularesSheet()`) gives each titular's
- * election-time puntaje — verified against a 90-player `sp_metrics` sample
- * with zero differences (see task brief) — which is the correct SNAPSHOT
- * CEILING for their plaza (see `Plazas\Puntaje` for the ×2 half-points
- * encoding `openPlazaWithinTransaction()` expects). Neither sheet's `id`
- * column is trusted for anything: a titular is resolved to a WordPress
- * `sp_player` post id by NAME (`NombreMatcher`), never by an id the
- * spreadsheet itself supplies (see class docblock on `NombreMatcher` for
- * why exact-string equality is not enough, and "THE CANDIDATE POOL" below
- * for what pool a name is matched against).
+ * The "GRILLA ELECCION" sheet (`EleccionSheetParser::parseGrillaSheet()`)
+ * names, per team, the 11 official titulares for the WHOLE year and which
+ * one is captain (`Vuelta` = `CAP`) — see that method's own docblock, and
+ * `EleccionSheetParser`'s class docblock section "WHY 'GRILLA ELECCION',
+ * NEVER 'x Equipo'", for exactly why the sheet this importer used to read
+ * (`x Equipo`) is refused outright: it is a formula-derived view of "GRILLA
+ * ELECCION" that resolves at least two teams to the wrong person, and whose
+ * own placeholder rows are literal Excel `#REF!` errors. The "Titulares
+ * eleccion con datos" sheet (`EleccionSheetParser::parseTitularesSheet()`)
+ * gives each titular's election-time puntaje — verified against a 90-player
+ * `sp_metrics` sample with zero differences (see task brief) — which is the
+ * correct SNAPSHOT CEILING for their plaza (see `Plazas\Puntaje` for the ×2
+ * half-points encoding `openPlazaWithinTransaction()` expects). This is a
+ * separate sheet with zero formula cells of its own (raw stored data,
+ * indexed by person) — it cannot have inherited "x Equipo"'s bug, and
+ * `planificar()` below still hard-errors, naming the team, the vuelta and
+ * the person, if a titular "GRILLA ELECCION" yields has no puntaje here (see
+ * the loop over `$team['titulares']` below). Neither sheet's `id` column is
+ * trusted for anything: a titular is resolved to a WordPress `sp_player`
+ * post id by NAME (`NombreMatcher`), never by an id the spreadsheet itself
+ * supplies (see class docblock on `NombreMatcher` for why exact-string
+ * equality is not enough, and "THE CANDIDATE POOL" below for what pool a
+ * name is matched against).
  *
  * *** THE CANDIDATE POOL: A TEAM'S OWN WORDPRESS ROSTER, THIS SEASON ***
  * A titular's name is matched only against `sp_player` posts that are BOTH
@@ -118,7 +128,7 @@ class EleccionImporter {
      * problem — see `EleccionPlazasPlan`'s own class docblock.
      *
      * @param array<int, array{equipo:string, line:int, titulares:array<string,string>}> $equipoTeams
-     *        `EleccionSheetParser::parseEquipoSheet()`'s own `teams` output.
+     *        `EleccionSheetParser::parseGrillaSheet()`'s own `teams` output.
      * @param array<int, string> $equipoParserErrors Same parser's `errors`.
      * @param array<string, string> $puntajes `EleccionSheetParser::parseTitularesSheet()`'s
      *        own `puntajes` output (normalized name => raw puntaje string).
@@ -151,7 +161,7 @@ class EleccionImporter {
 
         foreach ( $equipoTeams as $team ) {
             $rawEquipo = (string) $team['equipo'];
-            $label     = '' !== trim( $rawEquipo ) ? $rawEquipo : '(sin nombre, linea ' . $team['line'] . ')';
+            $label     = '' !== trim( $rawEquipo ) ? $rawEquipo : '(sin nombre, columna ' . $team['line'] . ')';
 
             $teamId = $this->resolveEquipoId( $rawEquipo, $publishedTeams, $errors, (int) $team['line'] );
 
@@ -433,8 +443,12 @@ class EleccionImporter {
     /**
      * @param array<int, string> $publishedTeams id => post_title
      * @param array<int, string> $errors
+     * @param int $columna The team block's 1-indexed spreadsheet column in
+     *        "GRILLA ELECCION" (`$team['line']` — see
+     *        `EleccionSheetParser::parseGrillaSheet()`'s own docblock for
+     *        why that field is still called `line`).
      */
-    private function resolveEquipoId( string $rawEquipo, array $publishedTeams, array &$errors, int $line ): ?int {
+    private function resolveEquipoId( string $rawEquipo, array $publishedTeams, array &$errors, int $columna ): ?int {
         $normalized = EquipoAliasMap::resolve( TextNormalizer::normalize( $rawEquipo ) );
 
         $matches = [];
@@ -445,12 +459,12 @@ class EleccionImporter {
         }
 
         if ( [] === $matches ) {
-            $errors[] = "Hoja 'x Equipo', equipo '{$rawEquipo}' (linea {$line}): no existe un equipo publicado (sp_team) con ese nombre, ni un alias conocido (ver EquipoAliasMap).";
+            $errors[] = "Hoja 'GRILLA ELECCION', equipo '{$rawEquipo}' (columna {$columna}): no existe un equipo publicado (sp_team) con ese nombre, ni un alias conocido (ver EquipoAliasMap).";
             return null;
         }
 
         if ( count( $matches ) > 1 ) {
-            $errors[] = "Hoja 'x Equipo', equipo '{$rawEquipo}' (linea {$line}): el nombre coincide con " . count( $matches ) . ' equipos publicados; es ambiguo.';
+            $errors[] = "Hoja 'GRILLA ELECCION', equipo '{$rawEquipo}' (columna {$columna}): el nombre coincide con " . count( $matches ) . ' equipos publicados; es ambiguo.';
             return null;
         }
 

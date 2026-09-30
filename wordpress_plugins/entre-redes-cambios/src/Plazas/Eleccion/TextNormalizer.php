@@ -7,8 +7,8 @@ namespace EntreRedes\Cambios\Plazas\Eleccion;
 /**
  * Normalizes a free-text name for COMPARISON only — never for display. Every
  * class in this namespace that compares two names (a titular's name in the
- * "x Equipo" sheet against the same titular's name in "Titulares eleccion con
- * datos", or an Excel name against a WordPress `sp_player`/`sp_team`
+ * "GRILLA ELECCION" sheet against the same titular's name in "Titulares
+ * eleccion con datos", or an Excel name against a WordPress `sp_player`/`sp_team`
  * `post_title`) normalizes both sides with this SAME function first, so
  * "SINCLAIR , JUAN MARTIN" (a stray space before the comma) and
  * "SINCLAIR, JUAN MARTIN" compare equal, and an accented "María" compares

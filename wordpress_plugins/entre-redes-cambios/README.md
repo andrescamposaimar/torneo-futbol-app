@@ -147,8 +147,8 @@ The following are real gaps this slice leaves open. None of them is implemented 
 
 ### The two sheets
 
-- **`x Equipo`** (`Vuelta | Equipo | id | Nombre | Celular | mail | Fijo`) names, per team, 11 rows — `Vuelta` is `CAP` for the captain, then `1`..`10`. `id`, `Celular`, `mail` and `Fijo` are never read by this importer (no personal data is held in memory or written anywhere). The sheet interleaves repeated header rows between teams; `Plazas\Eleccion\EleccionSheetParser::parseEquipoSheet()` discards them and hard-errors any team whose block is not exactly 11 rows with exactly `CAP,1..10`.
-- **`Titulares eleccion con datos`** (`Orden | Apellido y Nombre | Posicion | Puntaje | ... | Equipo`) supplies each titular's election-time puntaje — the correct snapshot ceiling for their plaza — looked up by EXACT normalized name against the first sheet (verified against a 90-player `sp_metrics` sample with zero differences).
+- **`GRILLA ELECCION`** — the draft board itself: teams run across COLUMNS, three per team (an id column, a name column, one column of air). Row 2 holds the team name; row 3 is the captain (`Vuelta` = `CAP`); rounds `1`..`10` follow on rows 5, 7, ..., 23. `Plazas\Eleccion\EleccionSheetParser::parseGrillaSheet()` skips placeholder blocks (the sheet is laid out for more teams than exist this season) and hard-errors any team whose 11 slots do not each hold exactly one non-empty, non-duplicated name — see that class's own docblock for the full layout and for exactly why this importer refuses to read the easier-looking `x Equipo` sheet instead (a formula-derived view of this one, confirmed to resolve at least two teams to the wrong person, and whose own placeholder rows are literal Excel `#REF!` errors).
+- **`Titulares eleccion con datos`** (`Orden | Apellido y Nombre | Posicion | Puntaje | ... | Equipo`) supplies each titular's election-time puntaje — the correct snapshot ceiling for their plaza — looked up by EXACT normalized name against `GRILLA ELECCION` (verified against a 90-player `sp_metrics` sample with zero differences). Confirmed to hold zero formula cells of its own, unlike both other sheets — raw stored data, indexed by person.
 
 A titular's name is resolved to a WordPress `sp_player` post id by `Plazas\Eleccion\NombreMatcher` — token-based (surname overlap + matching first given name), matched only against that SAME team's own WordPress roster this season (see `EleccionImporter::equipoRoster()`) — never a fuzzy match against the whole league, and never resolved automatically when more than one candidate qualifies (an ambiguous tie is always a hard error). A name matching nothing needs an entry in the operator-supplied override file (`Plazas\Eleccion\EleccionOverrides`, a small `nombre_excel,titular_player_id` CSV) — an unresolved titular with no override blocks the entire import, never just that one plaza.
 
@@ -168,7 +168,7 @@ Dry-run is the default: without `--apply` (plazas) or `--apply-capitanes` (capta
 
 ### What this importer does not treat as an error
 
-A team whose "x Equipo" block does not have exactly 11 rows is a hard error naming the team (see `EleccionSheetParser`'s class docblock) — it can never form a complete titular set, so it is refused, not warned about and imported partially.
+A team whose `GRILLA ELECCION` block does not yield exactly 11 distinct titulares is a hard error naming the team (see `EleccionSheetParser`'s class docblock) — it can never form a complete titular set, so it is refused, not warned about and imported partially. The same applies to a titular found in two different teams (by internal id or by name) and to finding fewer team blocks than this election is known to have.
 
 ## The dictamen engine (slice 3)
 

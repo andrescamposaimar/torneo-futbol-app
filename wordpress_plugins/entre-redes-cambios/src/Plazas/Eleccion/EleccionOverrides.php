@@ -7,19 +7,21 @@ namespace EntreRedes\Cambios\Plazas\Eleccion;
 /**
  * Parses the operator-supplied override file — a small CSV the process
  * owner fills in for the titulares `NombreMatcher` cannot resolve on its
- * own (see `EleccionImporter`'s class docblock, "THE FIVE THAT DO NOT
- * RESOLVE") — into a normalized-name-to-player-id map. Pure, no `\wpdb`; the
- * override file is TEXT the CLI tool reads from disk exactly like the
- * election spreadsheet's own sheets are handed to `EleccionSheetParser`.
+ * own (see `EleccionImporter`'s class docblock, "THE OVERRIDE FILE: NEVER
+ * GUESS, NEVER SKIP A PLAZA SILENTLY") — into a normalized-name-to-player-id
+ * map. Pure, no `\wpdb`; the override file is TEXT the CLI tool reads from
+ * disk exactly like the election spreadsheet's own sheets are handed to
+ * `EleccionSheetParser`.
  *
  * *** FORMAT ***
  * A CSV with a header naming the two required columns, matched
  * case-insensitively and in any order, same convention as this codebase's
  * only other CSV format (see `Plazas\PlazaImportCsvParser`, now removed —
  * see this feature's own task brief for why): `nombre_excel` (the name
- * EXACTLY as it appears in the "x Equipo" sheet — this class normalizes it
- * the same way `NombreMatcher` normalizes every name it compares, so case,
- * accents and whitespace never matter) and `titular_player_id` (the
+ * EXACTLY as it appears in the "GRILLA ELECCION" sheet — this class
+ * normalizes it the same way `NombreMatcher` normalizes every name it
+ * compares, so case, accents and whitespace never matter) and
+ * `titular_player_id` (the
  * WordPress `sp_player` post id the operator has manually confirmed IS that
  * person). A row whose first cell starts with `#` is a comment and is
  * skipped, same convention as the removed CSV importer.
