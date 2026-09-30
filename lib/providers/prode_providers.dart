@@ -13,6 +13,7 @@ import '../services/prode_auth_state.dart';
 import '../services/prode_fixtures_controller.dart';
 import '../services/prode_history_controller.dart';
 import '../services/prode_ranking_controller.dart';
+import 'credencial_repository_providers.dart';
 
 /// Drives the native Google Sign-In sheet and returns a Google id_token whose
 /// `aud` is the web client id (via [serverClientId]) — the audience the
@@ -148,6 +149,11 @@ final prodeAuthControllerProvider =
   // the service's in-memory access-token cache. This removes the need for every
   // call site to manually pair storage writes with cache-invalidation calls.
   repository.onTokensChanged = service.invalidateTokenCache;
+
+  // Design D6 "logout -> wipe via an onLoggedOut hook in the prode auth
+  // flow": a Prode sign-out must never leave a credential cached behind for
+  // whoever opens the app next on this device.
+  controller.onLoggedOut = () => ref.read(credencialRepositoryProvider).clear();
 
   return controller;
 });

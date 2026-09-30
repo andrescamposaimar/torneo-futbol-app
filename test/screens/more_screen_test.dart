@@ -1,16 +1,23 @@
+import 'dart:typed_data';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_platform_interface/test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/config/tenant_config.dart';
 import 'package:torneo_futbol_app/config/tenant_provider.dart';
+import 'package:torneo_futbol_app/providers/credencial_providers.dart';
 import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/anuarios_screen.dart';
 import 'package:torneo_futbol_app/screens/campeones_screen.dart';
+import 'package:torneo_futbol_app/screens/credencial/credencial_screen.dart';
 import 'package:torneo_futbol_app/screens/more_screen.dart';
+import 'package:torneo_futbol_app/services/credencial_photo_store.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
 import 'package:torneo_futbol_app/services/i_cache_service.dart';
 import 'package:torneo_futbol_app/services/notification_service.dart';
@@ -20,6 +27,26 @@ import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/services/prode_ranking_controller.dart';
 import 'package:torneo_futbol_app/widgets/prode_identity_card.dart';
+
+// ---------------------------------------------------------------------------
+// A CredencialPhotoStore with no real filesystem access — see the same-named
+// class in credencial_screen_test.dart for why real dart:io Directory calls
+// inside testWidgets are avoided in this sandbox.
+// ---------------------------------------------------------------------------
+
+class _FakePhotoStore implements CredencialPhotoStore {
+  @override
+  Future<Uint8List?> readVerified(String sha256Hex) async => null;
+
+  @override
+  Future<void> write(Uint8List bytes, String sha256Hex) async {}
+
+  @override
+  Future<void> deleteAllExcept(String? keepSha256Hex) async {}
+
+  @override
+  Future<void> wipe() async {}
+}
 
 // ---------------------------------------------------------------------------
 // Minimal fakes so tapping into CampeonesScreen (pushed from the Historia
@@ -115,6 +142,7 @@ class _StubRankingController extends ProdeRankingController {
 TenantConfig _makeTenant({
   bool prode = true,
   bool campeones = false,
+  bool credencial = false,
   List<TenantAnuario> anuarios = const [],
   String? solicitudCambioUrl,
   bool waitingLists = false,
@@ -135,6 +163,7 @@ TenantConfig _makeTenant({
         prode: prode,
         waitingLists: waitingLists,
         campeones: campeones,
+        credencial: credencial,
       ),
       integrations: const TenantIntegrations(prodeAuth: _kProdeConfig),
       documents: TenantDocuments(
@@ -154,6 +183,7 @@ Future<void> _pump(
   WidgetTester tester, {
   bool prode = true,
   bool campeones = false,
+  bool credencial = false,
   List<TenantAnuario> anuarios = const [],
   String? solicitudCambioUrl,
   bool waitingLists = false,
@@ -164,6 +194,7 @@ Future<void> _pump(
   final tenantCfg = _makeTenant(
     prode: prode,
     campeones: campeones,
+    credencial: credencial,
     anuarios: anuarios,
     solicitudCambioUrl: solicitudCambioUrl,
     waitingLists: waitingLists,
@@ -376,6 +407,63 @@ void main() {
 
       expect(find.text('Goleadores'), findsOneWidget);
       expect(find.text('Imbatibles'), findsOneWidget);
+    });
+  });
+
+  group('MoreScreen · Mi Credencial entry point (flag-gated)', () {
+    // The flag stays false in both tenants through slice 3b — the tile must
+    // be fully absent, no crash (mirrors the campeones=false convention).
+    testWidgets('credencial=false → Credencial section and tile absent',
+        (tester) async {
+      await _pump(tester, credencial: false);
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Credencial'), findsNothing);
+      expect(find.text('Mi Credencial'), findsNothing);
+    });
+
+    testWidgets('credencial=true → Credencial section and tile present',
+        (tester) async {
+      await _pump(tester, credencial: true);
+
+      expect(find.text('Credencial'), findsOneWidget);
+      expect(find.text('Mi Credencial'), findsOneWidget);
+    });
+
+    testWidgets('credencial=true → tapping the tile pushes CredencialScreen',
+        (tester) async {
+      // CredencialScreen.initState() calls open(), which reads the real
+      // credencialRepositoryProvider/credencialPhotoStoreProvider chain —
+      // fake the secure storage platform and avoid real dart:io Directory
+      // access (see _FakePhotoStore's own docblock).
+      FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({});
+      final tenantCfg = _makeTenant(credencial: true);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            tenantConfigProvider.overrideWithValue(tenantCfg),
+            notificationServiceProvider.overrideWithValue(_FakeNotificationService()),
+            prodeApiServiceProvider.overrideWithValue(_FakeProdeApiService()),
+            prodeAuthControllerProvider.overrideWith(
+              (ref) => _StubAuthController(const ProdeAuthUnauthenticated()),
+            ),
+            prodeRankingControllerProvider.overrideWith((ref) => _StubRankingController()),
+            apiServiceProvider.overrideWithValue(_EmptyCampeonesApiService()),
+            cacheServiceProvider.overrideWithValue(_NoopCacheService()),
+            credencialPhotoStoreProvider.overrideWithValue(_FakePhotoStore()),
+          ],
+          child: const MaterialApp(home: MoreScreen()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Mi Credencial'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byType(CredencialScreen), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 
