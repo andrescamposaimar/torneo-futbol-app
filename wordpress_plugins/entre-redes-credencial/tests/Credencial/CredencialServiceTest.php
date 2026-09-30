@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Credencial\Tests\Credencial;
 
+use EntreRedes\Credencial\Approval\ApprovalRequestRepository;
 use EntreRedes\Credencial\Code\RotatingCode;
 use EntreRedes\Credencial\Credencial\CredencialService;
 use EntreRedes\Credencial\Credencial\IssuanceRepository;
@@ -30,17 +31,23 @@ class CredencialServiceTest extends TestCase {
     private const NOW    = 1_800_000_000;
 
     private CredencialService $service;
+    private ApprovalRequestRepository $approvalRequests;
 
     protected function setUp(): void {
         InitialSchema::up();
 
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_issuance" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_approval_request" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_approval_blob" );
+
+        $this->approvalRequests = new ApprovalRequestRepository( $wpdb, new InMemoryEventLog() );
 
         $this->service = new CredencialService(
             new PlayerReader(),
             $this->fakeTeamResolver( [ 'id' => 5, 'name' => 'Boca Juniors' ] ),
             new IssuanceRepository( $wpdb, new InMemoryEventLog() ),
+            $this->approvalRequests,
             self::SECRET
         );
     }
@@ -52,6 +59,25 @@ class CredencialServiceTest extends TestCase {
 
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_issuance" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_approval_request" );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_approval_blob" );
+    }
+
+    /** Inserts an already-approved photo request directly, bypassing the pending flow. */
+    private function approvedPhotoRequest( int $playerId, int $attachmentId, int $reviewedAtEpoch ): int {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'credencial_approval_request', [
+            'type'             => ApprovalRequestRepository::TYPE_PHOTO,
+            'target_player_id' => $playerId,
+            'requested_by'     => 100,
+            'payload'          => '{}',
+            'status'           => 'approved',
+            'attachment_id'    => $attachmentId,
+            'reviewed_at'      => gmdate( 'Y-m-d H:i:s', $reviewedAtEpoch ),
+            'created_at'       => gmdate( 'Y-m-d H:i:s', $reviewedAtEpoch ),
+        ] );
+
+        return (int) $wpdb->insert_id;
     }
 
     private function fakeTeamResolver( ?array $team ): TeamResolver {
@@ -143,6 +169,7 @@ class CredencialServiceTest extends TestCase {
             new PlayerReader(),
             $this->fakeTeamResolver( null ),
             new IssuanceRepository( $wpdb, new InMemoryEventLog() ),
+            $this->approvalRequests,
             self::SECRET
         );
         $this->seedEligiblePlayerWithPhoto( 1 );
@@ -169,5 +196,133 @@ class CredencialServiceTest extends TestCase {
 
         $this->assertSame( 'active', $state['state'] );
         $this->assertNull( $state['credential']['birth_date'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // engram 1589: `photo_request` was always null — ApprovalRequestRepository
+    // was never wired into resolve(). These prove the wiring, not just the
+    // repository queries (already covered by ApprovalRequestRepositoryTest).
+    // -------------------------------------------------------------------------
+
+    public function test_no_photo_with_a_pending_upload_reports_pending_photo_request(): void {
+        // Deliberately eligible but with no approved photo yet (spec "First upload").
+        $GLOBALS['wp_test_posts'][1] = [
+            'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador 1', 'post_date' => '2000-01-01 00:00:00',
+        ];
+        $requestId = $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'no_photo', $state['state'] );
+        $this->assertSame(
+            [ 'id' => $requestId, 'status' => 'pending', 'created_at' => gmdate( 'Y-m-d H:i:s', self::NOW ) ],
+            $state['photo_request']
+        );
+    }
+
+    public function test_active_player_with_a_pending_replacement_reports_pending_photo_request(): void {
+        $this->seedEligiblePlayerWithPhoto( 1 );
+        $requestId = $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'active', $state['state'] );
+        $this->assertNotNull( $state['credential'], 'the old approved photo must keep backing the credential while a replacement is pending' );
+        $this->assertSame(
+            [ 'id' => $requestId, 'status' => 'pending', 'created_at' => gmdate( 'Y-m-d H:i:s', self::NOW ) ],
+            $state['photo_request']
+        );
+    }
+
+    public function test_rejected_request_newer_than_the_approved_photo_is_reported(): void {
+        $this->seedEligiblePlayerWithPhoto( 1 );
+        $this->approvedPhotoRequest( 1, 55, self::NOW - 3600 );
+
+        $requestId = $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW - 1800 );
+        $this->approvalRequests->rejectPending( $requestId, 1, 'no se ve la cara', self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'active', $state['state'] );
+        $this->assertSame(
+            [ 'id' => $requestId, 'status' => 'rejected', 'created_at' => gmdate( 'Y-m-d H:i:s', self::NOW - 1800 ) ],
+            $state['photo_request']
+        );
+    }
+
+    public function test_rejected_request_older_than_the_approved_photo_is_not_reported(): void {
+        $this->seedEligiblePlayerWithPhoto( 1 );
+
+        $requestId = $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW - 3600 );
+        $this->approvalRequests->rejectPending( $requestId, 1, 'no se ve la cara', self::NOW - 1800 );
+
+        // A LATER approval supersedes the earlier rejection.
+        $this->approvedPhotoRequest( 1, 55, self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'active', $state['state'] );
+        $this->assertNull( $state['photo_request'] );
+    }
+
+    public function test_first_upload_rejected_with_no_approved_photo_ever_is_reported(): void {
+        $GLOBALS['wp_test_posts'][1] = [
+            'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador 1', 'post_date' => '2000-01-01 00:00:00',
+        ];
+
+        $requestId = $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW - 1800 );
+        $this->approvalRequests->rejectPending( $requestId, 1, 'no se ve la cara', self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'no_photo', $state['state'] );
+        $this->assertSame(
+            [ 'id' => $requestId, 'status' => 'rejected', 'created_at' => gmdate( 'Y-m-d H:i:s', self::NOW - 1800 ) ],
+            $state['photo_request']
+        );
+    }
+
+    public function test_no_pending_and_no_rejected_reports_no_photo_request(): void {
+        $this->seedEligiblePlayerWithPhoto( 1 );
+        $this->approvedPhotoRequest( 1, 55, self::NOW - 3600 );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'active', $state['state'] );
+        $this->assertNull( $state['photo_request'] );
+    }
+
+    public function test_approved_but_unpublished_request_is_not_reported(): void {
+        // Design: "An approved-but-unpublished request is not reported; the
+        // card shows the currently published photo." The live thumbnail
+        // (seeded by seedEligiblePlayerWithPhoto) never matches attachment_id
+        // 999, so this approved request is deliberately still unpublished.
+        $this->seedEligiblePlayerWithPhoto( 1 );
+        $this->approvedPhotoRequest( 1, 999, self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'active', $state['state'] );
+        $this->assertNull( $state['photo_request'] );
+    }
+
+    public function test_blocked_player_never_leaks_a_pending_photo_request(): void {
+        $this->seedEligiblePlayerWithPhoto( 1, [], [ 'estado' => 'Inhabilitado' ] );
+        $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'blocked', $state['state'] );
+        $this->assertNull( $state['photo_request'] );
+    }
+
+    public function test_not_a_player_never_leaks_a_pending_photo_request(): void {
+        // No sp_player post at all for id 1, but a stray approval row exists.
+        $this->approvalRequests->createPendingPhotoRequest( 1, 42, 'bytes', self::NOW );
+
+        $state = $this->service->resolve( 1, 42, self::NOW )->toArray();
+
+        $this->assertSame( 'not_a_player', $state['state'] );
+        $this->assertNull( $state['photo_request'] );
     }
 }
