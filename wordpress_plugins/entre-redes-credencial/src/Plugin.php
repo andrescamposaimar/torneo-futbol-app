@@ -53,9 +53,10 @@ final class Plugin {
             $sessionGateway = new Auth\ProdeSessionGateway( $wpdb );
             $authorizer     = new Auth\CredencialAuthorizer( $tokenVerifier, $sessionGateway );
 
-            $playerReader       = new Player\PlayerReader();
-            $teamResolver       = new Player\EntreRedesApiTeamResolver();
-            $issuanceRepository = new Credencial\IssuanceRepository( $wpdb, $eventLog );
+            $playerReader              = new Player\PlayerReader();
+            $teamResolver              = new Player\EntreRedesApiTeamResolver();
+            $issuanceRepository        = new Credencial\IssuanceRepository( $wpdb, $eventLog );
+            $approvalRequestRepository = new Approval\ApprovalRequestRepository( $wpdb, $eventLog );
 
             // credencial_code_secret is generated once, on activation — see
             // Migrations\MigrationRunner::generateCodeSecret(). Read here,
@@ -67,12 +68,11 @@ final class Plugin {
                 $playerReader,
                 $teamResolver,
                 $issuanceRepository,
+                $approvalRequestRepository,
                 $codeSecret
             );
 
             $credencialController = new Rest\CredencialController( $authorizer, $credencialService, $eventLog );
-
-            $approvalRequestRepository = new Approval\ApprovalRequestRepository( $wpdb, $eventLog );
 
             $photoUploadController = new Rest\PhotoUploadController(
                 $authorizer,

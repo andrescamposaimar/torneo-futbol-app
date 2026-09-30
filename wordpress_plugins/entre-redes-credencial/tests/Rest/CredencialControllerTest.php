@@ -67,6 +67,7 @@ class CredencialControllerTest extends TestCase {
             new PlayerReader(),
             $this->fakeTeamResolver(),
             new IssuanceRepository( $wpdb, new InMemoryEventLog() ),
+            new ApprovalRequestRepository( $wpdb, new InMemoryEventLog() ),
             'test-secret'
         );
     }
@@ -146,6 +147,7 @@ class CredencialControllerTest extends TestCase {
             new PlayerReader(),
             $this->fakeTeamResolver(),
             new IssuanceRepository( $wpdb, new InMemoryEventLog() ),
+            new ApprovalRequestRepository( $wpdb, new InMemoryEventLog() ),
             'test-secret'
         );
 

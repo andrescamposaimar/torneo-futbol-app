@@ -222,6 +222,77 @@ class ApprovalRequestRepositoryTest extends TestCase {
         $this->assertSame( 20, $found['attachment_id'] );
     }
 
+    // -------------------------------------------------------------------------
+    // Credencial GET wiring gap (engram 1589): CredencialService needs to know
+    // the pending/rejected state of a player's photo requests.
+    // -------------------------------------------------------------------------
+
+    public function test_findPendingPhotoRequest_returns_null_when_none_is_pending(): void {
+        $this->assertNull( $this->repo->findPendingPhotoRequest( 7 ) );
+    }
+
+    public function test_findPendingPhotoRequest_returns_the_pending_request(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+
+        $found = $this->repo->findPendingPhotoRequest( 7 );
+
+        $this->assertSame( $requestId, $found['id'] );
+        $this->assertSame( gmdate( 'Y-m-d H:i:s', self::NOW ), $found['created_at'] );
+    }
+
+    public function test_findPendingPhotoRequest_ignores_other_types(): void {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'credencial_approval_request', [
+            'type'             => 'some_future_type',
+            'target_player_id' => 7,
+            'requested_by'     => 100,
+            'payload'          => '{}',
+            'status'           => 'pending',
+            'created_at'       => gmdate( 'Y-m-d H:i:s', self::NOW ),
+        ] );
+
+        $this->assertNull( $this->repo->findPendingPhotoRequest( 7 ) );
+    }
+
+    public function test_findPendingPhotoRequest_ignores_another_players_pending_request(): void {
+        $this->repo->createPendingPhotoRequest( 8, 100, 'bytes', self::NOW );
+
+        $this->assertNull( $this->repo->findPendingPhotoRequest( 7 ) );
+    }
+
+    public function test_findNewestRejectedPhotoRequest_returns_null_when_none_was_rejected(): void {
+        $this->assertNull( $this->repo->findNewestRejectedPhotoRequest( 7 ) );
+    }
+
+    public function test_findNewestRejectedPhotoRequest_picks_the_newest_by_reviewed_at(): void {
+        $older = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+        $this->repo->rejectPending( $older, 1, 'motivo viejo', self::NOW );
+
+        $newer = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW + 10 );
+        $this->repo->rejectPending( $newer, 1, 'motivo nuevo', self::NOW + 3600 );
+
+        $found = $this->repo->findNewestRejectedPhotoRequest( 7 );
+
+        $this->assertSame( $newer, $found['id'] );
+        $this->assertSame( gmdate( 'Y-m-d H:i:s', self::NOW + 10 ), $found['created_at'] );
+        $this->assertSame( gmdate( 'Y-m-d H:i:s', self::NOW + 3600 ), $found['reviewed_at'] );
+    }
+
+    public function test_findNewestRejectedPhotoRequest_ignores_other_types(): void {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'credencial_approval_request', [
+            'type'             => 'some_future_type',
+            'target_player_id' => 7,
+            'requested_by'     => 100,
+            'payload'          => '{}',
+            'status'           => 'rejected',
+            'reviewed_at'      => gmdate( 'Y-m-d H:i:s', self::NOW ),
+            'created_at'       => gmdate( 'Y-m-d H:i:s', self::NOW ),
+        ] );
+
+        $this->assertNull( $this->repo->findNewestRejectedPhotoRequest( 7 ) );
+    }
+
     public function test_countRequestsSince_counts_only_requests_within_the_window(): void {
         global $wpdb;
         $wpdb->insert( $wpdb->prefix . 'credencial_approval_request', [

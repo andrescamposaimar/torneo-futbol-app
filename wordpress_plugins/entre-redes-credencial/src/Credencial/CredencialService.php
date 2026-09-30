@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Credencial\Credencial;
 
+use EntreRedes\Credencial\Approval\ApprovalRequestRepository;
 use EntreRedes\Credencial\Code\RotatingCode;
 use EntreRedes\Credencial\Player\PlayerReader;
 use EntreRedes\Credencial\Player\TeamResolver;
@@ -12,24 +13,42 @@ use EntreRedes\Credencial\Player\TeamResolver;
  * The single orchestrator behind GET /credencial/credencial — composes
  * Player\PlayerReader (eligibility + display facts, design D14),
  * Player\TeamResolver (the team/list badge, design D15), IssuanceRepository
- * (the stable id, design D4) and Code\RotatingCode (the liveness code seed)
- * into exactly one of the four states CredencialState models.
+ * (the stable id, design D4), Approval\ApprovalRequestRepository (the
+ * `photo_request` field, design Interfaces) and Code\RotatingCode (the
+ * liveness code seed) into exactly one of the four states CredencialState
+ * models.
  *
  * ORDER MATTERS, and mirrors the spec's own requirement order:
  *   1. Eligibility Determination — no matching sp_player => not_a_player;
  *      blocked estado => blocked. Neither of these ever touches the issuance
- *      table or the photo gate: a blocked/nonexistent player has no
- *      "current" credential to rotate or serve.
- *   2. Approved Photo Gate — no featured image => no_photo. Checked BEFORE
+ *      table, the photo gate, or `photo_request`: a blocked/nonexistent
+ *      player has no "current" credential to rotate or serve, and must never
+ *      leak whether a photo is under review (design: "blocked and
+ *      not_a_player: null — do not leak").
+ *   2. Approved Photo Gate — no featured image => no_photo, but STILL reports
+ *      `photo_request` (a first upload can be pending or rejected while no
+ *      photo has ever been approved — spec "First upload"). Checked BEFORE
  *      issuance resolution, so a player who has never had a photo approved
  *      never gets an issuance row minted for them prematurely.
  *   3. Only once both gates pass does this class mint/rotate the issuance
  *      row and assemble the full payload (design Interfaces section).
  *
- * `photo_request` in the GET response is ALWAYS null in this slice — the
- * approval-request pipeline (Approval\ApprovalRequestRepository) does not
- * exist yet (that is slice 2a/2b); this class has nothing to report there
- * until then.
+ * `photo_request` resolution (engram 1589: this repository existed since
+ * slice 2a/2b but was never wired back into the GET — "deferred to a later
+ * slice" comments are cables left unplugged):
+ *   - a pending PHOTO request for this player wins outright ({status:
+ *     pending}), whether the state ends up `no_photo` (first upload) or
+ *     `active` (replacement upload — the old approved photo keeps backing
+ *     the credential, design "Replacement upload while an approved photo
+ *     exists");
+ *   - otherwise, the newest REJECTED photo request is reported ONLY if it is
+ *     newer (by `reviewed_at`, the same "decision time" axis
+ *     findNewestApprovedPhotoRequest() already orders by) than the newest
+ *     APPROVED photo request, or if no photo request was ever approved.  A
+ *     rejection superseded by a later approval is stale and must not be
+ *     reported (design: "An approved-but-unpublished request is not
+ *     reported; the card shows the currently published photo" — the same
+ *     "only the newest decision matters" principle governs `photo_request`).
  *
  * The photo rendition size ('medium') is a DELIBERATE, NOT-YET-FINAL choice
  * — design's own Open Questions list "Photo rendition for the face check
@@ -48,6 +67,7 @@ final class CredencialService {
         private readonly PlayerReader $playerReader,
         private readonly TeamResolver $teamResolver,
         private readonly IssuanceRepository $issuanceRepository,
+        private readonly ApprovalRequestRepository $approvalRequestRepository,
         private readonly string $codeSecret
     ) {
     }
@@ -66,7 +86,7 @@ final class CredencialService {
         $photoUrl = get_the_post_thumbnail_url( $playerId, self::PHOTO_SIZE );
 
         if ( false === $photoUrl || '' === $photoUrl ) {
-            return CredencialState::noPhoto();
+            return CredencialState::noPhoto( $this->resolvePhotoRequest( $playerId ) );
         }
 
         $liveSha  = self::nullIfEmpty( (string) get_post_meta( $playerId, '_credencial_sha256', true ) );
@@ -93,7 +113,47 @@ final class CredencialService {
             ],
         ];
 
-        return CredencialState::active( $credential );
+        return CredencialState::active( $credential, $this->resolvePhotoRequest( $playerId ) );
+    }
+
+    /**
+     * See this class's own docblock for the resolution order. Only ever
+     * called once eligibility passed (never for blocked/not_a_player).
+     *
+     * @return array{id:int, status:string, created_at:string}|null
+     */
+    private function resolvePhotoRequest( int $playerId ): ?array {
+        $pending = $this->approvalRequestRepository->findPendingPhotoRequest( $playerId );
+
+        if ( null !== $pending ) {
+            return [
+                'id'         => $pending['id'],
+                'status'     => 'pending',
+                'created_at' => $pending['created_at'],
+            ];
+        }
+
+        $rejected = $this->approvalRequestRepository->findNewestRejectedPhotoRequest( $playerId );
+
+        if ( null === $rejected ) {
+            return null;
+        }
+
+        $approved = $this->approvalRequestRepository->findNewestApprovedPhotoRequest( $playerId );
+
+        $rejectedIsStale = null !== $approved
+            && null !== $approved['reviewed_at']
+            && ( $rejected['reviewed_at'] ?? '' ) <= $approved['reviewed_at'];
+
+        if ( $rejectedIsStale ) {
+            return null;
+        }
+
+        return [
+            'id'         => $rejected['id'],
+            'status'     => 'rejected',
+            'created_at' => $rejected['created_at'],
+        ];
     }
 
     /**
