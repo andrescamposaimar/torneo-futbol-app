@@ -239,6 +239,131 @@ class ApprovalRequestRepositoryTest extends TestCase {
         $this->assertSame( 1, $count );
     }
 
+    // -------------------------------------------------------------------------
+    // Slice 2b additions: findById, claim/reject, blob access, admin listing.
+    // -------------------------------------------------------------------------
+
+    public function test_findById_returns_the_full_row(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+
+        $row = $this->repo->findById( $requestId );
+
+        $this->assertSame( $requestId, $row['id'] );
+        $this->assertSame( 7, $row['target_player_id'] );
+        $this->assertSame( 'pending', $row['status'] );
+        $this->assertNull( $row['attachment_id'] );
+    }
+
+    public function test_findById_returns_null_for_an_unknown_id(): void {
+        $this->assertNull( $this->repo->findById( 999999 ) );
+    }
+
+    public function test_claimApproval_succeeds_exactly_once_for_a_pending_request(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+
+        $first = $this->repo->claimApproval( $requestId, 1, 55, self::NOW );
+        $this->assertTrue( $first );
+
+        $row = $this->repo->findById( $requestId );
+        $this->assertSame( 'approved', $row['status'] );
+        $this->assertSame( 55, $row['attachment_id'] );
+        $this->assertSame( 1, $row['reviewed_by'] );
+
+        // A second claim on the now-approved row must affect 0 rows.
+        $second = $this->repo->claimApproval( $requestId, 1, 999, self::NOW );
+        $this->assertFalse( $second );
+
+        // The first claim's attachment_id must survive — the "0 rows" claim
+        // above must NOT have silently overwritten it.
+        $this->assertSame( 55, $this->repo->findById( $requestId )['attachment_id'] );
+    }
+
+    public function test_claimApproval_returns_false_for_an_already_rejected_request(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+        $this->repo->rejectPending( $requestId, 1, null, self::NOW );
+
+        $this->assertFalse( $this->repo->claimApproval( $requestId, 1, 55, self::NOW ) );
+    }
+
+    public function test_setAttachmentId_updates_an_already_approved_row(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+        $this->repo->claimApproval( $requestId, 1, 55, self::NOW );
+
+        $this->repo->setAttachmentId( $requestId, 77 );
+
+        $this->assertSame( 77, $this->repo->findById( $requestId )['attachment_id'] );
+    }
+
+    public function test_rejectPending_succeeds_once_and_is_a_noop_on_retry(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+
+        $first = $this->repo->rejectPending( $requestId, 1, 'no se ve la cara', self::NOW );
+        $this->assertTrue( $first );
+
+        $row = $this->repo->findById( $requestId );
+        $this->assertSame( 'rejected', $row['status'] );
+        $this->assertSame( 'no se ve la cara', $row['review_note'] );
+
+        $second = $this->repo->rejectPending( $requestId, 1, 'otro motivo', self::NOW );
+        $this->assertFalse( $second );
+        $this->assertSame( 'no se ve la cara', $this->repo->findById( $requestId )['review_note'], 'a 0-row reject must not touch the already-decided row' );
+    }
+
+    public function test_rejectPending_returns_false_for_an_already_approved_request(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+        $this->repo->claimApproval( $requestId, 1, 55, self::NOW );
+
+        $this->assertFalse( $this->repo->rejectPending( $requestId, 1, null, self::NOW ) );
+    }
+
+    public function test_blob_binary_roundtrips_and_can_be_deleted(): void {
+        $requestId = $this->repo->createPendingPhotoRequest( 7, 100, 'the-bytes', self::NOW );
+
+        $this->assertSame( 'the-bytes', $this->repo->getBlobBinary( $requestId ) );
+
+        $this->repo->deleteBlob( $requestId );
+
+        $this->assertNull( $this->repo->getBlobBinary( $requestId ) );
+    }
+
+    public function test_getBlobBinary_is_null_for_an_unknown_request(): void {
+        $this->assertNull( $this->repo->getBlobBinary( 999999 ) );
+    }
+
+    public function test_findPendingByType_lists_only_pending_rows_of_that_type(): void {
+        $pendingId = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+        $approvedId = $this->repo->createPendingPhotoRequest( 8, 100, 'bytes', self::NOW );
+        $this->repo->claimApproval( $approvedId, 1, 55, self::NOW );
+
+        $rows = $this->repo->findPendingByType( ApprovalRequestRepository::TYPE_PHOTO );
+
+        $this->assertCount( 1, $rows );
+        $this->assertSame( $pendingId, $rows[0]['id'] );
+    }
+
+    public function test_findRequestIdsWithBlob_only_returns_requests_that_still_have_a_blob_row(): void {
+        $withBlob    = $this->repo->createPendingPhotoRequest( 7, 100, 'bytes', self::NOW );
+        $purgedBlob  = $this->repo->createPendingPhotoRequest( 8, 100, 'bytes', self::NOW );
+        $this->repo->deleteBlob( $purgedBlob );
+
+        $rows = $this->repo->findRequestIdsWithBlob( ApprovalRequestRepository::TYPE_PHOTO );
+        $ids  = array_column( $rows, 'id' );
+
+        $this->assertContains( $withBlob, $ids );
+        $this->assertNotContains( $purgedBlob, $ids );
+    }
+
+    public function test_findApprovedPlayerIds_lists_each_player_once(): void {
+        $this->approvedRequest( 7, 55, self::NOW );
+        $this->approvedRequest( 7, 56, self::NOW + 10 ); // same player, newer approval.
+        $this->approvedRequest( 8, 60, self::NOW );
+
+        $ids = $this->repo->findApprovedPlayerIds( ApprovalRequestRepository::TYPE_PHOTO );
+        sort( $ids );
+
+        $this->assertSame( [ 7, 8 ], $ids );
+    }
+
     /** Inserts an already-approved photo request directly (bypassing the pending flow) and returns its id. */
     private function approvedRequest( int $playerId, int $attachmentId, int $reviewedAtEpoch ): int {
         global $wpdb;
