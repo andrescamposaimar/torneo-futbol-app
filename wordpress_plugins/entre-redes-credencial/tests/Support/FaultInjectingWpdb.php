@@ -23,6 +23,17 @@ namespace EntreRedes\Credencial\Tests\Support;
  * so a test can script "fail the 2nd query, then let everything else run
  * normally" without the failure leaking into unrelated calls later in the
  * same test.
+ *
+ * Slice 2a addition: `insert()` is ALSO checked against the same
+ * `$queryFailures` queue as `query()` (via a synthetic "INSERT INTO
+ * {table} (...)" string built from the call's own arguments) — the shim's
+ * `wpdb::insert()` talks to PDO directly and never calls `$this->query()`,
+ * so without this override `failNextQueryMatching()` could never see an
+ * `insert()` call. Used by ApprovalRequestRepositoryTest to fake both a
+ * duplicate-key rejection (a real MySQL "Duplicate entry ... for key
+ * 'uq_pending_key'" message) and an unrelated DB failure, for its plain
+ * `$wpdb->insert()` calls — exactly the "2a's duplicate-key tests" this
+ * class's own docblock already anticipated.
  */
 final class FaultInjectingWpdb extends \wpdb {
 
@@ -95,5 +106,20 @@ final class FaultInjectingWpdb extends \wpdb {
         }
 
         return parent::get_row( $sql, $output );
+    }
+
+    /** See this class's own docblock (slice 2a addition) for why this exists. */
+    public function insert( string $table, array $data, mixed $format = null ): int|false {
+        $syntheticSql = 'INSERT INTO ' . $table . ' (' . implode( ', ', array_keys( $data ) ) . ')';
+
+        foreach ( $this->queryFailures as $i => $failure ) {
+            if ( 1 === preg_match( $failure['pattern'], $syntheticSql ) ) {
+                unset( $this->queryFailures[ $i ] );
+                $this->last_error = $failure['error'];
+                return false;
+            }
+        }
+
+        return parent::insert( $table, $data, $format );
     }
 }
