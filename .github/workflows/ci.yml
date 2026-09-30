@@ -84,9 +84,12 @@ jobs:
           php-version: ${{ matrix.php }}
           # pdo_sqlite backs the in-memory wpdb shim in tests/wp-shim.php;
           # openssl is used for prode's JWT signing; dom/libxml/json are
-          # PHPUnit's. The union is declared for every plugin — an unused
+          # PHPUnit's; gd/exif/fileinfo back entre-redes-credencial's photo
+          # upload pipeline (Photo\PhotoValidator's finfo + getimagesizefromstring
+          # check, Photo\GdPhotoReencoder's decode/rotate/re-encode — added
+          # slice 2a). The union is declared for every plugin — an unused
           # extension costs nothing, a missing one fails opaquely.
-          extensions: mbstring, pdo_sqlite, dom, json, libxml, openssl
+          extensions: mbstring, pdo_sqlite, dom, json, libxml, openssl, gd, exif, fileinfo
           coverage: none
 
       - name: Install dependencies
