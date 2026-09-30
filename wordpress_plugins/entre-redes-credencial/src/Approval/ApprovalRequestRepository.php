@@ -176,6 +176,70 @@ final class ApprovalRequestRepository {
     }
 
     /**
+     * The single pending PHOTO request for this player, if any (design D10:
+     * at most one pending request per player, DB-enforced by the
+     * `pending_key` UNIQUE index). Backs Credencial\CredencialService's GET
+     * response `photo_request` field (engram 1589: this repository existed
+     * but was never wired back into the GET).
+     *
+     * @return array{id:int, created_at:string}|null
+     */
+    public function findPendingPhotoRequest( int $playerId ): ?array {
+        $p   = $this->wpdb->prefix;
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                "SELECT id, created_at FROM {$p}credencial_approval_request
+                  WHERE target_player_id = %d AND status = 'pending' AND type = %s
+                  ORDER BY id DESC LIMIT 1",
+                $playerId,
+                self::TYPE_PHOTO
+            )
+        );
+
+        if ( null === $row ) {
+            return null;
+        }
+
+        return [
+            'id'         => (int) $row['id'],
+            'created_at' => (string) $row['created_at'],
+        ];
+    }
+
+    /**
+     * The newest rejected PHOTO request for this player, or null if none was
+     * ever rejected. Type-scoped like findNewestApprovedPhotoRequest(), for
+     * the same reason: the generic table is shared with future stages.
+     * Ordered by `reviewed_at` — the same "decision time" axis
+     * findNewestApprovedPhotoRequest() uses — so CredencialService can
+     * compare "which decision is newest" directly against it.
+     *
+     * @return array{id:int, created_at:string, reviewed_at:?string}|null
+     */
+    public function findNewestRejectedPhotoRequest( int $playerId ): ?array {
+        $p   = $this->wpdb->prefix;
+        $row = $this->wpdb->get_row(
+            $this->wpdb->prepare(
+                "SELECT id, created_at, reviewed_at FROM {$p}credencial_approval_request
+                  WHERE target_player_id = %d AND status = 'rejected' AND type = %s
+                  ORDER BY reviewed_at DESC, id DESC LIMIT 1",
+                $playerId,
+                self::TYPE_PHOTO
+            )
+        );
+
+        if ( null === $row ) {
+            return null;
+        }
+
+        return [
+            'id'          => (int) $row['id'],
+            'created_at'  => (string) $row['created_at'],
+            'reviewed_at' => $row['reviewed_at'] ?? null,
+        ];
+    }
+
+    /**
      * Count of $type requests created for this player since $sinceEpoch —
      * backs Rest\PhotoUploadController's upload rate limit (design D9: "5
      * uploads/24h (429)").
