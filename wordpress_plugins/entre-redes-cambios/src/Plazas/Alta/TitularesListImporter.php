@@ -64,12 +64,27 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * recognize, or a stats page quietly stops adding up. A hard, loud refusal
  * ("team_id 99999 does not exist") costs an operator thirty seconds to fix
  * a typo; a silently created duplicate costs a data-integrity investigation
- * weeks later. `loadExistingTeamIds()` / `loadExistingPlayerIds()` below are
+ * weeks later. `loadTeamStatuses()` / `loadPlayerStatuses()` below are
  * read-only by construction — nothing in this class ever calls
  * `wp_insert_post()`, and no method here accepts an `equipo`/player NAME as
  * anything other than a label for an error message (see
  * `TitularesListParser`'s own docblock, "an `equipo` column MAY also be
  * present").
+ *
+ * *** "DOES NOT EXIST" AND "EXISTS BUT ISN'T PUBLISHED" ARE DIFFERENT
+ * PROBLEMS, NEVER COLLAPSED INTO ONE ***
+ * A `team_id`/`titular_player_id` can fail to resolve THREE distinct ways,
+ * and each one calls for a different operator action: no row with that id
+ * at all (a typo in the CSV — fix the id), a row that exists but sits in
+ * `draft`/`pending`/`trash`/etc (a real person or team, just not published
+ * right now — restore or publish it, never re-type anything), or — players
+ * only — a row that IS published but was never tagged into this season (a
+ * registration gap, not an identity problem). Collapsing the second case
+ * into "does not exist" would be actively misleading: it would send an
+ * operator hunting for a typo in an id that is already correct. See
+ * `loadTeamStatuses()` / `loadPlayerStatuses()` below — both return every
+ * matching post's `post_status`, precisely so `planificar()` can tell these
+ * apart and name the actual status in the error.
  *
  * *** VALIDATE THE WHOLE FILE BEFORE WRITING A SINGLE ROW ***
  * `planificar()` performs only reads; `aplicarPlazas()` / `aplicarCapitanes()`
@@ -147,8 +162,8 @@ class TitularesListImporter {
             $errors[] = $fechaError;
         }
 
-        $existingTeamIds       = $this->loadExistingTeamIds();
-        $existingPlayerIds     = $this->loadExistingPlayerIds();
+        $teamStatuses              = $this->loadTeamStatuses();
+        $playerStatuses            = $this->loadPlayerStatuses();
         $playersRegisteredInSeason = $this->loadPlayersRegisteredInSeason( $seasonId );
 
         // A duplicate titular anywhere in the file is a contradiction no
@@ -168,8 +183,17 @@ class TitularesListImporter {
         foreach ( $byTeam as $teamId => $teamRows ) {
             $label = $this->teamLabel( $teamId, $teamRows );
 
-            if ( ! isset( $existingTeamIds[ $teamId ] ) ) {
+            $teamStatus = $teamStatuses[ $teamId ] ?? null;
+
+            if ( null === $teamStatus ) {
                 $errors[]        = "Equipo {$label}: team_id {$teamId} no existe como sp_team.";
+                $teamSummaries[] = [ 'team_id' => $teamId, 'team_label' => $label, 'estado' => 'con_errores', 'row_count' => count( $teamRows ) ];
+                continue;
+            }
+
+            if ( 'publish' !== $teamStatus ) {
+                $errors[]        = "Equipo {$label}: team_id {$teamId} existe como sp_team pero esta en estado '"
+                    . $this->statusLabel( $teamStatus ) . "' ({$teamStatus}), no publicado — si se borro o quedo sin publicar por error, restaurelo/publiquelo antes de reimportar.";
                 $teamSummaries[] = [ 'team_id' => $teamId, 'team_label' => $label, 'estado' => 'con_errores', 'row_count' => count( $teamRows ) ];
                 continue;
             }
@@ -195,10 +219,18 @@ class TitularesListImporter {
             $rowHasError = false;
 
             foreach ( $teamRows as $row ) {
-                $playerId = $row['titular_player_id'];
+                $playerId     = $row['titular_player_id'];
+                $playerStatus = $playerStatuses[ $playerId ] ?? null;
 
-                if ( ! isset( $existingPlayerIds[ $playerId ] ) ) {
+                if ( null === $playerStatus ) {
                     $errors[]    = "Equipo {$label}, fila {$row['line']}: titular_player_id {$playerId} no existe como sp_player.";
+                    $rowHasError = true;
+                    continue;
+                }
+
+                if ( 'publish' !== $playerStatus ) {
+                    $errors[]    = "Equipo {$label}, fila {$row['line']}: el jugador {$playerId} existe como sp_player pero esta en estado '"
+                        . $this->statusLabel( $playerStatus ) . "' ({$playerStatus}), no publicado — si se borro o quedo sin publicar por error, restaurelo/publiquelo antes de reimportar.";
                     $rowHasError = true;
                     continue;
                 }
@@ -438,53 +470,58 @@ class TitularesListImporter {
     // -------------------------------------------------------------------------
 
     /**
-     * @return array<int, true> Every `sp_team` post id, regardless of
-     *         `post_status` — a trashed or draft team is still a real post
-     *         this backfill must not treat as "does not exist"; the
-     *         distinction this importer actually cares about is "does a row
-     *         exist at all", never the WordPress publish workflow state of
-     *         that row.
+     * @return array<int, string> Every `sp_team` post id mapped to its OWN
+     *         `post_status`, regardless of what that status is — a trashed
+     *         or draft team is still a real post, but this importer must
+     *         never mistake "exists, just not published" for either "does
+     *         not exist" or "may as well be published" (see class docblock,
+     *         "'DOES NOT EXIST' AND 'EXISTS BUT ISN'T PUBLISHED' ARE
+     *         DIFFERENT PROBLEMS"). `planificar()` is the ONLY place that
+     *         reads this map's values; a missing key means "no such id",
+     *         present with `'publish'` means usable, and present with
+     *         anything else names the exact status in the error.
      */
-    private function loadExistingTeamIds(): array {
+    private function loadTeamStatuses(): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
         $rows = $wpdb->get_results(
-            "SELECT ID AS id FROM {$p}posts WHERE post_type = 'sp_team'",
+            "SELECT ID AS id, post_status AS status FROM {$p}posts WHERE post_type = 'sp_team'",
             ARRAY_A
         );
 
-        $this->assertReadSucceeded( $rows, 'loadExistingTeamIds', [] );
+        $this->assertReadSucceeded( $rows, 'loadTeamStatuses', [] );
 
-        $set = [];
+        $statuses = [];
         foreach ( $rows as $row ) {
-            $set[ (int) $row['id'] ] = true;
+            $statuses[ (int) $row['id'] ] = (string) $row['status'];
         }
 
-        return $set;
+        return $statuses;
     }
 
     /**
-     * @return array<int, true> Every `sp_player` post id, regardless of
-     *         `post_status` — see `loadExistingTeamIds()`'s docblock for why.
+     * @return array<int, string> Every `sp_player` post id mapped to its OWN
+     *         `post_status` — see `loadTeamStatuses()`'s docblock for why
+     *         this is a status map, never a bare existence set.
      */
-    private function loadExistingPlayerIds(): array {
+    private function loadPlayerStatuses(): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
         $rows = $wpdb->get_results(
-            "SELECT ID AS id FROM {$p}posts WHERE post_type = 'sp_player'",
+            "SELECT ID AS id, post_status AS status FROM {$p}posts WHERE post_type = 'sp_player'",
             ARRAY_A
         );
 
-        $this->assertReadSucceeded( $rows, 'loadExistingPlayerIds', [] );
+        $this->assertReadSucceeded( $rows, 'loadPlayerStatuses', [] );
 
-        $set = [];
+        $statuses = [];
         foreach ( $rows as $row ) {
-            $set[ (int) $row['id'] ] = true;
+            $statuses[ (int) $row['id'] ] = (string) $row['status'];
         }
 
-        return $set;
+        return $statuses;
     }
 
     /**
@@ -538,6 +575,29 @@ class TitularesListImporter {
         }
 
         return null;
+    }
+
+    /**
+     * WordPress's own `post_status` values, translated for an operator who
+     * is not expected to know WordPress internals — used ONLY inside an
+     * error message (see `loadTeamStatuses()` / `loadPlayerStatuses()`'s own
+     * docblocks); the raw status is always printed alongside it too, so
+     * nothing is lost for whoever DOES want the literal value. A status not
+     * in this list (there are a few obscure ones, e.g. plugin-defined custom
+     * statuses) falls back to printing the raw value twice rather than
+     * guessing a translation.
+     */
+    private const STATUS_LABELS_ES = [
+        'draft'      => 'borrador',
+        'pending'    => 'pendiente',
+        'future'     => 'programado',
+        'private'    => 'privado',
+        'trash'      => 'papelera',
+        'auto-draft' => 'borrador automatico',
+    ];
+
+    private function statusLabel( string $status ): string {
+        return self::STATUS_LABELS_ES[ $status ] ?? $status;
     }
 
     /**

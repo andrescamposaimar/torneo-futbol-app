@@ -112,8 +112,8 @@ class TitularesListImporterTest extends TestCase {
         );
     }
 
-    private function seedTeam( int $id, string $title = 'Equipo' ): void {
-        $this->wpdb->insert( $this->wpdb->prefix . 'posts', [ 'ID' => $id, 'post_type' => 'sp_team', 'post_status' => 'publish', 'post_title' => $title ] );
+    private function seedTeam( int $id, string $title = 'Equipo', string $status = 'publish' ): void {
+        $this->wpdb->insert( $this->wpdb->prefix . 'posts', [ 'ID' => $id, 'post_type' => 'sp_team', 'post_status' => $status, 'post_title' => $title ] );
     }
 
     /** A season-registered, published sp_player. */
@@ -126,6 +126,13 @@ class TitularesListImporterTest extends TestCase {
     /** An sp_player post that exists but is NOT registered in any season. */
     private function seedUnregisteredPlayer( int $id, string $title = 'Jugador sin registrar' ): void {
         $this->wpdb->insert( $this->wpdb->prefix . 'posts', [ 'ID' => $id, 'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => $title ] );
+    }
+
+    /** An sp_player post that exists, IS registered in the season, but sits at a non-publish status (e.g. 'trash'). */
+    private function seedPlayerWithStatus( int $id, string $status, string $title = 'Jugador', int $seasonId = self::SEASON_ID ): void {
+        $p = $this->wpdb->prefix;
+        $this->wpdb->insert( $p . 'posts', [ 'ID' => $id, 'post_type' => 'sp_player', 'post_status' => $status, 'post_title' => $title ] );
+        $this->wpdb->insert( $p . 'term_relationships', [ 'object_id' => $id, 'term_taxonomy_id' => $seasonId ] );
     }
 
     private function countPlazas(): int {
@@ -253,6 +260,55 @@ class TitularesListImporterTest extends TestCase {
         $errors = implode( "\n", $plan->errors() );
         $this->assertStringContainsString( '900101', $errors );
         $this->assertStringContainsString( 'no esta registrado', $errors );
+    }
+
+    /**
+     * A player that IS registered in the season but sits in the trash is a
+     * different problem than "does not exist" — and must be reported as
+     * one: the operator's fix is to restore the post, not to hunt for a
+     * typo in an id that is already correct. See
+     * TitularesListImporter::loadPlayerStatuses()'s own class docblock.
+     */
+    public function test_a_trashed_player_is_a_hard_error_naming_its_status(): void {
+        $this->seedTeam( 9001 );
+        $rows = $this->elevenRows( 9001 );
+        foreach ( $rows as $row ) {
+            if ( 900101 === $row['titular_player_id'] ) {
+                $this->seedPlayerWithStatus( $row['titular_player_id'], 'trash' );
+                continue;
+            }
+            $this->seedPlayer( $row['titular_player_id'] );
+        }
+
+        $plan = $this->importer->planificar( $rows, [], self::SEASON_ID, self::FECHA_DESDE_ID );
+
+        $this->assertTrue( $plan->hasErrors() );
+        $errors = implode( "\n", $plan->errors() );
+        $this->assertStringContainsString( '900101', $errors );
+        $this->assertStringContainsString( 'trash', $errors );
+        $this->assertStringNotContainsString( 'no existe como sp_player', $errors, 'A trashed post is NOT the same problem as a nonexistent one.' );
+        $this->assertSame( [], $plan->rowsToOpen() );
+        $this->assertSame( 0, $this->countPlazas() );
+    }
+
+    /**
+     * Same distinction as the trashed-player case, for teams: a draft team
+     * is a real post that is simply not published yet, never a typo.
+     */
+    public function test_a_draft_team_is_a_hard_error_naming_its_status(): void {
+        $this->seedTeam( 9001, 'Equipo', 'draft' );
+        $rows = $this->elevenRows( 9001 );
+        $this->seedRosterFor( $rows );
+
+        $plan = $this->importer->planificar( $rows, [], self::SEASON_ID, self::FECHA_DESDE_ID );
+
+        $this->assertTrue( $plan->hasErrors() );
+        $errors = implode( "\n", $plan->errors() );
+        $this->assertStringContainsString( '9001', $errors );
+        $this->assertStringContainsString( 'draft', $errors );
+        $this->assertStringNotContainsString( 'no existe como sp_team', $errors, 'A draft post is NOT the same problem as a nonexistent one.' );
+        $this->assertSame( [], $plan->rowsToOpen() );
+        $this->assertSame( 0, $this->countPlazas() );
     }
 
     public function test_a_puntaje_outside_the_9_valid_values_is_a_hard_error(): void {

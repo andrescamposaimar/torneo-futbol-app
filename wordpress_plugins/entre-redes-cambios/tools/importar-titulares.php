@@ -80,6 +80,10 @@ COMPORTAMIENTO:
     un plantel a medias es peor que ninguno.
   - Un team_id o un titular_player_id que no existan en WordPress son errores
     que bloquean TODO el import, nunca se crea un equipo o un jugador nuevo.
+  - Un team_id/titular_player_id que SI existe pero esta en papelera, en
+    borrador, etc. es un error DISTINTO al anterior (y lo nombra asi): ahi el
+    arreglo es restaurar o publicar el post, no corregir un id que ya es
+    correcto.
   - Un equipo cuya cantidad de filas no sea exactamente 11 es una
     ADVERTENCIA, no un error — un plantel real a mitad de temporada puede
     legitimamente diferir.
