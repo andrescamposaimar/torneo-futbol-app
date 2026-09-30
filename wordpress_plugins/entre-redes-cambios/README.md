@@ -137,38 +137,34 @@ The following are real gaps this slice leaves open. None of them is implemented 
 3. **No correction primitive.** There is no way to undo or repair a wrongly-loaded plaza or ocupación — no "delete this link", no "reopen this plaza" — short of a direct SQL fix. This is acceptable ONLY because no UI exists yet to make the mistake in the first place; it becomes a blocker the moment slice 3 (or any admin screen) lets a human load real data.
 4. **No check that the tables are actually InnoDB.** Every invariant this slice defends inside a transaction (at most one vigent ocupación, atomic close-then-insert) silently depends on `ENGINE=InnoDB` actually taking effect. If a hosting provider's `dbDelta()` run substitutes a non-transactional engine (some managed MySQL configurations do this transparently), `START TRANSACTION` / `ROLLBACK` become no-ops and every invariant in this README degrades without any error ever being raised.
 
-## Importing plazas from the March 2026 election spreadsheet
+## Importing plazas from the official titulares list
 
 `cambios_plaza` is empty until this runs. Nothing else in this plugin opens a plaza on its own — no REST route, no admin screen, no cron ever calls `PlazaRepository::openPlaza()` / `::openPlazaWithinTransaction()` — so until the backfill happens, every captain's own plantel screen in the app is legitimately empty (`lib/screens/cambios/cambios_plantel_screen.dart` has its own explicit empty state for exactly this reason, not a bug).
 
-`tools/importar-eleccion.php` is the one-time bridge from the two sources that already have this data — the election spreadsheet (an `.xlsx`, read via PhpSpreadsheet) and WordPress itself — to this plugin's own tables. It replaces an earlier CSV-transcription importer that asked an operator to retype 330 rows by hand; see `Plazas\Eleccion\EleccionImporter`'s own class docblock for the full model.
+`tools/importar-titulares.php` reads a plain CSV of already-resolved ids and hands it to `Plazas\Alta\TitularesListImporter` — see that class's own docblock for the full model. It replaces `tools/importar-eleccion.php` and the whole `Plazas\Eleccion\` namespace (removed entirely, together with the `phpoffice/phpspreadsheet` dependency): parsing the March 2026 election `.xlsx` was the wrong design from the start. That spreadsheet was a one-off cross-reference the process owner used to settle who each team's official titulares are — never a data source this plugin should keep parsing on an ongoing basis. That cross-reference is finished; its OUTPUT is the plain CSV this importer reads, already resolved to WordPress ids, with no name matching left to do.
 
-`phpoffice/phpspreadsheet` lives in `require-dev`, not `require`: this script is the only thing that uses it (nothing under `src/` references `PhpOffice`), so it never needs to load on a live WordPress request. A production install (`composer install --no-dev`) will not have it; running the importer there fails fast with a message naming `composer install` as the fix, instead of a bare "class not found" fatal.
+### The CSV
 
-### The two sheets
+Four required columns, matched case-insensitively and in any order: `team_id` (the WordPress `sp_team` post id), `titular_player_id` (the WordPress `sp_player` post id), `puntaje_techo` (one of the 9 valid puntajes — see `Plazas\Puntaje`), and `es_capitan` (literally `1` or `0`). An `equipo` column may also be present — it is read ONLY to make error messages legible, never to resolve or cross-check anything; `team_id` is the sole identifier this import trusts. See `tools/examples/titulares-oficiales.ejemplo.csv` for the shape (invented ids — the real season-2026 list is operator data, never committed).
 
-- **`x Equipo`** (`Vuelta | Equipo | id | Nombre | Celular | mail | Fijo`) names, per team, 11 rows — `Vuelta` is `CAP` for the captain, then `1`..`10`. `id`, `Celular`, `mail` and `Fijo` are never read by this importer (no personal data is held in memory or written anywhere). The sheet interleaves repeated header rows between teams; `Plazas\Eleccion\EleccionSheetParser::parseEquipoSheet()` discards them and hard-errors any team whose block is not exactly 11 rows with exactly `CAP,1..10`.
-- **`Titulares eleccion con datos`** (`Orden | Apellido y Nombre | Posicion | Puntaje | ... | Equipo`) supplies each titular's election-time puntaje — the correct snapshot ceiling for their plaza — looked up by EXACT normalized name against the first sheet (verified against a 90-player `sp_metrics` sample with zero differences).
-
-A titular's name is resolved to a WordPress `sp_player` post id by `Plazas\Eleccion\NombreMatcher` — token-based (surname overlap + matching first given name), matched only against that SAME team's own WordPress roster this season (see `EleccionImporter::equipoRoster()`) — never a fuzzy match against the whole league, and never resolved automatically when more than one candidate qualifies (an ambiguous tie is always a hard error). A name matching nothing needs an entry in the operator-supplied override file (`Plazas\Eleccion\EleccionOverrides`, a small `nombre_excel,titular_player_id` CSV) — an unresolved titular with no override blocks the entire import, never just that one plaza.
+Neither a `team_id` nor a `titular_player_id` that does not resolve is ever created: both a team and a player already exist by the time this importer runs (a new player is registered by hand, at inscription, before the election this data comes from) — see `TitularesListImporter`'s own class docblock for why copying SportsPress's own player importer's "create if missing" behavior here would be worse than simply failing.
 
 ### How to run it
 
 ```bash
-php tools/importar-eleccion.php --excel=<archivo.xlsx> --fecha-desde-id=<id> [--season-id=<id>] [--overrides=<archivo.csv>] [--apply] [--apply-capitanes]
+php tools/importar-titulares.php --csv=<archivo.csv> --season-id=<id> --fecha-desde-id=<id> [--apply] [--apply-capitanes]
 ```
 
-Dry-run is the default: without `--apply` (plazas) or `--apply-capitanes` (captaincy), the command only validates and prints the plan — nothing is written. The two writes are independent — either can run without the other. `php tools/importar-eleccion.php --help` prints the full contract and needs neither WordPress nor a database connection.
+Dry-run is the default: without `--apply` (plazas) or `--apply-capitanes` (captaincy), the command only validates and prints the plan — nothing is written. The two writes are independent — either can run without the other. `php tools/importar-titulares.php --help` prints the full contract and needs neither WordPress nor a database connection.
 
 ### The safety properties, and why each exists
 
-- **The whole spreadsheet is validated before a single row is written.** `EleccionImporter::planificar()` performs only reads; `aplicarPlazas()` / `aplicarCapitanes()` both refuse outright when the plan has any error, and every plaza opened is written as ONE atomic transaction. A partially imported roster is worse than none: the captain screens would show some teams a plausible, wrong squad, and nobody would notice until a captain requested a change against a plaza that does not exist.
+- **The whole CSV is validated before a single row is written.** `TitularesListImporter::planificar()` performs only reads; `aplicarPlazas()` / `aplicarCapitanes()` both refuse outright when the plan has any error, and every plaza opened is written as ONE atomic transaction. A partially imported roster is worse than none: the captain screens would show some teams a plausible, wrong squad, and nobody would notice until a captain requested a change against a plaza that does not exist.
 - **It is idempotent on `(season_id, team_id, titular_player_id)`**, same key and same reasoning as the importer it replaces — retrying `--apply` after a successful import opens nothing new.
-- **A read-only reemplazo report** (`EleccionImporter::reportarReemplazos()`) surfaces, per team, where WordPress's own `reemplazo_baja`/`reemplazo_alta` flags already disagree with the official 11 titulares — informational only, and deliberately NOT a write: who currently occupies each plaza is a separate problem this importer does not solve.
 
 ### What this importer does not treat as an error
 
-A team whose "x Equipo" block does not have exactly 11 rows is a hard error naming the team (see `EleccionSheetParser`'s class docblock) — it can never form a complete titular set, so it is refused, not warned about and imported partially.
+A team whose row count is not exactly 11 is a WARNING, never an error — this importer is also meant to re-run mid-season, when a real squad can legitimately differ from exactly 11 rows (an injury replacement already resolved, a plaza not yet filled); refusing the whole load over that would defeat the backfill's own purpose.
 
 ## The dictamen engine (slice 3)
 

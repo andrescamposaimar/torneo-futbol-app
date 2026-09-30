@@ -8,7 +8,6 @@
         "firebase/php-jwt": "^7.0"
     },
     "require-dev": {
-        "phpoffice/phpspreadsheet": "^5.10",
         "phpunit/phpunit": "^10.5",
         "yoast/phpunit-polyfills": "^2.0"
     },
