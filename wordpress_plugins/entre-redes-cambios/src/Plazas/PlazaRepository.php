@@ -121,8 +121,8 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * apply an entire Friday lote of solicitudes as ONE atomic database
  * transaction — a nested `START TRANSACTION` per plaza change is not safe
  * across engines (see those methods' own docblocks). `openPlazaWithinTransaction()`
- * exists for the same reason, for `Plazas\PlazaImporter`: a roster backfill
- * opens many plazas across many teams from one CSV, and that whole batch
+ * exists for the same reason, for `Plazas\Eleccion\EleccionImporter`: a roster
+ * backfill opens many plazas across many teams from one import, and that whole batch
  * must be all-or-nothing — the same "half-applied is worse than none"
  * reasoning as the Friday lote. All three share every validation guard with
  * their normal counterparts via `prepareSucceedOcupacion()` /
@@ -201,7 +201,7 @@ class PlazaRepository {
 
     /**
      * Same operation as openPlaza(), but for a caller already running its own
-     * transaction spanning more than this one call — `Plazas\PlazaImporter`,
+     * transaction spanning more than this one call — `Plazas\Eleccion\EleccionImporter`,
      * which must open every plaza of a CSV backfill as ONE atomic batch. See
      * class docblock, "'WithinTransaction' VARIANTS", and
      * succeedOcupacionWithinTransaction()'s docblock for the full reasoning
