@@ -23,6 +23,10 @@ const marianistaTenant = TenantConfig(
     // re-enabling is a one-line change.
     prode: true,
     campeones: true,
+    // Slice 1a-3b of the credencial-virtual change land with this OFF —
+    // flipped only after the WordPress plugin is deployed and the slice 4
+    // manual verification checklist passes (see design "Rollout").
+    credencial: false,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
