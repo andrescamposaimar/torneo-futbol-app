@@ -14,11 +14,11 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Integration tests for CandidatosResolver against the in-memory SQLite
- * shim — real PlazaRepository, plus ad hoc `wp_posts` / `wp_term_relationships`
- * / `wp_term_taxonomy` / `wp_postmeta` tables (WordPress core tables this
+ * shim — real PlazaRepository, plus ad hoc `wp_term_relationships` /
+ * `wp_term_taxonomy` / `wp_postmeta` tables (WordPress core tables this
  * plugin's own test schema does not otherwise create — see
  * DictamenContextAssemblerTest for the same pattern applied to `wp_postmeta`
- * alone).
+ * alone) and `wp_posts` via wp-shim.php's wp_test_create_posts_table().
  */
 class CandidatosResolverTest extends TestCase {
 
@@ -42,13 +42,9 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
 
-        $wpdb->query(
-            "CREATE TABLE IF NOT EXISTS {$p}posts (
-                ID INTEGER PRIMARY KEY,
-                post_type TEXT,
-                post_status TEXT
-            )"
-        );
+        // Schema owned by wp-shim.php's wp_test_create_posts_table() — see
+        // its docblock for why.
+        wp_test_create_posts_table( $wpdb );
         $wpdb->query(
             "CREATE TABLE IF NOT EXISTS {$p}term_relationships (
                 object_id INTEGER,
@@ -70,7 +66,6 @@ class CandidatosResolverTest extends TestCase {
                 meta_value TEXT
             )"
         );
-        $wpdb->query( "DELETE FROM {$p}posts" );
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
         $wpdb->query( "DELETE FROM {$p}postmeta" );

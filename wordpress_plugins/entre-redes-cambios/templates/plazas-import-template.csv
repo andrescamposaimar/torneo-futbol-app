@@ -1,0 +1,34 @@
+equipo,titular,tipo,puntaje_techo
+# Plantilla para la carga inicial de plazas (cambios_plaza).
+#
+# COLUMNAS:
+#   equipo         El nombre EXACTO del equipo (tal como figura publicado
+#                  en el sitio) o su id de WordPress. Un nombre que no
+#                  coincide exactamente, o que coincide con mas de un
+#                  equipo, es un error.
+#   titular        El nombre EXACTO del jugador titular de esta plaza, o su
+#                  id de WordPress. El titular es el dueño permanente de la
+#                  plaza — no cambia aunque otro jugador la ocupe despues.
+#   tipo           'campo' o 'suplente'. 'suplente' es el BANCO (una de las
+#                  2 plazas de banco por equipo), NUNCA el jugador que
+#                  reemplaza a otro.
+#   puntaje_techo  Uno de: 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5 (coma o punto,
+#                  ambos se aceptan).
+#
+# Por reglamento, cada equipo necesita 11 filas: 9 de tipo 'campo' + 2 de
+# tipo 'suplente'. Un equipo con otro total genera una ADVERTENCIA al
+# validar (no bloquea la importacion): un plantel real puede legitimamente
+# tener menos o mas a mitad de temporada.
+#
+# La temporada y la fecha de inicio de TODAS las plazas NO van en este CSV
+# — se pasan una sola vez al ejecutar el comando:
+#   php tools/importar-plazas.php --csv=plazas-import-template.csv --fecha-desde-id=<id> [--season-id=<id>] [--apply]
+#
+# Las lineas que empiezan con '#' (como estas) se ignoran por completo, y
+# se puede agregar cualquier columna extra (por ejemplo 'notas') sin que
+# rompa nada.
+#
+# Ejemplo (equipo y titular por NOMBRE):
+# Boca Juniors,Juan Perez,campo,3
+# Ejemplo (equipo y titular por ID de WordPress):
+# 1234,5678,suplente,"2,5"
