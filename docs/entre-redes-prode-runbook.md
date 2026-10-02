@@ -119,7 +119,25 @@ Or using WP-CLI (preferred):
 
 ## 6. Build script
 
-[TODO — PR-11: document `scripts/build-prode-plugin.sh` — how to produce a deployable ZIP with vendored dependencies.]
+`wordpress_plugins/build-plugin.sh <plugin>` produces the deployable ZIP for
+any plugin in `wordpress_plugins/` (prode, campeones, credencial, cambios).
+
+Why it exists: the entre-redes-prode 0.7.0 package was once assembled by hand
+without running `composer install`, so it shipped without `vendor/`. WordPress
+activated it, the REST routes registered, and the healthcheck reported "ok" —
+while every login died on a missing `Firebase\JWT\JWT` class. A broken plugin
+reporting itself healthy. The script now refuses to produce a zip that would
+repeat that: it runs `composer install --no-dev`, checks that every vendor/
+path the plugin actually needs is present, runs a self-test that signs or
+verifies a real token (not just a class-exists check), and inspects the
+finished zip with `unzip -l` before trusting it.
+
+```bash
+./wordpress_plugins/build-plugin.sh entre-redes-prode            # build
+./wordpress_plugins/build-plugin.sh entre-redes-prode --with-dev  # + restore phpunit after
+```
+
+See §8 for the upgrade flow this feeds into.
 
 ---
 
@@ -145,7 +163,7 @@ To preserve data, deactivate the plugin without deleting it. All tables and data
 > and claimed WordPress would skip `uninstall.php`. That claim was wrong.
 > Use the replace flow below, which never invokes the uninstall hook.
 
-1. Build the ZIP: `./wordpress_plugins/build-prode.sh --with-dev`
+1. Build the ZIP: `./wordpress_plugins/build-plugin.sh entre-redes-prode --with-dev`
    (the script vendors production dependencies into the artifact and refuses to
    package a tree that would ship without them — see §6. `--with-dev` restores
    phpunit afterwards so the test suite still runs locally.)
@@ -166,7 +184,7 @@ To preserve data, deactivate the plugin without deleting it. All tables and data
    The reported `version` must match the ZIP you just uploaded. A stale version
    here means the replace did not take.
 
-**Bumping the version matters.** `build-prode.sh` reads `Version:` from
+**Bumping the version matters.** `build-plugin.sh` reads `Version:` from
 `entre-redes-prode.php`, and MigrationRunner gates schema updates on it. Shipping
 a changed plugin under an unchanged version number means the migration never runs.
 

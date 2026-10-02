@@ -27,6 +27,15 @@ curl https://your-site.com/wp-json/entre-redes/v1/prode/healthcheck
 # → {"status":"ok","plugin":"entre-redes-prode","version":"0.1.0","tenant_id":"marianista"}
 ```
 
+## Building the deployable zip
+
+Run `../build-plugin.sh entre-redes-prode` from `wordpress_plugins/`. It runs
+`composer install --no-dev`, verifies `vendor/firebase/php-jwt` and
+`vendor/ramsey/uuid` are present and actually sign/load (a 0.7.0 release once
+shipped without `vendor/` at all and still reported a healthy healthcheck —
+see `docs/entre-redes-prode-runbook.md` §6), and refuses to produce a zip that
+would repeat that.
+
 ## Table structure
 
 The plugin creates 10 custom tables prefixed with `{wp_prefix}prode_`:

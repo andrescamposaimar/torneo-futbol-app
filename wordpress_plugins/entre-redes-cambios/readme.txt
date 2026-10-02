@@ -20,9 +20,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 
 1. Install and activate the Entre Redes base plugin.
 2. Upload `entre-redes-cambios/` to the `wp-content/plugins/` directory.
-3. Run `composer install` inside the plugin directory (dev-only; no runtime dependencies).
+3. Run `composer install --no-dev` inside the plugin directory. This plugin ships one runtime dependency, `firebase/php-jwt`, used to verify the JWTs entre-redes-prode issues.
 4. Activate the plugin from the WordPress admin Plugins screen.
 5. Verify: `cambios_fecha`, `cambios_fecha_partido` and `cambios_settings` tables exist, and `cambios_settings` is seeded with default values.
+6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
 
