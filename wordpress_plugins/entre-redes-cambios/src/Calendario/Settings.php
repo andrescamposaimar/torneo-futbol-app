@@ -84,6 +84,24 @@ class Settings {
         return $this->readBool( 'prioridad_padres_activa', (string) InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'] );
     }
 
+    /**
+     * The operator-configured `sp_team` post id for THIS season's "lista de
+     * espera" pseudo-team, ONLY when explicitly set to a positive value —
+     * `null` otherwise (an absent row, or the seeded `'0'`, see
+     * Migrations\InitialSchema::SEED_DEFAULTS), which tells
+     * Plazas\ListaEsperaResolver to fall back to its own dynamic, slug-based
+     * lookup instead of trusting a `0` as a real post id. This accessor never
+     * performs that lookup itself — Settings stays a plain `cambios_settings`
+     * reader, same as every other getter in this class; see
+     * Plazas\ListaEsperaResolver's own docblock for the two-step resolution
+     * order (this override first, the dynamic lookup second).
+     */
+    public function listaEsperaTeamIdOverride(): ?int {
+        $value = $this->readInt( 'lista_espera_team_id', (int) InitialSchema::SEED_DEFAULTS['lista_espera_team_id'] );
+
+        return $value > 0 ? $value : null;
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------

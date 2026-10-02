@@ -209,6 +209,26 @@ class SettingsTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // listaEsperaTeamIdOverride()
+    // -------------------------------------------------------------------------
+
+    public function test_lista_espera_team_id_override_is_null_by_default(): void {
+        $this->assertNull( $this->settings->listaEsperaTeamIdOverride() );
+    }
+
+    public function test_lista_espera_team_id_override_is_null_when_the_row_is_zero(): void {
+        $this->putSetting( 'lista_espera_team_id', '0' );
+
+        $this->assertNull( $this->settings->listaEsperaTeamIdOverride() );
+    }
+
+    public function test_lista_espera_team_id_override_returns_the_row_value_when_positive(): void {
+        $this->putSetting( 'lista_espera_team_id', '14349' );
+
+        $this->assertSame( 14349, $this->settings->listaEsperaTeamIdOverride() );
+    }
+
+    // -------------------------------------------------------------------------
     // Drift protection: every getter's fallback vs InitialSchema::SEED_DEFAULTS
     // (mirrors entre-redes-prode's SettingsKeyConsistencyTest)
     // -------------------------------------------------------------------------
@@ -217,6 +237,10 @@ class SettingsTest extends TestCase {
         $this->assertSame( InitialSchema::SEED_DEFAULTS['timezone'], $this->settings->timezone() );
         $this->assertSame( (int) InitialSchema::SEED_DEFAULTS['season_id'], $this->settings->seasonId() );
         $this->assertSame( '1' === InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'], $this->settings->prioridadPadresActiva() );
+        $this->assertSame(
+            ( (int) InitialSchema::SEED_DEFAULTS['lista_espera_team_id'] ) > 0 ? (int) InitialSchema::SEED_DEFAULTS['lista_espera_team_id'] : null,
+            $this->settings->listaEsperaTeamIdOverride()
+        );
 
         $offsetGetters = [
             'plazo_apertura_solicitudes' => fn () => $this->settings->aperturaSolicitudesOffset(),

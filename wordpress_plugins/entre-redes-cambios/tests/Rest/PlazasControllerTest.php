@@ -9,8 +9,11 @@ use EntreRedes\Cambios\Capitania\CapitanAuthorizer;
 use EntreRedes\Cambios\Capitania\Exception\InvalidTokenException;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Plazas\CandidatoEstado;
 use EntreRedes\Cambios\Plazas\CandidatosResolver;
+use EntreRedes\Cambios\Plazas\CandidatosSeccion;
+use EntreRedes\Cambios\Plazas\ListaEsperaResolver;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Rest\PlazasController;
@@ -49,8 +52,8 @@ class PlazasControllerTest extends TestCase {
             ->method( 'listPlazasByEquipo' )
             ->with( self::SEASON_ID, self::TEAM_ID )
             ->willReturn( [
-                [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
-                [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => '2026-01-01 00:00:00' ],
+                [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6 ],
+                [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => '2026-01-01 00:00:00', 'puntaje_techo' => 10 ],
             ] );
 
         $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
@@ -96,6 +99,7 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 777, $plazas[0]['ocupante_player_id'] );
         $this->assertTrue( $plazas[0]['es_titular_el_ocupante'] );
         $this->assertFalse( $plazas[0]['cerrada'] );
+        $this->assertSame( 3.0, $plazas[0]['puntaje_techo'] );
         // meetsMinimo/countFechasUntilLiberacion: min(3) - resueltas(1) = 2 faltantes.
         $this->assertSame( 2, $plazas[0]['fechas_faltantes_liberacion'] );
 
@@ -123,8 +127,8 @@ class PlazasControllerTest extends TestCase {
 
             $plazaRepository = $this->createMock( PlazaRepository::class );
             $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-                [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
-                [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null ],
+                [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6 ],
+                [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null, 'puntaje_techo' => 6 ],
             ] );
             $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
                 [ 1, [
@@ -179,7 +183,7 @@ class PlazasControllerTest extends TestCase {
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-            [ 'id' => 9, 'titular_player_id' => 777, 'closed_at' => null ],
+            [ 'id' => 9, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6 ],
         ] );
         $plazaRepository->method( 'listOcupaciones' )->willReturn( [] );
 
@@ -214,8 +218,8 @@ class PlazasControllerTest extends TestCase {
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
-            [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null ],
+            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6 ],
+            [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null, 'puntaje_techo' => 6 ],
         ] );
         $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
             [ 1, [
@@ -279,7 +283,7 @@ class PlazasControllerTest extends TestCase {
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
         $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
-            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null ],
+            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6 ],
         ] );
         $plazaRepository->method( 'listOcupaciones' )->willReturn( [
             [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 888, 'es_genesis' => 0, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
@@ -763,6 +767,201 @@ class PlazasControllerTest extends TestCase {
         } finally {
             $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // listarCandidatos() — ?seccion=
+    // -------------------------------------------------------------------------
+
+    /**
+     * Omitting `?seccion` keeps the EXACT pre-existing behavior —
+     * `paraPlaza()`, never `paraSeccion()` — for any caller written before
+     * these two sections existed. Every other `listarCandidatos()` test
+     * above already proves this path; this test additionally proves
+     * `paraSeccion()` is never touched.
+     */
+    public function test_listar_candidatos_without_seccion_never_calls_para_seccion(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+        $candidatosResolver->expects( $this->never() )->method( 'paraSeccion' );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $this->assertSame( 200, $response->get_status() );
+    }
+
+    public function test_listar_candidatos_seccion_invalida_returns_400(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->expects( $this->never() )->method( 'authorize' );
+
+        $plazaRepository    = $this->createMock( PlazaRepository::class );
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'seccion' => 'no_existe' ] ) );
+
+        $this->assertSame( 400, $response->get_status() );
+        $this->assertSame( 'seccion_invalida', $response->get_data()['code'] );
+    }
+
+    /** @return ListaEsperaResolver&\PHPUnit\Framework\MockObject\MockObject */
+    private function listaEsperaResolverQueResuelve( int $teamId ): ListaEsperaResolver {
+        $listaEsperaResolver = $this->createMock( ListaEsperaResolver::class );
+        $listaEsperaResolver->method( 'resolve' )->with( self::SEASON_ID )->willReturn( $teamId );
+
+        return $listaEsperaResolver;
+    }
+
+    public function test_listar_candidatos_seccion_lista_espera_delegates_to_para_seccion_with_the_resolved_team_id(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plaza           = [ 'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6 ];
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( $plaza );
+
+        $fechaRepository     = $this->createMock( FechaRepository::class );
+        $listaEsperaResolver = $this->listaEsperaResolverQueResuelve( 14349 );
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )
+            ->method( 'paraSeccion' )
+            ->with( $plaza, CandidatosSeccion::LISTA_ESPERA, 14349, $this->isInstanceOf( BloqueoReemplazoPolicy::class ), $this->isType( 'callable' ) )
+            ->willReturn( [ new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ) ] );
+        $candidatosResolver->expects( $this->never() )->method( 'paraPlaza' );
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            $listaEsperaResolver
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'seccion' => CandidatosSeccion::LISTA_ESPERA ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame(
+            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ] ],
+            $response->get_data()['candidatos']
+        );
+    }
+
+    public function test_listar_candidatos_seccion_padron_completo_delegates_to_para_seccion(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plaza           = [ 'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6 ];
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( $plaza );
+
+        $fechaRepository     = $this->createMock( FechaRepository::class );
+        $listaEsperaResolver = $this->listaEsperaResolverQueResuelve( 14349 );
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )
+            ->method( 'paraSeccion' )
+            ->with( $plaza, CandidatosSeccion::PADRON_COMPLETO, 14349, $this->isInstanceOf( BloqueoReemplazoPolicy::class ), $this->isType( 'callable' ) )
+            ->willReturn( [] );
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            $listaEsperaResolver
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'seccion' => CandidatosSeccion::PADRON_COMPLETO ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame( [], $response->get_data()['candidatos'] );
+    }
+
+    /**
+     * THE loud-failure contract: when ListaEsperaResolver cannot resolve the
+     * team id, the WHOLE response fails (500, logged) — never a silent
+     * empty `candidatos: []`, which would read to a captain as "nobody
+     * signed up". See ListaEsperaResolver's own class docblock.
+     */
+    public function test_listar_candidatos_seccion_fails_loud_when_the_team_id_cannot_be_resolved(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository = $this->createMock( FechaRepository::class );
+
+        $listaEsperaResolver = $this->createMock( ListaEsperaResolver::class );
+        $listaEsperaResolver->method( 'resolve' )->willThrowException(
+            new \EntreRedes\Cambios\Plazas\Exception\ListaEsperaTeamUnresolvableException( 'test' )
+        );
+
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->never() )->method( 'paraSeccion' );
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            $listaEsperaResolver
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'seccion' => CandidatosSeccion::LISTA_ESPERA ] ) );
+
+        $this->assertSame( 500, $response->get_status() );
+        $this->assertSame( 'error_interno', $response->get_data()['code'] );
+        $this->assertTrue( $this->eventLog->has( 'rest.plazas_candidatos_fallida' ) );
+    }
+
+    /**
+     * A controller constructed WITHOUT a ListaEsperaResolver (the
+     * nullable-for-backward-compatibility default) must still fail loud, not
+     * silently, when a seccion IS requested against it — see the
+     * constructor's own docblock.
+     */
+    public function test_listar_candidatos_seccion_without_a_wired_resolver_fails_loud(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'seccion' => CandidatosSeccion::LISTA_ESPERA ] ) );
+
+        $this->assertSame( 500, $response->get_status() );
     }
 
     // -------------------------------------------------------------------------

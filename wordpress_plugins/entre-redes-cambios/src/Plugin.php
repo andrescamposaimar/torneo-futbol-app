@@ -106,6 +106,7 @@ final class Plugin {
             );
 
             $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository, $eventLog );
+            $listaEsperaResolver = new Plazas\ListaEsperaResolver( $wpdb, $settings, $eventLog );
 
             $plazasController = new Rest\PlazasController(
                 $capitanAuthorizer,
@@ -113,7 +114,9 @@ final class Plugin {
                 $fechaRepository,
                 $eventLog,
                 $candidatosResolver,
-                $bloqueoReemplazoPolicy
+                $bloqueoReemplazoPolicy,
+                null,
+                $listaEsperaResolver
             );
 
             $capitanController = new Rest\CapitanController(

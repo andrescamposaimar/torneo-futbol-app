@@ -35,14 +35,36 @@ CambiosApiService _baseFakeService() {
   );
 }
 
+/// A hand-written stub `StateNotifier` subclass — same convention as every
+/// other Cambios controller stub in this app (no mocking package). Tracks
+/// [loadCalls] so a test can assert a section's controller was NEVER asked
+/// to fetch (the lazy `padronCompleto` section, until the captain opens it).
 class _StubCandidatosController extends CambiosCandidatosController {
-  _StubCandidatosController(CambiosCandidatosState initialState)
-      : super(_baseFakeService(), seasonId: 7, teamId: 1, plazaId: 10) {
+  int loadCalls = 0;
+  final CambiosCandidatosState Function()? onLoad;
+
+  _StubCandidatosController(
+    CambiosCandidatosState initialState, {
+    CambiosCandidatosSeccion seccion = CambiosCandidatosSeccion.listaEspera,
+    this.onLoad,
+  }) : super(
+          _baseFakeService(),
+          seasonId: 7,
+          teamId: 1,
+          plazaId: 10,
+          seccion: seccion,
+          autoLoad: false,
+        ) {
     state = initialState;
   }
 
   @override
-  Future<void> load({String query = ''}) async {}
+  Future<void> load({String query = ''}) async {
+    loadCalls++;
+    if (onLoad != null) {
+      state = onLoad!();
+    }
+  }
 }
 
 class _StubPlantelController extends CambiosPlantelController {
@@ -115,11 +137,20 @@ final _plaza = CambiosPlaza(
   ocupanteNombre: 'Pedro Gómez',
   esTitularElOcupante: false,
   cerrada: false,
+  puntajeTecho: 3.0,
   fechasFaltantesLiberacion: 0,
   fechasFaltantesLiberacionIndeterminado: false,
 );
 
-CambiosCandidatosParams get _params => (seasonId: 7, teamId: 1, plazaId: 10);
+CambiosCandidatosParams _paramsFor(CambiosCandidatosSeccion seccion) => (
+      seasonId: 7,
+      teamId: 1,
+      plazaId: 10,
+      seccion: seccion,
+    );
+final _paramsListaEspera = _paramsFor(CambiosCandidatosSeccion.listaEspera);
+final _paramsPadronCompleto = _paramsFor(CambiosCandidatosSeccion.padronCompleto);
+
 CambiosTeamScope get _scope => (seasonId: 7, teamId: 1);
 
 /// An open fecha with both windows open by default — the common case for
@@ -138,10 +169,24 @@ CambiosFechaAbierta _fechaAbierta({
       sustitucionAbierta: sustitucionAbierta,
     );
 
+const _defaultFecha = CambiosFechaAbierta(
+  fechaId: 42,
+  numeroEnTorneo: 3,
+  torneo: 'Apertura',
+  playDate: '2026-01-10',
+  regresoAbierta: true,
+  sustitucionAbierta: true,
+);
+
+/// [listaEsperaState] backs the eagerly-loaded section (the screen's default
+/// view); [padronCompletoController], if given, backs the LAZY section — a
+/// test only needs to pass it when it actually switches to "Padrón
+/// Completo".
 Future<void> _pumpScreen(
   WidgetTester tester, {
   required CambiosSolicitudTipo tipo,
-  CambiosCandidatosState candidatosState = const CambiosCandidatosLoaded(candidatos: [], query: ''),
+  CambiosCandidatosState listaEsperaState = const CambiosCandidatosLoaded(candidatos: [], query: ''),
+  _StubCandidatosController? padronCompletoController,
   CambiosApiService? apiService,
   _StubPlantelController? plantelController,
   // Defaults to an open fecha with both windows open — pass `null` to
@@ -151,8 +196,20 @@ Future<void> _pumpScreen(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        cambiosCandidatosControllerProvider(_params)
-            .overrideWith((ref) => _StubCandidatosController(candidatosState)),
+        cambiosCandidatosControllerProvider(_paramsListaEspera).overrideWith(
+          (ref) => _StubCandidatosController(
+            listaEsperaState,
+            seccion: CambiosCandidatosSeccion.listaEspera,
+          ),
+        ),
+        cambiosCandidatosControllerProvider(_paramsPadronCompleto).overrideWith(
+          (ref) =>
+              padronCompletoController ??
+              _StubCandidatosController(
+                const CambiosCandidatosIdle(),
+                seccion: CambiosCandidatosSeccion.padronCompleto,
+              ),
+        ),
         cambiosPlantelControllerProvider(_scope)
             .overrideWith((ref) => plantelController ?? _StubPlantelController()),
         cambiosFechaAbiertaProvider(_scope.seasonId).overrideWith((ref) => Future.value(fecha)),
@@ -174,22 +231,13 @@ Future<void> _pumpScreen(
   await tester.pump();
 }
 
-const _defaultFecha = CambiosFechaAbierta(
-  fechaId: 42,
-  numeroEnTorneo: 3,
-  torneo: 'Apertura',
-  playDate: '2026-01-10',
-  regresoAbierta: true,
-  sustitucionAbierta: true,
-);
-
 void main() {
   group('CambiosSolicitarScreen — sustitucion', () {
     testWidgets('candidatos loading -> shows a spinner', (tester) async {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosLoading(),
+        listaEsperaState: const CambiosCandidatosLoading(),
       );
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
@@ -198,7 +246,7 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosError(),
+        listaEsperaState: const CambiosCandidatosError(),
       );
       expect(find.text('Reintentar'), findsOneWidget);
     });
@@ -207,7 +255,7 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosLoaded(candidatos: [], query: ''),
+        listaEsperaState: const CambiosCandidatosLoaded(candidatos: [], query: ''),
       );
       expect(find.text('No encontramos candidatos disponibles para esta plaza.'), findsOneWidget);
     });
@@ -217,9 +265,9 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosLoaded(
+        listaEsperaState: const CambiosCandidatosLoaded(
           candidatos: [
-            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
           ],
           query: '',
         ),
@@ -245,9 +293,9 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosLoaded(
+        listaEsperaState: const CambiosCandidatosLoaded(
           candidatos: [
-            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
           ],
           query: '',
         ),
@@ -279,11 +327,18 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            cambiosCandidatosControllerProvider(_params)
-                .overrideWith((ref) => _StubCandidatosController(const CambiosCandidatosLoaded(
-                      candidatos: [],
-                      query: '',
-                    ))),
+            cambiosCandidatosControllerProvider(_paramsListaEspera).overrideWith(
+              (ref) => _StubCandidatosController(const CambiosCandidatosLoaded(
+                candidatos: [],
+                query: '',
+              )),
+            ),
+            cambiosCandidatosControllerProvider(_paramsPadronCompleto).overrideWith(
+              (ref) => _StubCandidatosController(
+                const CambiosCandidatosIdle(),
+                seccion: CambiosCandidatosSeccion.padronCompleto,
+              ),
+            ),
             cambiosPlantelControllerProvider(_scope).overrideWith((ref) => _StubPlantelController()),
             cambiosFechaAbiertaProvider(_scope.seasonId).overrideWith((ref) => completer.future),
           ],
@@ -319,9 +374,9 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosLoaded(
+        listaEsperaState: const CambiosCandidatosLoaded(
           candidatos: [
-            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
           ],
           query: '',
         ),
@@ -348,14 +403,20 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            cambiosCandidatosControllerProvider(_params).overrideWith(
+            cambiosCandidatosControllerProvider(_paramsListaEspera).overrideWith(
               (ref) => _StubCandidatosController(const CambiosCandidatosLoaded(
                 candidatos: [
                   CambiosCandidato(
-                      playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+                      playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
                 ],
                 query: '',
               )),
+            ),
+            cambiosCandidatosControllerProvider(_paramsPadronCompleto).overrideWith(
+              (ref) => _StubCandidatosController(
+                const CambiosCandidatosIdle(),
+                seccion: CambiosCandidatosSeccion.padronCompleto,
+              ),
             ),
             cambiosPlantelControllerProvider(_scope).overrideWith((ref) => plantel),
             cambiosFechaAbiertaProvider(_scope.seasonId)
@@ -399,9 +460,9 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.sustitucion,
-        candidatosState: const CambiosCandidatosLoaded(
+        listaEsperaState: const CambiosCandidatosLoaded(
           candidatos: [
-            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 3.5, viable: true),
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
           ],
           query: '',
         ),
@@ -416,6 +477,177 @@ void main() {
       expect(find.text('No se pudo enviar el pedido. Probá de nuevo en unos minutos.'),
           findsOneWidget);
       expect(find.byType(CambiosSolicitarScreen), findsOneWidget);
+    });
+  });
+
+  group('CambiosSolicitarScreen — las dos secciones de candidatos', () {
+    testWidgets('both sections render — Lista de Espera by default, Padrón Completo after toggling',
+        (tester) async {
+      final padronController = _StubCandidatosController(
+        const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 900, nombre: 'Nico del Padrón', esPadre: false, puntaje: 2.5, viable: true),
+          ],
+          query: '',
+        ),
+        seccion: CambiosCandidatosSeccion.padronCompleto,
+      );
+
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        listaEsperaState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
+          ],
+          query: '',
+        ),
+        padronCompletoController: padronController,
+      );
+
+      // Default view: Lista de Espera.
+      expect(find.byKey(const Key('candidato_200')), findsOneWidget);
+      expect(find.byKey(const Key('candidato_900')), findsNothing);
+
+      await tester.tap(find.text('Padrón Completo'));
+      await tester.pump();
+
+      expect(find.byKey(const Key('candidato_200')), findsNothing);
+      expect(find.byKey(const Key('candidato_900')), findsOneWidget);
+    });
+
+    testWidgets('Padrón Completo issues no request until the captain opens it', (tester) async {
+      final padronController = _StubCandidatosController(
+        const CambiosCandidatosIdle(),
+        seccion: CambiosCandidatosSeccion.padronCompleto,
+        onLoad: () => const CambiosCandidatosLoaded(candidatos: [], query: ''),
+      );
+
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        padronCompletoController: padronController,
+      );
+
+      // The common case: opening the step only ever touched Lista de
+      // Espera's own controller — Padrón Completo's was never asked to load.
+      expect(padronController.loadCalls, 0);
+
+      await tester.tap(find.text('Padrón Completo'));
+      await tester.pump();
+
+      expect(padronController.loadCalls, 1);
+
+      // Switching back and forth again must not re-fetch.
+      await tester.tap(find.text('Lista de Espera'));
+      await tester.pump();
+      await tester.tap(find.text('Padrón Completo'));
+      await tester.pump();
+
+      expect(padronController.loadCalls, 1);
+    });
+
+    testWidgets('selecting a candidate from Padrón Completo submits the same way as Lista de Espera',
+        (tester) async {
+      final fakeService = _FakeSubmitService();
+      final padronController = _StubCandidatosController(
+        const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 900, nombre: 'Nico del Padrón', esPadre: false, puntaje: 2.5, viable: true),
+          ],
+          query: '',
+        ),
+        seccion: CambiosCandidatosSeccion.padronCompleto,
+      );
+      final plantel = _StubPlantelController();
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            cambiosCandidatosControllerProvider(_paramsListaEspera)
+                .overrideWith((ref) => _StubCandidatosController(const CambiosCandidatosLoaded(
+                      candidatos: [],
+                      query: '',
+                    ))),
+            cambiosCandidatosControllerProvider(_paramsPadronCompleto)
+                .overrideWith((ref) => padronController),
+            cambiosPlantelControllerProvider(_scope).overrideWith((ref) => plantel),
+            cambiosFechaAbiertaProvider(_scope.seasonId)
+                .overrideWith((ref) => Future.value(_fechaAbierta(fechaId: 42))),
+            cambiosApiServiceProvider.overrideWithValue(fakeService),
+          ],
+          child: MaterialApp(
+            home: Navigator(
+              onGenerateRoute: (settings) => MaterialPageRoute(
+                builder: (_) => CambiosSolicitarScreen(
+                  seasonId: 7,
+                  teamId: 1,
+                  plaza: _plaza,
+                  tipo: CambiosSolicitudTipo.sustitucion,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Padrón Completo'));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('candidato_900')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('confirmar_solicitud_button')));
+      await tester.pumpAndSettle();
+
+      expect(fakeService.lastCall!['entrantePlayerId'], 900);
+      expect(plantel.refreshCalls, 1);
+    });
+  });
+
+  group('CambiosSolicitarScreen — filtro por puntaje (techo de la plaza)', () {
+    testWidgets('every puntaje is shown, and chips above the ceiling are present but disabled',
+        (tester) async {
+      // _plaza's own puntajeTecho is 3.0 — 3.5/4/4.5/5 exceed it.
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        listaEsperaState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
+            CambiosCandidato(playerId: 201, nombre: 'Marcos Díaz', esPadre: false, puntaje: 3.0, viable: true),
+          ],
+          query: '',
+        ),
+      );
+
+      // Every one of the 9 valid puntajes is rendered, enabled or not.
+      for (final valor in const <double>[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1]) {
+        expect(find.byKey(Key('puntaje_chip_$valor')), findsOneWidget,
+            reason: 'puntaje $valor should always render, disabled or not');
+      }
+
+      // Tapping a DISABLED chip (above techo 3.0) does nothing: both
+      // candidates stay visible, neither gets filtered out as if the chip
+      // had actually applied.
+      await tester.tap(find.byKey(const Key('puntaje_chip_5.0')));
+      await tester.pump();
+      expect(find.byKey(const Key('candidato_200')), findsOneWidget);
+      expect(find.byKey(const Key('candidato_201')), findsOneWidget);
+
+      // Tapping an ENABLED chip (within techo) DOES filter the list.
+      await tester.tap(find.byKey(const Key('puntaje_chip_2.5')));
+      await tester.pump();
+      expect(find.byKey(const Key('candidato_200')), findsOneWidget);
+      expect(find.byKey(const Key('candidato_201')), findsNothing);
+    });
+
+    testWidgets('the plaza ceiling is displayed as text', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
+
+      // _plaza's own puntajeTecho is 3.0 (see this file's top-level fixture).
+      expect(find.text('Techo de esta plaza: 3 pts.'), findsOneWidget);
     });
   });
 
