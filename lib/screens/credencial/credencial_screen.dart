@@ -46,7 +46,9 @@ class _CredencialScreenState extends ConsumerState<CredencialScreen> {
     final notifier = ref.read(credencialControllerProvider.notifier);
 
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      // No `backgroundColor` override: `buildAppTheme` already sets
+      // `scaffoldBackgroundColor` from the tenant's own colors (design D-UI:
+      // "Background scaffoldBackgroundColor" — colors only from the theme).
       appBar: const EntreRedesAppBar(title: 'Mi Credencial'),
       // No blanket padding here — [CredencialCard] already carries its own
       // internal inset, and each branch below applies exactly one layer of
@@ -67,10 +69,10 @@ class _CredencialScreenState extends ConsumerState<CredencialScreen> {
   ) {
     return switch (state) {
       CredencialLoading() => const Center(child: CircularProgressIndicator()),
-      CredencialNotSignedIn() => _Message(
+      CredencialNotSignedIn() => const _Message(
           icon: Icons.lock_outline,
-          text: 'Tu sesión se cerró. Volvé a ingresar para ver tu '
-              'credencial.',
+          title: 'Sesión cerrada',
+          body: 'Volvé a ingresar para ver tu credencial.',
         ),
       CredencialActive(
         :final credential,
@@ -84,91 +86,117 @@ class _CredencialScreenState extends ConsumerState<CredencialScreen> {
         // which previously left a first-frame window where the valid-styled
         // card rendered with a silhouette placeholder (verify-report 1575,
         // slice 3b, NEW WARNING 1).
-        SingleChildScrollView(
-          // No padding here: [CredencialCard] already carries its own
-          // internal 16px inset (a `Card` + `Padding(16)`), matching exactly
-          // the layout budget validated by CredencialCard's own narrow-
-          // viewport test. Stacking a second 16px layer here previously ate
-          // 32px more width per side than that test covered, causing a real
-          // (non-flaky) RenderFlex overflow on a 375pt-wide phone at 1.3x
-          // text scale that only a screen-level widget test at that exact
-          // size caught.
-          child: CredencialCard(
-            credential: credential,
-            replacement: replacement,
-            stale: stale,
-            photoBytes: photoBytes,
-          ),
+        //
+        // No wrapping Padding/SingleChildScrollView here: [CredencialCard]
+        // owns its own SafeArea, scrolling and single 16px inset (design
+        // D-UI) — stacking a second layer here previously ate more width
+        // per side than CredencialCard's own narrow-viewport test covered,
+        // causing a real (non-flaky) RenderFlex overflow on a 375pt-wide
+        // phone at 1.3x text scale that only a screen-level widget test at
+        // that exact size caught.
+        CredencialCard(
+          credential: credential,
+          replacement: replacement,
+          stale: stale,
+          photoBytes: photoBytes,
         ),
       CredencialNoPhoto() => const _Message(
           icon: Icons.badge_outlined,
-          text: 'Todavía no tenés una foto aprobada para tu credencial.',
+          title: 'Sin foto aprobada',
+          body: 'Todavía no tenés una foto aprobada para tu credencial.',
         ),
       CredencialPendingPhoto() => const _Message(
           icon: Icons.hourglass_top,
-          text: 'Tu foto está en revisión.',
+          title: 'Foto en revisión',
+          body: 'Tu foto está en revisión.',
         ),
       CredencialRejectedPhoto() => const _Message(
           icon: Icons.error_outline,
-          text: 'Tu foto nueva fue rechazada. La comisión se pondrá en '
+          title: 'Foto rechazada',
+          body: 'Tu foto nueva fue rechazada. La comisión se pondrá en '
               'contacto.',
         ),
       CredencialBlocked() => const _Message(
           icon: Icons.block,
-          text: 'Tu credencial no está disponible.',
+          title: 'Credencial no disponible',
+          body: 'Tu credencial no está disponible.',
         ),
       CredencialNotAPlayer() => const _Message(
           icon: Icons.info_outline,
-          text: 'No encontramos un jugador asociado a tu cuenta.',
+          title: 'Sin jugador asociado',
+          body: 'No encontramos un jugador asociado a tu cuenta.',
         ),
       CredencialExpired() => _Message(
-          icon: Icons.wifi_off,
-          text: 'Tu credencial venció. Conectate a internet para renovarla.',
+          icon: Icons.event_busy,
+          title: 'Credencial vencida',
+          body: 'Conectate a internet para renovarla.',
           onRetry: notifier.open,
         ),
       CredencialOfflineNoCache() => _Message(
           icon: Icons.wifi_off,
-          text: 'Sin conexión. Conectate a internet para ver tu credencial.',
+          title: 'Sin conexión',
+          body: 'Conectate a internet para ver tu credencial.',
           onRetry: notifier.open,
         ),
       CredencialPhotoUnavailable() => _Message(
-          icon: Icons.wifi_off,
-          text: 'No pudimos descargar tu foto. Conectate a internet y volvé '
-              'a intentar.',
+          icon: Icons.image_not_supported_outlined,
+          title: 'No pudimos descargar tu foto',
+          body: 'Conectate a internet y volvé a intentar.',
           onRetry: notifier.open,
         ),
       CredencialError(:final message) => _Message(
           icon: Icons.error_outline,
-          text: message,
+          title: 'Algo salió mal',
+          body: message,
           onRetry: notifier.open,
         ),
     };
   }
 }
 
-/// Shared layout for every non-Active/non-Loading state: an icon, short
-/// Spanish copy and an optional retry action.
+/// Shared layout for every non-Active/non-Loading state (design D-UI): a 72pt
+/// icon in a tinted circle, a title, a short body and an optional retry
+/// action — one visual language across all 10 message states instead of
+/// each screen inventing its own.
 class _Message extends StatelessWidget {
   final IconData icon;
-  final String text;
+  final String title;
+  final String body;
   final VoidCallback? onRetry;
 
-  const _Message({required this.icon, required this.text, this.onRetry});
+  const _Message({
+    required this.icon,
+    required this.title,
+    required this.body,
+    this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 48, color: Colors.grey.shade500),
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 36, color: primary),
+            ),
             const SizedBox(height: 16),
-            Text(text, textAlign: TextAlign.center),
+            Text(title, style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(body, style: theme.textTheme.bodyMedium, textAlign: TextAlign.center),
             if (onRetry != null) ...[
               const SizedBox(height: 16),
-              ElevatedButton(
+              FilledButton(
                   onPressed: onRetry, child: const Text('Reintentar')),
             ],
           ],
