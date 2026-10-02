@@ -30,6 +30,28 @@ import 'cambios_solicitudes_screen.dart';
 /// from [cambiosEquipoRosterProvider] (one request, covers every titular)
 /// plus [cambiosJugadorPorIdProvider] per id that call misses (an occupant
 /// from another team or the reserve pool) — see those providers' docblocks.
+///
+/// *** WHY THE PER-ID FALLBACK GATES ON `rosterAsync.hasValue` ***
+/// The fallback must fire only once the roster's outcome is actually known.
+/// Branching on `.valueOrNull` instead — as a previous version of this
+/// screen did — collapses "still loading" and "fetch failed" into the same
+/// `null` as "not on this team's roster", so the fallback fires for every
+/// titular/occupant the instant the screen opens, before the one roster
+/// request (which would have covered all of them) even has a chance to
+/// land. `.hasValue` is `true` only after [cambiosEquipoRosterProvider]
+/// resolves successfully, so: while loading, nothing is requested per id;
+/// if the roster fetch fails, nothing is requested per id either (see
+/// below); once it resolves, only the ids it genuinely misses get their own
+/// request.
+///
+/// A roster FETCH ERROR deliberately does NOT fall back to one request per
+/// needed id — we would not know which ids the roster would have covered,
+/// so that would retry the same already-failing backend call up to 22
+/// times instead of once. The fallback's real job is "this specific id is
+/// a genuine miss on an otherwise successful roster", not "recover from an
+/// outage"; every card just keeps its placeholder look (see
+/// [CambiosPlantelView.jugadoresById]'s docblock), and the existing
+/// `RefreshIndicator` lets the captain retry the whole load.
 class CambiosPlantelScreen extends ConsumerWidget {
   final int seasonId;
   final int teamId;
@@ -48,19 +70,28 @@ class CambiosPlantelScreen extends ConsumerWidget {
 
     final jugadoresById = <int, Jugador>{};
     if (state is CambiosPlantelLoaded) {
-      final roster = ref.watch(cambiosEquipoRosterProvider(teamId)).valueOrNull;
-      if (roster != null) jugadoresById.addAll(roster);
+      final rosterAsync = ref.watch(cambiosEquipoRosterProvider(teamId));
 
-      final neededIds = <int>{};
-      for (final plaza in state.plazas) {
-        neededIds.add(plaza.titularPlayerId);
-        final ocupanteId = plaza.ocupantePlayerId;
-        if (ocupanteId != null) neededIds.add(ocupanteId);
-      }
-      for (final id in neededIds) {
-        if (jugadoresById.containsKey(id)) continue;
-        final fallback = ref.watch(cambiosJugadorPorIdProvider(id)).valueOrNull;
-        if (fallback != null) jugadoresById[id] = fallback;
+      // `hasValue` — not `valueOrNull` — is the gate: see this class's own
+      // docblock, "WHY THE PER-ID FALLBACK GATES ON `rosterAsync.hasValue`".
+      // While loading, or on a roster fetch error, this whole block is
+      // skipped: no per-id request fires for ANY id, and every card falls
+      // back to its placeholder look until the roster resolves (or the
+      // captain retries via `RefreshIndicator`).
+      if (rosterAsync.hasValue) {
+        jugadoresById.addAll(rosterAsync.value!);
+
+        final neededIds = <int>{};
+        for (final plaza in state.plazas) {
+          neededIds.add(plaza.titularPlayerId);
+          final ocupanteId = plaza.ocupantePlayerId;
+          if (ocupanteId != null) neededIds.add(ocupanteId);
+        }
+        for (final id in neededIds) {
+          if (jugadoresById.containsKey(id)) continue;
+          final fallback = ref.watch(cambiosJugadorPorIdProvider(id)).valueOrNull;
+          if (fallback != null) jugadoresById[id] = fallback;
+        }
       }
     }
 
