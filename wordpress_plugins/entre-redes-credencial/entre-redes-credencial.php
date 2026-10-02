@@ -3,7 +3,7 @@
  * Plugin Name:       Entre Redes — Credencial Virtual
  * Plugin URI:        https://entreredespadres.com.ar
  * Description:       Virtual player credential (photo, rotating liveness code, offline cache) for the Entre Redes football league. Requires the Entre Redes main plugin and entre-redes-prode for session auth.
- * Version:           0.2.0
+ * Version:           0.2.1
  * Requires at least: 6.2
  * Requires PHP:      8.2
  * Author:            Entre Redes
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'ENTRE_REDES_CREDENCIAL_VERSION', '0.2.0' );
+define( 'ENTRE_REDES_CREDENCIAL_VERSION', '0.2.1' );
 define( 'ENTRE_REDES_CREDENCIAL_FILE', __FILE__ );
 define( 'ENTRE_REDES_CREDENCIAL_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ENTRE_REDES_CREDENCIAL_URL', plugin_dir_url( __FILE__ ) );

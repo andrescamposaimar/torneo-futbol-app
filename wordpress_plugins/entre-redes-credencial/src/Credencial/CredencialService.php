@@ -52,19 +52,20 @@ use EntreRedes\Credencial\Player\TeamResolver;
  *     reported; the card shows the currently published photo" — the same
  *     "only the newest decision matters" principle governs `photo_request`).
  *
- * The photo rendition size ('medium') is decided (design D5c, rev 9): the
- * card draws the photo at 72 logical px, and 'medium' is the same rendition
- * the player detail screen already loads (host-cached, proven to download).
- * Centralized in one constant so revisiting it later is still a one-line
- * change.
+ * The photo rendition size (design D5c) is 'large': WordPress caps a 'large'
+ * rendition at 1024px on the longest edge and returns the original URL when
+ * the original is smaller, so the photo is never upscaled server-side. The
+ * card renders the photo as its dominant element (design D-UI), so a lower
+ * rendition is visibly soft. Centralized in one constant so revisiting it
+ * later is still a one-line change.
  */
 final class CredencialService {
 
     /** Design D5: "Reissue on every GET with expires_at = now+365d." */
     private const CREDENTIAL_TTL_SECONDS = 365 * 24 * 60 * 60;
 
-    /** Design D5c: the same rendition the player detail screen already loads. */
-    private const PHOTO_SIZE = 'medium';
+    /** Design D5c: 'large' (<=1024px, original when smaller — never upscaled). */
+    private const PHOTO_SIZE = 'large';
 
     public function __construct(
         private readonly PlayerReader $playerReader,
