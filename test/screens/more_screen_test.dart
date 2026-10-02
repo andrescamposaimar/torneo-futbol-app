@@ -36,13 +36,13 @@ import 'package:torneo_futbol_app/widgets/prode_identity_card.dart';
 
 class _FakePhotoStore implements CredencialPhotoStore {
   @override
-  Future<Uint8List?> readVerified(String sha256Hex) async => null;
+  Future<Uint8List?> read(int photoId) async => null;
 
   @override
-  Future<void> write(Uint8List bytes, String sha256Hex) async {}
+  Future<void> write(Uint8List bytes, int photoId) async {}
 
   @override
-  Future<void> deleteAllExcept(String? keepSha256Hex) async {}
+  Future<void> deleteAllExcept(int? keepPhotoId) async {}
 
   @override
   Future<void> wipe() async {}

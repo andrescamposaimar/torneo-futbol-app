@@ -22,8 +22,7 @@ Credencial _credencial({
     birthDate: birthDate,
     caracter: caracter,
     team: team,
-    photo:
-        const CredencialPhoto(url: 'https://example.com/p.jpg', sha256: 'abc'),
+    photo: const CredencialPhoto(id: 1, url: 'https://example.com/p.jpg'),
     codeSeed: 'c2VlZA',
     code: const CredencialCode(alg: 'SHA256', step: 30, digits: 6),
   );
