@@ -890,8 +890,18 @@ if ( ! function_exists( 'get_the_post_thumbnail_url' ) ) {
     // has_post_thumbnail() below so a test only ever has to set one array to
     // control both "does this player have an approved photo" and "what is
     // its URL".
+    //
+    // PR C addition (design D5c rev 10): also records the requested `$size`
+    // into $wp_test_post_thumbnail_requested_sizes, keyed by post id,
+    // mirroring real WordPress's `($post, $size = 'post-thumbnail')`
+    // signature. This lets a test assert WHICH rendition CredencialService
+    // actually asked for (e.g. 'large') without the shim caring what that
+    // rendition is — the returned URL is still controlled entirely by
+    // $wp_test_post_thumbnail_urls, same as before.
     function get_the_post_thumbnail_url( int|string $post = 0, mixed $size = 'post-thumbnail' ): string|false {
-        global $wp_test_post_thumbnail_urls;
+        global $wp_test_post_thumbnail_urls, $wp_test_post_thumbnail_requested_sizes;
+
+        $wp_test_post_thumbnail_requested_sizes[ (int) $post ] = $size;
 
         return $wp_test_post_thumbnail_urls[ (int) $post ] ?? false;
     }

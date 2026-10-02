@@ -53,10 +53,11 @@ class CredencialServiceTest extends TestCase {
     }
 
     protected function tearDown(): void {
-        $GLOBALS['wp_test_posts']               = [];
-        $GLOBALS['wp_test_postmeta']             = [];
-        $GLOBALS['wp_test_post_thumbnail_urls']  = [];
-        $GLOBALS['wp_test_post_thumbnail_ids']   = [];
+        $GLOBALS['wp_test_posts']                         = [];
+        $GLOBALS['wp_test_postmeta']                       = [];
+        $GLOBALS['wp_test_post_thumbnail_urls']            = [];
+        $GLOBALS['wp_test_post_thumbnail_ids']             = [];
+        $GLOBALS['wp_test_post_thumbnail_requested_sizes'] = [];
 
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_issuance" );
@@ -148,6 +149,22 @@ class CredencialServiceTest extends TestCase {
 
         $this->assertSame( 'no_photo', $state['state'] );
         $this->assertNull( $state['credential'] );
+    }
+
+    /**
+     * Design D5c: the credential photo uses the 'large' rendition — at most
+     * 1024px on the longest edge, original when smaller, so the photo is
+     * never upscaled server-side. The shim
+     * records whatever `$size` was actually requested (see
+     * tests/wp-shim.php), so this asserts the REQUEST, not just that a URL
+     * came back.
+     */
+    public function test_active_player_photo_is_requested_at_the_large_rendition(): void {
+        $this->seedEligiblePlayerWithPhoto( 1 );
+
+        $this->service->resolve( 1, 42, self::NOW );
+
+        $this->assertSame( 'large', $GLOBALS['wp_test_post_thumbnail_requested_sizes'][1] );
     }
 
     public function test_active_player_gets_a_full_credential_payload(): void {
