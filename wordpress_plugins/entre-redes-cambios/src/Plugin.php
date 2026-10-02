@@ -178,6 +178,24 @@ final class Plugin {
             } );
         }
 
+        // Daily calendar-seeding cron (see Calendario\Cron\SeedCalendarioCron's
+        // own class docblock for why this is a schedule and never a
+        // save_post listener, and for how its overlap lock works). Registered
+        // on every request — cheap, and required so WP-Cron's own request to
+        // wp-cron.php (which also boots this plugin via plugins_loaded) can
+        // resolve the hook.
+        //
+        // scheduleCrons() itself runs from the plugin's activation hook (see
+        // entre-redes-cambios.php); the wp_next_scheduled() guard below is a
+        // safety net for the "plugin files overwritten without going through
+        // WordPress's activate flow" case, where no activation hook fires —
+        // mirrors entre-redes-prode's own safety net in this exact spot.
+        add_action( Calendario\Cron\SeedCalendarioCron::HOOK, [ Calendario\Cron\SeedCalendarioCron::class, 'run' ] );
+
+        if ( false === wp_next_scheduled( Calendario\Cron\SeedCalendarioCron::HOOK ) ) {
+            Calendario\Cron\SeedCalendarioCron::schedule();
+        }
+
         load_plugin_textdomain(
             'entre-redes-cambios',
             false,

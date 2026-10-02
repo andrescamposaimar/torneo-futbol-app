@@ -386,6 +386,36 @@ registration, the captain's candidate list is currently offering people it
 should not. Its meaning is an open question for the process owner — recorded
 here rather than guessed at.
 
+## Seeding the calendar in production
+
+Slice 0 shipped `Calendario\SeedTemporadaService` with exactly one caller in the whole codebase: `tools/dry-run-calendario.php`, which runs entirely against the in-memory SQLite test shim and says so in its own header — it can never touch real data. That left `cambios_fecha` permanently empty in production, with nothing to fill it, which in turn blocked `Plazas\Alta\TitularesListImporter` (it needs a `fecha_desde_id` from that table). This closes that gap with two production callers, never by changing the seeder itself.
+
+### `Calendario\Cron\SeedCalendarioCron` — the daily WP-Cron event
+
+Registered on plugin activation (`entre_redes_cambios_seed_calendario_daily`, recurrence `daily`) and cleared on deactivation — an orphaned cron event that outlives the plugin is a bug that only shows up as mystery load months later. `Plugin::boot()` also re-registers it on every request if missing, as a safety net for the "plugin files overwritten without going through WordPress's activate flow" case (mirrors `entre-redes-prode`'s own pattern in that exact spot).
+
+It is bound to `add_action`, never to a SportsPress save hook — see the class's own docblock for why: this codebase already paid for exactly that mistake once (`wpm2_jugador_partido`'s sync bound to `save_post_sp_event`, which fires BEFORE the generic `save_post` where SportsPress writes a match's own metas, so the listener read a half-saved match; no hook priority can fix that, because priority only orders callbacks within one hook, never between two different hooks). A cron reading the already-published `/entre-redes/v1/*` REST API avoids that race entirely.
+
+**The overlap lock.** `FechaRepository::recalculateOrden()` writes `orden` in two passes (it parks every moving row in a disjoint high range first, because `UNIQUE(season_id, orden)` collides transiently — see that method's own docblock), so two seed runs in flight together could interleave into a corrupt ordering. `SeedCalendarioCron` takes an advisory lock (a transient, `cambios_seed_calendario_lock`) before doing anything else: whoever sets it first proceeds, anyone else backs off and records `calendario.seed_bloqueado` instead of racing. The lock carries a 10-minute TTL purely as a safety valve against a run that died without releasing it.
+
+**Failure is loud, not silent.** A network timeout or a malformed API payload throws from inside `PartidosApiClient`'s fetch calls — which all run BEFORE `FechaRepository` is even constructed, so nothing has been written yet — and is caught and recorded as `calendario.seed_fallido` through `Observability\EventLog`, with the underlying error message. A successful run records `calendario.seed_exitoso` with the season id and fecha count. Every one of these codes is greppable in the `entre_redes_cambios_event` action or the PHP error log (see `Observability\WpEventLog`).
+
+**WP-Cron is traffic-triggered, not a real scheduler** — a quiet site can run this hours late, which is fine here (the committee updates the fixture at most a few times a week). That is exactly why the manual trigger below also exists.
+
+**The known limitation it inherits.** The default fetcher is built on `PartidosApiClient`, whose own docblock already says `/partidos` cannot distinguish a genuine 0-0 from a published-but-resultless partido, and that "the DEFINITIVE production fetcher should NOT be this REST client." This slice wires it up anyway — it is the only fetcher this codebase has that does not depend on a live `sp_results` integration — not because that limitation is resolved. A future slice that replaces it only needs to change one factory method; nothing else here would need to change.
+
+### `tools/sembrar-calendario.php` — the manual trigger
+
+Bootstraps a real WordPress install (same `wp-load.php` upward search as `tools/importar-titulares.php`) and runs the exact same `SeedCalendarioCron` pipeline against the real `$wpdb` — sharing the WP-Cron event's own overlap lock, so a manual run and the cron can never race each other either.
+
+**Dry-run is the default; `--apply` is required to write.** Without `--apply`, this script fetches nothing and writes nothing — it reads and reports the calendar EXACTLY as already persisted (whatever the cron, or a previous `--apply`, already wrote), through the same table-plus-validations report `tools/dry-run-calendario.php` uses (see `Calendario\Cli\CalendarioReport` below). It deliberately does not attempt to preview a hypothetical fresh fetch: `SeedTemporadaService::seed()` has no plan-only mode, and wrapping it in a transaction to roll back afterwards is not a safe substitute for one — `recalculateOrden()` already opens and commits its OWN inner transaction, so an outer rollback would either be refused outright (the SQLite shim) or, worse, silently commit everything early on real MySQL, which would make "dry run" secretly write. `--apply` is therefore the only mode that ever calls the fetcher. `php tools/sembrar-calendario.php --help` prints the full contract and needs neither WordPress nor a database.
+
+**The one thing that must never be confused: which script can touch real data.** `tools/dry-run-calendario.php` runs against the in-memory SQLite shim and can never write to a real install, full stop — its own header says so, and so does `tools/sembrar-calendario.php`'s. Keep both scripts; they answer different questions — one proves the pipeline is correct against a known, frozen fixture, the other operates the real calendar.
+
+### `Calendario\Cli\CalendarioReport` — one presentation, two callers
+
+Both scripts print the exact same table (orden, play_date, torneo_label, numero_en_torneo, partido count, estado, veces_postergada) and the exact same GENERIC validations — orden continuity, numero_en_torneo resets, the first fecha being Clasificacion, estado matching its partidos, and `countResolvedFechasSince()` agreeing with the derived jugada count — because these hold true at ANY point in a season, loaded or not. `tools/dry-run-calendario.php` additionally pins its OWN exact-count assertions (23 fechas, 15 partidos each, the 5/9/9 phase split) on top of that shared report, because those are regression pins against ONE specific, frozen, already-verified fixture — meaningless against a real season still being loaded week by week, so they stay local to that script.
+
 ## Scope of this slice (slice 0)
 
 This is a "pure function, zero UI" slice: `Plugin::boot()` intentionally registers no REST routes, no admin screens, and no cron jobs. It only runs migrations on activation. The calendar admin screen, the solicitud/regreso REST endpoints, and the seeding cron are later slices, built on top of the domain logic here once it is validated.

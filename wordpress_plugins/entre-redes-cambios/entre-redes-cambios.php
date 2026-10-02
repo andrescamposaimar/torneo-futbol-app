@@ -55,6 +55,12 @@ register_activation_hook( __FILE__, function () {
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Migrations/InitialSchema.php';
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Migrations/MigrationRunner.php';
     require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Admin/ProcessOwnerAuthorizer.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/FechaRepository.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/LigaResolver.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/PartidosApiClient.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/SeedTemporadaService.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/Settings.php';
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/Cron/SeedCalendarioCron.php';
 
     \EntreRedes\Cambios\Migrations\MigrationRunner::run( new \EntreRedes\Cambios\Observability\WpEventLog() );
 
@@ -69,14 +75,22 @@ register_activation_hook( __FILE__, function () {
     if ( null !== $administrador && ! $administrador->has_cap( \EntreRedes\Cambios\Admin\ProcessOwnerAuthorizer::CAPABILITY ) ) {
         $administrador->add_cap( \EntreRedes\Cambios\Admin\ProcessOwnerAuthorizer::CAPABILITY );
     }
+
+    // Daily calendar-seeding cron — see Calendario\Cron\SeedCalendarioCron's
+    // own class docblock for why this is a schedule, not a save_post
+    // listener, and for how it guards against overlapping runs.
+    \EntreRedes\Cambios\Calendario\Cron\SeedCalendarioCron::schedule();
 } );
 
-// Deactivation hook — no crons are scheduled by this slice; kept as a no-op
-// hook point for future slices that will need to unschedule them. Data is
-// NEVER dropped here (that is uninstall.php's job, and only on explicit
-// "Delete").
+// Deactivation hook — unschedule the calendar-seeding cron; do NOT drop
+// tables (data preserved — that is uninstall.php's job, and only on explicit
+// "Delete"). An orphaned cron event that outlives the plugin is a bug that
+// only shows up as mystery load months later, with nothing pointing back at
+// what caused it — so this runs unconditionally, never behind a flag.
 register_deactivation_hook( __FILE__, function () {
-    // Intentionally empty for slice 0 — see class docblock in src/Plugin.php.
+    require_once ENTRE_REDES_CAMBIOS_DIR . 'src/Calendario/Cron/SeedCalendarioCron.php';
+
+    \EntreRedes\Cambios\Calendario\Cron\SeedCalendarioCron::unschedule();
 } );
 
 // Uninstall is handled via uninstall.php (WP calls it only on explicit uninstall).

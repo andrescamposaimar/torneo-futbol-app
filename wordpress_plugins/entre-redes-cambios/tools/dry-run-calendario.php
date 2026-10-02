@@ -28,6 +28,7 @@ if ( 'cli' !== PHP_SAPI ) {
     exit( 1 );
 }
 
+use EntreRedes\Cambios\Calendario\Cli\CalendarioReport;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Calendario\LigaResolver;
@@ -71,20 +72,6 @@ const BASE_URL  = 'https://entreredespadres.com.ar/wp-json/entre-redes/v1';
 const EXPECTED_TOTAL_FECHAS       = 23;
 const EXPECTED_PARTIDOS_POR_FECHA = 15;
 const EXPECTED_PHASE_COUNTS       = [ 'Clasificacion' => 5, 'Apertura' => 9, 'Clausura' => 9 ];
-
-/**
- * COUNT(*) of a fecha's partido rows, optionally restricted to ones with a
- * loaded result. Replaces three near-identical inline queries that used to
- * differ only by this one WHERE clause fragment.
- */
-function countPartidosDeFecha( \wpdb $wpdb, int $fechaId, bool $soloConResultado = false ): int {
-    $sql = "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_fecha_partido WHERE fecha_id = %d";
-    if ( $soloConResultado ) {
-        $sql .= ' AND tiene_resultado = 1';
-    }
-
-    return (int) $wpdb->get_var( $wpdb->prepare( $sql, $fechaId ) );
-}
 
 // ─── Production-style HTTP fetcher: file_get_contents, since this script runs
 // outside WordPress entirely (no wp_remote_get() available) ──────────────────
@@ -169,39 +156,19 @@ $service->seed( SEASON_ID, DRY_RUN_NOW );
 
 $fechas = $repository->listBySeason( SEASON_ID );
 
-echo "\n=== Calendario (temporada " . SEASON_ID . ") ===\n";
-printf(
-    "%-6s %-12s %-16s %-6s %-10s %-12s %-10s\n",
-    'orden',
-    'play_date',
-    'torneo_label',
-    'num',
-    'partidos',
-    'estado',
-    'postergada'
-);
+printf( "Temporada: %d\n", SEASON_ID );
+// Shared with tools/sembrar-calendario.php — see CalendarioReport's own
+// class docblock for why the table print lives there and not here.
+$partidosCountByFecha = CalendarioReport::printTable( $fechas, $wpdb );
 
-$partidosCountByFecha = [];
-foreach ( $fechas as $fecha ) {
-    $fechaId = (int) $fecha['id'];
-    $count   = countPartidosDeFecha( $wpdb, $fechaId );
-    $partidosCountByFecha[ $fechaId ] = $count;
+// ─── Validaciones especificas de ESTE snapshot ───────────────────────────────
+//
+// These are regression pins against the EXACT fixture verified against the
+// live API on 2026-09-26 — meaningless against a real, still-loading season
+// (see CalendarioReport's class docblock for why they stay local to this
+// script instead of living alongside the generic invariants).
 
-    printf(
-        "%-6d %-12s %-16s %-6d %-10d %-12s %-10d\n",
-        (int) $fecha['orden'],
-        (string) $fecha['play_date'],
-        (string) $fecha['torneo_label'],
-        (int) $fecha['numero_en_torneo'],
-        $count,
-        (string) $fecha['estado'],
-        (int) $fecha['veces_postergada']
-    );
-}
-
-// ─── Automatic validations ────────────────────────────────────────────────────
-
-echo "\n=== Validaciones automaticas ===\n";
+echo "\n=== Validaciones especificas de esta temporada (snapshot verificado) ===\n";
 
 $failures = 0;
 
@@ -241,80 +208,35 @@ $check(
     $allHaveExpectedCount
 );
 
-$ordenes         = array_map( static fn( array $f ): int => (int) $f['orden'], $fechas );
-$expectedOrdenes = range( 1, $totalFechas );
-sort( $ordenes );
-$check(
-    'orden continuo 1..' . $totalFechas . ' sin huecos ni repetidos',
-    $ordenes === $expectedOrdenes
-);
-
 $phaseCounts = [];
-$prevTorneo  = null;
-$resetsOk    = true;
 foreach ( $fechas as $fecha ) {
-    $torneo = (string) $fecha['torneo_label'];
-    $numero = (int) $fecha['numero_en_torneo'];
-
+    $torneo                 = (string) $fecha['torneo_label'];
     $phaseCounts[ $torneo ] = ( $phaseCounts[ $torneo ] ?? 0 ) + 1;
-
-    if ( $torneo !== $prevTorneo && 1 !== $numero ) {
-        $resetsOk = false;
-    }
-    $prevTorneo = $torneo;
 }
 $check(
-    'numero_en_torneo reinicia en cada cambio de torneo, fases '
-        . implode( '/', EXPECTED_PHASE_COUNTS ) . ' (encontrado: ' . json_encode( $phaseCounts ) . ')',
-    $resetsOk && EXPECTED_PHASE_COUNTS === $phaseCounts
+    'fases ' . implode( '/', EXPECTED_PHASE_COUNTS ) . ' (encontrado: ' . json_encode( $phaseCounts ) . ')',
+    EXPECTED_PHASE_COUNTS === $phaseCounts
 );
 
-$primera = $fechas[0] ?? null;
-$check(
-    'la primera fecha es Clasificacion con orden 1',
-    null !== $primera && 1 === (int) $primera['orden'] && 'Clasificacion' === (string) $primera['torneo_label']
-);
-
-// ─── estado: the checks that would have caught the wiring bug ────────────────
-//
 // The first version of this script validated shape only — counts, orden,
-// numero_en_torneo — and reported "todas las validaciones pasaron" while every
-// single fecha sat at the 'programada' default, because nothing ever called
-// EstadoDeriver. Shape was perfect; meaning was absent. These three checks
-// exist so that can never pass silently again.
-
+// numero_en_torneo — and reported "todas las validaciones pasaron" while
+// every single fecha sat at the 'programada' default, because nothing ever
+// called EstadoDeriver. Shape was perfect; meaning was absent. This check
+// (specific to the known-good snapshot, where 19 of 23 fechas are already
+// played) exists so that can never pass silently again.
 $jugadas = array_values( array_filter(
     $fechas,
     static fn( array $f ): bool => 'jugada' === (string) $f['estado']
 ) );
-
 $check(
     'al menos una fecha quedo en estado jugada (' . count( $jugadas ) . ' de ' . count( $fechas ) . ')',
     count( $jugadas ) > 0
 );
 
-// Every fecha whose partidos all carry a result must have derived to 'jugada'.
-$derivacionOk = true;
-foreach ( $fechas as $f ) {
-    $fechaId  = (int) $f['id'];
-    $total    = countPartidosDeFecha( $wpdb, $fechaId );
-    $conRes   = countPartidosDeFecha( $wpdb, $fechaId, true );
-    $esperado = ( $total > 0 && $total === $conRes ) ? 'jugada' : 'programada';
-    if ( $esperado !== (string) $f['estado'] ) {
-        $derivacionOk = false;
-        echo "       ! fecha {$f['play_date']}: esperaba '{$esperado}', tiene '{$f['estado']}'"
-            . " ({$conRes} de {$total} partidos con resultado)\n";
-    }
-}
-$check( 'el estado de cada fecha coincide con sus partidos', $derivacionOk );
+// ─── Validaciones genericas — validas en cualquier momento de la temporada ───
+// Shared with tools/sembrar-calendario.php.
 
-// End-to-end check of the rule the whole feature hangs on.
-$resueltasDesdeLaPrimera = $repository->countResolvedFechasSince( SEASON_ID, (int) $primera['id'] );
-$check(
-    'countResolvedFechasSince() desde la fecha 1 cuenta las ' . count( $jugadas ) . ' resueltas'
-        . ' (devolvio: ' . $resueltasDesdeLaPrimera . ')',
-    $resueltasDesdeLaPrimera === count( $jugadas )
-);
+$failures += CalendarioReport::printValidations( $fechas, $partidosCountByFecha, $wpdb, $repository, SEASON_ID );
 
 // ─── Second run: idempotency ──────────────────────────────────────────────────
 
