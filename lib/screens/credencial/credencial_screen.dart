@@ -100,10 +100,13 @@ class _CredencialScreenState extends ConsumerState<CredencialScreen> {
           stale: stale,
           photoBytes: photoBytes,
         ),
+      // There is no in-app photo upload yet (slice 4), so this state must
+      // never promise an in-app action: the comisión loads the photo.
       CredencialNoPhoto() => const _Message(
           icon: Icons.badge_outlined,
-          title: 'Sin foto aprobada',
-          body: 'Todavía no tenés una foto aprobada para tu credencial.',
+          title: 'Sin foto cargada',
+          body: 'Todavía no tenés una foto cargada. Pedile a la comisión '
+              'que la cargue para poder usar tu credencial.',
         ),
       CredencialPendingPhoto() => const _Message(
           icon: Icons.hourglass_top,

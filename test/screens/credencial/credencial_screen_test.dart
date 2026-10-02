@@ -296,9 +296,10 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('NoPhoto → prompts photo upload, no crash', (tester) async {
+    testWidgets('NoPhoto → tells the player to ask the comisión, no crash',
+        (tester) async {
       await _pump(tester, const CredencialNoPhoto());
-      expect(find.textContaining('foto aprobada'), findsWidgets);
+      expect(find.textContaining('foto cargada'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 
