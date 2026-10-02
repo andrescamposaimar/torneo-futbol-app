@@ -2,12 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/tenant_provider.dart';
 import '../models/cambios_fecha_abierta.dart';
+import '../models/jugador.dart';
 import '../services/cambios_api_service.dart';
 import '../services/cambios_candidatos_controller.dart';
 import '../services/cambios_context_controller.dart';
 import '../services/cambios_plantel_controller.dart';
 import '../services/cambios_solicitudes_controller.dart';
 import 'prode_providers.dart';
+import 'service_providers.dart';
 
 /// Provides a [CambiosApiService] wired to the active tenant's base API URL
 /// (`cfg.apiBaseUrl` + `/cambios`) and reusing [prodeApiServiceProvider]'s
@@ -110,4 +112,51 @@ final cambiosCandidatosControllerProvider = StateNotifierProvider.autoDispose
 final cambiosFechaAbiertaProvider =
     FutureProvider.autoDispose.family<CambiosFechaAbierta?, int>((ref, seasonId) {
   return ref.watch(cambiosApiServiceProvider).fetchFechaAbierta(seasonId: seasonId);
+});
+
+/// Fetches [teamId]'s full roster (the same `/jugadores?equipo_id=` call
+/// `TeamDetailScreen` makes) and indexes it by player id — the primary,
+/// single-request source "Mi Plantel" cards use for photo/posicion/puntaje.
+/// Every titular belongs to this team, so this one request covers all 11;
+/// see [cambiosJugadorPorIdProvider] for the occupants it misses (a cambio
+/// from another team, or the reserve pool).
+///
+/// autoDispose: cheap to re-fetch on every visit, same rationale as
+/// [cambiosPlantelControllerProvider].
+final cambiosEquipoRosterProvider =
+    FutureProvider.autoDispose.family<Map<int, Jugador>, int>((ref, teamId) async {
+  final api = ref.watch(apiServiceProvider);
+  final res = await api.getJugadoresRaw(equipoId: teamId, perPage: 50);
+  final items = List<dynamic>.from(res['items'] ?? const []);
+  final roster = <int, Jugador>{};
+  for (final raw in items) {
+    try {
+      final jugador = Jugador.fromJson(Map<String, dynamic>.from(raw as Map));
+      roster[jugador.id] = jugador;
+    } catch (_) {
+      // Malformed entry: skip it — same tolerance TeamDetailScreen applies
+      // to its own roster parse.
+    }
+  }
+  return roster;
+});
+
+/// Fetches a single player by id (`GET /jugadores/{id}`) — the fallback for
+/// a "Mi Plantel"/"Cambios activos" card whose player is NOT on
+/// [cambiosEquipoRosterProvider]'s team. Resolves to `null` on any failure
+/// instead of throwing: a card that cannot find its photo/puntaje falls
+/// back to its placeholder look, never a broken screen.
+///
+/// An `autoDispose.family` keyed by player id: one request per missing
+/// player id, deduplicated by Riverpod itself when more than one card
+/// watches the same id (e.g. a titular occupying his own plaza).
+final cambiosJugadorPorIdProvider =
+    FutureProvider.autoDispose.family<Jugador?, int>((ref, playerId) async {
+  try {
+    final api = ref.watch(apiServiceProvider);
+    final data = await api.getJugadorPorId(playerId);
+    return Jugador.fromJson(data);
+  } catch (_) {
+    return null;
+  }
 });
