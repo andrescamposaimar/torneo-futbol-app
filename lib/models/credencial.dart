@@ -182,39 +182,42 @@ class CredencialTeam {
   String toString() => 'CredencialTeam(id: $id, name: $name, kind: $kind)';
 }
 
-/// Design D5: the URL is only reachable online (it is the same featured-image
-/// URL `/jugadores` already serves publicly); [sha256] is what the offline
-/// cache actually verifies against the locally-stored file
-/// (`credencial_photo_store.dart`).
+/// Design D5/D4 (rev 9): [id] is the WordPress featured-image attachment id —
+/// the photo's real identity. It is what the offline cache is keyed on
+/// (`credencial_photo_store.dart`) and what the server rotates the
+/// credential id on; [url] is only reachable online and used solely to
+/// download the bytes. A missing `id` on the wire is a parse error (design:
+/// "a missing id is a parse error") — callers see it surface as the usual
+/// GET-parse-failure path, never a silently nullable photo identity.
 @immutable
 class CredencialPhoto {
+  final int id;
   final String url;
-  final String? sha256;
 
-  const CredencialPhoto({required this.url, this.sha256});
+  const CredencialPhoto({required this.id, required this.url});
 
   factory CredencialPhoto.fromJson(Map<String, dynamic> json) {
     return CredencialPhoto(
+      id: json['id'] as int,
       url: json['url'] as String,
-      sha256: json['sha256'] as String?,
     );
   }
 
-  Map<String, dynamic> toJson() => {'url': url, 'sha256': sha256};
+  Map<String, dynamic> toJson() => {'id': id, 'url': url};
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is CredencialPhoto &&
           runtimeType == other.runtimeType &&
-          url == other.url &&
-          sha256 == other.sha256;
+          id == other.id &&
+          url == other.url;
 
   @override
-  int get hashCode => Object.hash(url, sha256);
+  int get hashCode => Object.hash(id, url);
 
   @override
-  String toString() => 'CredencialPhoto(url: $url, sha256: $sha256)';
+  String toString() => 'CredencialPhoto(id: $id, url: $url)';
 }
 
 /// Echoes `RotatingCode::ALG/STEP/DIGITS` (design D4) so the client never

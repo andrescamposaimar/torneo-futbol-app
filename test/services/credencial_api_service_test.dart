@@ -38,7 +38,7 @@ Map<String, dynamic> _activeWireBody() => {
         'birth_date': null,
         'caracter': null,
         'team': null,
-        'photo': {'url': 'https://example.com/p.jpg', 'sha256': 'abc'},
+        'photo': {'id': 1, 'url': 'https://example.com/p.jpg'},
         'code_seed': 'c2VlZA',
         'code': {'alg': 'SHA256', 'step': 30, 'digits': 6},
       },

@@ -63,9 +63,9 @@ class _StubCredencialController extends CredencialController {
 }
 
 /// A [CredencialPhotoStore] with no real filesystem access at all — every
-/// method is overridden. `readVerified` always returns null (no cached
-/// photo bytes), which is enough for the Active state to render the
-/// placeholder icon instead of a real image.
+/// method is overridden. `read` always returns null (no cached photo
+/// bytes); unused here since every [CredencialActive] in this file supplies
+/// `photoBytes` directly.
 ///
 /// IMPORTANT: this codebase's `flutter_tester` sandbox does not reliably
 /// complete real `dart:io` `Directory` operations (create/delete) from
@@ -78,13 +78,13 @@ class _StubCredencialController extends CredencialController {
 /// the real temp-dir-backed behavior.
 class _FakePhotoStore implements CredencialPhotoStore {
   @override
-  Future<Uint8List?> readVerified(String sha256Hex) async => null;
+  Future<Uint8List?> read(int photoId) async => null;
 
   @override
-  Future<void> write(Uint8List bytes, String sha256Hex) async {}
+  Future<void> write(Uint8List bytes, int photoId) async {}
 
   @override
-  Future<void> deleteAllExcept(String? keepSha256Hex) async {}
+  Future<void> deleteAllExcept(int? keepPhotoId) async {}
 
   @override
   Future<void> wipe() async {}
@@ -175,7 +175,7 @@ Credencial _credencial() {
     caracter: 'Padre Alumno',
     team: CredencialTeam(
         id: 1, name: 'Real Madrid', kind: CredencialTeamKind.team),
-    photo: CredencialPhoto(url: 'https://example.com/p.jpg', sha256: 'abc'),
+    photo: CredencialPhoto(id: 1, url: 'https://example.com/p.jpg'),
     codeSeed: 'c2VlZA',
     code: CredencialCode(alg: 'SHA256', step: 30, digits: 6),
   );

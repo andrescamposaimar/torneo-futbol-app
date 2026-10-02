@@ -20,7 +20,7 @@ Map<String, dynamic> _activeWireJson({
       'caracter': caracter,
       'team': teamOverride ??
           {'id': 7, 'name': 'Lista de Espera 2026', 'kind': 'waiting_list'},
-      'photo': {'url': 'https://example.com/photo.jpg', 'sha256': 'abc123'},
+      'photo': {'id': 55, 'url': 'https://example.com/photo.jpg'},
       'code_seed': 'c2hhcmVkLXRlc3QtdmVjdG9yLXNlZWQtMDAx',
       'code': {'alg': 'SHA256', 'step': 30, 'digits': 6},
     },
@@ -37,7 +37,7 @@ void main() {
       expect(response.photoRequest, isNull);
       expect(response.credential!.id, 'cred-uuid-1');
       expect(response.credential!.team!.kind, CredencialTeamKind.waitingList);
-      expect(response.credential!.photo.sha256, 'abc123');
+      expect(response.credential!.photo.id, 55);
       expect(response.credential!.code.digits, 6);
 
       final roundTripped = CredencialResponse.fromJson(response.toJson());
@@ -83,6 +83,20 @@ void main() {
 
       expect(response.photoRequest!.id, 5);
       expect(response.photoRequest!.status, PhotoRequestStatus.pending);
+    });
+
+    test(
+        'a photo with a missing id is a parse error (design rev 9: id is '
+        'the photo identity, never optional)', () {
+      final wire = _activeWireJson();
+      (wire['credential'] as Map<String, dynamic>)['photo'] = {
+        'url': 'https://example.com/photo.jpg',
+      };
+
+      expect(
+        () => CredencialResponse.fromJson(wire),
+        throwsA(isA<TypeError>()),
+      );
     });
 
     test('rejects an unknown state string', () {

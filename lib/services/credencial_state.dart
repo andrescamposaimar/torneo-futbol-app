@@ -51,15 +51,15 @@ enum CredencialReplacementStatus { none, pending, rejected }
 /// every successful GET, so it doubles as "last verified at"; no separate
 /// timestamp field is needed).
 ///
-/// [photoBytes] is required and must already be verified against
-/// [credential]'s `photo.sha256` by whoever constructs this state
+/// [photoBytes] is required and must already be resolved for
+/// [credential]'s `photo.id` by whoever constructs this state
 /// (`CredencialController` — see its class docblock). Decision 1523 (non-
-/// negotiable): a card with valid styling must NEVER render without
-/// verified photo bytes, not even for one frame — this is enforced BY
-/// CONSTRUCTION here rather than by [CredencialScreen] re-reading the photo
-/// file asynchronously at render time (verify-report 1575, slice 3b, NEW
-/// WARNING 1: a `FutureBuilder`-based re-read has an unavoidable first-frame
-/// window where the valid-styled card renders before the read resolves).
+/// negotiable): a card with valid styling must NEVER render without photo
+/// bytes, not even for one frame — this is enforced BY CONSTRUCTION here
+/// rather than by [CredencialScreen] re-reading the photo file
+/// asynchronously at render time (verify-report 1575, slice 3b, NEW WARNING
+/// 1: a `FutureBuilder`-based re-read has an unavoidable first-frame window
+/// where the valid-styled card renders before the read resolves).
 final class CredencialActive extends CredencialUiState {
   final Credencial credential;
   final CredencialReplacementStatus replacement;
@@ -153,17 +153,19 @@ final class CredencialOfflineNoCache extends CredencialUiState {
   String toString() => 'CredencialOfflineNoCache()';
 }
 
-/// A fresh `active` response was received, but a verified photo for the
-/// CURRENT approved `sha256` could not be obtained: the download failed, or
-/// the downloaded bytes did not match the server's declared hash.
+/// A fresh `active` response was received, but photo bytes for the CURRENT
+/// approved `photo.id` could not be obtained: reusing the cached file failed
+/// and a fresh download either failed outright or failed validation
+/// (status, content-type, signature sniff, or decode — see
+/// `downloadCredencialPhoto`).
 ///
 /// Decision 1523 (non-negotiable): a card with valid styling — rotating
-/// code, name, DNI, team — must NEVER render without a verified photo, since
-/// the whole point of the credential is letting venue security compare the
+/// code, name, DNI, team — must NEVER render without a photo, since the
+/// whole point of the credential is letting venue security compare the
 /// holder's face against a TRUSTED photo. This is therefore a distinct,
 /// deliberately non-valid state, not a variant of [CredencialActive] with a
 /// placeholder image: it carries no rotating code and no valid-card chrome.
-/// A previously-verified photo for a DIFFERENT (now-replaced) `sha256` is
+/// A previously-cached photo for a DIFFERENT (now-replaced) `photo.id` is
 /// never substituted here either — it may be a rejected/replaced face.
 final class CredencialPhotoUnavailable extends CredencialUiState {
   const CredencialPhotoUnavailable();

@@ -11,14 +11,14 @@ import 'rotating_code_view.dart';
 /// and Display" + "Rotating Liveness Code").
 ///
 /// Pure/presentational: it never touches the network, the repository, or the
-/// filesystem — [photoBytes] must already be the verified bytes carried by
-/// [CredencialActive] (design D5; decision 1523: a card with valid styling
-/// must NEVER render without verified photo bytes, so this widget does not
-/// accept a nullable/placeholder photo at all — there is no valid state to
-/// render a [CredencialActive] without bytes already verified against
-/// `credential.photo.sha256` by [CredencialController]). This keeps the
-/// card trivially testable and matches the app's container/presentational
-/// split (`ProdeIdentityCard` builds its own content inline instead, but this
+/// filesystem — [photoBytes] must already be the bytes resolved by
+/// [CredencialController] for `credential.photo.id` (design D5; decision
+/// 1523: a card with valid styling must NEVER render without photo bytes, so
+/// this widget does not accept a nullable/placeholder photo at all — there
+/// is no valid state to render a [CredencialActive] without bytes already
+/// resolved by [CredencialController]). This keeps the card trivially
+/// testable and matches the app's container/presentational split
+/// (`ProdeIdentityCard` builds its own content inline instead, but this
 /// card's per-state banners and multiple optional fields warrant the
 /// separation here).
 class CredencialCard extends StatelessWidget {
