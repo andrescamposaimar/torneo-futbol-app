@@ -99,6 +99,39 @@ void main() {
       );
     });
 
+    test(
+        'withPhotoUrl replaces only the photo url, round-tripping through '
+        'toJson/fromJson (design D16: the saved JSON must be able to carry '
+        'an old url for a same-id retry)', () {
+      final wire = _activeWireJson();
+      final response = CredencialResponse.fromJson(wire);
+
+      final updated = response.withPhotoUrl('https://example.com/new.jpg');
+
+      expect(updated.credential!.photo.url, 'https://example.com/new.jpg');
+      expect(updated.credential!.photo.id, response.credential!.photo.id,
+          reason: 'withPhotoUrl must never change the photo identity');
+      expect(updated.credential!.fullName, response.credential!.fullName);
+      expect(updated.credential!.dni, response.credential!.dni);
+      expect(updated.state, response.state);
+      expect(updated.photoRequest, response.photoRequest);
+      // The original response must be untouched (immutability).
+      expect(response.credential!.photo.url, 'https://example.com/photo.jpg');
+
+      final roundTripped = CredencialResponse.fromJson(updated.toJson());
+      expect(roundTripped, equals(updated));
+    });
+
+    test(
+        'withPhotoUrl on a response with no credential (e.g. blocked) is a '
+        'no-op', () {
+      const response = CredencialResponse(state: CredencialCardState.blocked);
+
+      final updated = response.withPhotoUrl('https://example.com/new.jpg');
+
+      expect(updated, equals(response));
+    });
+
     test('rejects an unknown state string', () {
       expect(
         () => CredencialResponse.fromJson({

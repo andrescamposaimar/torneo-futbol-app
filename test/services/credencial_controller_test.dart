@@ -65,6 +65,7 @@ Uint8List _fakePhotoBytes(String label) => Uint8List.fromList(
 
 CredencialResponse _activeResponse({
   int photoId = 1,
+  String photoUrl = 'https://example.com/p.jpg',
   CredencialPhotoRequest? photoRequest,
   String expiresAt = '2027-09-29 00:00:00',
   int playerId = 1,
@@ -79,7 +80,7 @@ CredencialResponse _activeResponse({
       playerId: playerId,
       fullName: 'Juan Perez',
       dni: '30111222',
-      photo: CredencialPhoto(id: photoId, url: 'https://example.com/p.jpg'),
+      photo: CredencialPhoto(id: photoId, url: photoUrl),
       codeSeed: 'c2VlZA',
       code: const CredencialCode(alg: 'SHA256', step: 30, digits: 6),
     ),
@@ -440,6 +441,131 @@ void main() {
             reason: 'the file for the cached id is gone and nothing new '
                 'was saved, so the cache must not resurrect a byte-less '
                 'state on the next read');
+      });
+    });
+
+    group('same id, different photo url (D16, design rev 10)', () {
+      // Design D16: a URL change alone (same `photo.id`) is a rendition/host
+      // change, not a face change (rev 9.1 cache-key decision) — it must
+      // never be treated as "file missing" nor trigger PhotoUnavailable.
+      test(
+          'same id, same url, file present → reused with NO download call '
+          '(row 1)', () async {
+        final bytes = _fakePhotoBytes('unchanged-url-photo');
+        await repo.save(
+          _activeResponse(photoId: 20, photoUrl: 'https://example.com/a.jpg'),
+          photoBytes: bytes,
+        );
+
+        var downloadCalls = 0;
+        final controller = makeController(
+          fetch: () async => _activeResponse(
+              photoId: 20, photoUrl: 'https://example.com/a.jpg'),
+          downloadPhoto: (_) async {
+            downloadCalls++;
+            return bytes;
+          },
+        );
+
+        await controller.open();
+
+        expect(downloadCalls, 0);
+        expect(controller.state, isA<CredencialActive>());
+        expect((controller.state as CredencialActive).photoBytes, bytes);
+      });
+
+      test(
+          'same id, new url, download succeeds → re-downloads, replaces the '
+          'cached bytes, Active with the NEW bytes (row 2)', () async {
+        final oldBytes = _fakePhotoBytes('old-rendition');
+        await repo.save(
+          _activeResponse(photoId: 21, photoUrl: 'https://example.com/a.jpg'),
+          photoBytes: oldBytes,
+        );
+
+        final newBytes = _fakePhotoBytes('new-rendition');
+        var downloadCalls = 0;
+        final controller = makeController(
+          fetch: () async => _activeResponse(
+              photoId: 21, photoUrl: 'https://example.com/b.jpg'),
+          downloadPhoto: (url) async {
+            downloadCalls++;
+            expect(url, 'https://example.com/b.jpg');
+            return newBytes;
+          },
+        );
+
+        await controller.open();
+
+        expect(downloadCalls, 1);
+        expect(controller.state, isA<CredencialActive>());
+        expect((controller.state as CredencialActive).photoBytes, newBytes);
+        expect(await photoStore.read(21), newBytes,
+            reason: 'the on-disk file for the SAME id must be replaced, not '
+                'duplicated under a new key');
+
+        final cached = await repo.readCached();
+        expect(cached!.credential!.photo.url, 'https://example.com/b.jpg',
+            reason: 'the cached JSON must now record the NEW url the bytes '
+                'actually came from');
+      });
+
+      test(
+          'same id, new url, download fails → keeps the cached bytes, Active '
+          '(never PhotoUnavailable for a URL-only change), and the saved '
+          'JSON keeps the OLD url so the next open() retries (row 3)',
+          () async {
+        final oldBytes = _fakePhotoBytes('still-the-approved-face');
+        await repo.save(
+          _activeResponse(photoId: 22, photoUrl: 'https://example.com/a.jpg'),
+          photoBytes: oldBytes,
+        );
+
+        final controller = makeController(
+          fetch: () async => _activeResponse(
+              photoId: 22, photoUrl: 'https://example.com/b.jpg'),
+          downloadPhoto: (_) async => throw Exception('network blip'),
+        );
+
+        await controller.open();
+
+        expect(controller.state, isA<CredencialActive>(),
+            reason: 'design D16: never PhotoUnavailable for a rendition/url '
+                'change alone — the cached face is still the approved face');
+        final active = controller.state as CredencialActive;
+        expect(active.photoBytes, oldBytes);
+        expect(active.stale, isFalse);
+
+        expect(await photoStore.read(22), oldBytes,
+            reason: 'the file on disk must be untouched by the failed '
+                'download attempt');
+
+        final cached = await repo.readCached();
+        expect(cached!.credential!.photo.url, 'https://example.com/a.jpg',
+            reason: 'the saved JSON must keep the OLD url (the url the '
+                'bytes on disk actually came from) so the next open() '
+                'retries the download instead of silently giving up');
+
+        // A second open() must retry the download for the still-different
+        // url rather than treating the (now self-consistent) cache as a
+        // same-url match.
+        var secondDownloadCalls = 0;
+        final newBytes = _fakePhotoBytes('recovered-rendition');
+        final retryController = makeController(
+          fetch: () async => _activeResponse(
+              photoId: 22, photoUrl: 'https://example.com/b.jpg'),
+          downloadPhoto: (_) async {
+            secondDownloadCalls++;
+            return newBytes;
+          },
+        );
+        await retryController.open();
+
+        expect(secondDownloadCalls, 1,
+            reason: 'the retry must actually attempt a fresh download for '
+                'the still-pending url change');
+        expect((retryController.state as CredencialActive).photoBytes,
+            newBytes);
       });
     });
 

@@ -205,13 +205,60 @@ class CredencialController extends StateNotifier<CredencialUiState> {
         }
 
         final photoId = credential.photo.id;
-        final previousPhotoId = priorCache?.credential?.photo.id;
-        if (previousPhotoId == photoId) {
-          // The approved photo is unchanged since the last verified read —
-          // try the file already on disk first, no re-download needed.
+        final previousPhoto = priorCache?.credential?.photo;
+        if (previousPhoto != null && previousPhoto.id == photoId) {
+          // The approved photo identity is unchanged since the last
+          // verified read — try the file already on disk first.
           final existingBytes = await _repository.readPhoto(photoId);
           if (existingBytes != null) {
-            await _repository.save(response, photoBytes: null);
+            if (previousPhoto.url == credential.photo.url) {
+              // Design D16 row 1: same id, same url — the cached file still
+              // backs this exact url, reuse it with no network call.
+              await _repository.save(response, photoBytes: null);
+              state = CredencialActive(
+                credential: credential,
+                replacement: _replacementFor(response.photoRequest),
+                stale: false,
+                photoBytes: existingBytes,
+              );
+              return;
+            }
+
+            // Design D16 rows 2/3: same id, DIFFERENT url — a rendition or
+            // host change, not a face change (rev 9.1 cache-key decision).
+            // Try to refresh the bytes, but the cached face is still the
+            // approved one either way, so this must never fall back to
+            // PhotoUnavailable just because the refresh failed.
+            Uint8List? refreshed;
+            try {
+              refreshed = await _downloadPhoto(credential.photo.url);
+            } catch (_) {
+              refreshed = null;
+            }
+
+            if (refreshed != null) {
+              // Row 2: download OK — replace the bytes on disk (same id,
+              // `CredencialPhotoStore.write` renames over the existing
+              // file) and record the new url.
+              await _repository.save(response, photoBytes: refreshed);
+              state = CredencialActive(
+                credential: credential,
+                replacement: _replacementFor(response.photoRequest),
+                stale: false,
+                photoBytes: refreshed,
+              );
+              return;
+            }
+
+            // Row 3: download failed — keep showing the cached bytes
+            // (same approved face) and save the response with the OLD url,
+            // so the cached JSON keeps recording "the url the bytes on disk
+            // came from" and the next open() notices the url is still
+            // pending and retries, instead of wrongly looking up to date.
+            await _repository.save(
+              response.withPhotoUrl(previousPhoto.url),
+              photoBytes: null,
+            );
             state = CredencialActive(
               credential: credential,
               replacement: _replacementFor(response.photoRequest),

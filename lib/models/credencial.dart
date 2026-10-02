@@ -422,4 +422,40 @@ class CredencialResponse {
   @override
   String toString() =>
       'CredencialResponse(state: $state, photoRequest: $photoRequest, credential: $credential)';
+
+  /// Returns a copy of this response with its credential's photo [url]
+  /// replaced, keeping every other field — including `photo.id`, the
+  /// photo's real identity — unchanged. A no-op when there is no
+  /// [credential] at all (e.g. blocked/no_photo/not_a_player).
+  ///
+  /// Design D16 (rev 10): a same-`photo.id` URL change is a rendition/host
+  /// change, not a face change. When a re-download for the NEW url fails,
+  /// the cached bytes (downloaded from the OLD url) are kept, so the JSON
+  /// cache must keep recording the OLD url — "the url the bytes on disk
+  /// came from" — rather than the fresh response's new url. That is what
+  /// makes the next `open()` notice the url is still pending and retry the
+  /// download, instead of wrongly believing the cache is already
+  /// up to date.
+  CredencialResponse withPhotoUrl(String url) {
+    final current = credential;
+    if (current == null) return this;
+    return CredencialResponse(
+      state: state,
+      photoRequest: photoRequest,
+      credential: Credencial(
+        id: current.id,
+        issuedAt: current.issuedAt,
+        expiresAt: current.expiresAt,
+        playerId: current.playerId,
+        fullName: current.fullName,
+        dni: current.dni,
+        birthDate: current.birthDate,
+        caracter: current.caracter,
+        team: current.team,
+        photo: CredencialPhoto(id: current.photo.id, url: url),
+        codeSeed: current.codeSeed,
+        code: current.code,
+      ),
+    );
+  }
 }
