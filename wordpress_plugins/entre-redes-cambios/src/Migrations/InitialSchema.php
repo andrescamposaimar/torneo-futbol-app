@@ -63,6 +63,17 @@ class InitialSchema {
         // it into an actual gate; it must never silently become active on its
         // own just because the setting row is unseeded.
         'prioridad_padres_activa'    => '0',
+        // `0` means "not configured" — NEVER a real `sp_team` post id, see
+        // Calendario\Settings::listaEsperaTeamIdOverride()'s own docblock.
+        // Unlike every other default above, this one is NOT the production
+        // fallback value by itself: Plazas\ListaEsperaResolver falls back to
+        // a DYNAMIC lookup (the `sp_team` whose slug is `lista-de-espera-{year}`
+        // for the configured season) when this row is `0`, rather than to a
+        // second hardcoded literal here — a specific team id would go stale
+        // the first season it is not updated by hand. Set this to a real
+        // `sp_team` post id only to OVERRIDE that dynamic lookup (e.g. the
+        // slug convention breaks, or a season needs a different team).
+        'lista_espera_team_id'       => '0',
     ];
 
     /**

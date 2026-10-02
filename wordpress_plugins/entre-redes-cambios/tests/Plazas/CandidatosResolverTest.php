@@ -8,6 +8,7 @@ use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Plazas\CandidatosResolver;
+use EntreRedes\Cambios\Plazas\CandidatosSeccion;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use PHPUnit\Framework\TestCase;
@@ -137,14 +138,7 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->insert( $p . 'posts', [ 'ID' => $playerId, 'post_type' => 'sp_player', 'post_status' => 'publish' ] );
         $wpdb->insert( $p . 'term_relationships', [ 'object_id' => $playerId, 'term_taxonomy_id' => $seasonId ] );
 
-        if ( null !== $metrics ) {
-            if ( array_key_exists( 'caracter', $metrics ) ) {
-                $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'caracter', 'meta_value' => (string) $metrics['caracter'] ] );
-                unset( $metrics['caracter'] );
-            }
-
-            $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'sp_metrics', 'meta_value' => serialize( $metrics ) ] );
-        }
+        $this->seedMetricas( $playerId, $metrics );
     }
 
     private function plaza( int $puntajeTechoHalfPoints = 6 /* 3.0 */ ): int {
@@ -156,6 +150,48 @@ class CandidatosResolverTest extends TestCase {
             1,
             '2026-03-01 10:00:00'
         );
+    }
+
+    /**
+     * A player with NO `sp_season` registration at all — the exact shape
+     * paraSeccion()'s padrón-wide population must still include (unlike
+     * playerIdsRegistradosEnTemporada()'s season-scoped query).
+     */
+    private function seedPlayerSinTemporada( int $playerId, ?array $metrics ): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->insert( $p . 'posts', [ 'ID' => $playerId, 'post_type' => 'sp_player', 'post_status' => 'publish' ] );
+
+        $this->seedMetricas( $playerId, $metrics );
+    }
+
+    /** @param array<string, mixed>|null $metrics */
+    private function seedMetricas( int $playerId, ?array $metrics ): void {
+        if ( null === $metrics ) {
+            return;
+        }
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        if ( array_key_exists( 'caracter', $metrics ) ) {
+            $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'caracter', 'meta_value' => (string) $metrics['caracter'] ] );
+            unset( $metrics['caracter'] );
+        }
+
+        $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'sp_metrics', 'meta_value' => serialize( $metrics ) ] );
+    }
+
+    /** Creates the `sp_team` taxonomy term itself — call ONCE per team id. */
+    private function seedEquipoTaxonomyTerm( int $teamId ): void {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $teamId, 'term_id' => $teamId, 'taxonomy' => 'sp_team' ] );
+    }
+
+    private function seedEquipoMembership( int $playerId, int $teamId ): void {
+        global $wpdb;
+        $wpdb->insert( $wpdb->prefix . 'term_relationships', [ 'object_id' => $playerId, 'term_taxonomy_id' => $teamId ] );
     }
 
     // -------------------------------------------------------------------------
@@ -467,5 +503,234 @@ class CandidatosResolverTest extends TestCase {
             // entrante.
             $this->assertInstanceOf( \RuntimeException::class, $e );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // paraSeccion() — the two widened screen sections
+    // -------------------------------------------------------------------------
+
+    private const LISTA_ESPERA_TEAM_ID = 500;
+
+    public function test_para_seccion_rejects_an_invalid_seccion(): void {
+        $plazaId = $this->plaza();
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $this->expectException( \InvalidArgumentException::class );
+
+        $this->resolver->paraSeccion( $plaza, 'no_existe', self::LISTA_ESPERA_TEAM_ID, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+    }
+
+    public function test_lista_espera_seccion_returns_only_the_teams_players(): void {
+        $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
+
+        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+        $this->seedEquipoMembership( 800, self::LISTA_ESPERA_TEAM_ID );
+
+        // Season-registered, but NOT on the lista de espera team — must NOT
+        // appear in this section.
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraSeccion(
+            $plaza,
+            CandidatosSeccion::LISTA_ESPERA,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $candidatos );
+
+        $this->assertSame( [ 800 ], $ids );
+    }
+
+    public function test_lista_espera_seccion_excludes_the_plazas_own_current_vigent_occupant(): void {
+        $plazaId = $this->plaza( 10 );
+
+        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
+        // 700 is the plaza's own titular/vigent occupant (see plaza()).
+        $this->seedPlayer( 700, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+        $this->seedEquipoMembership( 700, self::LISTA_ESPERA_TEAM_ID );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraSeccion(
+            $plaza,
+            CandidatosSeccion::LISTA_ESPERA,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn
+        );
+
+        $this->assertSame( [], $candidatos );
+    }
+
+    /**
+     * THE widened-pool behavior the process owner asked for: a padrón
+     * completo candidate who carries NO `sp_season` registration at all for
+     * the current season must still appear here — unlike paraPlaza()'s own
+     * season-scoped population (see test_excludes_players_registered_in_a_different_season()
+     * above, which paraPlaza() keeps unchanged).
+     */
+    public function test_padron_completo_seccion_includes_a_player_with_no_season_registration(): void {
+        $plazaId = $this->plaza( 10 );
+
+        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
+        $this->seedPlayerSinTemporada( 900, [ 'caracter' => 'Padre Ex-Alumno', 'puntaje' => '2,5' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraSeccion(
+            $plaza,
+            CandidatosSeccion::PADRON_COMPLETO,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $candidatos );
+        $this->assertContains( 900, $ids );
+    }
+
+    public function test_padron_completo_seccion_excludes_the_lista_de_espera_teams_players(): void {
+        $plazaId = $this->plaza( 10 );
+
+        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+        $this->seedEquipoMembership( 800, self::LISTA_ESPERA_TEAM_ID );
+
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraSeccion(
+            $plaza,
+            CandidatosSeccion::PADRON_COMPLETO,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $candidatos );
+
+        $this->assertNotContains( 800, $ids, 'Lista de espera members must never appear in padron_completo.' );
+        $this->assertContains( 801, $ids );
+    }
+
+    // -------------------------------------------------------------------------
+    // Ceiling filter runs BEFORE the per-candidate viability queries
+    // -------------------------------------------------------------------------
+
+    /**
+     * A `PlazaRepository` subclass that counts every call to the two
+     * per-candidate viability queries evaluarCandidatos() runs AFTER the
+     * ceiling filter — real behavior otherwise (delegates to `parent::`), so
+     * this proves the actual query COUNT, not just the resulting viability
+     * verdicts.
+     */
+    private function countingPlazaRepository(): object {
+        global $wpdb;
+        $eventLog = $this->eventLog;
+
+        return new class( $wpdb, $eventLog ) extends PlazaRepository {
+            public int $vigentesCalls = 0;
+            public int $truncadoCalls = 0;
+
+            public function listOcupacionesVigentesDeJugador( int $seasonId, int $playerId, ?int $excluyendoPlazaId = null ): array {
+                ++$this->vigentesCalls;
+
+                return parent::listOcupacionesVigentesDeJugador( $seasonId, $playerId, $excluyendoPlazaId );
+            }
+
+            public function listPlazasConCierreTruncadoDeJugador( int $seasonId, int $playerId ): array {
+                ++$this->truncadoCalls;
+
+                return parent::listPlazasConCierreTruncadoDeJugador( $seasonId, $playerId );
+            }
+        };
+    }
+
+    /**
+     * THE measured claim this slice's task brief asks for: at a realistic
+     * ceiling, candidates whose puntaje exceeds the techo cost ZERO calls to
+     * either per-candidate viability query — only the candidates who clear
+     * the techo do. 5 candidates seeded, puntajes 2 / 2,5 / 3 / 4 / 5; with
+     * techo 2,5 only 2 of them clear it, so the viability queries must run
+     * exactly 2 times each, never 5.
+     */
+    public function test_ceiling_filter_runs_before_the_per_candidate_viability_queries(): void {
+        global $wpdb;
+
+        $countingPlazaRepository = $this->countingPlazaRepository();
+        $resolver                = new CandidatosResolver( $wpdb, $countingPlazaRepository, $this->eventLog );
+
+        $plazaId = $countingPlazaRepository->openPlaza(
+            self::SEASON_ID,
+            100,
+            700,
+            Puntaje::fromDecimal( 2.5 ), // techo 2,5
+            1,
+            '2026-03-01 10:00:00'
+        );
+
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2' ] );   // clears techo
+        $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] ); // clears techo (boundary)
+        $this->seedPlayer( 803, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );   // excluded by techo
+        $this->seedPlayer( 804, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );   // excluded by techo
+        $this->seedPlayer( 805, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '5' ] );   // excluded by techo
+
+        $plaza      = $countingPlazaRepository->findPlaza( $plazaId );
+        $candidatos = $resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertCount( 5, $candidatos, 'Every candidate must still be reported, only 3 as non-viable by techo.' );
+
+        $viableIds = array_map(
+            static fn ( $c ) => $c->playerId(),
+            array_filter( $candidatos, static fn ( $c ) => $c->viable() )
+        );
+        $this->assertSame( [ 801, 802 ], array_values( $viableIds ) );
+
+        $this->assertSame(
+            2,
+            $countingPlazaRepository->vigentesCalls,
+            'listOcupacionesVigentesDeJugador() must run ONLY for the 2 candidates within techo, never for all 5.'
+        );
+        $this->assertSame(
+            2,
+            $countingPlazaRepository->truncadoCalls,
+            'listPlazasConCierreTruncadoDeJugador() must run ONLY for the 2 candidates within techo, never for all 5.'
+        );
+    }
+
+    /**
+     * Same proof, at a WIDER ceiling: raising techo from 2,5 to 5,0 admits 2
+     * more candidates into the N+1 — a direct measurement of "a 2.5 plaza
+     * costs roughly a fifth of a 5 plaza" (this slice's task brief), not an
+     * assertion that it does.
+     */
+    public function test_a_wider_techo_measurably_costs_more_viability_queries(): void {
+        global $wpdb;
+
+        $countingPlazaRepository = $this->countingPlazaRepository();
+        $resolver                = new CandidatosResolver( $wpdb, $countingPlazaRepository, $this->eventLog );
+
+        $plazaId = $countingPlazaRepository->openPlaza(
+            self::SEASON_ID,
+            100,
+            700,
+            Puntaje::fromDecimal( 5.0 ), // techo 5,0 — admits everyone below
+            1,
+            '2026-03-01 10:00:00'
+        );
+
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2' ] );
+        $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        $this->seedPlayer( 803, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 804, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
+        $this->seedPlayer( 805, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '5' ] );
+
+        $plaza = $countingPlazaRepository->findPlaza( $plazaId );
+        $resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertSame( 5, $countingPlazaRepository->vigentesCalls );
+        $this->assertSame( 5, $countingPlazaRepository->truncadoCalls );
     }
 }
