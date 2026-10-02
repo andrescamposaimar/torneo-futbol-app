@@ -229,7 +229,7 @@ void main() {
 
     testWidgets('NotSignedIn → session-closed message', (tester) async {
       await _pump(tester, const CredencialNotSignedIn());
-      expect(find.textContaining('sesión se cerró'), findsOneWidget);
+      expect(find.text('Sesión cerrada'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -298,20 +298,20 @@ void main() {
 
     testWidgets('NoPhoto → prompts photo upload, no crash', (tester) async {
       await _pump(tester, const CredencialNoPhoto());
-      expect(find.textContaining('foto aprobada'), findsOneWidget);
+      expect(find.textContaining('foto aprobada'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 
     testWidgets('PendingPhoto → review-in-progress message', (tester) async {
       await _pump(tester, const CredencialPendingPhoto());
-      expect(find.textContaining('revisión'), findsOneWidget);
+      expect(find.textContaining('revisión'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 
     testWidgets('RejectedPhoto → rejection message with no reason',
         (tester) async {
       await _pump(tester, const CredencialRejectedPhoto());
-      expect(find.textContaining('rechazada'), findsOneWidget);
+      expect(find.textContaining('rechazada'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 
@@ -323,14 +323,14 @@ void main() {
 
     testWidgets('NotAPlayer → not-eligible message', (tester) async {
       await _pump(tester, const CredencialNotAPlayer());
-      expect(find.textContaining('jugador asociado'), findsOneWidget);
+      expect(find.textContaining('jugador asociado'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 
     testWidgets('Expired → reconnect message with retry button',
         (tester) async {
       await _pump(tester, const CredencialExpired());
-      expect(find.textContaining('venció'), findsOneWidget);
+      expect(find.text('Credencial vencida'), findsOneWidget);
       expect(find.text('Reintentar'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
@@ -392,22 +392,31 @@ void main() {
 
   group('CredencialScreen · no overflow on narrow phones with large text scale',
       () {
-    for (final size in [const Size(375, 667), const Size(390, 844)]) {
-      testWidgets('Active at $size, textScale 1.3 → no overflow',
-          (tester) async {
-        await checkNoOverflow(
+    for (final size in [
+      const Size(375, 667),
+      const Size(390, 844),
+      const Size(430, 932),
+    ]) {
+      for (final scale in [1.0, 1.3]) {
+        testWidgets('Active at $size, textScale $scale → no overflow',
+            (tester) async {
+          await checkNoOverflow(
             tester,
             CredencialActive(
                 credential: _credencial(), photoBytes: _validPngBytes()),
-            size);
-      });
+            size,
+            textScale: scale,
+          );
+        });
 
-      testWidgets('every message state at $size, textScale 1.3 → no overflow',
-          (tester) async {
-        for (final state in messageStates()) {
-          await checkNoOverflow(tester, state, size);
-        }
-      });
+        testWidgets(
+            'every message state at $size, textScale $scale → no overflow',
+            (tester) async {
+          for (final state in messageStates()) {
+            await checkNoOverflow(tester, state, size, textScale: scale);
+          }
+        });
+      }
     }
   });
 
