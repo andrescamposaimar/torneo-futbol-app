@@ -24,6 +24,15 @@ composer install
 composer test
 ```
 
+## Building the deployable zip
+
+Run `../build-plugin.sh entre-redes-cambios` from `wordpress_plugins/`. It runs
+`composer install --no-dev`, verifies `vendor/firebase/php-jwt` is present and
+actually verifies a signed token (not just a class-exists check), and refuses
+to produce a zip that would ship without it — the same gate that exists
+because an early entre-redes-prode release once shipped `vendor/`-less and
+still reported a healthy healthcheck.
+
 ## Datetime columns are UTC
 
 Every `DATETIME` column this plugin persists (`created_at`, `updated_at`, `solicitada_at`, `resuelta_at`, `designado_at`, `revocado_at`, `closed_at`, `estado_actualizado_at`, `cambios_settings.updated_at`, etc.) is stored in **UTC**, never the site's local civil time. Production code that needs "now" as a DATETIME string calls `current_time('mysql', true)` — the explicit `$gmt = true` argument — or derives it with `gmdate()` from an epoch already in hand (see `Rest\SolicitudesController::crear()`, which takes a single epoch instant and derives both its UTC DATETIME string and its `solicitud_instante_epoch` column from that SAME value, rather than reading the clock twice). `current_time('mysql')` **without** the second argument returns the site's LOCAL time — using it for a persisted column would silently write a wrong instant offset by the site's timezone. `Calendario\PlazosCalculator::computeUtc()` is the one place a CIVIL deadline (Buenos Aires wall-clock) is deliberately converted to UTC for exactly this reason — see that class's own docblock.
