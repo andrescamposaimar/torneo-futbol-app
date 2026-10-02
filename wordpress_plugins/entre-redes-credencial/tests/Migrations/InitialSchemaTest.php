@@ -27,7 +27,7 @@ class InitialSchemaTest extends TestCase {
     private static function expectedTables(): array {
         return [
             'wp_credencial_issuance' => [
-                'player_id', 'credential_id', 'user_id', 'photo_sha256', 'minted_at', 'updated_at',
+                'player_id', 'credential_id', 'user_id', 'photo_attachment_id', 'minted_at', 'updated_at',
             ],
             'wp_credencial_approval_request' => [
                 'id', 'type', 'target_player_id', 'requested_by', 'payload', 'status',
@@ -126,5 +126,28 @@ class InitialSchemaTest extends TestCase {
         }
 
         $this->assertSame( 1, (int) $byName['player_id']['pk'] );
+    }
+
+    /**
+     * Design migration 0.1.0 -> 0.2.0: `photo_attachment_id` defaults to 0
+     * ("0 = legacy/unknown row") so a pre-existing production row, which
+     * dbDelta only ADDS the column to (no backfill), rotates its credential
+     * id exactly once on its next GET — see IssuanceRepositoryTest's own
+     * "legacy row with 0 rotates once then stays stable".
+     */
+    public function test_photo_attachment_id_defaults_to_zero(): void {
+        InitialSchema::up();
+
+        global $wpdb;
+        $pdo  = $wpdb->getPdo();
+        $stmt = $pdo->query( 'PRAGMA table_info(wp_credencial_issuance)' );
+        $rows = $stmt->fetchAll( \PDO::FETCH_ASSOC );
+
+        $byName = [];
+        foreach ( $rows as $r ) {
+            $byName[ $r['name'] ] = $r;
+        }
+
+        $this->assertSame( '0', (string) $byName['photo_attachment_id']['dflt_value'] );
     }
 }

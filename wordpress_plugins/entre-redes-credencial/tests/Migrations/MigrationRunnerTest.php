@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace EntreRedes\Credencial\Tests\Migrations;
 
+use EntreRedes\Credencial\Migrations\InitialSchema;
 use EntreRedes\Credencial\Migrations\MigrationRunner;
 use EntreRedes\Credencial\Observability\InMemoryEventLog;
+use EntreRedes\Credencial\Tests\Support\RecordingWpdb;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -208,5 +210,105 @@ class MigrationRunnerTest extends TestCase {
         MigrationRunner::run( new InMemoryEventLog() );
 
         $this->assertSame( ENTRE_REDES_CREDENCIAL_VERSION, get_option( 'credencial_db_version' ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // Migration 0.1.0 -> 0.2.0 (design rev 9, decision
+    // `credencial/foto-desde-featured-image`): the retired `_credencial_sha256`
+    // meta is deleted exactly once, gated on the PERSISTED version being below
+    // the reserved 0.2.0 slot — never on ENTRE_REDES_CREDENCIAL_VERSION itself,
+    // so this stays correct even after a future 0.3.0 bump.
+    // -------------------------------------------------------------------------
+
+    public function test_run_from_0_1_0_deletes_the_legacy_sha256_meta_and_is_idempotent(): void {
+        update_option( 'credencial_db_version', '0.1.0' );
+        update_post_meta( 7, '_credencial_sha256', 'deadbeef' );
+        update_post_meta( 42, '_credencial_sha256', 'cafef00d' );
+
+        MigrationRunner::run( new InMemoryEventLog() );
+
+        $this->assertSame( ENTRE_REDES_CREDENCIAL_VERSION, get_option( 'credencial_db_version' ) );
+        $this->assertSame( '', get_post_meta( 7, '_credencial_sha256', true ) );
+        $this->assertSame( '', get_post_meta( 42, '_credencial_sha256', true ) );
+
+        // Second run (idempotent): nothing left to delete, no error, version stays put.
+        MigrationRunner::run( new InMemoryEventLog() );
+        $this->assertSame( ENTRE_REDES_CREDENCIAL_VERSION, get_option( 'credencial_db_version' ) );
+    }
+
+    public function test_run_already_at_0_2_0_never_touches_the_legacy_meta_function_again(): void {
+        update_option( 'credencial_db_version', '0.2.0' );
+        update_post_meta( 7, '_credencial_sha256', 'should-survive' );
+
+        MigrationRunner::run( new InMemoryEventLog() );
+
+        // The gate is < 0.2.0; already-at-0.2.0 must not re-run the one-time
+        // cleanup (harmless if it did, since the key is already gone in
+        // production, but the gate's OWN correctness is what this pins).
+        $this->assertSame( 'should-survive', get_post_meta( 7, '_credencial_sha256', true ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // InitialSchema::dropLegacyPhotoSha256Column() — information_schema-gated,
+    // exercised via a RecordingWpdb since the SQLite shim has no
+    // information_schema at all (see InitialSchema's own docblock).
+    // -------------------------------------------------------------------------
+
+    public function test_drop_legacy_column_issues_exactly_one_drop_when_the_probe_reports_the_column_exists(): void {
+        $recording = new RecordingWpdb( [ 'photo_sha256' => 1 ] );
+        $original  = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $recording;
+
+        try {
+            InitialSchema::up();
+        } finally {
+            $GLOBALS['wpdb'] = $original;
+        }
+
+        $drops = $recording->queriesMatching( '/ALTER TABLE .*DROP COLUMN photo_sha256/i' );
+        $this->assertCount( 1, $drops );
+    }
+
+    public function test_drop_legacy_column_issues_no_drop_when_the_probe_reports_zero(): void {
+        $recording = new RecordingWpdb( [ 'photo_sha256' => 0 ] );
+        $original  = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $recording;
+
+        try {
+            InitialSchema::up();
+        } finally {
+            $GLOBALS['wpdb'] = $original;
+        }
+
+        $drops = $recording->queriesMatching( '/ALTER TABLE .*DROP COLUMN photo_sha256/i' );
+        $this->assertCount( 0, $drops );
+    }
+
+    public function test_drop_legacy_column_issues_no_drop_when_the_probe_returns_null(): void {
+        $recording = new RecordingWpdb( [ 'photo_sha256' => null ] );
+        $original  = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $recording;
+
+        try {
+            InitialSchema::up();
+        } finally {
+            $GLOBALS['wpdb'] = $original;
+        }
+
+        $drops = $recording->queriesMatching( '/ALTER TABLE .*DROP COLUMN photo_sha256/i' );
+        $this->assertCount( 0, $drops );
+    }
+
+    public function test_drop_legacy_column_alter_failure_never_throws(): void {
+        $recording = new RecordingWpdb( [ 'photo_sha256' => 1 ], forceAlterFailure: true );
+        $original  = $GLOBALS['wpdb'];
+        $GLOBALS['wpdb'] = $recording;
+
+        try {
+            InitialSchema::up();
+            $this->addToAssertionCount( 1 ); // Reaching here without a fatal is the assertion.
+        } finally {
+            $GLOBALS['wpdb'] = $original;
+        }
     }
 }

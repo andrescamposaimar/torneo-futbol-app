@@ -47,6 +47,7 @@ class CredencialControllerTest extends TestCase {
         $GLOBALS['wp_test_posts']              = [];
         $GLOBALS['wp_test_postmeta']            = [];
         $GLOBALS['wp_test_post_thumbnail_urls'] = [];
+        $GLOBALS['wp_test_post_thumbnail_ids']  = [];
 
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_issuance" );
@@ -102,6 +103,7 @@ class CredencialControllerTest extends TestCase {
         ];
         $GLOBALS['wp_test_postmeta'][1]['dni']      = [ '30111222' ];
         $GLOBALS['wp_test_post_thumbnail_urls'][1]  = 'https://example.com/photo.jpg';
+        $GLOBALS['wp_test_post_thumbnail_ids'][1]   = 55;
 
         $authorizer = $this->createMock( CredencialAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'user_id' => 42, 'player_id' => 1 ] );
@@ -133,12 +135,13 @@ class CredencialControllerTest extends TestCase {
             'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador Uno', 'post_date' => '2000-01-01 00:00:00',
         ];
         $GLOBALS['wp_test_post_thumbnail_urls'][1] = 'https://example.com/photo.jpg';
+        $GLOBALS['wp_test_post_thumbnail_ids'][1]  = 55;
 
         $wpdb = new FaultInjectingWpdb();
         $wpdb->getPdo()->exec(
             'CREATE TABLE wp_credencial_issuance (
                 player_id INTEGER PRIMARY KEY, credential_id TEXT, user_id INTEGER,
-                photo_sha256 TEXT, minted_at TEXT, updated_at TEXT
+                photo_attachment_id INTEGER, minted_at TEXT, updated_at TEXT
             )'
         );
         $wpdb->failNextQueryMatching( '/INSERT INTO wp_credencial_issuance/i', 'Deadlock found' );

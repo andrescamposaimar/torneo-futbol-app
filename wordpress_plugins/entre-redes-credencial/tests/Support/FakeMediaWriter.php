@@ -24,16 +24,13 @@ use EntreRedes\Credencial\Photo\MediaWriter;
  */
 final class FakeMediaWriter implements MediaWriter {
 
-    /** @var array<int, array{requestId: int, sha256: string, metadataGenerated: bool}> */
+    /** @var array<int, array{requestId: int, metadataGenerated: bool}> */
     private array $attachments = [];
 
     private int $nextId = 1;
 
     /** @var array<int, int> playerId => attachmentId */
     private array $featured = [];
-
-    /** @var array<int, string> playerId => sha256 */
-    private array $playerSha = [];
 
     /** @var array<int, int> requestId => times createAttachment() was called for it */
     private array $createCalls = [];
@@ -61,7 +58,7 @@ final class FakeMediaWriter implements MediaWriter {
         $this->createCalls[ $requestId ] = ( $this->createCalls[ $requestId ] ?? 0 ) + 1;
 
         $id                       = $this->nextId++;
-        $this->attachments[ $id ] = [ 'requestId' => $requestId, 'sha256' => hash( 'sha256', $binary ), 'metadataGenerated' => false ];
+        $this->attachments[ $id ] = [ 'requestId' => $requestId, 'metadataGenerated' => false ];
 
         return $id;
     }
@@ -96,25 +93,13 @@ final class FakeMediaWriter implements MediaWriter {
         $this->featured[ $playerId ] = $attachmentId;
     }
 
-    public function getAttachmentSha256( int $attachmentId ): ?string {
-        return $this->attachments[ $attachmentId ]['sha256'] ?? null;
-    }
-
-    public function getPlayerSha256Meta( int $playerId ): ?string {
-        return $this->playerSha[ $playerId ] ?? null;
-    }
-
-    public function setPlayerSha256Meta( int $playerId, string $sha256 ): void {
-        $this->playerSha[ $playerId ] = $sha256;
-    }
-
     // -------------------------------------------------------------------------
     // Test-only helpers (not part of the MediaWriter contract).
     // -------------------------------------------------------------------------
 
     /** Registers an attachment as already existing, WITHOUT tagging it to any request — see class docblock. */
     public function seedAttachment( int $attachmentId ): void {
-        $this->attachments[ $attachmentId ] = [ 'requestId' => -1, 'sha256' => 'seeded-sha', 'metadataGenerated' => true ];
+        $this->attachments[ $attachmentId ] = [ 'requestId' => -1, 'metadataGenerated' => true ];
         if ( $attachmentId >= $this->nextId ) {
             $this->nextId = $attachmentId + 1;
         }

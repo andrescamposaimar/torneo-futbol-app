@@ -25,13 +25,15 @@ use EntreRedes\Credencial\Player\TeamResolver;
  *      player has no "current" credential to rotate or serve, and must never
  *      leak whether a photo is under review (design: "blocked and
  *      not_a_player: null — do not leak").
- *   2. Approved Photo Gate — no featured image => no_photo, but STILL reports
- *      `photo_request` (a first upload can be pending or rejected while no
- *      photo has ever been approved — spec "First upload"). Checked BEFORE
- *      issuance resolution, so a player who has never had a photo approved
- *      never gets an issuance row minted for them prematurely.
+ *   2. Approved Photo Gate — no featured image (no thumbnail attachment id,
+ *      or no resolvable URL) => no_photo, but STILL reports `photo_request`
+ *      (a first upload can be pending or rejected while no photo has ever
+ *      been approved — spec "First upload"). Checked BEFORE issuance
+ *      resolution, so a player who has never had a photo approved never gets
+ *      an issuance row minted for them prematurely.
  *   3. Only once both gates pass does this class mint/rotate the issuance
- *      row and assemble the full payload (design Interfaces section).
+ *      row (keyed by the thumbnail's attachment id — design D4, rev 9) and
+ *      assemble the full payload (design Interfaces section).
  *
  * `photo_request` resolution (engram 1589: this repository existed since
  * slice 2a/2b but was never wired back into the GET — "deferred to a later
@@ -50,17 +52,18 @@ use EntreRedes\Credencial\Player\TeamResolver;
  *     reported; the card shows the currently published photo" — the same
  *     "only the newest decision matters" principle governs `photo_request`).
  *
- * The photo rendition size ('medium') is a DELIBERATE, NOT-YET-FINAL choice
- * — design's own Open Questions list "Photo rendition for the face check
- * (medium vs large)" as still open. Centralized in one constant so revisiting
- * it later is a one-line change.
+ * The photo rendition size ('medium') is decided (design D5c, rev 9): the
+ * card draws the photo at 72 logical px, and 'medium' is the same rendition
+ * the player detail screen already loads (host-cached, proven to download).
+ * Centralized in one constant so revisiting it later is still a one-line
+ * change.
  */
 final class CredencialService {
 
     /** Design D5: "Reissue on every GET with expires_at = now+365d." */
     private const CREDENTIAL_TTL_SECONDS = 365 * 24 * 60 * 60;
 
-    /** See this class's own docblock — open question, not yet finalized. */
+    /** Design D5c: the same rendition the player detail screen already loads. */
     private const PHOTO_SIZE = 'medium';
 
     public function __construct(
@@ -83,14 +86,14 @@ final class CredencialService {
             return CredencialState::blocked();
         }
 
-        $photoUrl = get_the_post_thumbnail_url( $playerId, self::PHOTO_SIZE );
+        $thumbnailId = get_post_thumbnail_id( $playerId );
+        $photoUrl    = get_the_post_thumbnail_url( $playerId, self::PHOTO_SIZE );
 
-        if ( false === $photoUrl || '' === $photoUrl ) {
+        if ( false === $thumbnailId || $thumbnailId <= 0 || false === $photoUrl || '' === $photoUrl ) {
             return CredencialState::noPhoto( $this->resolvePhotoRequest( $playerId ) );
         }
 
-        $liveSha  = self::nullIfEmpty( (string) get_post_meta( $playerId, '_credencial_sha256', true ) );
-        $issuance = $this->issuanceRepository->resolve( $playerId, $liveUserId, $liveSha, $now );
+        $issuance = $this->issuanceRepository->resolve( $playerId, $liveUserId, (int) $thumbnailId, $now );
 
         $team = self::shapeTeam( $this->teamResolver->resolve( $playerId ) );
 
@@ -104,7 +107,7 @@ final class CredencialService {
             'birth_date' => $player->birthDateOrNull(),
             'caracter'   => $player->caracterOrNull(),
             'team'       => $team,
-            'photo'      => [ 'url' => $photoUrl, 'sha256' => $liveSha ],
+            'photo'      => [ 'id' => (int) $thumbnailId, 'url' => $photoUrl ],
             'code_seed'  => RotatingCode::seedFor( $this->codeSecret, $issuance['credential_id'] ),
             'code'       => [
                 'alg'    => RotatingCode::ALG,
@@ -170,9 +173,5 @@ final class CredencialService {
             'name' => $team['name'],
             'kind' => TeamKind::fromName( $team['name'] ),
         ];
-    }
-
-    private static function nullIfEmpty( string $value ): ?string {
-        return '' === $value ? null : $value;
     }
 }

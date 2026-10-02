@@ -49,6 +49,7 @@ class InitialSchema {
         }
 
         self::ensurePendingKeyIndex( $p );
+        self::dropLegacyPhotoSha256Column( $p );
 
         return $results;
     }
@@ -60,18 +61,23 @@ class InitialSchema {
     /**
      * credencial_issuance — one row per player, PK on player_id (see design
      * D4). `credential_id` is the server-minted, stable id the app caches;
-     * it rotates ONLY when `user_id` or `photo_sha256` differs from the live
-     * values (Credencial\CredencialService — a later slice), never on every
-     * GET. `photo_sha256` is the sha256 of the currently-published featured
-     * image, snapshotted here purely to detect that rotation trigger; it is
-     * NOT the source of truth for the photo itself.
+     * it rotates ONLY when `user_id` or `photo_attachment_id` differs from
+     * the live values (Credencial\CredencialService — a later slice), never
+     * on every GET. `photo_attachment_id` is the WordPress attachment id of
+     * the currently-published featured image (design rev 9, decision
+     * `credencial/foto-desde-featured-image`), snapshotted here purely to
+     * detect that rotation trigger; it is NOT the source of truth for the
+     * photo itself. `0` means "legacy row, live id unknown yet" — migration
+     * 0.1.0 -> 0.2.0 adds this column to existing rows with that default
+     * (no backfill), so every pre-existing row rotates its credential id
+     * exactly once, on its next GET.
      */
     private static function sqlCredencialIssuance( string $p, string $charset ): string {
         return "CREATE TABLE {$p}credencial_issuance (
   player_id BIGINT UNSIGNED NOT NULL,
   credential_id CHAR(36) NOT NULL,
   user_id BIGINT UNSIGNED NOT NULL,
-  photo_sha256 CHAR(64) NULL DEFAULT NULL,
+  photo_attachment_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
   minted_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
   PRIMARY KEY  (player_id)
@@ -196,6 +202,66 @@ class InitialSchema {
                 printf(
                     esc_html__(
                         'Entre Redes Credencial: no se pudo crear el índice único pending_key (uq_pending_key), probablemente porque ya existen solicitudes pendientes duplicadas. La garantía a nivel de base de datos de "a lo sumo una solicitud pendiente por jugador" NO está activa hasta resolver esto. Error: %s',
+                        'entre-redes-credencial'
+                    ),
+                    esc_html( $error )
+                );
+                echo '</p></div>';
+            } );
+        }
+    }
+
+    /**
+     * Migration 0.1.0 -> 0.2.0 (design rev 9, decision
+     * `credencial/foto-desde-featured-image`): drops the retired
+     * `photo_sha256` column, left behind by dbDelta's own convention of
+     * ADDING columns but never removing them. Same information_schema-probe
+     * shape as ensurePendingKeyIndex() above: skip silently on a shim with no
+     * information_schema (null), skip when the column is already gone (0),
+     * DROP COLUMN only when it is still there (> 0).
+     *
+     * TOLERANT AND NEVER THROWS: a leftover nullable column is inert (nothing
+     * reads or writes it any more — see the Remove list in design rev 9), so
+     * a failed ALTER is only ever an admin_notice, exactly like a failed
+     * uq_pending_key ALTER above never blocks activation.
+     *
+     * Runs on EVERY activation (not gated by MigrationRunner's version
+     * check) so re-activating an already-migrated site is a safe no-op, and
+     * so a site that skipped 0.2.0 activation once still gets it on the next
+     * one — same "always safe to re-run" discipline as dbDelta itself.
+     */
+    private static function dropLegacyPhotoSha256Column( string $p ): void {
+        global $wpdb;
+
+        $table = $p . 'credencial_issuance';
+
+        $exists = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME   = %s
+                    AND COLUMN_NAME  = 'photo_sha256'",
+                $table
+            )
+        );
+
+        // null  -> no information_schema (non-MySQL shim): skip silently.
+        // 0     -> already dropped (or never existed, e.g. a fresh install
+        //          created straight at 0.2.0): skip.
+        if ( null === $exists || (int) $exists === 0 ) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        $ok = $wpdb->query( "ALTER TABLE {$table} DROP COLUMN photo_sha256" );
+
+        if ( false === $ok ) {
+            $error = (string) $wpdb->last_error;
+            add_action( 'admin_notices', function () use ( $error ) {
+                echo '<div class="notice notice-error"><p>';
+                printf(
+                    esc_html__(
+                        'Entre Redes Credencial: no se pudo eliminar la columna obsoleta photo_sha256 de credencial_issuance. No afecta el funcionamiento (la columna ya no se lee ni se escribe), pero conviene resolverlo. Error: %s',
                         'entre-redes-credencial'
                     ),
                     esc_html( $error )

@@ -43,6 +43,7 @@ class PluginRestWiringTest extends TestCase {
         $GLOBALS['wp_test_posts']              = [];
         $GLOBALS['wp_test_postmeta']            = [];
         $GLOBALS['wp_test_post_thumbnail_urls'] = [];
+        $GLOBALS['wp_test_post_thumbnail_ids']  = [];
 
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}credencial_issuance" );
@@ -171,6 +172,7 @@ class PluginRestWiringTest extends TestCase {
             'post_type' => 'sp_player', 'post_status' => 'publish', 'post_title' => 'Jugador 777', 'post_date' => '2000-01-01 00:00:00',
         ];
         $GLOBALS['wp_test_post_thumbnail_urls'][777] = 'https://example.com/photo.jpg';
+        $GLOBALS['wp_test_post_thumbnail_ids'][777]  = 55;
 
         // CredencialController's clockFn defaults to the REAL time() when
         // wired by Plugin::boot() (no fake clock injected in production) —

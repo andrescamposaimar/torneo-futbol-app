@@ -36,12 +36,23 @@ class WpMediaWriterTest extends TestCase {
         $this->writer = new WpMediaWriter();
     }
 
-    public function test_createAttachment_returns_a_new_id_tagged_with_the_request_and_its_sha256(): void {
+    public function test_createAttachment_returns_a_new_id_tagged_with_the_request(): void {
         $id = $this->writer->createAttachment( 'jpeg-bytes', 42 );
 
         $this->assertGreaterThan( 0, $id );
         $this->assertSame( [ $id ], $this->writer->findAttachmentsTaggedWithRequest( 42 ) );
-        $this->assertSame( hash( 'sha256', 'jpeg-bytes' ), $this->writer->getAttachmentSha256( $id ) );
+    }
+
+    /**
+     * Regression guard (design rev 9, decision
+     * `credencial/foto-desde-featured-image`): the photo identity is the
+     * attachment id, never a hash — createAttachment() must not write the
+     * retired `_credencial_sha256` meta on the new attachment.
+     */
+    public function test_createAttachment_never_writes_the_legacy_sha256_meta(): void {
+        $id = $this->writer->createAttachment( 'jpeg-bytes', 42 );
+
+        $this->assertSame( '', get_post_meta( $id, '_credencial_sha256', true ) );
     }
 
     public function test_createAttachment_uses_a_random_128bit_hex_filename_not_derived_from_the_request(): void {
@@ -155,13 +166,5 @@ class WpMediaWriterTest extends TestCase {
             $GLOBALS['wp_test_attachment_metadata'],
             'metadata must actually be generated and stored, not silently skipped'
         );
-    }
-
-    public function test_player_sha256_meta_roundtrips(): void {
-        $this->assertNull( $this->writer->getPlayerSha256Meta( 7 ) );
-
-        $this->writer->setPlayerSha256Meta( 7, 'abc123' );
-
-        $this->assertSame( 'abc123', $this->writer->getPlayerSha256Meta( 7 ) );
     }
 }

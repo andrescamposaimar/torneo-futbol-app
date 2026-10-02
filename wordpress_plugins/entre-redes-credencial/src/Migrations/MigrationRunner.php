@@ -54,6 +54,16 @@ class MigrationRunner {
      */
     private const REQUIRED_EXTENSIONS = [ 'gd', 'exif', 'fileinfo' ];
 
+    /**
+     * The reserved one-time-upgrade slot for design rev 9's migration
+     * (decision `credencial/foto-desde-featured-image`): the photo identity
+     * mechanism changed from a sha256 hash to the WordPress attachment id, so
+     * the retired `_credencial_sha256` meta must be purged once. Gated on
+     * this LITERAL version string, never on ENTRE_REDES_CREDENCIAL_VERSION —
+     * a future 0.3.0 bump must not re-run this specific cleanup.
+     */
+    private const PHOTO_IDENTITY_MIGRATION_VERSION = '0.2.0';
+
     public static function run( EventLog $eventLog ): void {
         $installed = get_option( self::DB_VERSION_OPTION, '0' );
         $current   = ENTRE_REDES_CREDENCIAL_VERSION;
@@ -62,8 +72,15 @@ class MigrationRunner {
         // schema already matches. On upgrades this picks up new columns.
         InitialSchema::up();
 
+        if ( version_compare( (string) $installed, self::PHOTO_IDENTITY_MIGRATION_VERSION, '<' ) ) {
+            // One-time: the sha256-based photo identity is retired (design
+            // rev 9) — nothing reads or writes this meta any more. Idempotent
+            // regardless of how many posts have it, or whether it exists at
+            // all (a no-op delete is not an error).
+            delete_post_meta_by_key( '_credencial_sha256' );
+        }
+
         if ( version_compare( (string) $installed, $current, '<' ) ) {
-            // Reserved for one-time upgrade tasks. None exist yet in slice 1a.
             update_option( self::DB_VERSION_OPTION, $current );
         }
 

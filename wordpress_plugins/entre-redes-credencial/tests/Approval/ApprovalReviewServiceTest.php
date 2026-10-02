@@ -51,6 +51,19 @@ class ApprovalReviewServiceTest extends TestCase {
     }
 
     /**
+     * setUp() only clears hooks before the next test of THIS class. The
+     * shim's add_action() registry is process-wide, so a
+     * `save_post_sp_player` listener left by this class's last test (the
+     * race simulations register one) would fire inside whatever test class
+     * runs next and calls do_action() — e.g. PendingPhotosPageTest — and
+     * insert phantom approval rows there.
+     */
+    protected function tearDown(): void {
+        unset( $GLOBALS['_prode_test_action_callbacks']['save_post_sp_player'] );
+        unset( $GLOBALS['_prode_test_actions']['save_post_sp_player'] );
+    }
+
+    /**
      * @return array{0: FaultInjectingWpdb, 1: ApprovalRequestRepository}
      */
     private function faultyRepository(): array {
@@ -87,7 +100,6 @@ class ApprovalReviewServiceTest extends TestCase {
         $this->assertNotNull( $attachmentId );
         $this->assertSame( $attachmentId, $this->media->getFeaturedImageId( self::PLAYER ) );
         $this->assertTrue( $this->media->metadataWasGenerated( $attachmentId ) );
-        $this->assertSame( hash( 'sha256', 'photo-bytes' ), $this->media->getPlayerSha256Meta( self::PLAYER ) );
     }
 
     public function test_approve_fires_the_cache_invalidation_hook(): void {
