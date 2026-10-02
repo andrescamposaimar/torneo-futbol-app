@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
+import 'package:torneo_futbol_app/models/cambios_candidato.dart';
 import 'package:torneo_futbol_app/models/cambios_plaza.dart';
 import 'package:torneo_futbol_app/models/cambios_solicitud.dart';
 import 'package:torneo_futbol_app/providers/cambios_providers.dart';
@@ -80,7 +81,13 @@ class _StubPlantelController extends CambiosPlantelController {
 
 class _StubCandidatosController extends CambiosCandidatosController {
   _StubCandidatosController(CambiosCandidatosState initialState)
-      : super(_fakeService(), seasonId: 7, teamId: 1, plazaId: 1) {
+      : super(
+          _fakeService(),
+          seasonId: 7,
+          teamId: 1,
+          plazaId: 1,
+          seccion: CambiosCandidatosSeccion.listaEspera,
+        ) {
     state = initialState;
   }
 
@@ -125,14 +132,25 @@ class _NoopJugadorApiService implements IApiService {
 const _scope = (seasonId: 7, teamId: 1);
 
 /// [CambiosSolicitarScreen] keys its candidatos controller by
-/// `(seasonId, teamId, plazaId)` — one override per distinct plazaId under
-/// test, or the real (non-stubbed) provider runs instead and reaches for
-/// `tenantConfigProvider`, which this test suite never bootstraps.
-Override _candidatosOverrideFor(int plazaId) {
-  final params = (seasonId: _scope.seasonId, teamId: _scope.teamId, plazaId: plazaId);
-  return cambiosCandidatosControllerProvider(params).overrideWith(
-    (ref) => _StubCandidatosController(const CambiosCandidatosLoaded(candidatos: [], query: '')),
-  );
+/// `(seasonId, teamId, plazaId, seccion)` — ONE override per distinct
+/// plazaId AND seccion under test, or the real (non-stubbed) provider runs
+/// instead and reaches for `tenantConfigProvider`, which this test suite
+/// never bootstraps. `CambiosSolicitarScreen.build()` `watch`es BOTH
+/// sections unconditionally (see that screen's own docblock for why), so
+/// both need an override here even though these container tests never
+/// interact with the candidate step itself.
+List<Override> _candidatosOverridesFor(int plazaId) {
+  return CambiosCandidatosSeccion.values.map((seccion) {
+    final params = (
+      seasonId: _scope.seasonId,
+      teamId: _scope.teamId,
+      plazaId: plazaId,
+      seccion: seccion,
+    );
+    return cambiosCandidatosControllerProvider(params).overrideWith(
+      (ref) => _StubCandidatosController(const CambiosCandidatosLoaded(candidatos: [], query: '')),
+    );
+  }).toList();
 }
 
 Future<void> _pumpContainer(WidgetTester tester, {required List<CambiosPlaza> plazas}) async {
@@ -144,7 +162,7 @@ Future<void> _pumpContainer(WidgetTester tester, {required List<CambiosPlaza> pl
           (ref) => _StubPlantelController(CambiosPlantelLoaded(plazas: plazas)),
         ),
         for (final plazaId in plazas.map((p) => p.plazaId).toSet())
-          _candidatosOverrideFor(plazaId),
+          ..._candidatosOverridesFor(plazaId),
         cambiosFechaAbiertaProvider(_scope.seasonId).overrideWith((ref) => Future.value(null)),
         cambiosSolicitudesControllerProvider(_scope).overrideWith(
           (ref) => _StubSolicitudesController(const CambiosSolicitudesLoaded(solicitudes: [])),

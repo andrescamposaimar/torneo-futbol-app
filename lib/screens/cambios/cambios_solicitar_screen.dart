@@ -1,16 +1,18 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/cambios_candidato.dart';
 import '../../models/cambios_fecha_abierta.dart';
 import '../../models/cambios_plaza.dart';
 import '../../models/cambios_solicitud.dart';
 import '../../providers/cambios_providers.dart';
 import '../../services/cambios_api_service.dart';
 import '../../services/cambios_candidatos_controller.dart';
+import '../../services/player_filter_service.dart';
+import '../../widgets/cambios_candidato_card.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import '../../widgets/loading_seccion.dart';
+import '../../widgets/prode_segmented_toggle.dart';
 
 /// "Pedir cambio" — for one [plaza], either:
 ///   - [CambiosSolicitudTipo.sustitucion]: a searchable list of viable
@@ -23,6 +25,43 @@ import '../../widgets/loading_seccion.dart';
 /// caller refreshes `cambiosPlantelControllerProvider` for this team/season
 /// so the roster reflects the change through shared Riverpod state, exactly
 /// like `_PredictionSheet` never threads a result back through `pop()`.
+///
+/// *** THE TWO CANDIDATE SECTIONS ***
+/// A `sustitucion` candidate step has TWO populations the captain chooses
+/// between via a segmented toggle — [CambiosCandidatosSeccion.listaEspera]
+/// (who actually signed up to come in as a cambio) and
+/// [CambiosCandidatosSeccion.padronCompleto] (everyone else in the whole
+/// padrón, widened on purpose — see that enum's own docblock). Each section
+/// is backed by its OWN [cambiosCandidatosControllerProvider] instance
+/// (keyed by `seccion`, see `cambios_providers.dart`): `listaEspera` loads
+/// the instant this screen opens (the common case, one request), while
+/// `padronCompleto` stays [CambiosCandidatosIdle] — fetching NOTHING — until
+/// [_onSeccionChanged] asks for it the first time the captain switches to
+/// it. Neither section ever computes its OWN viability or puntaje-ceiling
+/// logic: both render exactly what the backend returned, nothing more (see
+/// `Rest\PlazasController::listarCandidatos()`'s own docblock on the
+/// backend, "FILTERING HAPPENS HERE, NEVER IN CandidatosResolver" — the
+/// mobile client follows the identical discipline for the same reason: a
+/// screen that disagrees with the dictamen engine is worse than no screen
+/// at all).
+///
+/// *** SEARCH + PUNTAJE CHIPS ARE LOCAL, NOT A SECOND SERVER ROUND TRIP ***
+/// Once a section has loaded, typing in the search field or toggling a
+/// puntaje chip narrows the ALREADY-fetched list client-side, via
+/// [PlayerFilterService.filtrar] — see `_candidatosFiltrados()`. This is
+/// what keeps "the common case must cost one request" true even while the
+/// captain is actively narrowing a long "Padrón Completo" list down.
+///
+/// *** THE PUNTAJE CHIPS TEACH THE CEILING, THEY NEVER HIDE IT ***
+/// Every one of the 9 valid puntajes is always shown — the ones ABOVE
+/// `plaza.puntajeTecho` render disabled, visibly greyed, and noticeably
+/// BIGGER than the enabled ones (the process owner's own request: a captain
+/// hits this constraint constantly, so the screen should make it impossible
+/// to miss, not hide the excluded values). This is a pure presentation
+/// choice over the puntaje VALUE already known client-side
+/// (`plaza.puntajeTecho`, itself only ever DISPLAYED, never computed) — it
+/// changes nothing about which candidates the backend already decided are
+/// viable.
 ///
 /// *** WHERE `fechaId` COMES FROM ***
 /// `POST /cambios/solicitudes` requires a `fecha_id` (the season fecha this
@@ -65,31 +104,73 @@ class CambiosSolicitarScreen extends ConsumerStatefulWidget {
       _CambiosSolicitarScreenState();
 }
 
+/// Every valid puntaje the reglamento recognizes — same 9 discrete values
+/// `players_screen.dart`'s own puntaje filter uses (`Plazas\Puntaje` on the
+/// backend). Kept as its own small literal here rather than imported from
+/// that screen: `players_screen.dart` is explicitly out of scope for this
+/// change (see this slice's own task brief), and this is the only other
+/// place in the app that needs the same list.
+const List<double> _valoresPuntaje = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
+
 class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen> {
   final _searchController = TextEditingController();
-  Timer? _debounce;
   int? _selectedPlayerId;
   bool _submitting = false;
   String? _error;
 
-  CambiosCandidatosParams get _candidatosParams => (
+  CambiosCandidatosSeccion _seccion = CambiosCandidatosSeccion.listaEspera;
+  String _searchQuery = '';
+  final List<double> _puntajesFiltro = [];
+
+  CambiosCandidatosParams _paramsFor(CambiosCandidatosSeccion seccion) => (
         seasonId: widget.seasonId,
         teamId: widget.teamId,
         plazaId: widget.plaza.plazaId,
+        seccion: seccion,
       );
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   void _onSearchChanged(String query) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () {
-      ref.read(cambiosCandidatosControllerProvider(_candidatosParams).notifier).load(query: query);
+    setState(() => _searchQuery = query);
+  }
+
+  void _onPuntajeToggled(double valor) {
+    setState(() {
+      if (_puntajesFiltro.contains(valor)) {
+        _puntajesFiltro.remove(valor);
+      } else {
+        _puntajesFiltro.add(valor);
+      }
     });
+  }
+
+  /// Switches the visible section and, the FIRST time `padronCompleto` is
+  /// opened, triggers its (until-now-idle) fetch — see this class's own
+  /// docblock, "THE TWO CANDIDATE SECTIONS". Switching back and forth
+  /// afterward never re-fetches: once a section's controller has left
+  /// [CambiosCandidatosIdle], this is a no-op beyond the local [setState].
+  ///
+  /// Reading (never watching) `cambiosCandidatosControllerProvider` here is
+  /// safe against Riverpod's `autoDispose` teardown ONLY because [build]
+  /// below `watch`es BOTH sections' providers UNCONDITIONALLY, for as long
+  /// as this screen is mounted — see that method's own comment. Without
+  /// that, switching sections would momentarily leave the just-selected
+  /// section's provider with zero watchers (between this `setState` and the
+  /// next frame's rebuild), and `autoDispose` would tear it down right as
+  /// this method tries to use it.
+  void _onSeccionChanged(CambiosCandidatosSeccion seccion) {
+    setState(() => _seccion = seccion);
+
+    final params = _paramsFor(seccion);
+    final current = ref.read(cambiosCandidatosControllerProvider(params));
+    if (current is CambiosCandidatosIdle) {
+      ref.read(cambiosCandidatosControllerProvider(params).notifier).load();
+    }
   }
 
   Future<void> _onConfirmar() async {
@@ -160,6 +241,20 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
         ventanaAbierta &&
         (!isSustitucion || _selectedPlayerId != null);
 
+    // Both sections' providers are `watch`ed HERE, UNCONDITIONALLY, for as
+    // long as this screen is built — never only the currently visible one.
+    // This is what keeps `autoDispose` from tearing either controller down
+    // the instant the OTHER section becomes the one actually rendered (see
+    // `_onSeccionChanged`'s own docblock for the race this avoids). Only
+    // the state matching `_seccion` is ever handed to `_CandidatosList`
+    // below — the other one is kept alive, never displayed.
+    final listaEsperaState =
+        ref.watch(cambiosCandidatosControllerProvider(_paramsFor(CambiosCandidatosSeccion.listaEspera)));
+    final padronCompletoState =
+        ref.watch(cambiosCandidatosControllerProvider(_paramsFor(CambiosCandidatosSeccion.padronCompleto)));
+    final candidatosState =
+        _seccion == CambiosCandidatosSeccion.listaEspera ? listaEsperaState : padronCompletoState;
+
     return Scaffold(
       appBar: EntreRedesAppBar(
         title: isSustitucion ? 'Pedir cambio' : 'Pedir regreso',
@@ -174,6 +269,16 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
           if (isSustitucion) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: ProdeSegmentedToggle(
+                labels: const ['Lista de Espera', 'Padrón Completo'],
+                selectedIndex: _seccion == CambiosCandidatosSeccion.listaEspera ? 0 : 1,
+                onChanged: (i) => _onSeccionChanged(
+                  i == 0 ? CambiosCandidatosSeccion.listaEspera : CambiosCandidatosSeccion.padronCompleto,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: TextField(
                 key: const Key('candidato_search_field'),
                 controller: _searchController,
@@ -185,10 +290,18 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
                 ),
               ),
             ),
+            _PuntajeChips(
+              techo: widget.plaza.puntajeTecho,
+              seleccionados: _puntajesFiltro,
+              onToggle: _onPuntajeToggled,
+            ),
             Expanded(
               child: _CandidatosList(
-                params: _candidatosParams,
-                searchQuery: _searchController.text,
+                state: candidatosState,
+                onRetry: () =>
+                    ref.read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier).load(),
+                searchQuery: _searchQuery,
+                puntajesFiltro: _puntajesFiltro,
                 selectedPlayerId: _selectedPlayerId,
                 onSelect: (playerId) => setState(() => _selectedPlayerId = playerId),
               ),
@@ -266,61 +379,204 @@ class _PlazaHeader extends StatelessWidget {
   }
 }
 
-/// The candidate list for a `sustitucion` — loading/error/empty/loaded states
-/// of [cambiosCandidatosControllerProvider], plus per-row selection state and
-/// the trailing icon/subtitle. Its own widget (rather than inline in
-/// [CambiosSolicitarScreen]'s `Column`) for the same reason every other
-/// state in this file already got one: [_PlazaHeader], [_FechaGapBanner],
-/// [_VentanaCerradaBanner], [_CandidatosErrorView], [_CandidatosEmptyView].
-class _CandidatosList extends ConsumerWidget {
-  final CambiosCandidatosParams params;
+/// Every valid puntaje, as a chip — enabled ones toggle a LOCAL filter over
+/// the already-loaded candidate list; the ones ABOVE [techo] render
+/// disabled, greyed, and noticeably bigger — see
+/// `CambiosSolicitarScreen`'s own docblock, "THE PUNTAJE CHIPS TEACH THE
+/// CEILING, THEY NEVER HIDE IT".
+class _PuntajeChips extends StatelessWidget {
+  final double techo;
+  final List<double> seleccionados;
+  final ValueChanged<double> onToggle;
+
+  const _PuntajeChips({
+    required this.techo,
+    required this.seleccionados,
+    required this.onToggle,
+  });
+
+  /// Half-point integer comparison — avoids a direct `double >` on values
+  /// that are each exact halves (1, 1.5, 2, ... 5) but still originate from
+  /// two independent sources (this literal list vs. a JSON-decoded
+  /// `puntaje_techo`), mirroring `Plazas\Puntaje`'s own ×2 encoding on the
+  /// backend (see that class's docblock for why a raw float compare is the
+  /// wrong tool for this exact kind of boundary check).
+  bool _excedeTecho(double valor) => (valor * 2).round() > (techo * 2).round();
+
+  @override
+  Widget build(BuildContext context) {
+    final label = techo == techo.truncateToDouble() ? techo.toInt().toString() : techo.toString();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Techo de esta plaza: $label pts.',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black54),
+          ),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: _valoresPuntaje.map((valor) {
+                final disabled = _excedeTecho(valor);
+                final isSelected = !disabled && seleccionados.contains(valor);
+                final texto = valor == valor.truncateToDouble()
+                    ? valor.toInt().toString()
+                    : valor.toString();
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: GestureDetector(
+                    key: Key('puntaje_chip_$valor'),
+                    onTap: disabled ? null : () => onToggle(valor),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: disabled ? 16 : 12,
+                        vertical: disabled ? 10 : 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: disabled
+                            ? Colors.grey.shade200
+                            : (isSelected ? Theme.of(context).colorScheme.primary : Colors.grey[200]),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        texto,
+                        style: TextStyle(
+                          fontSize: disabled ? 16 : 13,
+                          fontWeight: FontWeight.w600,
+                          color: disabled
+                              ? Colors.grey.shade400
+                              : (isSelected ? Colors.white : Colors.black87),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Narrows [candidatos] by [query] and [puntajes] via
+/// [PlayerFilterService.filtrar] (reused, not reimplemented — see
+/// `CambiosSolicitarScreen`'s own docblock) and sorts by puntaje descending
+/// via [PlayerFilterService.comparadorPuntaje]. Both operate on a plain
+/// `Map` shape (`title.rendered` / `metrics.puntaje`) because that service
+/// is shared with `players_screen.dart`'s raw WordPress jugador maps — the
+/// thin wrapper here (and the `_candidato` back-reference) is the ADAPTER
+/// that lets a typed [CambiosCandidato] go through that SAME logic without
+/// reimplementing its string/puntaje matching.
+List<CambiosCandidato> _candidatosFiltrados(
+  List<CambiosCandidato> candidatos, {
+  required String query,
+  required List<double> puntajes,
+}) {
+  final envueltos = candidatos
+      .map((c) => {
+            'title': {'rendered': c.nombre},
+            'metrics': {'puntaje': c.puntaje},
+            '_candidato': c,
+          })
+      .toList();
+
+  final filtrados = PlayerFilterService.filtrar(
+    envueltos,
+    query: query,
+    puntajes: puntajes,
+  )..sort(PlayerFilterService.comparadorPuntaje);
+
+  return filtrados.map((m) => (m as Map)['_candidato'] as CambiosCandidato).toList(growable: false);
+}
+
+/// The candidate list for a `sustitucion` — loading/error/empty/loaded views
+/// for ONE section's already-resolved [state] (the caller, [CambiosSolicitarScreen],
+/// `watch`es BOTH sections' providers itself and hands down only the
+/// currently selected one's state — see that class's own `build()` comment
+/// for why this widget never watches the provider itself), plus per-row
+/// selection state and the trailing icon/subtitle. Its own widget (rather
+/// than inline in [CambiosSolicitarScreen]'s `Column`) for the same reason
+/// every other state in this file already got one: [_PlazaHeader],
+/// [_FechaGapBanner], [_VentanaCerradaBanner], [_CandidatosErrorView],
+/// [_CandidatosEmptyView].
+class _CandidatosList extends StatelessWidget {
+  final CambiosCandidatosState state;
+  final VoidCallback onRetry;
   final String searchQuery;
+  final List<double> puntajesFiltro;
   final int? selectedPlayerId;
   final ValueChanged<int> onSelect;
 
   const _CandidatosList({
-    required this.params,
+    required this.state,
+    required this.onRetry,
     required this.searchQuery,
+    required this.puntajesFiltro,
     required this.selectedPlayerId,
     required this.onSelect,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(cambiosCandidatosControllerProvider(params));
-
+  Widget build(BuildContext context) {
     return switch (state) {
+      CambiosCandidatosIdle() => const _CandidatosIdleView(),
       CambiosCandidatosLoading() => const LoadingSeccion(texto: 'Buscando candidatos...'),
-      CambiosCandidatosError() => _CandidatosErrorView(
-          onRetry: () =>
-              ref.read(cambiosCandidatosControllerProvider(params).notifier).load(query: searchQuery),
-        ),
-      CambiosCandidatosLoaded(:final candidatos) => candidatos.isEmpty
-          ? const _CandidatosEmptyView()
-          : ListView.builder(
-              key: const Key('candidatos_list'),
-              itemCount: candidatos.length,
-              itemBuilder: (context, i) {
-                final c = candidatos[i];
-                final isSelected = selectedPlayerId == c.playerId;
-                return ListTile(
-                  key: Key('candidato_${c.playerId}'),
-                  selected: isSelected,
-                  onTap: () => onSelect(c.playerId),
-                  trailing: isSelected
-                      ? Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary)
-                      : const Icon(Icons.radio_button_unchecked),
-                  title: Text(c.nombre),
-                  subtitle: Text(
-                    [
-                      if (c.esPadre) 'Padre',
-                      c.puntaje != null ? 'Puntaje: ${c.puntaje}' : 'Puntaje: sin datos',
-                    ].join(' · '),
-                  ),
-                );
-              },
-            ),
+      CambiosCandidatosError() => _CandidatosErrorView(onRetry: onRetry),
+      CambiosCandidatosLoaded(:final candidatos) => _buildLoaded(context, candidatos),
     };
+  }
+
+  Widget _buildLoaded(BuildContext context, List<CambiosCandidato> candidatos) {
+    final filtrados = _candidatosFiltrados(
+      candidatos,
+      query: searchQuery,
+      puntajes: puntajesFiltro,
+    );
+
+    if (filtrados.isEmpty) {
+      return const _CandidatosEmptyView();
+    }
+
+    return ListView.builder(
+      key: const Key('candidatos_list'),
+      itemCount: filtrados.length,
+      itemBuilder: (context, i) {
+        final c = filtrados[i];
+        return CambiosCandidatoCard(
+          key: Key('candidato_${c.playerId}'),
+          playerId: c.playerId,
+          nombre: c.nombre,
+          esPadre: c.esPadre,
+          puntaje: c.puntaje,
+          selected: selectedPlayerId == c.playerId,
+          onTap: () => onSelect(c.playerId),
+        );
+      },
+    );
+  }
+}
+
+/// Shown for the LAZY section ("Padrón Completo") before it has ever been
+/// opened — distinct from [LoadingSeccion] (which implies a fetch is
+/// already in flight): this is "nothing requested yet", not "waiting on the
+/// network". Should only ever be visible for one frame in practice —
+/// `_onSeccionChanged` requests the load in the SAME event that makes this
+/// section visible — but it is still the honest state to render if that
+/// ever briefly shows.
+class _CandidatosIdleView extends StatelessWidget {
+  const _CandidatosIdleView();
+
+  @override
+  Widget build(BuildContext context) {
+    return const LoadingSeccion(texto: 'Buscando candidatos...');
   }
 }
 
@@ -330,20 +586,26 @@ class _CandidatosErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'No pudimos cargar los candidatos. Revisá tu conexión y '
-              'reintentá en unos minutos.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(onPressed: onRetry, child: const Text('Reintentar')),
-          ],
+    // SingleChildScrollView, not a bare Center/Column: this view now sits
+    // BELOW the segmented toggle + puntaje chips row this slice added, which
+    // leaves less vertical room than before — a narrow viewport (or this
+    // suite's default test window) can otherwise overflow a fixed Column.
+    return SingleChildScrollView(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'No pudimos cargar los candidatos. Revisá tu conexión y '
+                'reintentá en unos minutos.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(onPressed: onRetry, child: const Text('Reintentar')),
+            ],
+          ),
         ),
       ),
     );

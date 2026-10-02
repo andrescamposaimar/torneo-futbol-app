@@ -1,5 +1,36 @@
 import 'package:flutter/foundation.dart';
 
+/// Which of the two candidate pools `GET /cambios/plazas/candidatos?seccion=`
+/// enumerates — mirrors `Plazas\CandidatosSeccion` on the backend. Neither
+/// name editorializes about approval odds (see that backend class's own
+/// docblock) — both are neutral descriptions of WHERE a candidate comes
+/// from, never a hint about how likely the committee is to approve them.
+///
+/// Omitting `?seccion` entirely keeps the backend's pre-existing
+/// season-registered pool — this app never does that any more (both screen
+/// sections always pass one of these two), but the backend still accepts the
+/// omission for other callers; see `CambiosApiService.fetchCandidatos()`.
+enum CambiosCandidatosSeccion {
+  /// Players on the "lista de espera" pseudo-team — who actually signed up
+  /// to come in as a cambio.
+  listaEspera,
+
+  /// Every OTHER published player, i.e. the whole padrón minus the lista de
+  /// espera team — widened on purpose so a previously-registered,
+  /// already-rated player can come in even without being on this year's
+  /// `sp_season` list.
+  padronCompleto;
+
+  String toWire() {
+    switch (this) {
+      case CambiosCandidatosSeccion.listaEspera:
+        return 'lista_espera';
+      case CambiosCandidatosSeccion.padronCompleto:
+        return 'padron_completo';
+    }
+  }
+}
+
 /// A single candidate for a plaza, as returned by
 /// `GET /cambios/plazas/candidatos`.
 ///
