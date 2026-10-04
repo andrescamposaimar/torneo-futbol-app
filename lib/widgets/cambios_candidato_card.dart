@@ -79,10 +79,21 @@ class CambiosCandidatoCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (esPadre) ...[
-                        const SizedBox(width: 6),
-                        const CambiosBadge(text: 'Padre'),
-                      ],
+                      const SizedBox(width: 6),
+                      // Every candidate carries one of these two — the
+                      // tournament's own two-category model (see this
+                      // widget's own docblock): `esPadre` is `caracter`
+                      // starting with "padre"; everyone else is "Invitado".
+                      // Not `Expanded`/`Flexible`: the badge keeps its own
+                      // intrinsic width so it is never squeezed or wrapped —
+                      // the name above gives up room first via its own
+                      // `Expanded` + ellipsis.
+                      esPadre
+                          ? const CambiosBadge(text: 'Padre')
+                          : const CambiosBadge(
+                              text: 'Invitado',
+                              variant: CambiosBadgeVariant.accent,
+                            ),
                     ],
                   ),
                 ],
