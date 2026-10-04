@@ -632,10 +632,10 @@ class CandidatosResolver {
      *        search yet display a different resolved name. Matching is
      *        whatever case/accent sensitivity the underlying SQL engine's
      *        `LIKE` gives (case-insensitive for both this plugin's SQLite
-     *        test shim and MySQL's default collation); no wildcard
-     *        ('%', '_') escaping is applied — consistent with every other
-     *        free-text filter already in this codebase, none of which
-     *        escapes LIKE metacharacters either.
+     *        test shim and MySQL's default collation). The term is escaped
+     *        with `$wpdb->esc_like()` before being wrapped in `%…%` — the
+     *        standard WordPress idiom — so a literal `%` or `_` typed by the
+     *        captain matches itself instead of acting as a wildcard.
      * @return array<int, int>
      * @throws \RuntimeException When the query fails at the wpdb level.
      */
@@ -647,8 +647,13 @@ class CandidatosResolver {
         $params         = [ $seasonId ];
 
         if ( '' !== $search ) {
-            $filtroBusqueda = ' AND posts.post_title LIKE %s';
-            $params[]       = '%' . $search . '%';
+            // ESCAPE '\' is explicit here (not just implied by $wpdb->esc_like()'s
+            // backslash escaping) because MySQL treats backslash as the LIKE
+            // escape character BY DEFAULT, but the SQLite test shim backing this
+            // plugin's whole suite does not — the clause makes the behavior
+            // explicit and identical on both engines.
+            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '\\'";
+            $params[]       = '%' . $wpdb->esc_like( $search ) . '%';
         }
 
         $rows = $wpdb->get_results(
@@ -706,8 +711,13 @@ class CandidatosResolver {
         $params         = [ (string) $teamId ];
 
         if ( '' !== $search ) {
-            $filtroBusqueda = ' AND posts.post_title LIKE %s';
-            $params[]       = '%' . $search . '%';
+            // ESCAPE '\' is explicit here (not just implied by $wpdb->esc_like()'s
+            // backslash escaping) because MySQL treats backslash as the LIKE
+            // escape character BY DEFAULT, but the SQLite test shim backing this
+            // plugin's whole suite does not — the clause makes the behavior
+            // explicit and identical on both engines.
+            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '\\'";
+            $params[]       = '%' . $wpdb->esc_like( $search ) . '%';
         }
 
         $rows = $wpdb->get_results(
@@ -766,8 +776,13 @@ class CandidatosResolver {
         $params         = [ (string) $excludeTeamId ];
 
         if ( '' !== $search ) {
-            $filtroBusqueda = ' AND posts.post_title LIKE %s';
-            $params[]       = '%' . $search . '%';
+            // ESCAPE '\' is explicit here (not just implied by $wpdb->esc_like()'s
+            // backslash escaping) because MySQL treats backslash as the LIKE
+            // escape character BY DEFAULT, but the SQLite test shim backing this
+            // plugin's whole suite does not — the clause makes the behavior
+            // explicit and identical on both engines.
+            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '\\'";
+            $params[]       = '%' . $wpdb->esc_like( $search ) . '%';
         }
 
         $rows = $wpdb->get_results(

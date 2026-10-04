@@ -922,6 +922,53 @@ class CandidatosResolverTest extends TestCase {
     }
 
     /**
+     * A literal '%' or '_' typed into the search box must be matched AS
+     * TEXT, never as a SQL LIKE wildcard — otherwise a captain typing '%'
+     * would match every player in the population instead of getting an
+     * empty (or genuinely matching) result. Before this fix,
+     * playerIdsRegistradosEnTemporada() interpolated $search into the LIKE
+     * pattern unescaped, so '%' matched everything.
+     */
+    public function test_buscar_paginado_search_escapes_like_wildcards(): void {
+        $plazaId = $this->plaza( 10 );
+        $this->seedManyPlayers( 5 ); // ids 1000..1004.
+        $this->seedPlayer( 9000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+
+        global $wpdb;
+        // Every "other" player gets a REAL, non-null, non-matching title —
+        // `seedManyPlayers()` itself leaves post_title NULL, and `NULL LIKE
+        // '%...%'` is NULL (falsy) regardless of escaping, which would make
+        // this test pass even with the bug still present (nothing for an
+        // unescaped '%' to wildcard-match against). An actual title is what
+        // an unescaped '%' would incorrectly match against.
+        foreach ( range( 1000, 1004 ) as $otroId ) {
+            $wpdb->update( $wpdb->prefix . 'posts', [ 'post_title' => "Jugador Distinto $otroId" ], [ 'ID' => $otroId ] );
+        }
+        $wpdb->update( $wpdb->prefix . 'posts', [ 'post_title' => '100% Seguro' ], [ 'ID' => 9000 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10,
+            '%'
+        );
+
+        $this->assertSame(
+            1,
+            $resultado['total'],
+            "A literal '%' search must match only the player whose name contains a literal '%', "
+            . 'not every player in the population.'
+        );
+        $this->assertSame( 9000, $resultado['candidatos'][0]->playerId() );
+    }
+
+    /**
      * $puntajesFiltro (the app's puntaje chips) excludes non-matching
      * candidates from the POPULATION entirely — including one whose puntaje
      * is unresolvable, which can never match a specific requested value.
@@ -948,6 +995,55 @@ class CandidatosResolverTest extends TestCase {
 
         $this->assertSame( 1, $resultado['total'] );
         $this->assertSame( [ 800 ], array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ) );
+    }
+
+    /**
+     * COMPOSITION: $puntajesFiltro and pagination must combine correctly —
+     * the filter narrows the POPULATION first (see `buscarPaginado()`'s own
+     * docblock), and pagination then slices THAT narrowed population, never
+     * the other way around. A larger population is seeded here so a
+     * regression that paginated BEFORE filtering (returning an empty or
+     * wrong page 2) would be caught — the single-page tests above
+     * (`test_buscar_paginado_puntajes_filtro_excludes_non_matching_puntajes`)
+     * never exercise a second page at all.
+     */
+    public function test_buscar_paginado_puntajes_filtro_combined_with_page_2(): void {
+        $plazaId = $this->plaza( 10 );
+
+        // 15 matching players (ids 2000..2014) interleaved with 5
+        // non-matching ones (ids 2100..2104) — the non-matching ones must
+        // never count towards the filtered population's total or its
+        // pagination.
+        for ( $i = 0; $i < 15; $i++ ) {
+            $this->seedPlayer( 2000 + $i, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        }
+        for ( $i = 0; $i < 5; $i++ ) {
+            $this->seedPlayer( 2100 + $i, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
+        }
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            2,
+            10,
+            '',
+            [ 2.5 ]
+        );
+
+        // Page 1 (ids 2000..2009) already consumed the first 10 of the 15
+        // matching players — page 2 must return exactly the remaining 5
+        // (ids 2010..2014), never bleed in a non-matching player or wrap
+        // around to page 1's players again.
+        $this->assertSame( 15, $resultado['total'] );
+        $this->assertSame(
+            [ 2010, 2011, 2012, 2013, 2014 ],
+            array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] )
+        );
     }
 
     public function test_buscar_paginado_seccion_padron_completo_still_excludes_lista_de_espera(): void {
