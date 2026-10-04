@@ -9,6 +9,7 @@ import '../../providers/cambios_providers.dart';
 import '../../services/cambios_api_service.dart';
 import '../../services/cambios_candidatos_controller.dart';
 import '../../services/player_filter_service.dart';
+import '../../utils/puntaje_utils.dart';
 import '../../widgets/cambios_candidato_card.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import '../../widgets/loading_seccion.dart';
@@ -91,12 +92,36 @@ class CambiosSolicitarScreen extends ConsumerStatefulWidget {
   final CambiosPlaza plaza;
   final CambiosSolicitudTipo tipo;
 
+  /// *** THE HEADER'S PUNTAJE IS ALWAYS THE TITULAR'S OWN ***
+  /// [_PlazaHeader] renders [plaza.titularNombre] on the left — the titular
+  /// is the one displayed regardless of who currently occupies the plaza
+  /// (see `CambiosPlantelScreen`'s own docblock on that product rule). This
+  /// field MUST carry that SAME player's puntaje, never the current
+  /// ocupante's, or the name and the number on the header would silently
+  /// belong to two different people. The caller resolves it as
+  /// `jugadoresById[plaza.titularPlayerId]?.puntaje` — see
+  /// `cambios_plantel_screen.dart`'s two navigation call sites.
+  ///
+  /// Deliberately NOT [CambiosPlaza.puntajeTecho]: the techo is
+  /// `MAX(puntaje, 2.5)` ("la regla del 2,5"), so it equals the real puntaje
+  /// only by accident for a player rated 2.5 or higher — for anyone below
+  /// that it silently overstates them.
+  ///
+  /// `null` while the roster fetch that would resolve it is still pending or
+  /// has failed — [_PlazaHeader] renders nothing on the right in that case,
+  /// same discipline as [CambiosJugadorCard]'s own puntaje column (an absent
+  /// datum must never print as a fact — this exact failure mode already
+  /// shipped once in this feature when a missing `puntaje_techo` silently
+  /// defaulted to `0`).
+  final double? puntaje;
+
   const CambiosSolicitarScreen({
     super.key,
     required this.seasonId,
     required this.teamId,
     required this.plaza,
     required this.tipo,
+    this.puntaje,
   });
 
   @override
@@ -261,7 +286,7 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
       ),
       body: Column(
         children: [
-          _PlazaHeader(plaza: widget.plaza),
+          _PlazaHeader(plaza: widget.plaza, puntaje: widget.puntaje),
           if (fechaAsync.isLoading) const _FechaLoadingBanner(),
           if (!fechaAsync.isLoading && fecha == null) const _FechaGapBanner(),
           if (fecha != null && !ventanaAbierta)
@@ -356,23 +381,46 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
 // Header + auxiliary views
 // ---------------------------------------------------------------------------
 
+/// Name on the left, puntaje right-aligned on the right — see
+/// `CambiosSolicitarScreen.puntaje`'s own docblock for why these two values
+/// must always belong to the SAME player (the titular) and must never come
+/// from [CambiosPlaza.puntajeTecho].
 class _PlazaHeader extends StatelessWidget {
   final CambiosPlaza plaza;
-  const _PlazaHeader({required this.plaza});
+  final double? puntaje;
+  const _PlazaHeader({required this.plaza, required this.puntaje});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final estilo = theme.textTheme.labelLarge
+        ?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.bold);
+
+    // `formatearPuntaje` already collapses "unknown" (null, 0 — meaning
+    // "sin calificar" — or unparseable) to '-'; that sentinel is exactly the
+    // signal to render nothing here rather than an invented value.
+    final puntajeTexto = formatearPuntaje(puntaje);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       color: theme.colorScheme.primary.withValues(alpha: 0.06),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(plaza.titularNombre,
-              style: theme.textTheme.labelLarge
-                  ?.copyWith(color: theme.colorScheme.primary, fontWeight: FontWeight.bold)),
+          Expanded(
+            child: Text(
+              plaza.titularNombre,
+              style: estilo,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
+          ),
+          if (puntajeTexto != '-')
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text('$puntajeTexto ptos', style: estilo),
+            ),
         ],
       ),
     );

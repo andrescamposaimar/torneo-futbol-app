@@ -114,6 +114,11 @@ class CambiosPlantelScreen extends ConsumerWidget {
             teamId: teamId,
             plaza: plaza,
             tipo: CambiosSolicitudTipo.sustitucion,
+            // Always the TITULAR's own puntaje, never the occupant's — see
+            // `CambiosSolicitarScreen.puntaje`'s own docblock on why the
+            // header's name and puntaje must stay coupled to the same
+            // player.
+            puntaje: jugadoresById[plaza.titularPlayerId]?.puntaje,
           ),
         ),
       ),
@@ -125,6 +130,7 @@ class CambiosPlantelScreen extends ConsumerWidget {
             teamId: teamId,
             plaza: plaza,
             tipo: CambiosSolicitudTipo.regreso,
+            puntaje: jugadoresById[plaza.titularPlayerId]?.puntaje,
           ),
         ),
       ),
