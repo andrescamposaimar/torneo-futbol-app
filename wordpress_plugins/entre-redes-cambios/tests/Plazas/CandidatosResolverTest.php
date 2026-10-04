@@ -276,6 +276,29 @@ class CandidatosResolverTest extends TestCase {
         $this->assertSame( 'puntaje_indeterminado', $candidatos[0]->motivoNoViable() );
     }
 
+    /**
+     * THE production incident this fix closes (2026-10-04,
+     * `entre_redes_cambios_ultimo_error`): a stored puntaje of "0" means "sin
+     * calificar", never a legitimate rating of zero — see
+     * JugadorMetricasReader's own class docblock. Before the fix, this
+     * player's puntaje threw \InvalidArgumentException out of
+     * JugadorMetricasReader::resolveMuchos(), which paraPlaza() never
+     * catches — aborting the WHOLE candidate list for a single bad row. Must
+     * resolve exactly like a missing puntaje: not viable,
+     * 'puntaje_indeterminado', no exception.
+     */
+    public function test_a_candidate_with_stored_puntaje_zero_is_indeterminado_not_an_exception(): void {
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '0' ] );
+
+        $plaza      = $this->plazaRepository->findPlaza( $plazaId );
+        $candidatos = $this->resolver->paraPlaza( $plaza, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn );
+
+        $this->assertFalse( $candidatos[0]->viable() );
+        $this->assertSame( 'puntaje_indeterminado', $candidatos[0]->motivoNoViable() );
+        $this->assertNull( $candidatos[0]->puntaje() );
+    }
+
     public function test_a_candidate_occupying_another_vigent_plaza_is_not_viable(): void {
         $plazaId = $this->plaza();
         $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
@@ -1173,5 +1196,56 @@ class CandidatosResolverTest extends TestCase {
         $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
         $this->assertNotContains( 800, $ids );
         $this->assertContains( 801, $ids );
+    }
+
+    /**
+     * THE EXACT production failure shape, reproduced at the resolver level
+     * (where `Rest\PlazasController::listarCandidatos()`'s own top-level
+     * `\Throwable` catch would otherwise have turned this into a 500 — see
+     * that controller's own `rest.plazas_candidatos_fallida` event log and
+     * this slice's task description for the real incident):
+     * `?seccion=padron_completo` resolves its WHOLE population's metrics in
+     * ONE batched `JugadorMetricasReader::resolveMuchos()` call BEFORE
+     * pagination (see `buscarPaginado()`'s own docblock, "WHY PAGINATION
+     * HAPPENS HERE, BEFORE THE N+1, NOT AFTER") — a single player anywhere in
+     * that population with a stored puntaje of "0" used to throw
+     * \InvalidArgumentException out of THAT call, which `buscarPaginado()`
+     * never individually catches, aborting the response for every other
+     * candidate on the page too. This test seeds that population — one
+     * puntaje-zero player alongside two otherwise-viable candidates — and
+     * asserts the whole page still resolves with the other candidates
+     * intact, exactly like the fix's task brief requires ("the request still
+     * succeeds").
+     */
+    public function test_buscar_paginado_does_not_500_when_one_padron_completo_candidate_has_a_stored_puntaje_of_zero(): void {
+        $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
+
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '0' ] );
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            CandidatosSeccion::PADRON_COMPLETO,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame( 3, $resultado['total'] );
+
+        $porId = [];
+        foreach ( $resultado['candidatos'] as $c ) {
+            $porId[ $c->playerId() ] = $c;
+        }
+
+        $this->assertFalse( $porId[800]->viable() );
+        $this->assertSame( 'puntaje_indeterminado', $porId[800]->motivoNoViable() );
+        $this->assertTrue( $porId[801]->viable() );
+        $this->assertTrue( $porId[802]->viable() );
     }
 }

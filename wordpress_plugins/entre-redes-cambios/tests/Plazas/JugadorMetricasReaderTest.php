@@ -234,6 +234,143 @@ class JugadorMetricasReaderTest extends TestCase {
         $this->assertSame( 4.0, $this->reader->resolve( 7 )->puntaje()->toDecimal() );
     }
 
+    // -------------------------------------------------------------------------
+    // Production incident, 2026-10-04 — a stored puntaje of zero means "sin
+    // calificar", never "rated zero", and a genuinely malformed value must
+    // degrade to null (logged) rather than throw. See JugadorMetricasReader's
+    // class docblock, "A STORED PUNTAJE OF ZERO MEANS 'SIN CALIFICAR'" and
+    // "AN OTHERWISE-INVALID STORED VALUE DEGRADES TO NULL TOO, BUT IS
+    // LOGGED".
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dataProvider storedZeroVariants
+     */
+    public function test_puntaje_resolves_to_null_when_the_stored_value_normalizes_to_zero( $storedValue ): void {
+        $this->putSpMetrics( 40, [ 'puntaje' => $storedValue ] );
+
+        $this->assertNull( $this->reader->resolve( 40 )->puntaje() );
+    }
+
+    /** @return array<string, array{0: mixed}> */
+    public static function storedZeroVariants(): array {
+        return [
+            'string "0"'      => [ '0' ],
+            'string "0.0"'    => [ '0.0' ],
+            'string "0,0"'    => [ '0,0' ], // Spanish-locale comma separator
+            'native int 0'    => [ 0 ],
+            'native float 0.0' => [ 0.0 ],
+        ];
+    }
+
+    /**
+     * A stored zero is NOT data corruption — it must never be logged as an
+     * invalid value, only treated the same as a missing/blank puntaje.
+     */
+    public function test_puntaje_zero_does_not_record_an_invalido_event(): void {
+        $eventLog = new InMemoryEventLog();
+        $reader   = new JugadorMetricasReader( $this->wpdbForMetricsEventTest(), $eventLog );
+
+        $this->putSpMetrics( 41, [ 'puntaje' => '0' ] );
+
+        $this->assertNull( $reader->resolve( 41 )->puntaje() );
+        $this->assertFalse( $eventLog->has( 'metrics.puntaje_invalido' ) );
+    }
+
+    /**
+     * THE production incident itself, reproduced directly against resolve():
+     * before this fix, this threw \InvalidArgumentException out of
+     * extractPuntaje() — now it must resolve to a null puntaje instead.
+     */
+    public function test_resolve_does_not_throw_for_the_production_zero_puntaje_shape(): void {
+        $this->putSpMetrics( 42, [ 'caracter' => 'Padre Alumno', 'puntaje' => '0' ] );
+
+        $resultado = $this->reader->resolve( 42 );
+
+        $this->assertNull( $resultado->puntaje() );
+        $this->assertTrue( $resultado->esPadre() );
+    }
+
+    /**
+     * A malformed, non-numeric stored value must ALSO resolve to null — but,
+     * unlike zero, it is genuine data corruption and must be logged, with the
+     * player id and the raw stored value, so it stays visible instead of
+     * silently vanishing.
+     */
+    public function test_puntaje_resolves_to_null_and_logs_an_event_for_a_malformed_value(): void {
+        $eventLog = new InMemoryEventLog();
+        $reader   = new JugadorMetricasReader( $this->wpdbForMetricsEventTest(), $eventLog );
+
+        $this->putSpMetrics( 43, [ 'puntaje' => 'abc' ] );
+
+        $this->assertNull( $reader->resolve( 43 )->puntaje() );
+        $this->assertTrue( $eventLog->has( 'metrics.puntaje_invalido' ) );
+        $this->assertSame( 43, $eventLog->last()['contexto']['player_id'] );
+        $this->assertSame( 'abc', $eventLog->last()['contexto']['raw_value'] );
+    }
+
+    /**
+     * A numeric value that is nonetheless not one of the 9 discrete puntajes
+     * (e.g. 2.3) must ALSO degrade to null and be logged the same way.
+     */
+    public function test_puntaje_resolves_to_null_and_logs_an_event_for_a_value_outside_the_9_valid_puntajes(): void {
+        $eventLog = new InMemoryEventLog();
+        $reader   = new JugadorMetricasReader( $this->wpdbForMetricsEventTest(), $eventLog );
+
+        $this->putSpMetrics( 44, [ 'puntaje' => '2.3' ] );
+
+        $this->assertNull( $reader->resolve( 44 )->puntaje() );
+        $this->assertTrue( $eventLog->has( 'metrics.puntaje_invalido' ) );
+        $this->assertSame( 44, $eventLog->last()['contexto']['player_id'] );
+        $this->assertSame( '2.3', $eventLog->last()['contexto']['raw_value'] );
+    }
+
+    /**
+     * Regression guard: 108 real production players store their puntaje with
+     * a COMMA decimal separator ("3,5") — `fromDecimal()` already normalizes
+     * this, and the new zero/invalid handling must not break it.
+     */
+    public function test_puntaje_with_a_comma_decimal_separator_still_parses_correctly(): void {
+        $this->putSpMetrics( 45, [ 'puntaje' => '3,5' ] );
+
+        $this->assertSame( 3.5, $this->reader->resolve( 45 )->puntaje()->toDecimal() );
+    }
+
+    /**
+     * resolveMuchos() must apply the SAME zero/invalid handling per player,
+     * without one bad row anywhere in the batch affecting any other —
+     * reproducing the batched shape Plazas\CandidatosResolver actually uses.
+     */
+    public function test_resolve_muchos_handles_zero_and_invalid_puntajes_without_throwing(): void {
+        $eventLog = new InMemoryEventLog();
+        $reader   = new JugadorMetricasReader( $this->wpdbForMetricsEventTest(), $eventLog );
+
+        $this->putSpMetrics( 50, [ 'puntaje' => '0' ] );      // sin calificar
+        $this->putSpMetrics( 51, [ 'puntaje' => 'abc' ] );    // malformed
+        $this->putSpMetrics( 52, [ 'puntaje' => '3,5' ] );    // valid, comma
+
+        $resultado = $reader->resolveMuchos( [ 50, 51, 52 ] );
+
+        $this->assertNull( $resultado[50]->puntaje() );
+        $this->assertNull( $resultado[51]->puntaje() );
+        $this->assertSame( 3.5, $resultado[52]->puntaje()->toDecimal() );
+
+        $this->assertTrue( $eventLog->has( 'metrics.puntaje_invalido' ) );
+        $this->assertSame( 51, $eventLog->last()['contexto']['player_id'] );
+    }
+
+    /**
+     * Reuses the main `$wpdb` global (shared schema) behind a dedicated
+     * reader instance backed by its own InMemoryEventLog — needed by the
+     * tests above that must inspect recorded events without the default
+     * `$this->reader`'s shared, un-inspectable event log.
+     */
+    private function wpdbForMetricsEventTest(): \wpdb {
+        global $wpdb;
+
+        return $wpdb;
+    }
+
     /**
      * THE regression this whole fix exists to prevent: `puntaje` and
      * `caracter` come from two DIFFERENT postmeta rows now (`sp_metrics` and

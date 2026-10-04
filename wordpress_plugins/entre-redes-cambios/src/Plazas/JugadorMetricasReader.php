@@ -142,6 +142,47 @@ use EntreRedes\Cambios\Support\ChecksReads;
  * queries, and `resolve()` applies the equivalent `last_error` check inline
  * for both queries, since `$wpdb->get_var()` returns a scalar, not the
  * `array|null` shape the trait guards.
+ *
+ * *** A STORED PUNTAJE OF ZERO MEANS "SIN CALIFICAR", NOT "RATED ZERO" ***
+ * Production incident (`entre_redes_cambios_ultimo_error`, 2026-10-04):
+ * `GET /cambios/plazas/candidatos?seccion=padron_completo` returned a 500
+ * because `extractPuntaje()` fed the stored string `"0"` straight into
+ * `Puntaje::fromDecimal()`, which correctly rejects it —
+ * `Puntaje::fromHalfPoints()`'s valid range is 2..10 half-points (1..5
+ * points), and 0 is not in it. Verified against the full production
+ * `sp_player` padrón (1105 published players, `_fields=id,metrics`): 7
+ * players store `puntaje = "0"` (ids 4823, 4831, 4832, 4838, 21519, 21521,
+ * and one more) — none registered in season 2026, which is why only
+ * `?seccion=padron_completo` (every published player, not just this
+ * season's roster) ever reached one. The app's own
+ * `lib/utils/puntaje_utils.dart`'s `formatearPuntaje()` already documents `0`
+ * as "sin calificar" (not yet rated), never as a legitimate rating of zero —
+ * this reader now agrees: a stored value that normalizes to numeric zero is
+ * treated exactly like a missing or blank puntaje, i.e. `extractPuntaje()`
+ * returns `null`, never a thrown exception.
+ *
+ * *** AN OTHERWISE-INVALID STORED VALUE DEGRADES TO NULL TOO, BUT IS LOGGED
+ * *** Downstream, a `null` puntaje is already a safe, first-class state —
+ * `Plazas\CandidatosResolver::partitionPorTecho()` turns it into a
+ * `CandidatoEstado` with `motivoNoViable = 'puntaje_indeterminado'`: not
+ * viable, cannot be selected, but does not abort anyone else's read. A
+ * single corrupt row (a stray non-numeric string, a value outside the 9
+ * discrete puntajes) therefore gets the SAME treatment as a genuinely absent
+ * puntaje rather than being allowed to throw an `\InvalidArgumentException`
+ * out of `extractPuntaje()` — which, before this fix, is exactly what turned
+ * ONE bad row into a 500 for the WHOLE page (`resolveMuchos()` has no
+ * per-player try/catch of its own; the exception simply propagated out of
+ * `Plazas\CandidatosResolver::buscarPaginado()` into
+ * `Rest\PlazasController::listarCandidatos()`'s top-level `\Throwable` catch).
+ * Swallowing it silently would hide real data corruption, so it is recorded
+ * via `$this->eventLog` as `metrics.puntaje_invalido` (player id and the raw
+ * stored value) before `extractPuntaje()` returns null — visible, but no
+ * longer fatal to anyone else's request. `Puntaje::fromHalfPoints()` /
+ * `::fromDecimal()` themselves are UNCHANGED and still throw: callers that
+ * genuinely require a valid puntaje (`Plazas\Alta\TitularesListImporter`,
+ * `Dictamen\Reglas\PuntajeDentroDelTecho`) still get that strictness: this
+ * reader is the boundary where untrusted stored data enters the system, and
+ * is the only place that catches it.
  */
 final class JugadorMetricasReader {
 
@@ -171,20 +212,23 @@ final class JugadorMetricasReader {
     }
 
     /**
-     * @throws \InvalidArgumentException When the stored puntaje value is
-     *         present but is not one of the 9 valid puntajes — propagated
-     *         from Puntaje::fromDecimal(), same as before this extraction.
      * @throws \RuntimeException When either query fails at the wpdb level. A
      *         genuinely absent row (`$raw === null` with `$wpdb->last_error`
      *         empty) is NOT a failure — it keeps its existing meaning, "no
      *         row for this player under this meta_key" — see class docblock.
+     *         A stored puntaje of zero, or one that is not one of the 9
+     *         valid puntajes, is NOT a failure either — it resolves to a
+     *         null puntaje (logged, for the invalid case) rather than
+     *         throwing — see class docblock, "A STORED PUNTAJE OF ZERO MEANS
+     *         'SIN CALIFICAR'" and "AN OTHERWISE-INVALID STORED VALUE
+     *         DEGRADES TO NULL TOO, BUT IS LOGGED".
      */
     public function resolve( int $playerId ): JugadorMetricas {
         $rawMetrics  = $this->fetchLatestMetaValue( $playerId, self::META_KEY_METRICS, 'resolve' );
         $rawCaracter = $this->fetchLatestMetaValue( $playerId, self::META_KEY_CARACTER, 'resolve' );
 
         return JugadorMetricas::desde(
-            $this->extractPuntaje( $rawMetrics ),
+            $this->extractPuntaje( $rawMetrics, $playerId ),
             self::esPadreDesdeCaracter( $rawCaracter )
         );
     }
@@ -202,9 +246,14 @@ final class JugadorMetricasReader {
      * @return array<int, JugadorMetricas> Keyed by player_id. A player with
      *         no `sp_metrics` row and/or no `caracter` row simply gets the
      *         corresponding fact left at its empty default — the map is
-     *         total over $playerIds, never partial.
-     * @throws \InvalidArgumentException Same as resolve(), for whichever
-     *         player's stored puntaje is invalid.
+     *         total over $playerIds, never partial. A player whose stored
+     *         puntaje is zero, or otherwise not one of the 9 valid puntajes,
+     *         ALSO resolves with a null puntaje rather than aborting the
+     *         whole batch — see class docblock, "A STORED PUNTAJE OF ZERO
+     *         MEANS 'SIN CALIFICAR'" and "AN OTHERWISE-INVALID STORED VALUE
+     *         DEGRADES TO NULL TOO, BUT IS LOGGED". This is exactly what lets
+     *         one corrupt row never take down `Plazas\CandidatosResolver`'s
+     *         whole candidate pool.
      * @throws \RuntimeException When either query fails at the wpdb level —
      *         see class docblock, "READ FAILURES MUST NEVER READ AS 'NOBODY
      *         HAS METRICS'".
@@ -218,7 +267,7 @@ final class JugadorMetricasReader {
         $esPadres = array_fill_keys( $playerIds, false );
 
         foreach ( $this->fetchLatestMetaValuesFor( $playerIds, self::META_KEY_METRICS, 'resolveMuchos' ) as $playerId => $rawMetrics ) {
-            $puntajes[ $playerId ] = $this->extractPuntaje( $rawMetrics );
+            $puntajes[ $playerId ] = $this->extractPuntaje( $rawMetrics, $playerId );
         }
 
         foreach ( $this->fetchLatestMetaValuesFor( $playerIds, self::META_KEY_CARACTER, 'resolveMuchos' ) as $playerId => $rawCaracter ) {
@@ -360,12 +409,20 @@ final class JugadorMetricasReader {
 
     /**
      * @return Puntaje|null Null when $rawMetrics decodes to nothing usable,
-     *         or omits both `puntaje` and `Puntaje`, or the value is empty —
-     *         same behaviour as before caracter was split out of this blob.
-     * @throws \InvalidArgumentException Propagated from Puntaje::fromDecimal()
-     *         when the stored value is present but invalid.
+     *         or omits both `puntaje` and `Puntaje`, or the value is empty,
+     *         or normalizes to numeric zero ("sin calificar", never "rated
+     *         zero" — see class docblock, "A STORED PUNTAJE OF ZERO MEANS
+     *         'SIN CALIFICAR'"), or is not one of the 9 valid puntajes (see
+     *         class docblock, "AN OTHERWISE-INVALID STORED VALUE DEGRADES TO
+     *         NULL TOO, BUT IS LOGGED" — the invalid case is recorded via
+     *         `$this->eventLog` as `metrics.puntaje_invalido` before this
+     *         returns null). Never throws: this method is the boundary where
+     *         untrusted stored data enters the system, so it degrades
+     *         instead of propagating `Puntaje::fromDecimal()`'s own
+     *         strictness — see that method's docblock for why IT still
+     *         throws for every other caller.
      */
-    private function extractPuntaje( ?string $rawMetrics ): ?Puntaje {
+    private function extractPuntaje( ?string $rawMetrics, int $playerId ): ?Puntaje {
         $metrics = $this->decodeMetrics( $rawMetrics );
 
         if ( null === $metrics ) {
@@ -378,7 +435,33 @@ final class JugadorMetricasReader {
             return null;
         }
 
-        return Puntaje::fromDecimal( is_string( $puntajeValue ) ? $puntajeValue : (string) $puntajeValue );
+        $raw = is_string( $puntajeValue ) ? $puntajeValue : (string) $puntajeValue;
+
+        // Normalize BEFORE validity enters play, the same way
+        // Puntaje::fromDecimal() itself normalizes a comma decimal separator
+        // — this is what lets '0', '0.0' and '0,0' all read as the SAME "sin
+        // calificar" case, rather than string-comparing against the literal
+        // '0' alone (see class docblock for the production incident this
+        // closes).
+        $normalized = str_replace( ',', '.', $raw );
+
+        if ( is_numeric( $normalized ) && 0.0 === (float) $normalized ) {
+            return null;
+        }
+
+        try {
+            return Puntaje::fromDecimal( $raw );
+        } catch ( \InvalidArgumentException $e ) {
+            // A genuinely corrupt row must stay VISIBLE, not vanish — see
+            // class docblock, "AN OTHERWISE-INVALID STORED VALUE DEGRADES TO
+            // NULL TOO, BUT IS LOGGED".
+            $this->eventLog->record( 'metrics.puntaje_invalido', [
+                'player_id' => $playerId,
+                'raw_value' => $raw,
+            ] );
+
+            return null;
+        }
     }
 
     /**
