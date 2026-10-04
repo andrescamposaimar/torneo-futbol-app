@@ -507,7 +507,7 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ],
             ],
             $response->get_data()['candidatos']
         );
@@ -541,8 +541,8 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
-                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ],
+                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado', 'foto_url' => null ],
             ],
             $response->get_data()['candidatos']
         );
@@ -660,6 +660,54 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame( [], $response->get_data()['candidatos'] );
         $this->assertSame( '37', $response->get_headers()['X-WP-Total'] );
+    }
+
+    /**
+     * `foto_url` is resolved via the injected `$fotoResolverFn` — never a
+     * direct WordPress call the test suite could not otherwise exercise.
+     * `false`/`''` both collapse to `null` (the app's fallback-to-icon
+     * signal); a real URL passes through unchanged.
+     */
+    public function test_listar_candidatos_shapes_foto_url_via_the_injected_resolver(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 2,
+        ] );
+
+        $fotoResolverFn = static fn ( int $playerId ): string|false => 800 === $playerId
+            ? 'https://entreredespadres.com.ar/foto-800.jpg'
+            : '';
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            $fotoResolverFn
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $candidatos = $response->get_data()['candidatos'];
+        $this->assertSame( 'https://entreredespadres.com.ar/foto-800.jpg', $candidatos[0]['foto_url'] );
+        $this->assertNull( $candidatos[1]['foto_url'], 'An empty string from the resolver must collapse to null, never a broken image URL.' );
     }
 
     public function test_listar_candidatos_missing_fields_returns_400(): void {
@@ -911,7 +959,7 @@ class PlazasControllerTest extends TestCase {
 
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
-            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ] ],
+            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ] ],
             $response->get_data()['candidatos']
         );
     }

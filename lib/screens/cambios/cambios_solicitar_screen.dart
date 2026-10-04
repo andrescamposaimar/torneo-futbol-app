@@ -660,6 +660,7 @@ class _CandidatosList extends StatelessWidget {
           nombre: c.nombre,
           esPadre: c.esPadre,
           puntaje: c.puntaje,
+          fotoUrl: c.fotoUrl,
           selected: selectedPlayerId == c.playerId,
           onTap: () => onSelect(c.playerId),
         );

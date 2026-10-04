@@ -87,6 +87,9 @@ class PlazasController {
     /** @var callable(): int */
     private $clockFn;
 
+    /** @var callable(int): (string|false) */
+    private $fotoResolverFn;
+
     /** Default `?per_page=` when the request omits it — see listarCandidatos(). */
     private const DEFAULT_PER_PAGE = 20;
 
@@ -128,6 +131,12 @@ class PlazasController {
      *        `listarCandidatos()` for what happens when `seccion` is
      *        requested against a controller instance that was not wired
      *        with one (a loud failure, never a silent empty section).
+     * @param callable(int): (string|false)|null $fotoResolverFn Resolves one
+     *        candidate's photo URL — see `fotoJugador()`'s own docblock for
+     *        why this is injectable rather than a direct
+     *        `get_the_post_thumbnail_url()` call. Defaults to exactly that
+     *        call, at the SAME `'medium'` size `entre-redes-api`'s own
+     *        `/jugadores` endpoint already serves.
      */
     public function __construct(
         CapitanAuthorizer $authorizer,
@@ -137,7 +146,8 @@ class PlazasController {
         CandidatosResolver $candidatosResolver,
         ?BloqueoReemplazoPolicy $politicaCC5b = null,
         ?callable $clockFn = null,
-        ?ListaEsperaResolver $listaEsperaResolver = null
+        ?ListaEsperaResolver $listaEsperaResolver = null,
+        ?callable $fotoResolverFn = null
     ) {
         $this->authorizer          = $authorizer;
         $this->plazaRepository     = $plazaRepository;
@@ -147,6 +157,7 @@ class PlazasController {
         $this->politicaCC5b        = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
         $this->clockFn             = $clockFn ?? static fn (): int => time();
         $this->listaEsperaResolver = $listaEsperaResolver;
+        $this->fotoResolverFn      = $fotoResolverFn ?? static fn ( int $playerId ) => get_the_post_thumbnail_url( $playerId, 'medium' );
     }
 
     public function register_routes(): void {
@@ -312,8 +323,8 @@ class PlazasController {
      * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&seccion=lista_espera|padron_completo][&incluir_no_viables=1][&search=..][&puntajes[]=..][&page=..][&per_page=..]
      *
      * Response 200 (header `X-WP-Total: <int>`, see "PAGINATION" below):
-     * { candidatos: [ { player_id, nombre, es_padre, puntaje, viable,
-     *         motivo }, ... ] }
+     * { candidatos: [ { player_id, nombre, es_padre, puntaje, viable, motivo,
+     *         foto_url }, ... ] }
      *
      * THE single endpoint the captain's screen calls to know who is
      * available for a plaza AND why someone is not — backed entirely by
@@ -499,9 +510,9 @@ class PlazasController {
                 ) );
             }
 
-            // Names are primed for exactly the PAGE this response returns —
-            // never the whole population — see primePlayerTitles()'s own
-            // docblock.
+            // Names/photos are primed for exactly the PAGE this response
+            // returns — never the whole population — see
+            // primePlayerTitles()'s own docblock and fotoJugador()'s.
             $this->primePlayerTitles( array_map(
                 static fn ( CandidatoEstado $c ): int => $c->playerId(),
                 $candidatos
@@ -540,7 +551,42 @@ class PlazasController {
             'puntaje'   => null !== $c->puntaje() ? $c->puntaje()->toDecimal() : null,
             'viable'    => $c->viable(),
             'motivo'    => $c->motivoNoViable(),
+            'foto_url'  => $this->fotoJugador( $c->playerId() ),
         ];
+    }
+
+    /**
+     * The candidate's photo — the WordPress featured image of the
+     * `sp_player` post, at the SAME `'medium'` size `entre-redes-api`'s own
+     * `/jugadores` endpoint already serves (see that plugin's
+     * `entre_redes_get_jugadores()`, `get_the_post_thumbnail_url( $post->ID,
+     * 'medium' )`) — so "Pedir cambio" and "Mi Plantel"/"Jugadores" never
+     * show two different pictures of the same player.
+     *
+     * Resolved via the injected `$fotoResolverFn`, never a direct
+     * `get_the_post_thumbnail_url()` call — this plugin's whole test suite
+     * runs against an in-memory SQLite shim with no real WordPress media
+     * library behind it (see this class's own class docblock, and every
+     * other collaborator in this plugin that reads WordPress state through
+     * an injected seam rather than a bare global function call). Injecting
+     * the resolution function is what lets a test exercise this method's own
+     * null-coalescing below without a real attachment.
+     *
+     * Called ONLY after `primePlayerTitles()` has already warmed the post
+     * object cache for exactly this response's PAGE of candidates — never
+     * the whole population (see `listarCandidatos()`'s own docblock,
+     * "PAGINATION") — the SAME batching discipline `nombreJugador()` already
+     * relies on for the name, applied here to the photo instead.
+     *
+     * @return string|null `null` when the player has no featured image (the
+     *         callable returns `false` or an empty string) — the app falls
+     *         back to its person icon for that candidate, never a broken
+     *         image (see `CambiosCandidatoCard`'s own fallback).
+     */
+    private function fotoJugador( int $playerId ): ?string {
+        $foto = ( $this->fotoResolverFn )( $playerId );
+
+        return is_string( $foto ) && '' !== $foto ? $foto : null;
     }
 
     /**

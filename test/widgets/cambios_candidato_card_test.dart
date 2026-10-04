@@ -147,4 +147,80 @@ void main() {
       expect(badgeWidthNarrow, closeTo(badgeWidthShortName, 0.5));
     });
   });
+
+  group('CambiosCandidatoCard — foto', () {
+    testWidgets('no fotoUrl renders the person icon, never a NetworkImage', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Sin Foto',
+          esPadre: false,
+          puntaje: 3.0,
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      expect(find.byIcon(Icons.person), findsOneWidget);
+      final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
+      expect(avatar.backgroundImage, isNull);
+    });
+
+    testWidgets('an empty fotoUrl also renders the person icon, same as null', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Foto Vacia',
+          esPadre: false,
+          puntaje: 3.0,
+          fotoUrl: '',
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      expect(find.byIcon(Icons.person), findsOneWidget);
+    });
+
+    testWidgets('a fotoUrl renders a NetworkImage with that URL, never the fallback icon',
+        (tester) async {
+      // Flutter's test binding intercepts every HTTP call and returns 400,
+      // so NetworkImage always fails to decode here — same suppression
+      // `prode_identity_card_test.dart` already uses for its own photo
+      // avatar test (this widget has no `onBackgroundImageError` of its
+      // own, same as `CambiosJugadorCard`'s and `players_screen.dart`'s
+      // identical `CircleAvatar(backgroundImage: NetworkImage(...))`
+      // pattern — this is about what URL the widget WIRES, not actually
+      // loading an image in a test).
+      final originalOnError = FlutterError.onError;
+      FlutterError.onError = (details) {
+        if (details.exception is NetworkImageLoadException) return;
+        originalOnError?.call(details);
+      };
+
+      try {
+        await tester.pumpWidget(_wrap(
+          CambiosCandidatoCard(
+            playerId: 1,
+            nombre: 'Con Foto',
+            esPadre: false,
+            puntaje: 3.0,
+            fotoUrl: 'https://entreredespadres.com.ar/foto-1.jpg',
+            selected: false,
+            onTap: () {},
+          ),
+        ));
+        await tester.pump();
+
+        expect(find.byIcon(Icons.person), findsNothing);
+        final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
+        final backgroundImage = avatar.backgroundImage;
+        expect(backgroundImage, isA<NetworkImage>());
+        expect(
+            (backgroundImage as NetworkImage).url, 'https://entreredespadres.com.ar/foto-1.jpg');
+      } finally {
+        FlutterError.onError = originalOnError;
+      }
+    });
+  });
 }

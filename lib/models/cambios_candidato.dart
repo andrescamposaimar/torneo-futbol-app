@@ -53,6 +53,13 @@ class CambiosCandidato {
   /// `puntaje_excede_techo`), null when viable.
   final String? motivo;
 
+  /// The candidate's photo URL (the WordPress featured image of the
+  /// `sp_player` post, 'medium' size — see `Rest\PlazasController::
+  /// fotoJugador()` on the backend), or `null` when the player has none.
+  /// `CambiosCandidatoCard` falls back to a person icon when this is null,
+  /// never a broken image.
+  final String? fotoUrl;
+
   const CambiosCandidato({
     required this.playerId,
     required this.nombre,
@@ -60,10 +67,12 @@ class CambiosCandidato {
     this.puntaje,
     required this.viable,
     this.motivo,
+    this.fotoUrl,
   });
 
   factory CambiosCandidato.fromJson(Map<String, dynamic> json) {
     final rawPuntaje = json['puntaje'];
+    final rawFoto = json['foto_url'];
     return CambiosCandidato(
       playerId: (json['player_id'] as int?) ?? 0,
       nombre: (json['nombre'] as String?) ?? '',
@@ -71,6 +80,7 @@ class CambiosCandidato {
       puntaje: rawPuntaje is num ? rawPuntaje.toDouble() : null,
       viable: json['viable'] == true,
       motivo: json['motivo'] as String?,
+      fotoUrl: rawFoto is String && rawFoto.isNotEmpty ? rawFoto : null,
     );
   }
 
@@ -84,11 +94,12 @@ class CambiosCandidato {
           esPadre == other.esPadre &&
           puntaje == other.puntaje &&
           viable == other.viable &&
-          motivo == other.motivo;
+          motivo == other.motivo &&
+          fotoUrl == other.fotoUrl;
 
   @override
   int get hashCode =>
-      Object.hash(playerId, nombre, esPadre, puntaje, viable, motivo);
+      Object.hash(playerId, nombre, esPadre, puntaje, viable, motivo, fotoUrl);
 
   @override
   String toString() =>

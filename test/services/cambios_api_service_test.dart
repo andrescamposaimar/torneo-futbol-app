@@ -124,8 +124,8 @@ void main() {
       expect(plazas.single.regresoElegible, isFalse); // 2 fechas faltantes
     });
 
-    test('fetchCandidatos() parses the candidatos list and the X-WP-Total header, and forwards '
-        'page/per_page/puntajes', () async {
+    test('fetchCandidatos() parses the candidatos list, foto_url, and the X-WP-Total header',
+        () async {
       final repo = await _repoWithAccessToken();
       final service = _makeService(
         repo,
@@ -145,6 +145,7 @@ void main() {
                   'puntaje': 3.5,
                   'viable': true,
                   'motivo': null,
+                  'foto_url': 'https://entreredespadres.com.ar/foto-200.jpg',
                 },
               ],
             }),
@@ -167,6 +168,7 @@ void main() {
       expect(pagina.candidatos.single.nombre, 'Pedro Gómez');
       expect(pagina.candidatos.single.puntaje, 3.5);
       expect(pagina.candidatos.single.viable, isTrue);
+      expect(pagina.candidatos.single.fotoUrl, 'https://entreredespadres.com.ar/foto-200.jpg');
       expect(pagina.total, 37);
     });
 
@@ -191,6 +193,30 @@ void main() {
       final pagina = await service.fetchCandidatos(seasonId: 7, teamId: 1, plazaId: 10);
 
       expect(pagina.total, 1);
+    });
+
+    test('fetchCandidatos() parses a null foto_url as null', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'candidatos': [
+                {
+                  'player_id': 201,
+                  'nombre': 'Sin Foto',
+                  'es_padre': false,
+                  'puntaje': 2.0,
+                  'viable': true,
+                  'motivo': null,
+                  'foto_url': null,
+                },
+              ],
+            }, 200)),
+      );
+
+      final pagina = await service.fetchCandidatos(seasonId: 7, teamId: 1, plazaId: 10);
+
+      expect(pagina.candidatos.single.fotoUrl, isNull);
     });
 
     test('fetchSolicitudes() parses the solicitudes list including a dictamen', () async {
