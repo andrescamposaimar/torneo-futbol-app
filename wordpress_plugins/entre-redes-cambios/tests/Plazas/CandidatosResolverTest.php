@@ -969,6 +969,110 @@ class CandidatosResolverTest extends TestCase {
     }
 
     /**
+     * Same concern as test_buscar_paginado_search_escapes_like_wildcards(),
+     * for the OTHER `LIKE` wildcard: a literal '_' typed into the search box
+     * must match only a title that actually contains '_', never act as the
+     * single-character wildcard and match everything else too. As with that
+     * test, every "other" player gets a REAL, non-matching title — a NULL
+     * title would pass this test even with wildcard escaping completely
+     * broken, since `NULL LIKE '%...%'` is never true regardless of
+     * escaping.
+     */
+    public function test_buscar_paginado_search_escapes_like_underscore_wildcard(): void {
+        $plazaId = $this->plaza( 10 );
+        $this->seedManyPlayers( 5 ); // ids 1000..1004.
+        $this->seedPlayer( 9001, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+
+        global $wpdb;
+        foreach ( range( 1000, 1004 ) as $otroId ) {
+            $wpdb->update( $wpdb->prefix . 'posts', [ 'post_title' => "Jugador Distinto $otroId" ], [ 'ID' => $otroId ] );
+        }
+        $wpdb->update( $wpdb->prefix . 'posts', [ 'post_title' => 'Zapata_Suplente' ], [ 'ID' => 9001 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10,
+            '_'
+        );
+
+        $this->assertSame(
+            1,
+            $resultado['total'],
+            "A literal '_' search must match only the player whose name contains a literal '_', "
+            . 'not every player in the population (the single-character wildcard would otherwise '
+            . 'match every title of at least one character).'
+        );
+        $this->assertSame( 9001, $resultado['candidatos'][0]->playerId() );
+    }
+
+    /**
+     * Pins the EXACT `LIKE ... ESCAPE` clause this class emits, at the SQL
+     * level — the gap the behavioural wildcard tests above cannot close.
+     * Both `ESCAPE '\'` (the production bug) and `ESCAPE '!'` (the fix)
+     * return IDENTICAL rows under this plugin's SQLite-backed test shim —
+     * SQLite does not give backslash any special meaning inside a string
+     * literal, so it happily accepts and correctly evaluates `ESCAPE '\'`.
+     * MySQL does not: its own string-literal parser treats `\'` as an
+     * escaped quote, so that clause never closes the literal and the query
+     * fails as a syntax error in production (see CandidatosResolver's
+     * escapeLikeTerm() docblock for the documented MySQL behavior this is
+     * based on). No assertion that runs against this SQLite shim can
+     * exercise MySQL's parser directly — this test proves only that the
+     * generated SQL TEXT uses `ESCAPE '!'`, which is what makes the clause
+     * engine-agnostic; it does NOT prove the query runs correctly against a
+     * real MySQL server, which would require an actual MySQL integration
+     * test this suite does not have.
+     */
+    public function test_buscar_paginado_search_pins_escape_character_in_generated_sql(): void {
+        global $wpdb;
+        $wpdb->queries = [];
+
+        $plazaId = $this->plaza( 10 );
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10,
+            'Zapata'
+        );
+
+        $likeQueries = array_values( array_filter(
+            $wpdb->queries,
+            static fn ( string $sql ): bool => str_contains( $sql, 'post_title LIKE' )
+        ) );
+
+        $this->assertNotEmpty( $likeQueries, 'Expected a post_title LIKE query to run when $search is non-empty.' );
+
+        foreach ( $likeQueries as $sql ) {
+            $this->assertStringContainsString(
+                "ESCAPE '!'",
+                $sql,
+                "The generated LIKE clause must use ESCAPE '!'. If this fails because the clause "
+                . "reverted to ESCAPE '\\'' (a backslash), that change passes every OTHER test in "
+                . 'this suite under the SQLite shim while breaking on real MySQL — see this test\'s '
+                . 'own docblock.'
+            );
+            $this->assertStringNotContainsString(
+                'ESCAPE \'\\',
+                $sql,
+                'A backslash must never be the LIKE escape character — see escapeLikeTerm() docblock.'
+            );
+        }
+    }
+
+    /**
      * $puntajesFiltro (the app's puntaje chips) excludes non-matching
      * candidates from the POPULATION entirely — including one whose puntaje
      * is unresolvable, which can never match a specific requested value.
