@@ -22,10 +22,12 @@ import 'cambios_jugador_card.dart';
 ///
 /// [fotoUrl] IS now part of the payload (`Rest\PlazasController::
 /// fotoJugador()`, batched per PAGE the same way the name already is — see
-/// that method's own docblock on the backend) — rendered exactly the way
-/// [CambiosJugadorCard] already renders its own `jugador?.imagen`:
-/// `NetworkImage` when present, the person icon otherwise. A missing photo
-/// must fall back to the icon, never a broken image.
+/// that method's own docblock on the backend) — rendered via the SAME
+/// [CambiosAvatar] widget [CambiosJugadorCard] renders its own
+/// `jugador?.imagen` through: a missing URL falls back to the person icon,
+/// and so does a URL that resolves but fails to LOAD (a 404, a deleted
+/// attachment) — see that widget's own docblock for why a plain ternary on
+/// [fotoUrl] cannot catch the second case.
 class CambiosCandidatoCard extends StatelessWidget {
   final int playerId;
   final String nombre;
@@ -73,9 +75,7 @@ class CambiosCandidatoCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            fotoUrl != null && fotoUrl!.isNotEmpty
-                ? CircleAvatar(backgroundImage: NetworkImage(fotoUrl!))
-                : const CircleAvatar(child: Icon(Icons.person)),
+            CambiosAvatar(imageUrl: fotoUrl),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
