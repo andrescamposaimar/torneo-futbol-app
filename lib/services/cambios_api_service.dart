@@ -243,7 +243,12 @@ class CambiosApiService {
       final totalHeader = response.headers['x-wp-total'];
       final total = totalHeader != null ? int.tryParse(totalHeader) : null;
 
-      return (candidatos: candidatos, total: total ?? candidatos.length);
+      // `total` stays null (never falls back to `candidatos.length`) when
+      // the header is missing or unparseable — see [CambiosCandidatosPagina]'s
+      // own docblock for why a fabricated total is actively dangerous here:
+      // a full page's length READS as "that's everything", silently
+      // stopping infinite scroll at page 1 with no error and no retry.
+      return (candidatos: candidatos, total: total);
     } on CambiosMalformedResponseException {
       rethrow;
     } catch (_) {

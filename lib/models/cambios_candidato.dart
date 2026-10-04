@@ -113,9 +113,17 @@ class CambiosCandidato {
 /// `search`/`puntajes`, BEFORE pagination — see
 /// `Rest\PlazasController::listarCandidatos()`'s own docblock on the
 /// backend, "PAGINATION"), read from the `X-WP-Total` response header, the
-/// SAME convention `ApiService.getJugadoresRaw()` already reads. A screen
-/// decides whether more pages remain from [total] and its own
-/// page/per-page math, never from how many items THIS page returned (a page
-/// can legitimately come back short of `per_page` while more pages remain —
-/// see that same backend docblock for why).
-typedef CambiosCandidatosPagina = ({List<CambiosCandidato> candidatos, int total});
+/// SAME convention `ApiService.getJugadoresRaw()` already reads.
+///
+/// [total] is `null` when the header is missing or unparseable — see
+/// [CambiosApiService.fetchCandidatos]'s own docblock for why this is NEVER
+/// defaulted to `candidatos.length`: that would fabricate a plausible but
+/// false population size (a full page reads identically to "that is the
+/// whole list"), silently truncating infinite scroll one page in. A screen
+/// decides whether more pages remain from [total] and its own page/per-page
+/// math when [total] is known, and otherwise from an honest "was this page
+/// full" signal (see `CambiosCandidatosController`'s own `hasMoreFor()`) —
+/// never from how many items THIS page returned alone (a page can
+/// legitimately come back short of `per_page` while more pages remain — see
+/// that same backend docblock for why).
+typedef CambiosCandidatosPagina = ({List<CambiosCandidato> candidatos, int? total});

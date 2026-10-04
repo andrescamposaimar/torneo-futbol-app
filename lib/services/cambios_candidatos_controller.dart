@@ -60,12 +60,25 @@ final class CambiosCandidatosLoaded extends CambiosCandidatosState {
   /// full-screen [CambiosCandidatosLoading] the INITIAL fetch shows.
   final bool isLoadingMore;
 
+  /// `true` when the MOST RECENT [CambiosCandidatosController.loadMore] call
+  /// failed — distinct from [CambiosCandidatosError] (which only ever
+  /// replaces the WHOLE list on a failed [CambiosCandidatosController.load]):
+  /// there is something real already on screen here, so a failed next-page
+  /// fetch must render its own retry affordance at the bottom of the list
+  /// instead of silently dropping the spinner, which would be
+  /// indistinguishable from "that's the whole list" to a captain who stops
+  /// scrolling right there. Always `false` again the instant a fresh
+  /// [CambiosCandidatosController.load] or a successful
+  /// [CambiosCandidatosController.loadMore] replaces this state.
+  final bool loadMoreError;
+
   const CambiosCandidatosLoaded({
     required this.candidatos,
     required this.query,
     this.puntajes = const [],
     this.hasMore = false,
     this.isLoadingMore = false,
+    this.loadMoreError = false,
   });
 }
 
@@ -104,6 +117,25 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
 
   int _page = 1;
 
+  /// Monotonically increasing request-generation counter. Captured into a
+  /// local the instant [load] or [loadMore] starts a fetch, then checked
+  /// again right before that fetch's result is allowed to touch [state] or
+  /// [_page] — a call whose captured generation no longer matches
+  /// [_requestGeneration] by the time its future resolves is STALE and must
+  /// abandon its result instead of applying it.
+  ///
+  /// *** WHY THIS EXISTS *** Both [load] and [loadMore] `await` a network
+  /// call and then assign unconditionally. With no ordering guard, a
+  /// slower, OLDER request resolving after a newer one started (e.g. a
+  /// `loadMore()` still in flight when a debounced search re-triggers
+  /// `load()`, or two overlapping `load()` calls from a search box and an
+  /// undebounced puntaje chip toggle racing each other) would silently
+  /// overwrite the newer, still-correct state with results for filters the
+  /// screen no longer shows — see this slice's own task brief for the exact
+  /// captain-facing symptom. Every call that starts a fetch increments this
+  /// counter FIRST, so it alone decides "am I still the latest".
+  int _requestGeneration = 0;
+
   /// [autoLoad] only decides this controller's INITIAL state — `true`
   /// starts it as [CambiosCandidatosLoading] (the caller is expected to call
   /// [load] right after construction, same as before these two sections
@@ -126,6 +158,7 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
   /// toggle, or the first time a lazy section is opened). Use [loadMore] to
   /// append the NEXT page of the SAME search instead.
   Future<void> load({String query = '', List<double> puntajes = const []}) async {
+    final generation = ++_requestGeneration;
     state = const CambiosCandidatosLoading();
     _page = 1;
     try {
@@ -139,13 +172,23 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
         page: _page,
         perPage: _perPage,
       );
+      // A newer load()/loadMore() already started while this one was in
+      // flight — see [_requestGeneration]'s own docblock. Abandon this
+      // result; the newer call owns [state] now.
+      if (generation != _requestGeneration) return;
       state = CambiosCandidatosLoaded(
         candidatos: pagina.candidatos,
         query: query,
         puntajes: puntajes,
-        hasMore: _page * _perPage < pagina.total,
+        hasMore: hasMoreFor(
+          loadedCount: _page * _perPage,
+          total: pagina.total,
+          perPage: _perPage,
+          lastPageCount: pagina.candidatos.length,
+        ),
       );
     } catch (_) {
+      if (generation != _requestGeneration) return;
       state = const CambiosCandidatosError();
     }
   }
@@ -159,13 +202,19 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
   /// for the same approach to the bottom.
   ///
   /// A failed page fetch keeps whatever was ALREADY loaded — unlike [load],
-  /// there is something real to lose here, so this degrades to "stop
-  /// showing the loading spinner", never to [CambiosCandidatosError] (that
-  /// would blank out a list the captain was already looking at).
+  /// there is something real to lose here, so this degrades to
+  /// `isLoadingMore: false` + `loadMoreError: true` (see
+  /// [CambiosCandidatosLoaded.loadMoreError]'s own docblock for why that
+  /// flag exists), never to [CambiosCandidatosError] (that would blank out
+  /// a list the captain was already looking at). Calling [loadMore] again —
+  /// the screen's own retry affordance, or simply scrolling back to the
+  /// bottom — clears the error the same way a successful fetch would.
   Future<void> loadMore() async {
     final current = state;
     if (current is! CambiosCandidatosLoaded) return;
     if (!current.hasMore || current.isLoadingMore) return;
+
+    final generation = ++_requestGeneration;
 
     state = CambiosCandidatosLoaded(
       candidatos: current.candidatos,
@@ -187,23 +236,68 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
         page: nextPage,
         perPage: _perPage,
       );
+      // A newer load()/loadMore() already started while this one was in
+      // flight — see [_requestGeneration]'s own docblock. Abandon this
+      // result (including the page-cursor advance below): applying it now
+      // would merge a page fetched for a query the screen no longer shows
+      // into whatever the newer call already rendered.
+      if (generation != _requestGeneration) return;
       _page = nextPage;
       state = CambiosCandidatosLoaded(
         candidatos: [...current.candidatos, ...pagina.candidatos],
         query: current.query,
         puntajes: current.puntajes,
-        hasMore: _page * _perPage < pagina.total,
+        hasMore: hasMoreFor(
+          loadedCount: _page * _perPage,
+          total: pagina.total,
+          perPage: _perPage,
+          lastPageCount: pagina.candidatos.length,
+        ),
       );
     } catch (_) {
+      if (generation != _requestGeneration) return;
       state = CambiosCandidatosLoaded(
         candidatos: current.candidatos,
         query: current.query,
         puntajes: current.puntajes,
         hasMore: current.hasMore,
         isLoadingMore: false,
+        loadMoreError: true,
       );
     }
   }
+}
+
+/// Whether more pages plausibly remain beyond the page(s) already loaded.
+///
+/// When [total] is known (the server sent `X-WP-Total`), this is exact
+/// page/per-page math: [loadedCount] is `page * perPage` — how many items
+/// have been CONSUMED from the server's pre-filter population, the same
+/// quantity [total] itself measures (see [CambiosCandidatosPagina]'s own
+/// docblock) — deliberately never `candidatos.length`, which can be smaller
+/// once the viable-only filter runs on the backend (see
+/// `CambiosCandidatosLoaded.hasMore`'s own docblock for why a short page
+/// does not by itself mean the end of the list).
+///
+/// When [total] is `null` — the header was missing or unparseable, see
+/// [CambiosCandidatosPagina]'s own docblock for why that must NEVER be
+/// papered over with a fabricated total — "unknown" stays honestly unknown:
+/// this falls back to the one signal that is still true regardless, "did
+/// the page we just got come back FULL". A full page ([lastPageCount] ==
+/// [perPage]) means there MAY be more, so [hasMoreFor] optimistically
+/// returns `true` and lets the next [CambiosCandidatosController.loadMore]
+/// attempt find out; a SHORT page (fewer than [perPage] items) is the one
+/// case the server can never lie about via a missing header — a short page
+/// is only possible because the population genuinely ran out — so this
+/// returns `false`.
+bool hasMoreFor({
+  required int loadedCount,
+  required int? total,
+  required int perPage,
+  int? lastPageCount,
+}) {
+  if (total != null) return loadedCount < total;
+  return (lastPageCount ?? 0) >= perPage;
 }
 
 /// Whether [a] and [b] are the SAME filters — used by

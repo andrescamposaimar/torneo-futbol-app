@@ -172,27 +172,37 @@ void main() {
       expect(pagina.total, 37);
     });
 
-    test('fetchCandidatos() falls back to the page length when X-WP-Total is missing', () async {
+    test('fetchCandidatos() leaves total null when X-WP-Total is missing, even for a full page',
+        () async {
+      // THE dangerous case: a FULL page (20 of 20, the default perPage) with
+      // no header. Falling back to `candidatos.length` here would fabricate
+      // `total: 20`, which `CambiosCandidatosController.hasMoreFor()` reads
+      // as "that's the whole population" — silently truncating infinite
+      // scroll at page 1. See this method's own docblock and
+      // [CambiosCandidatosPagina]'s for why the fallback was removed.
       final repo = await _repoWithAccessToken();
       final service = _makeService(
         repo,
         MockClient((request) async => _jsonResponse({
-              'candidatos': [
-                {
-                  'player_id': 200,
-                  'nombre': 'Pedro Gómez',
+              'candidatos': List.generate(
+                20,
+                (i) => {
+                  'player_id': 200 + i,
+                  'nombre': 'Jugador #${200 + i}',
                   'es_padre': false,
                   'puntaje': 3.5,
                   'viable': true,
                   'motivo': null,
                 },
-              ],
+              ),
             }, 200)),
       );
 
       final pagina = await service.fetchCandidatos(seasonId: 7, teamId: 1, plazaId: 10);
 
-      expect(pagina.total, 1);
+      expect(pagina.total, isNull);
+      expect(pagina.candidatos, hasLength(20),
+          reason: 'A missing header must never truncate the page itself.');
     });
 
     test('fetchCandidatos() parses a null foto_url as null', () async {
