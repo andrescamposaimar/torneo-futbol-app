@@ -90,6 +90,17 @@ class PlazasController {
     /** @var callable(int): (string|false) */
     private $fotoResolverFn;
 
+    /**
+     * Player ids whose photo resolution THREW during the response currently
+     * being built — reset at the start of every `listarCandidatos()` call,
+     * drained (and recorded as ONE summarized event, never one event per
+     * row) right after `shapeCandidato()` has run for the whole page — see
+     * `fotoJugador()`'s own docblock.
+     *
+     * @var array<int, int>
+     */
+    private array $fotoResolverFailures = [];
+
     /** Default `?per_page=` when the request omits it — see listarCandidatos(). */
     private const DEFAULT_PER_PAGE = 20;
 
@@ -518,8 +529,27 @@ class PlazasController {
                 $candidatos
             ) );
 
+            $this->fotoResolverFailures = [];
+            $candidatosShape            = array_map( [ $this, 'shapeCandidato' ], $candidatos );
+
+            // One candidate's photo resolver throwing must degrade ONLY that
+            // row's foto_url to null (see fotoJugador()), never the whole
+            // response — but it is still worth knowing about, so it is
+            // recorded here as a SINGLE summarized event for the whole page
+            // rather than one event per failing row, which could flood the
+            // log if every photo in a page failed at once.
+            if ( [] !== $this->fotoResolverFailures ) {
+                $this->eventLog->record( 'rest.foto_jugador_fallida', [
+                    'season_id'  => $seasonId,
+                    'team_id'    => $teamId,
+                    'plaza_id'   => $plazaId,
+                    'count'      => count( $this->fotoResolverFailures ),
+                    'player_ids' => $this->fotoResolverFailures,
+                ] );
+            }
+
             $response = new \WP_REST_Response(
-                [ 'candidatos' => array_map( [ $this, 'shapeCandidato' ], $candidatos ) ],
+                [ 'candidatos' => $candidatosShape ],
                 200
             );
             $response->header( 'X-WP-Total', (string) $total );
@@ -578,13 +608,32 @@ class PlazasController {
      * "PAGINATION") — the SAME batching discipline `nombreJugador()` already
      * relies on for the name, applied here to the photo instead.
      *
+     * *** A THROWING RESOLVER DEGRADES ONLY THIS ROW, NEVER THE RESPONSE ***
+     * `$fotoResolverFn` is called inside its OWN `try`/`catch`: one bad
+     * attachment (a corrupt thumbnail, a resolver that hits a transient
+     * storage failure, …) must not turn the whole candidatos page into a 500
+     * — `shapeCandidato()` runs inside `listarCandidatos()`'s single
+     * top-level `try`, whose `catch` aborts the ENTIRE response, so a
+     * propagated exception here would do exactly that. The failing
+     * `$playerId` is recorded into `$this->fotoResolverFailures` instead of
+     * logged immediately — `listarCandidatos()` emits ONE summarized event
+     * for the whole page after `shapeCandidato()` has run for every
+     * candidate, never one event per failing row.
+     *
      * @return string|null `null` when the player has no featured image (the
-     *         callable returns `false` or an empty string) — the app falls
-     *         back to its person icon for that candidate, never a broken
-     *         image (see `CambiosCandidatoCard`'s own fallback).
+     *         callable returns `false` or an empty string) OR when the
+     *         callable throws — the app falls back to its person icon for
+     *         that candidate either way, never a broken image (see
+     *         `CambiosCandidatoCard`'s own fallback).
      */
     private function fotoJugador( int $playerId ): ?string {
-        $foto = ( $this->fotoResolverFn )( $playerId );
+        try {
+            $foto = ( $this->fotoResolverFn )( $playerId );
+        } catch ( \Throwable $e ) {
+            $this->fotoResolverFailures[] = $playerId;
+
+            return null;
+        }
 
         return is_string( $foto ) && '' !== $foto ? $foto : null;
     }

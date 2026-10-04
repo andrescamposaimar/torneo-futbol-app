@@ -710,6 +710,65 @@ class PlazasControllerTest extends TestCase {
         $this->assertNull( $candidatos[1]['foto_url'], 'An empty string from the resolver must collapse to null, never a broken image URL.' );
     }
 
+    /**
+     * A resolver that THROWS for one candidate must degrade only that
+     * candidate's `foto_url` to null — never abort the whole response with a
+     * 500 — and the failure must still be observable through EventLog,
+     * summarized once for the page rather than once per failing row.
+     */
+    public function test_listar_candidatos_tolerates_a_throwing_foto_resolver(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 2,
+        ] );
+
+        $fotoResolverFn = static function ( int $playerId ): string|false {
+            if ( 800 === $playerId ) {
+                throw new \RuntimeException( 'simulated storage failure' );
+            }
+
+            return 'https://entreredespadres.com.ar/foto-801.jpg';
+        };
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            $fotoResolverFn
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $this->assertSame( 200, $response->get_status(), 'One bad photo must never turn the whole page into a 500.' );
+
+        $candidatos = $response->get_data()['candidatos'];
+        $this->assertNull( $candidatos[0]['foto_url'], 'The throwing candidate degrades to null, like a missing photo.' );
+        $this->assertSame( 'https://entreredespadres.com.ar/foto-801.jpg', $candidatos[1]['foto_url'], 'The rest of the page must remain intact.' );
+
+        $this->assertTrue( $this->eventLog->has( 'rest.foto_jugador_fallida' ), 'The failure must be observable through EventLog.' );
+        $evento = $this->eventLog->last();
+        $this->assertSame( [ 800 ], $evento['contexto']['player_ids'] );
+        $this->assertSame( 1, $evento['contexto']['count'] );
+    }
+
     public function test_listar_candidatos_missing_fields_returns_400(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->expects( $this->never() )->method( 'authorize' );
