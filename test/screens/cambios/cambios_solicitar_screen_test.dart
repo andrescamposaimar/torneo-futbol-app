@@ -827,6 +827,53 @@ void main() {
 
       expect(listaEsperaController.loadMoreCalls, greaterThan(0));
     });
+
+    /// THE correctness contract fixed in this slice: a failed `loadMore()`
+    /// used to make the bottom spinner simply disappear, rendering a list
+    /// that STOPPED scrolling look indistinguishable from "that's the whole
+    /// population" — the full-list [CambiosCandidatosError] case already got
+    /// a retry affordance ([_CandidatosErrorView]); this proves the
+    /// bottom-of-list failure now gets its own, equivalent one.
+    testWidgets('a failed loadMore() renders a retry affordance that calls loadMore() again',
+        (tester) async {
+      final muchosCandidatos = List.generate(
+        30,
+        (i) => CambiosCandidato(playerId: i, nombre: 'Jugador $i', esPadre: false, puntaje: 2.5, viable: true),
+      );
+
+      final listaEsperaController = _StubCandidatosController(
+        CambiosCandidatosLoaded(
+          candidatos: muchosCandidatos,
+          query: '',
+          hasMore: true,
+          loadMoreError: true,
+        ),
+      );
+
+      await _pumpScreenWithControllers(
+        tester,
+        listaEsperaController: listaEsperaController,
+      );
+
+      // The retry row sits at the bottom of 30 items — scroll it into view,
+      // same as this group's own loadMore()-triggering test does. The
+      // scroll listener itself may also call loadMore() once it nears the
+      // bottom (it has no reason to special-case a prior failure) — this
+      // test cares only about the TAP, so it captures the call count right
+      // before tapping rather than asserting an exact total.
+      await tester.drag(find.byKey(const Key('candidatos_list')), const Offset(0, -4000));
+      await tester.pump();
+
+      expect(find.byKey(const Key('candidatos_load_more_error')), findsOneWidget);
+      expect(find.text('No pudimos cargar más candidatos.'), findsOneWidget);
+
+      final callsBeforeTap = listaEsperaController.loadMoreCalls;
+
+      await tester.tap(find.text('Reintentar'));
+      await tester.pump();
+
+      expect(listaEsperaController.loadMoreCalls, callsBeforeTap + 1);
+    });
   });
 
   group('CambiosSolicitarScreen — header puntaje', () {

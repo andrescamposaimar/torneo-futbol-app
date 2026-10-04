@@ -395,6 +395,9 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
                 onRetry: () => ref
                     .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
                     .load(query: _searchQuery, puntajes: _puntajesFiltro),
+                onRetryLoadMore: () => ref
+                    .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
+                    .loadMore(),
                 selectedPlayerId: _selectedPlayerId,
                 onSelect: (playerId) => setState(() => _selectedPlayerId = playerId),
               ),
@@ -604,6 +607,7 @@ class _CandidatosList extends StatelessWidget {
   final CambiosCandidatosState state;
   final ScrollController scrollController;
   final VoidCallback onRetry;
+  final VoidCallback onRetryLoadMore;
   final int? selectedPlayerId;
   final ValueChanged<int> onSelect;
 
@@ -611,6 +615,7 @@ class _CandidatosList extends StatelessWidget {
     required this.state,
     required this.scrollController,
     required this.onRetry,
+    required this.onRetryLoadMore,
     required this.selectedPlayerId,
     required this.onSelect,
   });
@@ -634,13 +639,37 @@ class _CandidatosList extends StatelessWidget {
       ..sort((a, b) => (b.puntaje ?? 0).compareTo(a.puntaje ?? 0));
 
     final mostrarCargandoMas = loaded.isLoadingMore;
+    final mostrarErrorCargarMas = loaded.loadMoreError;
 
     return ListView.builder(
       key: const Key('candidatos_list'),
       controller: scrollController,
-      itemCount: ordenados.length + (mostrarCargandoMas ? 1 : 0),
+      itemCount: ordenados.length + (mostrarCargandoMas || mostrarErrorCargarMas ? 1 : 0),
       itemBuilder: (context, i) {
         if (i >= ordenados.length) {
+          if (mostrarErrorCargarMas) {
+            return Padding(
+              key: const Key('candidatos_load_more_error'),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'No pudimos cargar más candidatos.',
+                      style: TextStyle(fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                    TextButton(
+                      onPressed: onRetryLoadMore,
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(
