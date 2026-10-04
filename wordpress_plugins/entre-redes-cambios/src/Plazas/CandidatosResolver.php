@@ -444,11 +444,17 @@ class CandidatosResolver {
 
     /**
      * Every PUBLISHED `sp_player` post on $teamId (the "lista de espera"
-     * team — see Plazas\ListaEsperaResolver) — the EXACT same taxonomy-join
-     * shape as playerIdsRegistradosEnTemporada(), but joined against
-     * `sp_team` instead of `sp_season`: SportsPress assigns a player to a
-     * team the same way it assigns a player to a season, via a taxonomy term
-     * relationship, never a postmeta row or a separate bridge table.
+     * team — see Plazas\ListaEsperaResolver) — NOT a taxonomy-join: unlike
+     * `sp_season`, SportsPress does not expose team membership as a
+     * taxonomy term relationship. A player's team is stored as ordinary
+     * `postmeta`, `meta_key = 'sp_team'`, `meta_value` = the team's
+     * `sp_team` post id (confirmed against the working sibling plugin,
+     * entre-redes-api, which filters players by team the same way via a
+     * `meta_query` on that exact key). There is no `sp_team` taxonomy at
+     * all — `GET /wp-json/wp/v2/taxonomies` on production lists `sp_league`,
+     * `sp_position`, `sp_role`, `sp_season`, `sp_venue`, and nothing else.
+     * A player can carry more than one `sp_team` postmeta row (historical
+     * teams), hence `SELECT DISTINCT`.
      *
      * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** Same
      * reasoning as playerIdsRegistradosEnTemporada() — a failed read here
@@ -468,14 +474,13 @@ class CandidatosResolver {
             $wpdb->prepare(
                 "SELECT DISTINCT posts.ID AS id
                    FROM {$p}posts posts
-                   INNER JOIN {$p}term_relationships tr ON tr.object_id = posts.ID
-                   INNER JOIN {$p}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                   INNER JOIN {$p}postmeta pm ON pm.post_id = posts.ID
                   WHERE posts.post_type = 'sp_player'
                     AND posts.post_status = 'publish'
-                    AND tt.taxonomy = 'sp_team'
-                    AND tt.term_id = %d
+                    AND pm.meta_key = 'sp_team'
+                    AND pm.meta_value = %s
                   ORDER BY posts.ID ASC",
-                $teamId
+                (string) $teamId
             ),
             ARRAY_A
         );
@@ -497,9 +502,11 @@ class CandidatosResolver {
      * does not.
      *
      * The exclusion is a single `NOT IN` subquery against the same
-     * taxonomy-join shape playerIdsListaDeEspera() uses directly, rather
-     * than fetching that list in PHP and filtering here — one query, no
-     * second round trip, and no risk of the two lists drifting if either
+     * postmeta shape playerIdsListaDeEspera() uses directly — team
+     * membership is `postmeta`, `meta_key = 'sp_team'`, never a taxonomy
+     * (see playerIdsListaDeEspera()'s own docblock for the full evidence) —
+     * rather than fetching that list in PHP and filtering here — one query,
+     * no second round trip, and no risk of the two lists drifting if either
      * query's WHERE clause is ever edited without the other.
      *
      * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** Same
@@ -520,14 +527,13 @@ class CandidatosResolver {
                   WHERE posts.post_type = 'sp_player'
                     AND posts.post_status = 'publish'
                     AND posts.ID NOT IN (
-                        SELECT tr.object_id
-                          FROM {$p}term_relationships tr
-                          INNER JOIN {$p}term_taxonomy tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-                         WHERE tt.taxonomy = 'sp_team'
-                           AND tt.term_id = %d
+                        SELECT pm.post_id
+                          FROM {$p}postmeta pm
+                         WHERE pm.meta_key = 'sp_team'
+                           AND pm.meta_value = %s
                     )
                   ORDER BY posts.ID ASC",
-                $excludeTeamId
+                (string) $excludeTeamId
             ),
             ARRAY_A
         );
