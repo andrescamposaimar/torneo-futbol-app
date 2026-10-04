@@ -44,15 +44,30 @@ use EntreRedes\Cambios\Observability\EventLog;
  *
  * *** TWO WINDOWS, COMPUTED INDEPENDENTLY, NEVER ONE DERIVED FROM THE OTHER
  * *** Mirrors `Dictamen\Reglas\SolicitudEnPlazo`'s own "TWO DIFFERENT
- * DEADLINES, ONE WINDOW METHOD" section exactly: `regreso_abierta` is
- * `apertura_solicitudes <= now <= cierre_regresos`; `sustitucion_abierta` is
- * `PlazosCalculator::isWithinSolicitudWindow()`'s own contract
+ * DEADLINES, ONE WINDOW METHOD" section exactly: the `regreso` window is
+ * `apertura_solicitudes <= now <= cierre_regresos`; the `sustitucion` window
+ * is `PlazosCalculator::isWithinSolicitudWindow()`'s own contract
  * (`apertura_solicitudes <= now <= cierre_solicitudes`). `cierre_regresos`
  * falls BEFORE `cierre_solicitudes` (see `PlazosCalculator::PLAZO_KEYS`'s own
  * chronological ordering), so a captain can be past the regreso deadline
  * while still inside the sustitucion one — the screen needs to say so BEFORE
  * a captain picks a candidate, not learn it from a rejected `POST
  * /solicitudes`.
+ *
+ * *** THREE STATES, NOT TWO — WHY `ventanas` IS NO LONGER A BOOLEAN ***
+ * Each window used to be shaped as a single boolean (`regreso_abierta`,
+ * `sustitucion_abierta`). That collapses two genuinely different facts into
+ * one `false`: "the window has not opened yet" (`now < apertura_solicitudes`)
+ * and "the window's own deadline already passed" read identically on the
+ * wire, even though the first means "come back later, here is when" and the
+ * second means "this fecha is done for this request type". A caller cannot
+ * tell them apart from the boolean alone, and both are real: on 2026-10-04,
+ * fecha #20's `apertura_solicitudes` is 2026-10-11 — the window has not
+ * opened, yet the boolean reads exactly like "already closed". `ventanas` is
+ * shaped instead as `{ regreso: <fase>, sustitucion: <fase> }`, each `<fase>`
+ * one of `'antes'` (before `apertura_solicitudes`), `'abierta'` (within the
+ * window), or `'cerrada'` (past the window's own closing deadline) — see
+ * `fase()` below, the one three-way comparison both windows share.
  *
  * *** UTC, NEVER CIVIL, AND NEVER time() DIRECTLY *** — same discipline as
  * every other clock-comparing class in this plugin (see
@@ -66,6 +81,15 @@ use EntreRedes\Cambios\Observability\EventLog;
 class FechaController {
 
     use HandlesCapitanAuthorization;
+
+    /**
+     * The three wire values a window's phase can take — see class docblock,
+     * "THREE STATES, NOT TWO". Lowercase ASCII, no accents, by design: these
+     * are wire values the app switches on, not display copy.
+     */
+    private const FASE_ANTES   = 'antes';
+    private const FASE_ABIERTA = 'abierta';
+    private const FASE_CERRADA = 'cerrada';
 
     private CapitanAuthorizer $authorizer;
     private FechaRepository $fechaRepository;
@@ -115,9 +139,12 @@ class FechaController {
      *
      * Response 200: { fecha: { fecha_id, numero_en_torneo, torneo, play_date,
      *         plazos_utc: { apertura_solicitudes, cierre_regresos,
-     *         cierre_solicitudes, publicacion }, ventanas: { regreso_abierta,
-     *         sustitucion_abierta } } } — or { fecha: null } when the season
-     *         has no unresolved fecha (see class docblock).
+     *         cierre_solicitudes, publicacion }, ventanas: { regreso,
+     *         sustitucion } } } — each of `ventanas.regreso` /
+     *         `ventanas.sustitucion` one of `'antes'` | `'abierta'` |
+     *         `'cerrada'` (see class docblock, "THREE STATES, NOT TWO") — or
+     *         { fecha: null } when the season has no unresolved fecha (see
+     *         class docblock).
      */
     public function fechaAbierta( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -202,11 +229,6 @@ class FechaController {
         // Dictamen\Reglas\SolicitudEnPlazo's own $nowUtc derivation exactly.
         $nowUtc = gmdate( 'Y-m-d H:i:s', $ahora );
 
-        $regresoAbierta = $nowUtc >= $plazosUtc['apertura_solicitudes']
-            && $nowUtc <= $plazosUtc['cierre_regresos'];
-
-        $sustitucionAbierta = PlazosCalculator::isWithinSolicitudWindow( $nowUtc, $plazosUtc );
-
         return [
             'fecha_id'         => (int) $fecha['id'],
             'numero_en_torneo' => (int) $fecha['numero_en_torneo'],
@@ -214,9 +236,42 @@ class FechaController {
             'play_date'        => $playDate,
             'plazos_utc'       => $plazosUtc,
             'ventanas'         => [
-                'regreso_abierta'     => $regresoAbierta,
-                'sustitucion_abierta' => $sustitucionAbierta,
+                // Same bound SolicitudEnPlazo's own 'de regreso' branch uses
+                // (apertura_solicitudes..cierre_regresos).
+                'regreso'     => self::fase(
+                    $nowUtc,
+                    $plazosUtc['apertura_solicitudes'],
+                    $plazosUtc['cierre_regresos']
+                ),
+                // apertura_solicitudes..cierre_solicitudes is exactly
+                // PlazosCalculator::isWithinSolicitudWindow()'s own contract
+                // — the 'abierta' branch below agrees with it by
+                // construction, not by re-deriving the same comparison a
+                // second way.
+                'sustitucion' => self::fase(
+                    $nowUtc,
+                    $plazosUtc['apertura_solicitudes'],
+                    $plazosUtc['cierre_solicitudes']
+                ),
             ],
         ];
+    }
+
+    /**
+     * The one three-way comparison both windows share — see class docblock,
+     * "THREE STATES, NOT TWO". Each window's own ($apertura, $cierre) pair
+     * stays independent (see class docblock, "TWO WINDOWS, COMPUTED
+     * INDEPENDENTLY"); only this comparison itself is shared code.
+     *
+     * $now, $apertura and $cierre MUST be expressed in the same frame — UTC
+     * here, since $nowUtc is derived from `$ahora` via `gmdate()` and
+     * compared against `plazos_utc` (see class docblock, "UTC, NEVER CIVIL").
+     */
+    private static function fase( string $now, string $apertura, string $cierre ): string {
+        if ( $now < $apertura ) {
+            return self::FASE_ANTES;
+        }
+
+        return $now <= $cierre ? self::FASE_ABIERTA : self::FASE_CERRADA;
     }
 }
