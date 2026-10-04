@@ -157,16 +157,18 @@ CambiosTeamScope get _scope => (seasonId: 7, teamId: 1);
 /// tests that are not specifically about the fecha-fetch machinery.
 CambiosFechaAbierta _fechaAbierta({
   int fechaId = 42,
-  bool regresoAbierta = true,
-  bool sustitucionAbierta = true,
+  CambiosVentanaFase regresoFase = CambiosVentanaFase.abierta,
+  CambiosVentanaFase sustitucionFase = CambiosVentanaFase.abierta,
+  DateTime? aperturaSolicitudesUtc,
 }) =>
     CambiosFechaAbierta(
       fechaId: fechaId,
       numeroEnTorneo: 3,
       torneo: 'Apertura',
       playDate: '2026-01-10',
-      regresoAbierta: regresoAbierta,
-      sustitucionAbierta: sustitucionAbierta,
+      regresoFase: regresoFase,
+      sustitucionFase: sustitucionFase,
+      aperturaSolicitudesUtc: aperturaSolicitudesUtc,
     );
 
 const _defaultFecha = CambiosFechaAbierta(
@@ -174,8 +176,8 @@ const _defaultFecha = CambiosFechaAbierta(
   numeroEnTorneo: 3,
   torneo: 'Apertura',
   playDate: '2026-01-10',
-  regresoAbierta: true,
-  sustitucionAbierta: true,
+  regresoFase: CambiosVentanaFase.abierta,
+  sustitucionFase: CambiosVentanaFase.abierta,
 );
 
 /// [listaEsperaState] backs the eagerly-loaded section (the screen's default
@@ -382,11 +384,46 @@ void main() {
           ],
           query: '',
         ),
-        fecha: _fechaAbierta(sustitucionAbierta: false),
+        fecha: _fechaAbierta(sustitucionFase: CambiosVentanaFase.cerrada),
       );
 
       expect(find.byKey(const Key('ventana_cerrada_banner')), findsOneWidget);
       expect(find.byKey(const Key('fecha_gap_banner')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('candidato_200')));
+      await tester.pump();
+
+      final confirmButton = tester.widget<ElevatedButton>(
+        find.byKey(const Key('confirmar_solicitud_button')),
+      );
+      expect(confirmButton.onPressed, isNull);
+    });
+
+    testWidgets('sustitucion window not open yet -> shows the ventana antes banner with the '
+        'opening date, not the ya-cerró copy', (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        listaEsperaState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
+          ],
+          query: '',
+        ),
+        fecha: _fechaAbierta(
+          sustitucionFase: CambiosVentanaFase.antes,
+          // 2026-10-11 03:00:00 UTC == 2026-10-11 00:00:00 in Buenos Aires
+          // (UTC-3, no DST) — a Sunday.
+          aperturaSolicitudesUtc: DateTime.utc(2026, 10, 11, 3),
+        ),
+      );
+
+      expect(find.byKey(const Key('ventana_antes_banner')), findsOneWidget);
+      expect(find.byKey(const Key('ventana_cerrada_banner')), findsNothing);
+      expect(
+        find.text('Vas a poder pedir un cambio a partir del domingo 11/10.'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byKey(const Key('candidato_200')));
       await tester.pump();
@@ -715,7 +752,10 @@ void main() {
       await _pumpScreen(
         tester,
         tipo: CambiosSolicitudTipo.regreso,
-        fecha: _fechaAbierta(regresoAbierta: false, sustitucionAbierta: true),
+        fecha: _fechaAbierta(
+          regresoFase: CambiosVentanaFase.cerrada,
+          sustitucionFase: CambiosVentanaFase.abierta,
+        ),
       );
 
       expect(find.byKey(const Key('ventana_cerrada_banner')), findsOneWidget);

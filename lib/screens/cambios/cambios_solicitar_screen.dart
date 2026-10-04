@@ -9,6 +9,7 @@ import '../../providers/cambios_providers.dart';
 import '../../services/cambios_api_service.dart';
 import '../../services/cambios_candidatos_controller.dart';
 import '../../services/player_filter_service.dart';
+import '../../utils/date_utils.dart';
 import '../../utils/puntaje_utils.dart';
 import '../../widgets/cambios_candidato_card.dart';
 import '../../widgets/entre_redes_app_bar.dart';
@@ -84,7 +85,7 @@ import '../../widgets/prode_segmented_toggle.dart';
 /// [CambiosFechaAbierta.ventanaAbiertaPara] answers exactly the question this
 /// screen's own tipo cares about — `regreso_abierta` for
 /// [CambiosSolicitudTipo.regreso], `sustitucion_abierta` for
-/// [CambiosSolicitudTipo.sustitucion] — and [_VentanaCerradaBanner] shows
+/// [CambiosSolicitudTipo.sustitucion] — and [_VentanaEstadoBanner] shows
 /// that BEFORE the candidate list or the confirm button ever becomes usable.
 class CambiosSolicitarScreen extends ConsumerStatefulWidget {
   final int seasonId;
@@ -290,7 +291,11 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
           if (fechaAsync.isLoading) const _FechaLoadingBanner(),
           if (!fechaAsync.isLoading && fecha == null) const _FechaGapBanner(),
           if (fecha != null && !ventanaAbierta)
-            _VentanaCerradaBanner(esSustitucion: isSustitucion),
+            _VentanaEstadoBanner(
+              esSustitucion: isSustitucion,
+              fase: fecha.faseFor(esSustitucion: isSustitucion),
+              aperturaSolicitudesUtc: fecha.aperturaSolicitudesUtc,
+            ),
           if (isSustitucion) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -553,7 +558,7 @@ List<CambiosCandidato> _candidatosFiltrados(
 /// selection state and the trailing icon/subtitle. Its own widget (rather
 /// than inline in [CambiosSolicitarScreen]'s `Column`) for the same reason
 /// every other state in this file already got one: [_PlazaHeader],
-/// [_FechaGapBanner], [_VentanaCerradaBanner], [_CandidatosErrorView],
+/// [_FechaGapBanner], [_VentanaEstadoBanner], [_CandidatosErrorView],
 /// [_CandidatosEmptyView].
 class _CandidatosList extends StatelessWidget {
   final CambiosCandidatosState state;
@@ -724,26 +729,60 @@ class _FechaLoadingBanner extends StatelessWidget {
 }
 
 /// Shown when there IS an open fecha, but the deadline window for THIS
-/// tipo of request (regreso or sustitucion) has already closed — see
-/// `CambiosSolicitarScreen`'s own docblock, "WHY THE WINDOW CHECK HAPPENS
-/// HERE, NOT ONLY ON THE BACKEND": a captain must learn this before picking
-/// a candidate, never from a rejected submit.
-class _VentanaCerradaBanner extends StatelessWidget {
+/// tipo of request (regreso or sustitucion) is not currently open — either
+/// [CambiosVentanaFase.antes] (it has not opened yet, so this banner also
+/// tells the captain WHEN) or [CambiosVentanaFase.cerrada] (its own deadline
+/// already passed). See `CambiosFechaAbierta`'s own docblock, "THREE
+/// STATES, NOT TWO", for why a plain boolean could not tell these two apart
+/// — both used to read as the SAME "closed" banner, even though "come back
+/// Sunday" and "this fecha is done" are very different things to tell a
+/// captain. See also `CambiosSolicitarScreen`'s own docblock, "WHY THE
+/// WINDOW CHECK HAPPENS HERE, NOT ONLY ON THE BACKEND": a captain must learn
+/// this before picking a candidate, never from a rejected submit.
+///
+/// Renamed from `_VentanaCerradaBanner` (one state, one message) to
+/// `_VentanaEstadoBanner` (two possible non-open states, two messages) when
+/// this slice added the `antes` phase.
+class _VentanaEstadoBanner extends StatelessWidget {
   final bool esSustitucion;
-  const _VentanaCerradaBanner({required this.esSustitucion});
+  final CambiosVentanaFase fase;
+  final DateTime? aperturaSolicitudesUtc;
+
+  const _VentanaEstadoBanner({
+    required this.esSustitucion,
+    required this.fase,
+    required this.aperturaSolicitudesUtc,
+  });
+
+  /// "a cambio" / "un cambio" vs. "a regreso" / "un regreso" — the SAME
+  /// `esSustitucion`-keyed vocabulary the `cerrada` copy below already used,
+  /// kept consistent rather than introducing a third phrasing.
+  String get _accion => esSustitucion ? 'un cambio' : 'un regreso';
+
+  String get _mensaje {
+    if (fase == CambiosVentanaFase.antes) {
+      final apertura = aperturaSolicitudesUtc;
+      if (apertura == null) {
+        return 'Todavía no se abrió el plazo para pedir $_accion en esta fecha.';
+      }
+      return 'Vas a poder pedir $_accion a partir del ${formatDiaYFechaCorta(apertura)}.';
+    }
+
+    return esSustitucion
+        ? 'El plazo para pedir un cambio en esta fecha ya cerró.'
+        : 'El plazo para pedir un regreso en esta fecha ya cerró.';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final esAntes = fase == CambiosVentanaFase.antes;
+
     return MaterialBanner(
-      key: const Key('ventana_cerrada_banner'),
+      key: Key(esAntes ? 'ventana_antes_banner' : 'ventana_cerrada_banner'),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: const Icon(Icons.lock_clock_outlined, color: Colors.orange),
       backgroundColor: Colors.amber.shade100,
-      content: Text(
-        esSustitucion
-            ? 'El plazo para pedir un cambio en esta fecha ya cerró.'
-            : 'El plazo para pedir un regreso en esta fecha ya cerró.',
-      ),
+      content: Text(_mensaje),
       actions: const [SizedBox.shrink()],
     );
   }

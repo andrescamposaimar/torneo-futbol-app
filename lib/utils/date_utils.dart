@@ -73,3 +73,33 @@ String? formatFechaLarga(String? fecha) {
   final mes = _meses[parsed.month - 1];
   return '$dia ${parsed.day} de $mes de ${parsed.year}';
 }
+
+/// Fixed UTC-3 offset for Argentina, this app's single league's timezone —
+/// `Calendario\PlazosCalculator`'s own docblock on the backend documents it
+/// as not observing DST. Used ONLY to turn an already-known UTC instant
+/// (never `DateTime.now()`) into the Argentina CALENDAR DATE it falls on for
+/// display — a formatting step, never a clock comparison (the window's
+/// open/closed decision itself is always computed on the backend; see
+/// `CambiosSolicitarScreen`'s own docblock, "WHY THE WINDOW CHECK HAPPENS
+/// HERE, NOT ONLY ON THE BACKEND", for the one check that IS mirrored on the
+/// device, and why this is not another one of those).
+///
+/// A fixed offset — rather than `DateTime.toLocal()` — is deliberate: the
+/// device's ambient timezone is whatever the user (or a test runner) happens
+/// to be set to, and this app has exactly one civil calendar that matters
+/// for a plazo date, Argentina's, independent of where the phone or the CI
+/// machine think they are.
+const Duration argentinaUtcOffset = Duration(hours: -3);
+
+/// Formats a UTC [instanteUtc] as 'día dd/MM' in Argentina civil time, in
+/// lowercase (e.g. 'domingo 11/10') — the short form a "window not open yet"
+/// banner needs to tell a captain WHEN it opens. Reuses [_diasSemana] for
+/// the same reason [formatFechaLarga] does: this app does not initialize
+/// `intl`'s 'es' locale data, so a locale-aware `DateFormat` would throw.
+String formatDiaYFechaCorta(DateTime instanteUtc) {
+  final local = instanteUtc.toUtc().add(argentinaUtcOffset);
+  final dia = _diasSemana[local.weekday - 1].toLowerCase();
+  final dd = local.day.toString().padLeft(2, '0');
+  final mm = local.month.toString().padLeft(2, '0');
+  return '$dia $dd/$mm';
+}
