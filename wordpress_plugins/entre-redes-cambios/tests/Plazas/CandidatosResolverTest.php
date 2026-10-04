@@ -20,6 +20,16 @@ use PHPUnit\Framework\TestCase;
  * plugin's own test schema does not otherwise create — see
  * DictamenContextAssemblerTest for the same pattern applied to `wp_postmeta`
  * alone) and `wp_posts` via wp-shim.php's wp_test_create_posts_table().
+ *
+ * `wp_term_relationships` / `wp_term_taxonomy` are used ONLY for the real
+ * `sp_season` taxonomy (season registration). Team membership (`sp_team`)
+ * is NOT a taxonomy in production — it is a `postmeta` row, `meta_key =
+ * 'sp_team'`, `meta_value` = the team's post id — so `seedEquipoMembership()`
+ * below seeds `wp_postmeta` directly rather than a term relationship. An
+ * earlier version of this fixture seeded `sp_team` as a taxonomy term,
+ * which encoded the exact wrong assumption the production bug made and
+ * would have kept passing against a resolver that never matched a single
+ * real row.
  */
 class CandidatosResolverTest extends TestCase {
 
@@ -183,15 +193,18 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->insert( $p . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'sp_metrics', 'meta_value' => serialize( $metrics ) ] );
     }
 
-    /** Creates the `sp_team` taxonomy term itself — call ONCE per team id. */
-    private function seedEquipoTaxonomyTerm( int $teamId ): void {
-        global $wpdb;
-        $wpdb->insert( $wpdb->prefix . 'term_taxonomy', [ 'term_taxonomy_id' => $teamId, 'term_id' => $teamId, 'taxonomy' => 'sp_team' ] );
-    }
-
+    /**
+     * Seeds team membership the way production actually stores it: ordinary
+     * `postmeta`, `meta_key = 'sp_team'`, `meta_value` = the team's post id
+     * — NOT a taxonomy term relationship. There is no `sp_team` taxonomy in
+     * production (confirmed via `GET /wp-json/wp/v2/taxonomies`), so a prior
+     * version of this fixture that seeded `wp_term_relationships` /
+     * `wp_term_taxonomy` rows encoded the exact wrong assumption the
+     * production bug made.
+     */
     private function seedEquipoMembership( int $playerId, int $teamId ): void {
         global $wpdb;
-        $wpdb->insert( $wpdb->prefix . 'term_relationships', [ 'object_id' => $playerId, 'term_taxonomy_id' => $teamId ] );
+        $wpdb->insert( $wpdb->prefix . 'postmeta', [ 'post_id' => $playerId, 'meta_key' => 'sp_team', 'meta_value' => (string) $teamId ] );
     }
 
     // -------------------------------------------------------------------------
@@ -523,7 +536,6 @@ class CandidatosResolverTest extends TestCase {
     public function test_lista_espera_seccion_returns_only_the_teams_players(): void {
         $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
 
-        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
         $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
         $this->seedEquipoMembership( 800, self::LISTA_ESPERA_TEAM_ID );
 
@@ -548,7 +560,6 @@ class CandidatosResolverTest extends TestCase {
     public function test_lista_espera_seccion_excludes_the_plazas_own_current_vigent_occupant(): void {
         $plazaId = $this->plaza( 10 );
 
-        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
         // 700 is the plaza's own titular/vigent occupant (see plaza()).
         $this->seedPlayer( 700, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
         $this->seedEquipoMembership( 700, self::LISTA_ESPERA_TEAM_ID );
@@ -575,7 +586,6 @@ class CandidatosResolverTest extends TestCase {
     public function test_padron_completo_seccion_includes_a_player_with_no_season_registration(): void {
         $plazaId = $this->plaza( 10 );
 
-        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
         $this->seedPlayerSinTemporada( 900, [ 'caracter' => 'Padre Ex-Alumno', 'puntaje' => '2,5' ] );
 
         $plaza      = $this->plazaRepository->findPlaza( $plazaId );
@@ -594,7 +604,6 @@ class CandidatosResolverTest extends TestCase {
     public function test_padron_completo_seccion_excludes_the_lista_de_espera_teams_players(): void {
         $plazaId = $this->plaza( 10 );
 
-        $this->seedEquipoTaxonomyTerm( self::LISTA_ESPERA_TEAM_ID );
         $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
         $this->seedEquipoMembership( 800, self::LISTA_ESPERA_TEAM_ID );
 
