@@ -71,6 +71,44 @@ use EntreRedes\Cambios\Support\ChecksReads;
  * is read under a single, exact meta_key (`caracter`), unlike
  * `puntaje`/`Puntaje` in `sp_metrics`, which genuinely has two live castings.
  *
+ * *** fetchLatestMetaValuesFor() CHUNKS $playerIds, NEVER ONE UNBOUNDED `IN
+ * (...)` *** `Plazas\CandidatosResolver::buscarPaginado()` calls
+ * `resolveMuchos()` over the WHOLE candidate population BEFORE pagination
+ * (see that method's own docblock, "WHY PAGINATION HAPPENS HERE, BEFORE THE
+ * N+1, NOT AFTER") — for `?seccion=padron_completo` that population is
+ * roughly a THOUSAND player ids, which would otherwise build a single SQL
+ * statement with ~1000 `%d` placeholders. `fetchLatestMetaValuesFor()`
+ * batches $playerIds into chunks of `self::ID_CHUNK_SIZE` (200) and runs one
+ * query per chunk, merging the results — chosen conservatively: 200 keeps
+ * every chunk's placeholder count comfortably under the old SQLite
+ * `SQLITE_LIMIT_VARIABLE_NUMBER` default of 999 this plugin's own test shim
+ * is bound by (headroom for `meta_key` and any future extra bound param),
+ * keeps the per-chunk result set (post_id + meta_value, where `sp_metrics`
+ * is a serialized blob that can be a few hundred bytes per player) small
+ * enough to stay well under shared-hosting `max_allowed_packet` defaults even
+ * in the worst case, and keeps the query COUNT per request small (≈5-6
+ * chunks for a ~1000-player padrón, times 2 meta_keys = ≈10-12 queries) —
+ * nowhere near "one query per candidate".
+ *
+ * Chunking is safe here specifically because it partitions the INPUT ID
+ * LIST, not the OUTPUT ROWS: every row returned by a given chunk's query
+ * necessarily has a `post_id` that IS one of that chunk's ids (the `WHERE
+ * post_id IN (...)` clause guarantees it), so a single player's rows can
+ * NEVER be split across two chunks — a player belongs to exactly one chunk,
+ * full stop. This means the "DETERMINISM WHEN MORE THAN ONE ROW EXISTS FOR A
+ * PLAYER" rule above (last row in `ORDER BY meta_id ASC` wins) is completely
+ * unaffected by chunking: it is applied identically, per chunk, to that
+ * chunk's own rows, and the per-player winner is decided within that single
+ * chunk exactly as it would be if the whole id list had been queried at
+ * once. Merging each chunk's keyed map into the running result is therefore
+ * a plain union over disjoint key sets — never an overwrite between chunks.
+ *
+ * A query failure in ANY chunk — including one that is not the first — must
+ * still throw, per "READ FAILURES MUST NEVER READ AS 'NOBODY HAS METRICS'"
+ * below; results already merged from earlier, successful chunks are
+ * discarded along with the exception, never returned as a silently partial
+ * map. See JugadorMetricasReaderTest's chunking tests.
+ *
  * *** DETERMINISM WHEN MORE THAN ONE ROW EXISTS FOR A PLAYER ***
  * WordPress does NOT enforce uniqueness on `(post_id, meta_key)` in
  * `postmeta` — a player can legitimately end up with two rows under the SAME
@@ -111,6 +149,13 @@ final class JugadorMetricasReader {
 
     private const META_KEY_METRICS  = 'sp_metrics';
     private const META_KEY_CARACTER = 'caracter';
+
+    /**
+     * Max player ids per `fetchLatestMetaValuesFor()` query — see class
+     * docblock, "fetchLatestMetaValuesFor() CHUNKS $playerIds, NEVER ONE
+     * UNBOUNDED `IN (...)`", for why 200.
+     */
+    private const ID_CHUNK_SIZE = 200;
 
     private \wpdb $wpdb;
     private EventLog $eventLog;
@@ -241,44 +286,73 @@ final class JugadorMetricasReader {
      * resolveMuchos()'s two reads. See
      * `fetchLatestMetaValue()`'s docblock for the same determinism and
      * failure-handling contract, applied here per meta_key rather than per
-     * player.
+     * player, and the class docblock, "fetchLatestMetaValuesFor() CHUNKS
+     * $playerIds, NEVER ONE UNBOUNDED `IN (...)`", for why this runs one
+     * query per `self::ID_CHUNK_SIZE`-sized chunk of $playerIds rather than
+     * one query for the whole array.
      *
      * @param array<int, int> $playerIds
      * @return array<int, string> Keyed by player_id — ONLY the players that
      *         actually have a row under $metaKey are present; a player with
      *         none is simply absent from this map (callers must default the
      *         corresponding fact themselves, same as `resolveMuchos()` does).
-     * @throws \RuntimeException When the query fails at the wpdb level.
+     * @throws \RuntimeException When the query fails at the wpdb level, for
+     *         ANY chunk — including one that is not the first. Results
+     *         already merged from earlier, successful chunks are discarded
+     *         along with the exception; this method never returns a partial
+     *         map on failure (see class docblock, "READ FAILURES MUST NEVER
+     *         READ AS 'NOBODY HAS METRICS'").
      */
     private function fetchLatestMetaValuesFor( array $playerIds, string $metaKey, string $operacion ): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $placeholders = implode( ', ', array_fill( 0, count( $playerIds ), '%d' ) );
-
-        // ORDER BY meta_id ASC — NOT arbitrary, see class docblock,
-        // "DETERMINISM WHEN MORE THAN ONE ROW EXISTS FOR A PLAYER": the loop
-        // below overwrites $resultado[$playerId] on every matching row, so
-        // ascending order makes the LAST overwrite always the row with the
-        // highest meta_id — the same row fetchLatestMetaValue()'s own
-        // `ORDER BY meta_id DESC LIMIT 1` picks for that same player and
-        // meta_key.
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT post_id, meta_value FROM {$p}postmeta
-                  WHERE meta_key = %s AND post_id IN ({$placeholders})
-                  ORDER BY meta_id ASC",
-                array_merge( [ $metaKey ], $playerIds )
-            ),
-            ARRAY_A
-        );
-
-        $this->assertReadSucceeded( $rows, $operacion, [ 'player_ids_count' => count( $playerIds ), 'meta_key' => $metaKey ] );
-
         $resultado = [];
 
-        foreach ( $rows as $row ) {
-            $resultado[ (int) $row['post_id'] ] = (string) $row['meta_value'];
+        // Chunking the INPUT id list — never the output rows — is what makes
+        // this safe: a chunk's `WHERE post_id IN (...)` guarantees every row
+        // it returns belongs to THAT chunk's own ids, so one player's rows
+        // can never straddle two chunks. See class docblock,
+        // "fetchLatestMetaValuesFor() CHUNKS $playerIds...", for the full
+        // reasoning, including why this leaves the meta_id-ordering
+        // determinism rule below completely unaffected.
+        foreach ( array_chunk( $playerIds, self::ID_CHUNK_SIZE ) as $chunk ) {
+            $placeholders = implode( ', ', array_fill( 0, count( $chunk ), '%d' ) );
+
+            // ORDER BY meta_id ASC — NOT arbitrary, see class docblock,
+            // "DETERMINISM WHEN MORE THAN ONE ROW EXISTS FOR A PLAYER": the
+            // loop below overwrites $resultado[$playerId] on every matching
+            // row, so ascending order makes the LAST overwrite always the
+            // row with the highest meta_id — the same row
+            // fetchLatestMetaValue()'s own `ORDER BY meta_id DESC LIMIT 1`
+            // picks for that same player and meta_key. This holds per chunk
+            // exactly as it held for the whole list before chunking existed,
+            // because a player's rows are entirely contained within the one
+            // chunk that carries their id.
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT post_id, meta_value FROM {$p}postmeta
+                      WHERE meta_key = %s AND post_id IN ({$placeholders})
+                      ORDER BY meta_id ASC",
+                    array_merge( [ $metaKey ], $chunk )
+                ),
+                ARRAY_A
+            );
+
+            // Thrown here, per chunk — a failure on, say, the 4th of 6
+            // chunks must still fail the WHOLE read, never return the first
+            // 3 chunks' worth of players as "resolved" and silently drop the
+            // rest. $resultado accumulated so far is simply discarded along
+            // with this exception, exactly as it would be if the method had
+            // never chunked at all.
+            $this->assertReadSucceeded( $rows, $operacion, [
+                'player_ids_count' => count( $chunk ),
+                'meta_key'         => $metaKey,
+            ] );
+
+            foreach ( $rows as $row ) {
+                $resultado[ (int) $row['post_id'] ] = (string) $row['meta_value'];
+            }
         }
 
         return $resultado;

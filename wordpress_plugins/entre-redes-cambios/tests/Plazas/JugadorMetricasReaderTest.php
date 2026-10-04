@@ -290,6 +290,123 @@ class JugadorMetricasReaderTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // fetchLatestMetaValuesFor() chunking — see JugadorMetricasReader's class
+    // docblock, "fetchLatestMetaValuesFor() CHUNKS $playerIds, NEVER ONE
+    // UNBOUNDED `IN (...)`". This is what Plazas\CandidatosResolver's
+    // `buscarPaginado()` exercises for real when `?seccion=padron_completo`
+    // resolves ~1000 player ids BEFORE pagination.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Reads the private ID_CHUNK_SIZE constant rather than hardcoding it here
+     * a second time — these tests must stay correct even if that constant's
+     * value is tuned later.
+     */
+    private static function chunkSize(): int {
+        return ( new \ReflectionClassConstant( JugadorMetricasReader::class, 'ID_CHUNK_SIZE' ) )->getValue();
+    }
+
+    /**
+     * A population strictly larger than one chunk (2 full chunks + a partial
+     * third) must resolve to EXACTLY the same map a single, unchunked query
+     * would have produced — proving the per-chunk merge is a plain union,
+     * never a silent overwrite or drop across chunk boundaries.
+     */
+    public function test_resolve_muchos_chunks_a_population_larger_than_one_batch_and_merges_results(): void {
+        $chunkSize = self::chunkSize();
+        $total     = ( $chunkSize * 2 ) + 7; // 2 full chunks + a partial 3rd
+        $playerIds = range( 1, $total );
+
+        foreach ( $playerIds as $playerId ) {
+            // Deterministic, player-id-derived expectation: even ids are
+            // padres with puntaje 3, odd ids are non-padres with puntaje 1.
+            $esPadre = 0 === $playerId % 2;
+            $this->putSpMetrics( $playerId, [
+                'caracter' => $esPadre ? 'Padre Alumno' : 'Invitado',
+                'puntaje'  => $esPadre ? '3' : '1',
+            ] );
+        }
+
+        $resultado = $this->reader->resolveMuchos( $playerIds );
+
+        $this->assertCount( $total, $resultado );
+
+        foreach ( $playerIds as $playerId ) {
+            $esperadoPadre   = 0 === $playerId % 2;
+            $esperadoPuntaje = $esperadoPadre ? 3.0 : 1.0;
+
+            $this->assertSame( $esperadoPadre, $resultado[ $playerId ]->esPadre(), "player {$playerId} esPadre()" );
+            $this->assertSame( $esperadoPuntaje, $resultado[ $playerId ]->puntaje()->toDecimal(), "player {$playerId} puntaje()" );
+        }
+    }
+
+    /**
+     * Same pattern as `wpdbThatFailsGetResults()`, but fails only on the Nth
+     * matching call rather than every one — needed to simulate a failure on a
+     * LATER chunk while earlier chunks succeed normally.
+     */
+    private function wpdbThatFailsGetResultsOnNthMatchingCall( \wpdb $real, string $mustContain, int $failOnCallNumber ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain, $failOnCallNumber ) extends \wpdb {
+            private string $mustContain;
+            private int $failOnCallNumber;
+            private int $matchingCallCount = 0;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain, int $failOnCallNumber ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix           = $prefix;
+                $this->mustContain      = $mustContain;
+                $this->failOnCallNumber = $failOnCallNumber;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    ++$this->matchingCallCount;
+
+                    if ( $this->matchingCallCount === $this->failOnCallNumber ) {
+                        $this->last_error = 'simulated get_results failure for test (later chunk)';
+                        return [];
+                    }
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    /**
+     * THE regression this whole work unit exists to prevent: a failure in a
+     * chunk that is NOT the first must still throw — never silently return
+     * the earlier chunks' players as "resolved" while quietly dropping the
+     * rest, which would misread a partial DB failure as "these remaining
+     * players have no metrics" (see class docblock, "READ FAILURES MUST
+     * NEVER READ AS 'NOBODY HAS METRICS'").
+     */
+    public function test_resolve_muchos_throws_when_a_later_chunk_fails(): void {
+        global $wpdb;
+
+        $chunkSize = self::chunkSize();
+        $total     = ( $chunkSize * 2 ) + 7; // 3 chunks total
+        $playerIds = range( 1, $total );
+
+        foreach ( $playerIds as $playerId ) {
+            $this->putSpMetrics( $playerId, [ 'caracter' => 'Padre Alumno', 'puntaje' => '3' ] );
+        }
+
+        // Fails on the 2nd call whose SQL contains 'sp_metrics' — i.e. the
+        // SECOND chunk's metrics query, not the first.
+        $failingWpdb   = $this->wpdbThatFailsGetResultsOnNthMatchingCall( $wpdb, 'sp_metrics', 2 );
+        $failingReader = new JugadorMetricasReader( $failingWpdb, new InMemoryEventLog() );
+
+        $this->expectException( \RuntimeException::class );
+
+        $failingReader->resolveMuchos( $playerIds );
+    }
+
+    // -------------------------------------------------------------------------
     // FIX 4 — determinism when more than one row exists under a meta_key
     // -------------------------------------------------------------------------
 
