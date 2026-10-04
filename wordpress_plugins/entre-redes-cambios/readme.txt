@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.4
+Stable tag: 0.1.5
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.5 =
+* Fix: chunk the IN(...) clause JugadorMetricasReader builds from the whole candidate population (batches of 200) instead of one unbounded query, to harden the ?seccion=padron_completo path (~1000 players) against a production 500.
+* Add: persist the most recent unexpected failure (event, exception class, message, UTC timestamp) in the entre_redes_cambios_ultimo_error option, readable via phpMyAdmin, since this host exposes no PHP error log.
 
 = 0.1.4 =
 * Fix: the candidatos search filter (`CandidatosResolver`) built a `LIKE ... ESCAPE '\'` clause that is valid under this plugin's SQLite test shim but a SQL syntax error on real MySQL, where a backslash before the closing quote escapes the quote itself instead of closing the string literal. Every captain search request failed in production. Replaced the escape character with `!`, which has no special meaning in either engine's string-literal parsing or as a `LIKE` wildcard, via a new shared `escapeLikeTerm()` helper.

@@ -54,8 +54,62 @@ namespace EntreRedes\Cambios\Observability;
  * writes a last-resort line straight to `error_log()` (never back through
  * `do_action()`, which is the thing that just failed) and returns normally,
  * exactly as if nothing had gone wrong from the CALLER's point of view.
+ *
+ * *** THE `entre_redes_cambios_ultimo_error` OPTION — A DIAGNOSTIC AID, NOT
+ * PERMANENT TELEMETRY ***
+ * This plugin ships to shared hosting where the operator has NO access to
+ * any PHP error log (none under `public_html`, none exposed in the hosting
+ * panel) and `error_log()` above only fires when `WP_DEBUG` is active in
+ * production — which it normally is not. Without this, a 500 from this
+ * plugin is completely opaque: the operator sees `error_interno` on the
+ * device and has nothing else to look at. `record()` therefore ALSO
+ * persists the most recent FAILURE event (one whose `$evento` contains
+ * `'fallid'` — this plugin's own naming convention for a failure code, e.g.
+ * `lectura.fallida`, `escritura.fallida`, every `rest.*_fallida`; see this
+ * class's own docblock intro for the convention) into a single WordPress
+ * option, `entre_redes_cambios_ultimo_error`, with autoload OFF (it is read
+ * once, rarely, by an operator — never on every page load).
+ *
+ * Deliberately excludes events like `rest.autorizacion_denegada` (an
+ * expected 403, not an unexpected failure) — matching on `'fallid'` in the
+ * event CODE, rather than on the presence of an `excepcion`/`mensaje` key in
+ * `$contexto`, keeps that distinction: an authorization denial also carries
+ * `excepcion` (see `Rest\PlazasController`'s catch blocks) but is routed
+ * through a DIFFERENT event code precisely because it is not a failure this
+ * diagnostic aid needs to surface.
+ *
+ * ONLY the latest is kept (a plain overwrite, via `update_option()`) — never
+ * appended — so this can never grow unbounded; it is a single snapshot, not
+ * a log table. The stored payload is deliberately narrow: the event code,
+ * the exception class (from `$contexto['excepcion']` when present), a
+ * message (from `$contexto['mensaje']`, falling back to
+ * `$contexto['last_error']` for the `Support\ChecksReads` / `OpensTransactions`
+ * convention, truncated to a sane length in case a wpdb error message ever
+ * embeds a long SQL string), and a UTC timestamp. It NEVER stores the rest
+ * of `$contexto` — no JWT, no bearer token, no request headers, no player
+ * personal data, nothing beyond those four fields, regardless of what a
+ * future call site happens to pass.
+ *
+ * To read it: `SELECT option_value FROM wp_options WHERE option_name =
+ * 'entre_redes_cambios_ultimo_error'` via phpMyAdmin — the one tool this
+ * operator does have.
+ *
+ * This persistence ALSO runs inside `record()`'s own `try`/`catch`, for the
+ * exact same reason the `do_action()`/`error_log()` calls do: a failure
+ * writing this option (a WordPress bug, a read-only `wp_options` row) must
+ * never propagate back to the caller either.
  */
 class WpEventLog implements EventLog {
+
+    private const OPTION_ULTIMO_ERROR = 'entre_redes_cambios_ultimo_error';
+
+    /**
+     * Sane ceiling for the stored message — a wpdb `last_error` or exception
+     * message is normally a short sentence, but this guards against an
+     * unusually long one (e.g. one that happens to embed a SQL fragment)
+     * bloating the option.
+     */
+    private const MAX_MENSAJE_LENGTH = 500;
 
     /** @var callable(): bool */
     private $isDebugActive;
@@ -84,6 +138,8 @@ class WpEventLog implements EventLog {
             if ( ( $this->isDebugActive )() ) {
                 error_log( sprintf( '[entre-redes-cambios] %s %s', $evento, json_encode( $contexto ) ) );
             }
+
+            $this->recordUltimoErrorSiAplica( $evento, $contexto );
         } catch ( \Throwable $e ) {
             // Deliberately NOT re-entering do_action() — that is the thing
             // that just failed. error_log() is the one channel this class
@@ -94,5 +150,40 @@ class WpEventLog implements EventLog {
                 $e->getMessage()
             ) );
         }
+    }
+
+    /**
+     * Persists $evento/$contexto into the `entre_redes_cambios_ultimo_error`
+     * option when, and only when, $evento looks like a failure — see class
+     * docblock, "THE entre_redes_cambios_ultimo_error OPTION", for the exact
+     * matching rule and why `?seccion=padron_completo`-style denials are
+     * deliberately excluded. A no-op for every other event — this is the
+     * majority of calls (business events like `plaza.abierta`), so this
+     * check is a cheap `str_contains()` before anything else runs.
+     *
+     * @param array<string, mixed> $contexto
+     */
+    private function recordUltimoErrorSiAplica( string $evento, array $contexto ): void {
+        if ( ! str_contains( $evento, 'fallid' ) ) {
+            return;
+        }
+
+        $clase = isset( $contexto['excepcion'] ) && is_string( $contexto['excepcion'] )
+            ? $contexto['excepcion']
+            : null;
+
+        $mensajeCrudo = $contexto['mensaje'] ?? ( $contexto['last_error'] ?? '' );
+        $mensaje      = is_string( $mensajeCrudo ) ? $mensajeCrudo : '';
+
+        update_option(
+            self::OPTION_ULTIMO_ERROR,
+            [
+                'evento'    => $evento,
+                'clase'     => $clase,
+                'mensaje'   => mb_substr( $mensaje, 0, self::MAX_MENSAJE_LENGTH ),
+                'timestamp' => gmdate( 'Y-m-d H:i:s' ),
+            ],
+            false
+        );
     }
 }

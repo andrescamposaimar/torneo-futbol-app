@@ -25,14 +25,23 @@ class WpEventLogTest extends TestCase {
     private string $errorLogFile;
     private string|false $previousErrorLogSetting;
 
+    private const OPTION_ULTIMO_ERROR = 'entre_redes_cambios_ultimo_error';
+
     protected function setUp(): void {
         $this->errorLogFile            = tempnam( sys_get_temp_dir(), 'cambios_error_log_' );
         $this->previousErrorLogSetting = ini_set( 'error_log', $this->errorLogFile );
+
+        // This suite runs every test in one process (see this plugin's own
+        // test conventions) and the WP options shim is a single in-memory
+        // array — clear any snapshot a previous test left behind so these
+        // tests never depend on run order.
+        delete_option( self::OPTION_ULTIMO_ERROR );
     }
 
     protected function tearDown(): void {
         ini_set( 'error_log', $this->previousErrorLogSetting );
         @unlink( $this->errorLogFile );
+        delete_option( self::OPTION_ULTIMO_ERROR );
     }
 
     public function test_record_always_fires_the_wordpress_action_with_evento_and_contexto(): void {
@@ -134,5 +143,113 @@ class WpEventLogTest extends TestCase {
         } finally {
             remove_action( 'entre_redes_cambios_event', $listener, 10 );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // entre_redes_cambios_ultimo_error — the diagnostic aid for an operator
+    // with no PHP error log access at all. See class docblock, "THE
+    // entre_redes_cambios_ultimo_error OPTION".
+    // -------------------------------------------------------------------------
+
+    public function test_a_recorded_failure_populates_the_ultimo_error_option(): void {
+        $log = new WpEventLog( static fn(): bool => false );
+
+        $log->record( 'rest.plazas_candidatos_fallida', [
+            'season_id' => 7,
+            'excepcion' => \RuntimeException::class,
+            'mensaje'   => 'the query for meta_key failed at the wpdb level',
+        ] );
+
+        $almacenado = get_option( self::OPTION_ULTIMO_ERROR );
+
+        $this->assertIsArray( $almacenado );
+        $this->assertSame( 'rest.plazas_candidatos_fallida', $almacenado['evento'] );
+        $this->assertSame( \RuntimeException::class, $almacenado['clase'] );
+        $this->assertSame( 'the query for meta_key failed at the wpdb level', $almacenado['mensaje'] );
+        $this->assertArrayHasKey( 'timestamp', $almacenado );
+    }
+
+    /**
+     * `lectura.fallida` / `escritura.fallida` events (Support\ChecksReads,
+     * Support\OpensTransactions, PlazaRepository, etc.) never carry
+     * `excepcion`/`mensaje` — they carry `last_error`, the wpdb error string,
+     * recorded BEFORE the caller throws. The option must still capture a
+     * usable message from that field.
+     */
+    public function test_a_recorded_db_failure_without_excepcion_falls_back_to_last_error(): void {
+        $log = new WpEventLog( static fn(): bool => false );
+
+        $log->record( 'lectura.fallida', [
+            'operacion'  => 'resolveMuchos',
+            'last_error' => 'MySQL server has gone away',
+        ] );
+
+        $almacenado = get_option( self::OPTION_ULTIMO_ERROR );
+
+        $this->assertSame( 'lectura.fallida', $almacenado['evento'] );
+        $this->assertNull( $almacenado['clase'] );
+        $this->assertSame( 'MySQL server has gone away', $almacenado['mensaje'] );
+    }
+
+    /**
+     * The whole point of this option is to be safe for an operator to read
+     * via phpMyAdmin — it must never carry a JWT, a bearer token, or any
+     * other field from $contexto beyond the four documented ones, no matter
+     * what a call site happens to pass alongside `excepcion`/`mensaje`.
+     */
+    public function test_the_stored_payload_never_carries_a_token_or_other_contexto_fields(): void {
+        $log = new WpEventLog( static fn(): bool => false );
+
+        $log->record( 'rest.mis_equipos_fallida', [
+            'player_id'     => 42,
+            'excepcion'     => \RuntimeException::class,
+            'mensaje'       => 'token verification blew up',
+            'authorization' => 'Bearer eyJhbGciOiJIUzI1NiJ9.super-secret-token',
+        ] );
+
+        $almacenado = get_option( self::OPTION_ULTIMO_ERROR );
+
+        $this->assertSame(
+            [ 'evento', 'clase', 'mensaje', 'timestamp' ],
+            array_keys( $almacenado ),
+            'The stored payload must carry exactly these four fields, nothing from $contexto directly.'
+        );
+        $this->assertArrayNotHasKey( 'authorization', $almacenado );
+        $this->assertArrayNotHasKey( 'player_id', $almacenado );
+        $this->assertStringNotContainsString( 'Bearer', json_encode( $almacenado ) );
+    }
+
+    /**
+     * An expected authorization denial is not an "unexpected failure" — see
+     * class docblock for why matching is done on the event CODE
+     * (`str_contains($evento, 'fallid')`) rather than on the presence of an
+     * `excepcion` key, which `rest.autorizacion_denegada` also carries.
+     */
+    public function test_an_authorization_denial_does_not_populate_the_ultimo_error_option(): void {
+        $log = new WpEventLog( static fn(): bool => false );
+
+        $log->record( 'rest.autorizacion_denegada', [
+            'endpoint'  => 'GET /cambios/plazas/candidatos',
+            'excepcion' => \RuntimeException::class,
+        ] );
+
+        $this->assertFalse( get_option( self::OPTION_ULTIMO_ERROR, false ) );
+    }
+
+    /**
+     * Only the LATEST failure is kept — a second, different failure must
+     * overwrite the first rather than accumulate, so this option can never
+     * grow unbounded (see class docblock).
+     */
+    public function test_only_the_latest_failure_is_kept(): void {
+        $log = new WpEventLog( static fn(): bool => false );
+
+        $log->record( 'lectura.fallida', [ 'last_error' => 'first failure' ] );
+        $log->record( 'escritura.fallida', [ 'last_error' => 'second failure' ] );
+
+        $almacenado = get_option( self::OPTION_ULTIMO_ERROR );
+
+        $this->assertSame( 'escritura.fallida', $almacenado['evento'] );
+        $this->assertSame( 'second failure', $almacenado['mensaje'] );
     }
 }
