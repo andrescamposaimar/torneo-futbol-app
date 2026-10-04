@@ -343,10 +343,28 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->assertNotSame( 0, $ctx->entrantePuntaje() );
     }
 
-    public function test_entrante_puntaje_throws_when_the_stored_value_is_not_a_valid_puntaje(): void {
-        $this->expectException( \InvalidArgumentException::class );
+    /**
+     * UPDATED by the puntaje-cero production fix (2026-10-04):
+     * `JugadorMetricasReader::extractPuntaje()` no longer lets
+     * `Puntaje::fromDecimal()`'s `\InvalidArgumentException` escape — see its
+     * own class docblock, "AN OTHERWISE-INVALID STORED VALUE DEGRADES TO
+     * NULL TOO, BUT IS LOGGED". Before that fix, THIS exact shape (a
+     * malformed stored puntaje for a solicitud's own named entrante) threw
+     * out of `assemble()` too — a second, previously undiscovered instance
+     * of the same "one bad row aborts the whole request" failure mode the
+     * candidatos endpoint hit in production, just on the solicitud-creation
+     * path instead. It is now treated exactly like a missing puntaje: fails
+     * CLOSED via `Dictamen\Reglas\PuntajeDentroDelTecho`'s own
+     * `entrante_puntaje_indeterminado` motivo (see that rule's class
+     * docblock, "A MISSING PUNTAJE IS NEVER READ AS 'NO OBJECTION'"), logged
+     * and visible rather than thrown, never silently approved.
+     */
+    public function test_entrante_puntaje_resolves_to_null_and_is_logged_when_the_stored_value_is_not_a_valid_puntaje(): void {
+        $ctx = $this->assembleWithEntrante( [ 'puntaje' => '2,3' ] );
 
-        $this->assembleWithEntrante( [ 'puntaje' => '2,3' ] );
+        $this->assertNull( $ctx->entrantePuntaje() );
+        $this->assertTrue( $this->eventLog->has( 'metrics.puntaje_invalido' ) );
+        $this->assertTrue( $this->eventLog->has( 'entrante.puntaje_no_encontrado' ) );
     }
 
     /**

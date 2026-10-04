@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.5
+Stable tag: 0.1.6
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.6 =
+* Fix: a stored puntaje of "0" (7 players in production, none registered in season 2026) made `JugadorMetricasReader::extractPuntaje()` call `Puntaje::fromDecimal('0')`, which correctly rejects 0 as out of range — the thrown `InvalidArgumentException` escaped `CandidatosResolver::buscarPaginado()` uncaught, turning `GET /cambios/plazas/candidatos?seccion=padron_completo` into a 500 for every captain. A stored puntaje of zero now reads as "sin calificar" (never a legitimate rating of zero, matching the app's own `formatearPuntaje()`), and any OTHER value that is not one of the 9 valid puntajes degrades to the same safe `null` state instead of throwing — logged as `metrics.puntaje_invalido` (player id + raw value) so a genuinely corrupt row stays visible instead of vanishing. `Puntaje::fromHalfPoints()` / `::fromDecimal()` themselves are unchanged and still throw for callers that require a valid puntaje.
 
 = 0.1.5 =
 * Fix: chunk the IN(...) clause JugadorMetricasReader builds from the whole candidate population (batches of 200) instead of one unbounded query, to harden the ?seccion=padron_completo path (~1000 players) against a production 500.
