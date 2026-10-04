@@ -3,7 +3,7 @@
  * Plugin Name:       Entre Redes — Cambios de Jugadores
  * Plugin URI:        https://entreredespadres.com.ar
  * Description:       Player change/substitution calendar and lifecycle for the Entre Redes football league. Requires the Entre Redes main plugin.
- * Version:           0.1.3
+ * Version:           0.1.5
  * Requires at least: 6.2
  * Requires PHP:      8.2
  * Author:            Entre Redes
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'ENTRE_REDES_CAMBIOS_VERSION', '0.1.3' );
+define( 'ENTRE_REDES_CAMBIOS_VERSION', '0.1.5' );
 define( 'ENTRE_REDES_CAMBIOS_FILE', __FILE__ );
 define( 'ENTRE_REDES_CAMBIOS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ENTRE_REDES_CAMBIOS_URL', plugin_dir_url( __FILE__ ) );

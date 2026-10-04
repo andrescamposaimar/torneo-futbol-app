@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.3
+Stable tag: 0.1.5
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.5 =
+* Fix: chunk the IN(...) clause JugadorMetricasReader builds from the whole candidate population (batches of 200) instead of one unbounded query, to harden the ?seccion=padron_completo path (~1000 players) against a production 500.
+* Add: persist the most recent unexpected failure (event, exception class, message, UTC timestamp) in the entre_redes_cambios_ultimo_error option, readable via phpMyAdmin, since this host exposes no PHP error log.
 
 = 0.1.0 =
 * Initial scaffold: plugin structure, 3-table schema (cambios_fecha, cambios_fecha_partido, cambios_settings), pure PlazosCalculator and EstadoDeriver, FechaRepository, SeedTemporadaService. No REST/admin/cron consumers yet (slice 0).
