@@ -107,8 +107,34 @@ class FechaControllerTest extends TestCase {
             $data['fecha']['plazos_utc']
         );
         // $now (2026-01-05 12:00:00 UTC) is inside BOTH windows.
-        $this->assertTrue( $data['fecha']['ventanas']['regreso_abierta'] );
-        $this->assertTrue( $data['fecha']['ventanas']['sustitucion_abierta'] );
+        $this->assertSame( 'abierta', $data['fecha']['ventanas']['regreso'] );
+        $this->assertSame( 'abierta', $data['fecha']['ventanas']['sustitucion'] );
+    }
+
+    /**
+     * THE regression case this slice's task brief calls out explicitly: a
+     * `$now` strictly before `apertura_solicitudes` must read as `'antes'`,
+     * NEVER `'cerrada'` — a plain boolean collapsed both into the same
+     * `false` (see FechaController's own docblock, "THREE STATES, NOT TWO").
+     */
+    public function test_both_windows_read_antes_strictly_before_apertura_solicitudes(): void {
+        $this->seedFecha( 3, 1, '2026-01-10', 'programada' );
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'verifyIdentity' )->willReturn( [ 'player_id' => 777 ] );
+
+        // Strictly before apertura_solicitudes (2026-01-04 03:00:00 UTC).
+        $now = ( new \DateTimeImmutable( '2026-01-04 02:59:58', new \DateTimeZone( 'UTC' ) ) )->getTimestamp();
+        $controller = $this->newController( $authorizer, $now );
+
+        $response = $controller->fechaAbierta( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+        ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $ventanas = $response->get_data()['fecha']['ventanas'];
+        $this->assertSame( 'antes', $ventanas['regreso'] );
+        $this->assertSame( 'antes', $ventanas['sustitucion'] );
     }
 
     /**
@@ -133,11 +159,11 @@ class FechaControllerTest extends TestCase {
 
         $this->assertSame( 200, $response->get_status() );
         $ventanas = $response->get_data()['fecha']['ventanas'];
-        $this->assertFalse( $ventanas['regreso_abierta'] );
-        $this->assertTrue( $ventanas['sustitucion_abierta'] );
+        $this->assertSame( 'cerrada', $ventanas['regreso'] );
+        $this->assertSame( 'abierta', $ventanas['sustitucion'] );
     }
 
-    public function test_both_windows_closed_once_past_cierre_solicitudes(): void {
+    public function test_both_windows_cerrada_once_past_cierre_solicitudes(): void {
         $this->seedFecha( 3, 1, '2026-01-10', 'programada' );
 
         $authorizer = $this->createMock( CapitanAuthorizer::class );
@@ -153,8 +179,8 @@ class FechaControllerTest extends TestCase {
 
         $this->assertSame( 200, $response->get_status() );
         $ventanas = $response->get_data()['fecha']['ventanas'];
-        $this->assertFalse( $ventanas['regreso_abierta'] );
-        $this->assertFalse( $ventanas['sustitucion_abierta'] );
+        $this->assertSame( 'cerrada', $ventanas['regreso'] );
+        $this->assertSame( 'cerrada', $ventanas['sustitucion'] );
     }
 
     public function test_returns_fecha_null_when_every_fecha_of_the_season_is_resolved(): void {

@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
+import 'package:torneo_futbol_app/models/cambios_fecha_abierta.dart';
 import 'package:torneo_futbol_app/models/cambios_solicitud.dart';
 import 'package:torneo_futbol_app/services/cambios_api_service.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
@@ -281,7 +282,7 @@ void main() {
                 'cierre_solicitudes': '2026-01-09 02:59:59',
                 'publicacion': '2026-01-09 03:00:00',
               },
-              'ventanas': {'regreso_abierta': false, 'sustitucion_abierta': true},
+              'ventanas': {'regreso': 'cerrada', 'sustitucion': 'abierta'},
             },
           }, 200);
         }),
@@ -294,8 +295,12 @@ void main() {
       expect(fecha.numeroEnTorneo, 3);
       expect(fecha.torneo, 'Apertura');
       expect(fecha.playDate, '2026-01-10');
-      expect(fecha.regresoAbierta, isFalse);
-      expect(fecha.sustitucionAbierta, isTrue);
+      expect(fecha.regresoFase, CambiosVentanaFase.cerrada);
+      expect(fecha.sustitucionFase, CambiosVentanaFase.abierta);
+      expect(
+        fecha.aperturaSolicitudesUtc,
+        DateTime.utc(2026, 1, 4, 3, 0, 0),
+      );
     });
 
     test('returns null when the backend answers {"fecha": null}', () async {

@@ -71,8 +71,8 @@ const _fechaAbierta = CambiosFechaAbierta(
   numeroEnTorneo: 3,
   torneo: 'Apertura',
   playDate: '2026-01-10',
-  regresoAbierta: true,
-  sustitucionAbierta: true,
+  regresoFase: CambiosVentanaFase.abierta,
+  sustitucionFase: CambiosVentanaFase.abierta,
 );
 
 void _seedAccessToken(Map<String, String> store) {
