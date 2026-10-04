@@ -124,39 +124,73 @@ void main() {
       expect(plazas.single.regresoElegible, isFalse); // 2 fechas faltantes
     });
 
-    test('fetchCandidatos() parses the candidatos list', () async {
+    test('fetchCandidatos() parses the candidatos list and the X-WP-Total header, and forwards '
+        'page/per_page/puntajes', () async {
       final repo = await _repoWithAccessToken();
       final service = _makeService(
         repo,
         MockClient((request) async {
           expect(request.url.queryParameters['plaza_id'], '10');
           expect(request.url.queryParameters['search'], 'gom');
-          return _jsonResponse({
-            'candidatos': [
-              {
-                'player_id': 200,
-                'nombre': 'Pedro Gómez',
-                'es_padre': false,
-                'puntaje': 3.5,
-                'viable': true,
-                'motivo': null,
-              },
-            ],
-          }, 200);
+          expect(request.url.queryParameters['page'], '2');
+          expect(request.url.queryParameters['per_page'], '20');
+          expect(request.url.queryParametersAll['puntajes[]'], ['2.5', '4']);
+          return http.Response(
+            json.encode({
+              'candidatos': [
+                {
+                  'player_id': 200,
+                  'nombre': 'Pedro Gómez',
+                  'es_padre': false,
+                  'puntaje': 3.5,
+                  'viable': true,
+                  'motivo': null,
+                },
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json', 'x-wp-total': '37'},
+          );
         }),
       );
 
-      final candidatos = await service.fetchCandidatos(
+      final pagina = await service.fetchCandidatos(
         seasonId: 7,
         teamId: 1,
         plazaId: 10,
         search: 'gom',
+        puntajes: const [2.5, 4],
+        page: 2,
       );
 
-      expect(candidatos, hasLength(1));
-      expect(candidatos.single.nombre, 'Pedro Gómez');
-      expect(candidatos.single.puntaje, 3.5);
-      expect(candidatos.single.viable, isTrue);
+      expect(pagina.candidatos, hasLength(1));
+      expect(pagina.candidatos.single.nombre, 'Pedro Gómez');
+      expect(pagina.candidatos.single.puntaje, 3.5);
+      expect(pagina.candidatos.single.viable, isTrue);
+      expect(pagina.total, 37);
+    });
+
+    test('fetchCandidatos() falls back to the page length when X-WP-Total is missing', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'candidatos': [
+                {
+                  'player_id': 200,
+                  'nombre': 'Pedro Gómez',
+                  'es_padre': false,
+                  'puntaje': 3.5,
+                  'viable': true,
+                  'motivo': null,
+                },
+              ],
+            }, 200)),
+      );
+
+      final pagina = await service.fetchCandidatos(seasonId: 7, teamId: 1, plazaId: 10);
+
+      expect(pagina.total, 1);
     });
 
     test('fetchSolicitudes() parses the solicitudes list including a dictamen', () async {

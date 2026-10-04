@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/cambios_candidato.dart';
@@ -34,22 +35,74 @@ final class CambiosCandidatosError extends CambiosCandidatosState {
   const CambiosCandidatosError();
 }
 
+/// [candidatos] is every row loaded SO FAR — page 1 through whichever page
+/// [CambiosCandidatosController.loadMore] last appended — never the whole
+/// server-side population at once (see that controller's own docblock).
+/// [query]/[puntajes] are the filters THIS list was fetched with, so the
+/// screen can tell whether a section's already-loaded state still matches
+/// the currently active search/chips before deciding to re-fetch (see
+/// `cambios_solicitar_screen.dart`'s `_onSeccionChanged`).
 final class CambiosCandidatosLoaded extends CambiosCandidatosState {
   final List<CambiosCandidato> candidatos;
   final String query;
-  const CambiosCandidatosLoaded({required this.candidatos, required this.query});
+  final List<double> puntajes;
+
+  /// Whether the server reports more candidates beyond [candidatos] — see
+  /// `CambiosCandidatosPagina`'s own docblock for why this is total/page
+  /// math, never "did the last page come back full": a page can
+  /// legitimately return fewer than its own `per_page` once the
+  /// viable-only filter runs, while more pages still remain.
+  final bool hasMore;
+
+  /// `true` while [CambiosCandidatosController.loadMore] has an in-flight
+  /// request for the NEXT page — the screen renders a small spinner row at
+  /// the bottom of the list while this is true, distinct from the
+  /// full-screen [CambiosCandidatosLoading] the INITIAL fetch shows.
+  final bool isLoadingMore;
+
+  const CambiosCandidatosLoaded({
+    required this.candidatos,
+    required this.query,
+    this.puntajes = const [],
+    this.hasMore = false,
+    this.isLoadingMore = false,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Controller
 // ---------------------------------------------------------------------------
 
+/// Drives ONE section's candidate list as infinite scroll against
+/// `GET /cambios/plazas/candidatos` — the backend now ALWAYS paginates (see
+/// `Rest\PlazasController::listarCandidatos()`'s own docblock,
+/// "PAGINATION"), so this controller owns the page cursor instead of the
+/// screen loading everything once and filtering client-side via
+/// `PlayerFilterService`, as it did before this slice.
+///
+/// *** WHY SEARCH/PUNTAJE FILTERING IS NO LONGER LOCAL ***
+/// `?search=`/`?puntajes[]=` now narrow the POPULATION on the server, BEFORE
+/// pagination (see `Plazas\CandidatosResolver::buscarPaginado()`'s own
+/// docblock on the backend) — a client-side filter over only the
+/// already-loaded pages would silently miss a match that lives on a page
+/// not yet fetched. [load] therefore always starts a FRESH page-1 fetch
+/// with whatever [query]/[puntajes] the caller passes, never filters
+/// [state] locally.
 class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> {
   final CambiosApiService _service;
   final int seasonId;
   final int teamId;
   final int plazaId;
   final CambiosCandidatosSeccion seccion;
+
+  /// Matches the backend's own default (`Rest\PlazasController::
+  /// DEFAULT_PER_PAGE`) — kept in sync by convention, not by a shared
+  /// constant, since the two live in different languages/repos; either side
+  /// changing this independently only affects how many rows one network
+  /// round trip returns, never correctness.
+  static const int _perPage = 20;
+
+  int _page = 1;
 
   /// [autoLoad] only decides this controller's INITIAL state — `true`
   /// starts it as [CambiosCandidatosLoading] (the caller is expected to call
@@ -66,25 +119,98 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
     bool autoLoad = true,
   }) : super(autoLoad ? const CambiosCandidatosLoading() : const CambiosCandidatosIdle());
 
-  /// Fetches this section's candidate list from the backend, optionally
-  /// narrowed server-side by [query] (`?search=`). Always re-fetches — the
-  /// caller decides when this runs (eagerly once for `listaEspera`, once on
-  /// first open for `padronCompleto`, never per keystroke: the screen's own
-  /// search field and puntaje chips filter the already-loaded list locally,
-  /// via `PlayerFilterService` — see `cambios_solicitar_screen.dart`).
-  Future<void> load({String query = ''}) async {
+  /// Fetches page 1 of this section's candidate list, narrowed server-side
+  /// by [query] (`?search=`) and [puntajes] (`?puntajes[]=`). ALWAYS resets
+  /// to page 1 and REPLACES [state] — the right call whenever the filters
+  /// themselves changed (a debounced search keystroke, a puntaje chip
+  /// toggle, or the first time a lazy section is opened). Use [loadMore] to
+  /// append the NEXT page of the SAME search instead.
+  Future<void> load({String query = '', List<double> puntajes = const []}) async {
     state = const CambiosCandidatosLoading();
+    _page = 1;
     try {
-      final candidatos = await _service.fetchCandidatos(
+      final pagina = await _service.fetchCandidatos(
         seasonId: seasonId,
         teamId: teamId,
         plazaId: plazaId,
         seccion: seccion,
         search: query.isEmpty ? null : query,
+        puntajes: puntajes,
+        page: _page,
+        perPage: _perPage,
       );
-      state = CambiosCandidatosLoaded(candidatos: candidatos, query: query);
+      state = CambiosCandidatosLoaded(
+        candidatos: pagina.candidatos,
+        query: query,
+        puntajes: puntajes,
+        hasMore: _page * _perPage < pagina.total,
+      );
     } catch (_) {
       state = const CambiosCandidatosError();
     }
   }
+
+  /// Appends the NEXT page of the CURRENT search (same [query]/[puntajes]
+  /// already in [state]) — called by the screen's scroll listener as the
+  /// captain nears the bottom of the list. A no-op when [state] is not
+  /// [CambiosCandidatosLoaded], when the server already reported no more
+  /// pages (`hasMore == false`), or when a previous [loadMore] call is still
+  /// in flight — guards against the scroll listener firing more than once
+  /// for the same approach to the bottom.
+  ///
+  /// A failed page fetch keeps whatever was ALREADY loaded — unlike [load],
+  /// there is something real to lose here, so this degrades to "stop
+  /// showing the loading spinner", never to [CambiosCandidatosError] (that
+  /// would blank out a list the captain was already looking at).
+  Future<void> loadMore() async {
+    final current = state;
+    if (current is! CambiosCandidatosLoaded) return;
+    if (!current.hasMore || current.isLoadingMore) return;
+
+    state = CambiosCandidatosLoaded(
+      candidatos: current.candidatos,
+      query: current.query,
+      puntajes: current.puntajes,
+      hasMore: current.hasMore,
+      isLoadingMore: true,
+    );
+
+    final nextPage = _page + 1;
+    try {
+      final pagina = await _service.fetchCandidatos(
+        seasonId: seasonId,
+        teamId: teamId,
+        plazaId: plazaId,
+        seccion: seccion,
+        search: current.query.isEmpty ? null : current.query,
+        puntajes: current.puntajes,
+        page: nextPage,
+        perPage: _perPage,
+      );
+      _page = nextPage;
+      state = CambiosCandidatosLoaded(
+        candidatos: [...current.candidatos, ...pagina.candidatos],
+        query: current.query,
+        puntajes: current.puntajes,
+        hasMore: _page * _perPage < pagina.total,
+      );
+    } catch (_) {
+      state = CambiosCandidatosLoaded(
+        candidatos: current.candidatos,
+        query: current.query,
+        puntajes: current.puntajes,
+        hasMore: current.hasMore,
+        isLoadingMore: false,
+      );
+    }
+  }
+}
+
+/// Whether [a] and [b] are the SAME filters — used by
+/// `cambios_solicitar_screen.dart`'s `_onSeccionChanged` to decide whether
+/// switching to an already-loaded section needs a re-fetch (the active
+/// search/chips changed since that section last loaded) or not (switching
+/// back and forth with nothing changed must never re-fetch).
+bool mismosFiltros(String queryA, List<double> puntajesA, String queryB, List<double> puntajesB) {
+  return queryA == queryB && listEquals(puntajesA, puntajesB);
 }

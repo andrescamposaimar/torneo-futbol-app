@@ -95,3 +95,16 @@ class CambiosCandidato {
       'CambiosCandidato(playerId: $playerId, nombre: $nombre, '
       'esPadre: $esPadre, puntaje: $puntaje, viable: $viable)';
 }
+
+/// One page of `GET /cambios/plazas/candidatos`, as
+/// [CambiosApiService.fetchCandidatos] returns it: the page's own candidatos,
+/// plus [total] — the size of the WHOLE matching population (after
+/// `search`/`puntajes`, BEFORE pagination — see
+/// `Rest\PlazasController::listarCandidatos()`'s own docblock on the
+/// backend, "PAGINATION"), read from the `X-WP-Total` response header, the
+/// SAME convention `ApiService.getJugadoresRaw()` already reads. A screen
+/// decides whether more pages remain from [total] and its own
+/// page/per-page math, never from how many items THIS page returned (a page
+/// can legitimately come back short of `per_page` while more pages remain —
+/// see that same backend docblock for why).
+typedef CambiosCandidatosPagina = ({List<CambiosCandidato> candidatos, int total});

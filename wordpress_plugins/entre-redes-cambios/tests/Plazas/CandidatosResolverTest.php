@@ -742,4 +742,236 @@ class CandidatosResolverTest extends TestCase {
         $this->assertSame( 5, $countingPlazaRepository->vigentesCalls );
         $this->assertSame( 5, $countingPlazaRepository->truncadoCalls );
     }
+
+    // -------------------------------------------------------------------------
+    // buscarPaginado() — pagination, search, puntaje filter
+    // -------------------------------------------------------------------------
+
+    private function seedManyPlayers( int $count, int $startId = 1000 ): void {
+        for ( $i = 0; $i < $count; $i++ ) {
+            $this->seedPlayer( $startId + $i, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        }
+    }
+
+    public function test_buscar_paginado_rejects_an_invalid_seccion(): void {
+        $plazaId = $this->plaza();
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        $this->expectException( \InvalidArgumentException::class );
+
+        $this->resolver->buscarPaginado(
+            $plaza,
+            'no_existe',
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+    }
+
+    /**
+     * THE correctness test this slice's task brief names explicitly: no
+     * candidate must ever be duplicated across pages or silently skipped,
+     * and the ordering must be stable (player_id ascending, never puntaje —
+     * see buscarPaginado()'s own docblock, "WHY player_id, NEVER puntaje").
+     */
+    public function test_buscar_paginado_pages_through_the_whole_list_exactly_once_with_no_duplicates(): void {
+        $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
+        $this->seedManyPlayers( 25 );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $seen = [];
+        for ( $page = 1; $page <= 3; $page++ ) {
+            $resultado = $this->resolver->buscarPaginado(
+                $plaza,
+                null,
+                null,
+                BloqueoReemplazoPolicy::topeTresFechas(),
+                $this->countResolvedFechasSinceFn,
+                $page,
+                10
+            );
+
+            $this->assertSame( 25, $resultado['total'], "total must stay 25 regardless of which page (page {$page}) is requested." );
+
+            foreach ( $resultado['candidatos'] as $c ) {
+                $seen[] = $c->playerId();
+            }
+        }
+
+        $this->assertCount( 25, $seen, 'Every candidate must appear exactly once across all pages.' );
+        $this->assertCount( 25, array_unique( $seen ), 'No candidate must be duplicated across pages.' );
+        $this->assertSame( range( 1000, 1024 ), $seen, 'Pages must be stably ordered by player_id ascending.' );
+    }
+
+    /**
+     * An out-of-range page is a normal empty page, never an error — see
+     * buscarPaginado()'s own docblock, @param $page.
+     */
+    public function test_buscar_paginado_out_of_range_page_is_an_empty_page_not_an_error(): void {
+        $plazaId = $this->plaza( 10 );
+        $this->seedManyPlayers( 5 );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            99,
+            10
+        );
+
+        $this->assertSame( [], $resultado['candidatos'] );
+        $this->assertSame( 5, $resultado['total'], 'total must still report the real population size, not 0.' );
+    }
+
+    /**
+     * THE measured claim buscarPaginado() exists for: the per-candidate
+     * viability queries (evaluarViabilidadDentroDelTecho(), via
+     * PlazaRepository::listOcupacionesVigentesDeJugador() /
+     * ::listPlazasConCierreTruncadoDeJugador()) must run ONLY for the
+     * returned page, never the whole population — 10 candidates seeded, a
+     * page of 3 requested, so each must run exactly 3 times, never 10. Same
+     * counting-double pattern as
+     * test_ceiling_filter_runs_before_the_per_candidate_viability_queries().
+     */
+    public function test_buscar_paginado_runs_the_viability_queries_only_for_the_returned_page(): void {
+        global $wpdb;
+
+        $countingPlazaRepository = $this->countingPlazaRepository();
+        $resolver                = new CandidatosResolver( $wpdb, $countingPlazaRepository, $this->eventLog );
+
+        $plazaId = $countingPlazaRepository->openPlaza(
+            self::SEASON_ID,
+            100,
+            700,
+            Puntaje::fromDecimal( 5.0 ), // techo 5,0 — admits everyone below
+            1,
+            '2026-03-01 10:00:00'
+        );
+
+        for ( $i = 0; $i < 10; $i++ ) {
+            $this->seedPlayer( 2000 + $i, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        }
+
+        $plaza = $countingPlazaRepository->findPlaza( $plazaId );
+
+        $resultado = $resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            3
+        );
+
+        $this->assertCount( 3, $resultado['candidatos'] );
+        $this->assertSame( 10, $resultado['total'] );
+        $this->assertSame(
+            3,
+            $countingPlazaRepository->vigentesCalls,
+            'listOcupacionesVigentesDeJugador() must run ONLY for the 3 candidates on this page, never all 10.'
+        );
+        $this->assertSame(
+            3,
+            $countingPlazaRepository->truncadoCalls,
+            'listPlazasConCierreTruncadoDeJugador() must run ONLY for the 3 candidates on this page, never all 10.'
+        );
+    }
+
+    /**
+     * THE other correctness bug this slice's task brief names explicitly: a
+     * search term matching a player who would otherwise fall on a LATER page
+     * must still be found — because $search narrows the population BEFORE
+     * pagination (see buscarPaginado()'s own docblock), not after.
+     */
+    public function test_buscar_paginado_search_finds_a_player_on_a_later_page(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza( 10 );
+        $this->seedManyPlayers( 20 ); // ids 1000..1019, no title set
+
+        // Seeded LAST (highest id) — would land on page 2 of a 10-per-page
+        // listing if search ran only AFTER pagination instead of narrowing
+        // the population first.
+        $this->seedPlayer( 9999, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        $wpdb->update( $wpdb->prefix . 'posts', [ 'post_title' => 'Zapata Buscado' ], [ 'ID' => 9999 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10,
+            'Zapata'
+        );
+
+        $this->assertSame( 1, $resultado['total'] );
+        $this->assertCount( 1, $resultado['candidatos'] );
+        $this->assertSame( 9999, $resultado['candidatos'][0]->playerId() );
+    }
+
+    /**
+     * $puntajesFiltro (the app's puntaje chips) excludes non-matching
+     * candidates from the POPULATION entirely — including one whose puntaje
+     * is unresolvable, which can never match a specific requested value.
+     */
+    public function test_buscar_paginado_puntajes_filtro_excludes_non_matching_puntajes(): void {
+        $plazaId = $this->plaza( 10 );
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
+        $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10,
+            '',
+            [ 2.5 ]
+        );
+
+        $this->assertSame( 1, $resultado['total'] );
+        $this->assertSame( [ 800 ], array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ) );
+    }
+
+    public function test_buscar_paginado_seccion_padron_completo_still_excludes_lista_de_espera(): void {
+        $plazaId = $this->plaza( 10 );
+
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Padre Activo', 'puntaje' => '2,5' ] );
+        $this->seedEquipoMembership( 800, self::LISTA_ESPERA_TEAM_ID );
+
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            CandidatosSeccion::PADRON_COMPLETO,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
+        $this->assertNotContains( 800, $ids );
+        $this->assertContains( 801, $ids );
+    }
 }

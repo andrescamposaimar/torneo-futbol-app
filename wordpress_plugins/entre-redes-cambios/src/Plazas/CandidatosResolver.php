@@ -286,49 +286,215 @@ class CandidatosResolver {
         return $this->evaluarCandidatos( $candidatoIds, $metricas, $techo, $plazaId, $seasonId, $politica, $countResolvedFechasSinceFn );
     }
 
+    /**
+     * Paginated variant of `paraPlaza()`/`paraSeccion()`, built for
+     * `Rest\PlazasController::listarCandidatos()`'s own `?page=`/`?per_page=`
+     * params — see that method's own docblock. NEVER used by
+     * `contarPadresViables()` / `Reglas\PrioridadDePadresRespetada`, which
+     * need the FULL, unpaginated pool (see class docblock, "WHY THIS MUST BE
+     * THE ONLY IMPLEMENTATION" — that invariant is unaffected: this method is
+     * an ADDITIONAL entry point, not a replacement for the other two).
+     *
+     * *** WHY PAGINATION HAPPENS HERE, BEFORE THE N+1, NOT AFTER ***
+     * Slicing an already-fully-evaluated `CandidatoEstado[]` would still pay
+     * the WHOLE population's N+1 cost this method exists to avoid (see class
+     * docblock, "COST: THE CEILING FILTER RUNS BEFORE THE N+1, NEVER AFTER").
+     * This method reorders the work instead:
+     *   1. Resolve the population's ids (one query) and their metrics (one
+     *      batched query) — same cost as `paraPlaza()`/`paraSeccion()`,
+     *      regardless of how many pages exist.
+     *   2. Apply, in PHP, every CHEAP filter available from that batched
+     *      metrics read alone: the caller's own `$puntajesFiltro` (exact
+     *      puntaje match — e.g. the app's puntaje chips), narrowing the
+     *      POPULATION itself (a non-matching candidate is excluded
+     *      entirely, never just marked non-viable). `$search`, when given,
+     *      is pushed into the POPULATION query itself (see
+     *      `playerIdsRegistradosEnTemporada()` et al.'s own docblocks for
+     *      why `post_title LIKE`, not a second `get_the_title()` pass, is
+     *      what keeps this consistent with how `nombreJugador()` resolves a
+     *      name).
+     *   3. Slice EXACTLY the requested page out of that filtered,
+     *      player_id-ascending list — see "WHY player_id, NEVER puntaje, IS
+     *      THE SORT KEY" below.
+     *   4. Run the techo partition AND the per-candidate viability queries
+     *      (phase 2, `evaluarViabilidadDentroDelTecho()`) ONLY for the
+     *      page's own ids — never the whole filtered population. Before this
+     *      method existed, that N+1 ran for every candidate who cleared the
+     *      techo (`evaluarCandidatos()`, still used by `paraPlaza()` /
+     *      `paraSeccion()`); here it runs for at most `$perPage` of them.
+     *
+     * *** WHY player_id, NEVER puntaje, IS THE SORT KEY ***
+     * puntaje is not a SQL column at all (see class docblock, "WHERE THE
+     * CANDIDATE POOL COMES FROM" and `JugadorMetricasReader`'s own class
+     * docblock) and only has 9 possible discrete values (`Puntaje`'s own
+     * class docblock) — ties are the NORM, not the exception, across a
+     * population that can run into the hundreds. Ordering by it would be
+     * unstable across two consecutive page requests (nothing guarantees PHP
+     * resolves ties in the same relative order twice), which would silently
+     * duplicate some candidates across pages and skip others entirely.
+     * `player_id` is unique, and already the ordering every population query
+     * in this class uses (`ORDER BY posts.ID ASC`) — reusing it here is free
+     * and trivially total.
+     *
+     * @param array<string, mixed> $plaza As returned by
+     *        PlazaRepository::findPlaza() — same contract as paraPlaza().
+     * @param string|null $seccion `null` keeps paraPlaza()'s season-registered
+     *        population; one of CandidatosSeccion::todas() selects
+     *        paraSeccion()'s wider population — same two choices
+     *        Rest\PlazasController::listarCandidatos() already exposes via
+     *        `?seccion=`.
+     * @param int|null $listaEsperaTeamId Required (and resolved ONCE by the
+     *        caller, see paraSeccion()'s own docblock) when $seccion is not
+     *        null; ignored otherwise.
+     * @param int $page 1-based. Values below 1 are clamped up to 1 — an
+     *        out-of-range page (beyond the last one) is never an error, it
+     *        simply yields an empty `candidatos` via PHP's own
+     *        `array_slice()` semantics (an offset past the end is `[]`).
+     * @param int $perPage Clamped to >= 1 by this method; an upper bound is
+     *        the CALLER's responsibility (Rest\PlazasController enforces the
+     *        hard cap a request may ask for).
+     * @param string $search Matched against `post_title`, case-insensitively
+     *        — see `playerIdsRegistradosEnTemporada()` et al.
+     * @param array<int, float> $puntajesFiltro Decimal puntaje values to
+     *        keep (exact match) — empty means no filter beyond the plaza's
+     *        own techo. A candidate whose puntaje is unresolvable is
+     *        excluded entirely from the population when this is non-empty
+     *        (an indeterminate puntaje can never match a specific requested
+     *        value).
+     * @return array{candidatos: CandidatoEstado[], total: int} `total` is the
+     *         size of the population AFTER `$puntajesFiltro`/`$search` but
+     *         BEFORE pagination — i.e. "how many pages exist", not "how many
+     *         of THIS page are viable" (viability is only ever resolved for
+     *         the page actually requested — see point 4 above — so a
+     *         population-wide viable count is unavailable here without
+     *         paying the exact N+1 cost this method exists to avoid; a
+     *         caller that needs that count has `contarPadresViables()`).
+     * @throws \InvalidArgumentException When $seccion is given but is not one
+     *         of CandidatosSeccion::todas().
+     */
+    public function buscarPaginado(
+        array $plaza,
+        ?string $seccion,
+        ?int $listaEsperaTeamId,
+        BloqueoReemplazoPolicy $politica,
+        callable $countResolvedFechasSinceFn,
+        int $page,
+        int $perPage,
+        string $search = '',
+        array $puntajesFiltro = []
+    ): array {
+        if ( null !== $seccion && ! CandidatosSeccion::esValida( $seccion ) ) {
+            throw new \InvalidArgumentException(
+                "CandidatosResolver::buscarPaginado(): '{$seccion}' is not a valid seccion. "
+                . 'Valid values are: ' . implode( ', ', CandidatosSeccion::todas() ) . '.'
+            );
+        }
+
+        $plazaId  = (int) $plaza['id'];
+        $seasonId = (int) $plaza['season_id'];
+        $techo    = Puntaje::fromHalfPoints( (int) $plaza['puntaje_techo'] );
+
+        $vigente          = $this->plazaRepository->findOcupacionVigente( $plazaId );
+        $ocupanteActualId = null !== $vigente ? (int) $vigente['player_id'] : null;
+
+        $playerIds = match ( true ) {
+            null === $seccion                          => $this->playerIdsRegistradosEnTemporada( $seasonId, $search ),
+            CandidatosSeccion::LISTA_ESPERA === $seccion => $this->playerIdsListaDeEspera( (int) $listaEsperaTeamId, $search ),
+            default                                      => $this->playerIdsPadronCompleto( (int) $listaEsperaTeamId, $search ),
+        };
+
+        $candidatoIds = array_values( array_filter(
+            $playerIds,
+            static fn ( int $playerId ): bool => $playerId !== $ocupanteActualId
+        ) );
+
+        $metricas = $this->metricasReader->resolveMuchos( $candidatoIds );
+
+        // $puntajesFiltro narrows the POPULATION itself — unlike the techo,
+        // which only determines viability (see docblock above) — so it must
+        // run BEFORE $total is computed, exactly like $search already did at
+        // the SQL level.
+        $puntajesFiltroHalfPoints = array_map(
+            static fn ( float $p ): int => (int) round( $p * 2 ),
+            $puntajesFiltro
+        );
+
+        if ( ! empty( $puntajesFiltroHalfPoints ) ) {
+            $candidatoIds = array_values( array_filter(
+                $candidatoIds,
+                static function ( int $playerId ) use ( $metricas, $puntajesFiltroHalfPoints ): bool {
+                    $puntaje = $metricas[ $playerId ]->puntaje();
+
+                    return null !== $puntaje && in_array( $puntaje->halfPoints(), $puntajesFiltroHalfPoints, true );
+                }
+            ) );
+        }
+
+        $total = count( $candidatoIds );
+
+        $page    = max( 1, $page );
+        $perPage = max( 1, $perPage );
+        $pageIds = array_slice( $candidatoIds, ( $page - 1 ) * $perPage, $perPage );
+
+        if ( empty( $pageIds ) ) {
+            return [ 'candidatos' => [], 'total' => $total ];
+        }
+
+        $pageMetricas = array_intersect_key( $metricas, array_flip( $pageIds ) );
+
+        [ 'resuelto' => $resuelto, 'dentroDelTecho' => $dentroDelTecho ] =
+            $this->partitionPorTecho( $pageIds, $pageMetricas, $techo );
+
+        foreach ( $dentroDelTecho as $playerId ) {
+            $resuelto[ $playerId ] = $this->evaluarViabilidadDentroDelTecho(
+                $playerId,
+                $metricas[ $playerId ],
+                $plazaId,
+                $seasonId,
+                $politica,
+                $countResolvedFechasSinceFn
+            );
+        }
+
+        $candidatos = array_map( static fn ( int $playerId ): CandidatoEstado => $resuelto[ $playerId ], $pageIds );
+
+        return [ 'candidatos' => $candidatos, 'total' => $total ];
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
 
     /**
-     * Shared by `paraPlaza()` and `paraSeccion()` — the only place either
-     * population is turned into viability verdicts, so the two screen
-     * sections and the padres-priority rule can never silently disagree on
-     * what "viable" means (see class docblock, "WHY THIS MUST BE THE ONLY
-     * IMPLEMENTATION").
+     * Shared by `evaluarCandidatos()` and `buscarPaginado()` — the only place
+     * either partitions candidates by the techo ceiling, so the two code
+     * paths can never silently compute that partition differently (see class
+     * docblock, "WHY THIS MUST BE THE ONLY IMPLEMENTATION", same discipline
+     * applied one level down).
      *
-     * *** PHASE 1: THE CEILING FILTER, FROM METRICS ALREADY IN HAND *** —
-     * $metricas was already resolved by ONE batched
+     * *** THE CEILING FILTER, FROM METRICS ALREADY IN HAND *** — $metricas
+     * was already resolved by ONE batched
      * `JugadorMetricasReader::resolveMuchos()` call before this method runs;
      * reading `puntaje()`/`techo->allows()` off it costs no extra query.
      * Every candidate with no resolvable puntaje, or a puntaje over $techo,
-     * is finalized HERE, before either of the two per-candidate queries in
-     * phase 2 ever runs for them — see class docblock, "COST: THE CEILING
-     * FILTER RUNS BEFORE THE N+1, NEVER AFTER".
-     *
-     * *** PHASE 2: THE N+1, ONLY FOR WHOEVER CLEARED THE CEILING *** — only
-     * candidates whose puntaje survived phase 1 ever reach
-     * `evaluarViabilidadDentroDelTecho()`, which is where
-     * `PlazaRepository::listOcupacionesVigentesDeJugador()` /
-     * `::listPlazasConCierreTruncadoDeJugador()` actually run.
+     * is finalized HERE, before either of the two per-candidate queries
+     * `evaluarViabilidadDentroDelTecho()` runs ever runs for them — see class
+     * docblock, "COST: THE CEILING FILTER RUNS BEFORE THE N+1, NEVER AFTER".
      *
      * @param array<int, int> $candidatoIds
-     * @param array<int, JugadorMetricas> $metricas Keyed by player_id, as
-     *        returned by JugadorMetricasReader::resolveMuchos( $candidatoIds ) —
-     *        MUST be total over $candidatoIds.
-     * @return CandidatoEstado[] In the SAME order as $candidatoIds.
+     * @param array<int, JugadorMetricas> $metricas Keyed by player_id — MUST
+     *        be total over $candidatoIds (a subset of the full batched read
+     *        is fine, e.g. `buscarPaginado()`'s own page-only slice).
+     * @return array{resuelto: array<int, CandidatoEstado>, dentroDelTecho: array<int, int>}
+     *         `resuelto` holds a FINAL CandidatoEstado for every candidate
+     *         whose puntaje is unresolvable or exceeds $techo — nothing
+     *         further is ever computed for them. `dentroDelTecho` lists, in
+     *         the SAME relative order as $candidatoIds, every id that still
+     *         needs the per-candidate viability queries.
      */
-    private function evaluarCandidatos(
-        array $candidatoIds,
-        array $metricas,
-        Puntaje $techo,
-        int $plazaId,
-        int $seasonId,
-        BloqueoReemplazoPolicy $politica,
-        callable $countResolvedFechasSinceFn
-    ): array {
-        $dentroDelTecho = [];
+    private function partitionPorTecho( array $candidatoIds, array $metricas, Puntaje $techo ): array {
         $resuelto       = [];
+        $dentroDelTecho = [];
 
         foreach ( $candidatoIds as $playerId ) {
             $metrica = $metricas[ $playerId ];
@@ -346,6 +512,47 @@ class CandidatosResolver {
 
             $dentroDelTecho[] = $playerId;
         }
+
+        return [ 'resuelto' => $resuelto, 'dentroDelTecho' => $dentroDelTecho ];
+    }
+
+    /**
+     * Shared by `paraPlaza()` and `paraSeccion()` — the only place either
+     * population is turned into viability verdicts, so the two screen
+     * sections and the padres-priority rule can never silently disagree on
+     * what "viable" means (see class docblock, "WHY THIS MUST BE THE ONLY
+     * IMPLEMENTATION").
+     *
+     * *** PHASE 1: THE CEILING FILTER *** — delegated to partitionPorTecho(),
+     * from metrics already batched by the caller; no extra query. See that
+     * method's own docblock.
+     *
+     * *** PHASE 2: THE N+1, ONLY FOR WHOEVER CLEARED THE CEILING *** — only
+     * candidates whose puntaje survived phase 1 ever reach
+     * `evaluarViabilidadDentroDelTecho()`, which is where
+     * `PlazaRepository::listOcupacionesVigentesDeJugador()` /
+     * `::listPlazasConCierreTruncadoDeJugador()` actually run. Unlike
+     * `buscarPaginado()`, this runs for EVERY candidate who clears the
+     * techo — correct here, since `paraPlaza()`/`paraSeccion()` must report
+     * the FULL, unpaginated pool (see class docblock).
+     *
+     * @param array<int, int> $candidatoIds
+     * @param array<int, JugadorMetricas> $metricas Keyed by player_id, as
+     *        returned by JugadorMetricasReader::resolveMuchos( $candidatoIds ) —
+     *        MUST be total over $candidatoIds.
+     * @return CandidatoEstado[] In the SAME order as $candidatoIds.
+     */
+    private function evaluarCandidatos(
+        array $candidatoIds,
+        array $metricas,
+        Puntaje $techo,
+        int $plazaId,
+        int $seasonId,
+        BloqueoReemplazoPolicy $politica,
+        callable $countResolvedFechasSinceFn
+    ): array {
+        [ 'resuelto' => $resuelto, 'dentroDelTecho' => $dentroDelTecho ] =
+            $this->partitionPorTecho( $candidatoIds, $metricas, $techo );
 
         foreach ( $dentroDelTecho as $playerId ) {
             $resuelto[ $playerId ] = $this->evaluarViabilidadDentroDelTecho(
@@ -414,12 +621,35 @@ class CandidatosResolver {
      * reads as "no viable padre exists" — turning a database failure into a
      * silent APPROVAL of a non-padre entrante. See Support\ChecksReads.
      *
+     * @param string $search When non-empty, additionally requires
+     *        `post_title LIKE '%$search%'` — pushed into THIS query rather
+     *        than resolved via a second `get_the_title()` pass over the
+     *        whole population (see `buscarPaginado()`'s own docblock, point
+     *        2, for why). `post_title` is the EXACT same column
+     *        `nombreJugador()`'s `get_the_title()` ultimately reads for an
+     *        `sp_player` post — this plugin applies no title filters that
+     *        would make the two diverge — so a player can never match this
+     *        search yet display a different resolved name. Matching is
+     *        whatever case/accent sensitivity the underlying SQL engine's
+     *        `LIKE` gives (case-insensitive for both this plugin's SQLite
+     *        test shim and MySQL's default collation); no wildcard
+     *        ('%', '_') escaping is applied — consistent with every other
+     *        free-text filter already in this codebase, none of which
+     *        escapes LIKE metacharacters either.
      * @return array<int, int>
      * @throws \RuntimeException When the query fails at the wpdb level.
      */
-    private function playerIdsRegistradosEnTemporada( int $seasonId ): array {
+    private function playerIdsRegistradosEnTemporada( int $seasonId, string $search = '' ): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
+
+        $filtroBusqueda = '';
+        $params         = [ $seasonId ];
+
+        if ( '' !== $search ) {
+            $filtroBusqueda = ' AND posts.post_title LIKE %s';
+            $params[]       = '%' . $search . '%';
+        }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
@@ -430,14 +660,14 @@ class CandidatosResolver {
                   WHERE posts.post_type = 'sp_player'
                     AND posts.post_status = 'publish'
                     AND tt.taxonomy = 'sp_season'
-                    AND tt.term_id = %d
+                    AND tt.term_id = %d{$filtroBusqueda}
                   ORDER BY posts.ID ASC",
-                $seasonId
+                $params
             ),
             ARRAY_A
         );
 
-        $this->assertReadSucceeded( $rows, 'playerIdsRegistradosEnTemporada', [ 'season_id' => $seasonId ] );
+        $this->assertReadSucceeded( $rows, 'playerIdsRegistradosEnTemporada', [ 'season_id' => $seasonId, 'search' => $search ] );
 
         return array_map( static fn ( array $row ): int => (int) $row['id'], $rows );
     }
@@ -463,12 +693,22 @@ class CandidatosResolver {
      * Plazas\ListaEsperaResolver's own class docblock for the same concern
      * one level up, at team-id resolution rather than membership).
      *
+     * @param string $search See playerIdsRegistradosEnTemporada()'s own
+     *        docblock for the exact matching semantics — identical here.
      * @return array<int, int>
      * @throws \RuntimeException When the query fails at the wpdb level.
      */
-    private function playerIdsListaDeEspera( int $teamId ): array {
+    private function playerIdsListaDeEspera( int $teamId, string $search = '' ): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
+
+        $filtroBusqueda = '';
+        $params         = [ (string) $teamId ];
+
+        if ( '' !== $search ) {
+            $filtroBusqueda = ' AND posts.post_title LIKE %s';
+            $params[]       = '%' . $search . '%';
+        }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
@@ -478,14 +718,14 @@ class CandidatosResolver {
                   WHERE posts.post_type = 'sp_player'
                     AND posts.post_status = 'publish'
                     AND pm.meta_key = 'sp_team'
-                    AND pm.meta_value = %s
+                    AND pm.meta_value = %s{$filtroBusqueda}
                   ORDER BY posts.ID ASC",
-                (string) $teamId
+                $params
             ),
             ARRAY_A
         );
 
-        $this->assertReadSucceeded( $rows, 'playerIdsListaDeEspera', [ 'team_id' => $teamId ] );
+        $this->assertReadSucceeded( $rows, 'playerIdsListaDeEspera', [ 'team_id' => $teamId, 'search' => $search ] );
 
         return array_map( static fn ( array $row ): int => (int) $row['id'], $rows );
     }
@@ -513,12 +753,22 @@ class CandidatosResolver {
      * reasoning as playerIdsListaDeEspera() — a failed read here would
      * render "Padrón Completo" as an empty list instead of failing loud.
      *
+     * @param string $search See playerIdsRegistradosEnTemporada()'s own
+     *        docblock for the exact matching semantics — identical here.
      * @return array<int, int>
      * @throws \RuntimeException When the query fails at the wpdb level.
      */
-    private function playerIdsPadronCompleto( int $excludeTeamId ): array {
+    private function playerIdsPadronCompleto( int $excludeTeamId, string $search = '' ): array {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
+
+        $filtroBusqueda = '';
+        $params         = [ (string) $excludeTeamId ];
+
+        if ( '' !== $search ) {
+            $filtroBusqueda = ' AND posts.post_title LIKE %s';
+            $params[]       = '%' . $search . '%';
+        }
 
         $rows = $wpdb->get_results(
             $wpdb->prepare(
@@ -531,14 +781,14 @@ class CandidatosResolver {
                           FROM {$p}postmeta pm
                          WHERE pm.meta_key = 'sp_team'
                            AND pm.meta_value = %s
-                    )
+                    ){$filtroBusqueda}
                   ORDER BY posts.ID ASC",
-                (string) $excludeTeamId
+                $params
             ),
             ARRAY_A
         );
 
-        $this->assertReadSucceeded( $rows, 'playerIdsPadronCompleto', [ 'exclude_team_id' => $excludeTeamId ] );
+        $this->assertReadSucceeded( $rows, 'playerIdsPadronCompleto', [ 'exclude_team_id' => $excludeTeamId, 'search' => $search ] );
 
         return array_map( static fn ( array $row ): int => (int) $row['id'], $rows );
     }

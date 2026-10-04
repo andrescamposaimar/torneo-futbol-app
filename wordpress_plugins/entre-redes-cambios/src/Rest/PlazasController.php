@@ -87,6 +87,17 @@ class PlazasController {
     /** @var callable(): int */
     private $clockFn;
 
+    /** Default `?per_page=` when the request omits it — see listarCandidatos(). */
+    private const DEFAULT_PER_PAGE = 20;
+
+    /**
+     * Hard upper bound on `?per_page=` — see listarCandidatos()'s own
+     * docblock, "PAGINATION": a caller cannot opt back into "the whole
+     * population in one response", the exact cost this slice's task brief
+     * set out to remove.
+     */
+    private const MAX_PER_PAGE = 100;
+
     /**
      * @param CandidatosResolver           $candidatosResolver THE single
      *        source of truth for the candidatos endpoint — see that class's
@@ -298,10 +309,11 @@ class PlazasController {
     }
 
     /**
-     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&seccion=lista_espera|padron_completo][&incluir_no_viables=1][&search=..]
+     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&seccion=lista_espera|padron_completo][&incluir_no_viables=1][&search=..][&puntajes[]=..][&page=..][&per_page=..]
      *
-     * Response 200: { candidatos: [ { player_id, nombre, es_padre, puntaje,
-     *         viable, motivo }, ... ] }
+     * Response 200 (header `X-WP-Total: <int>`, see "PAGINATION" below):
+     * { candidatos: [ { player_id, nombre, es_padre, puntaje, viable,
+     *         motivo }, ... ] }
      *
      * THE single endpoint the captain's screen calls to know who is
      * available for a plaza AND why someone is not — backed entirely by
@@ -317,9 +329,37 @@ class PlazasController {
      * dictamen engine refuse, instead of this screen showing an optimistic
      * list the engine would then reject.
      *
+     * *** PAGINATION — `?page=`/`?per_page=`, ALWAYS ON ***
+     * This endpoint used to return its WHOLE candidate population in one
+     * response — for `?seccion=padron_completo` that is roughly a thousand
+     * rows, most of which then paid the per-candidate viability queries
+     * (`Plazas\CandidatosResolver`'s own "COST" docblock) for nothing a
+     * single screen could ever show at once. It now ALWAYS paginates, via
+     * `Plazas\CandidatosResolver::buscarPaginado()` — see that method's own
+     * docblock for exactly how pagination is ordered BEFORE the N+1, never
+     * after. `?page` defaults to 1, is clamped to >= 1. `?per_page` defaults
+     * to self::DEFAULT_PER_PAGE and is clamped to
+     * `[1, self::MAX_PER_PAGE]` — the upper bound exists specifically so a
+     * caller cannot opt back into "the whole population in one response".
+     * An out-of-range `?page` (beyond the last one) is never a 400 — it is
+     * simply an empty `candidatos: []`, same as `buscarPaginado()`'s own
+     * `array_slice()` semantics.
+     *
+     * The total population size (after `?search=`/`?puntajes[]=`, BEFORE
+     * pagination — see `buscarPaginado()`'s own docblock for exactly what
+     * this counts) is reported via the `X-WP-Total` response header — the
+     * SAME convention `entre-redes-api`'s own `/jugadores` endpoint already
+     * uses and this app's `ApiService.getJugadoresRaw()` already reads, kept
+     * deliberately consistent rather than inventing a third pagination
+     * shape. The app decides whether more pages remain from this header and
+     * `page`/`per_page` math, NEVER from how many items a given page
+     * returned — see "FILTERING HAPPENS HERE, NEVER IN CandidatosResolver"
+     * below for why a page can legitimately return fewer than `per_page`
+     * items while pages still remain.
+     *
      * *** THE TWO SCREEN SECTIONS — `?seccion=` ***
      * `?seccion=lista_espera` and `?seccion=padron_completo` select ONE of
-     * the two WIDER populations `Plazas\CandidatosResolver::paraSeccion()`
+     * the two WIDER populations `Plazas\CandidatosResolver::buscarPaginado()`
      * exposes (see that method's own docblock) — the people who actually
      * signed up, and everyone else in the padrón, respectively. Resolving
      * which `sp_team` post IS "lista de espera" for $seasonId
@@ -332,26 +372,32 @@ class PlazasController {
      * list would be the wrong failure mode for this specific endpoint.
      *
      * `?seccion` is OPTIONAL and purely ADDITIVE: omitting it keeps the
-     * EXACT pre-existing behavior (`CandidatosResolver::paraPlaza()`, the
+     * EXACT pre-existing population (`Plazas\CandidatosResolver`'s
      * season-registered pool) for any caller — including the committee's
-     * own tooling — written before these two sections existed.
+     * own tooling — written before these two sections existed. Pagination
+     * now applies to EVERY call regardless of `?seccion`.
      *
      * *** FILTERING HAPPENS HERE, NEVER IN CandidatosResolver ***
-     * `paraPlaza()` stays the single, unfiltered source of truth (see its
-     * own docblock) — `Reglas\PrioridadDePadresRespetada` needs that FULL
-     * pool to count viable padres, so `CandidatosResolver` itself must never
-     * change to accommodate this endpoint's own presentation needs. Instead:
-     *   - By DEFAULT, only VIABLE candidates are returned — a captain cannot
-     *     act on a non-viable one, and a season's full candidate pool can run
-     *     into the hundreds (see CandidatosResolver's own docblock, "COST:
-     *     THE CEILING FILTER RUNS BEFORE THE N+1, NEVER AFTER"), most of it
-     *     not actionable.
-     *   - `?incluir_no_viables=1` opts back into the FULL list, `viable` and
-     *     `motivo` intact — for the committee's own tooling, which may want
-     *     to see WHY someone was excluded. Applies identically whether
-     *     `?seccion` was given or not.
-     *   - `?search=<text>` narrows whatever set the rules above already
-     *     produced to names containing $text, case-insensitively.
+     * `paraPlaza()`/`paraSeccion()` stay the single, unfiltered, UNPAGINATED
+     * sources of truth (see CandidatosResolver's own docblock) —
+     * `Reglas\PrioridadDePadresRespetada` needs that FULL pool to count
+     * viable padres, so those two methods must never change to accommodate
+     * this endpoint's own presentation needs; `buscarPaginado()` is an
+     * ADDITIVE third entry point this endpoint alone calls. Instead:
+     *   - By DEFAULT, only VIABLE candidates among the PAGE are returned — a
+     *     captain cannot act on a non-viable one. Because viability is only
+     *     ever computed for the requested page (see "PAGINATION" above), a
+     *     page can legitimately come back with FEWER than `per_page` items
+     *     even while `X-WP-Total` says more pages remain — exactly like any
+     *     other filtered list page can.
+     *   - `?incluir_no_viables=1` opts back into the page's FULL list,
+     *     `viable` and `motivo` intact — for the committee's own tooling,
+     *     which may want to see WHY someone was excluded. Applies
+     *     identically whether `?seccion` was given or not.
+     *   - `?search=<text>` and `?puntajes[]=<decimal>` (repeatable, e.g.
+     *     `puntajes[]=3&puntajes[]=4.5`) narrow the POPULATION itself,
+     *     BEFORE pagination — see `buscarPaginado()`'s own docblock for why
+     *     that ordering matters and exactly how each is matched.
      */
     public function listarCandidatos( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -401,7 +447,10 @@ class PlazasController {
             $boundedFechaCounter        = new BoundedFechaCounter( $this->fechaRepository, $this->eventLog );
             $countResolvedFechasSinceFn = $boundedFechaCounter->boundedCountResolvedFechasSinceFn( $seasonId );
 
-            if ( '' !== $seccion ) {
+            $seccionParaResolver = '' !== $seccion ? $seccion : null;
+            $listaEsperaTeamId   = null;
+
+            if ( null !== $seccionParaResolver ) {
                 if ( null === $this->listaEsperaResolver ) {
                     throw new \RuntimeException(
                         'PlazasController::listarCandidatos(): a seccion was requested but this controller '
@@ -410,47 +459,61 @@ class PlazasController {
                 }
 
                 $listaEsperaTeamId = $this->listaEsperaResolver->resolve( $seasonId );
-
-                $candidatos = $this->candidatosResolver->paraSeccion(
-                    $plaza,
-                    $seccion,
-                    $listaEsperaTeamId,
-                    $this->politicaCC5b,
-                    $countResolvedFechasSinceFn
-                );
-            } else {
-                $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
             }
+
+            $page    = max( 1, (int) ( $request->get_param( 'page' ) ?? 1 ) );
+            $perPage = $request->get_param( 'per_page' );
+            $perPage = null !== $perPage ? (int) $perPage : self::DEFAULT_PER_PAGE;
+            $perPage = max( 1, min( $perPage, self::MAX_PER_PAGE ) );
+
+            $search = trim( (string) ( $request->get_param( 'search' ) ?? '' ) );
+
+            $puntajesFiltro = array_values( array_filter(
+                array_map(
+                    static fn ( $valor ): ?float => is_numeric( $valor ) ? (float) $valor : null,
+                    (array) ( $request->get_param( 'puntajes' ) ?? [] )
+                ),
+                static fn ( ?float $v ): bool => null !== $v
+            ) );
+
+            $resultado  = $this->candidatosResolver->buscarPaginado(
+                $plaza,
+                $seccionParaResolver,
+                $listaEsperaTeamId,
+                $this->politicaCC5b,
+                $countResolvedFechasSinceFn,
+                $page,
+                $perPage,
+                $search,
+                $puntajesFiltro
+            );
+            $candidatos = $resultado['candidatos'];
+            $total      = $resultado['total'];
 
             $incluirNoViables = '1' === (string) $request->get_param( 'incluir_no_viables' );
 
-            $candidatos = array_values( array_filter(
-                $candidatos,
-                static fn ( CandidatoEstado $c ): bool => $incluirNoViables || $c->viable()
-            ) );
+            if ( ! $incluirNoViables ) {
+                $candidatos = array_values( array_filter(
+                    $candidatos,
+                    static fn ( CandidatoEstado $c ): bool => $c->viable()
+                ) );
+            }
 
-            // Names are primed for exactly the set that survived the
-            // viable/incluir_no_viables filter above — the only ids this
-            // response could still need, whether to search against or to
-            // finally shape. See primePlayerTitles()'s own docblock.
+            // Names are primed for exactly the PAGE this response returns —
+            // never the whole population — see primePlayerTitles()'s own
+            // docblock.
             $this->primePlayerTitles( array_map(
                 static fn ( CandidatoEstado $c ): int => $c->playerId(),
                 $candidatos
             ) );
 
-            $search = trim( (string) ( $request->get_param( 'search' ) ?? '' ) );
-
-            if ( '' !== $search ) {
-                $candidatos = array_values( array_filter(
-                    $candidatos,
-                    fn ( CandidatoEstado $c ): bool => false !== mb_stripos( $this->nombreJugador( $c->playerId() ), $search )
-                ) );
-            }
-
-            return new \WP_REST_Response(
+            $response = new \WP_REST_Response(
                 [ 'candidatos' => array_map( [ $this, 'shapeCandidato' ], $candidatos ) ],
                 200
             );
+            $response->header( 'X-WP-Total', (string) $total );
+
+            return $response;
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'rest.plazas_candidatos_fallida', [
                 'season_id' => $seasonId,

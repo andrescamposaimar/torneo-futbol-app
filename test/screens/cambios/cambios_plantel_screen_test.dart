@@ -92,7 +92,7 @@ class _StubCandidatosController extends CambiosCandidatosController {
   }
 
   @override
-  Future<void> load({String query = ''}) async {}
+  Future<void> load({String query = '', List<double> puntajes = const []}) async {}
 }
 
 class _StubSolicitudesController extends CambiosSolicitudesController {
