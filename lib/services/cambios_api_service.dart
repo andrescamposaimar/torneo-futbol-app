@@ -185,16 +185,23 @@ class CambiosApiService {
   // GET /plazas/candidatos
   // ---------------------------------------------------------------------------
 
+  /// [seccion] selects ONE of the two widened candidate pools (see
+  /// [CambiosCandidatosSeccion]'s own docblock) via `?seccion=`. `null`
+  /// omits the param entirely, which keeps the backend's pre-existing
+  /// season-registered pool — kept for backward compatibility, but this
+  /// app's own "Pedir cambio" screen always passes one of the two values.
   Future<List<CambiosCandidato>> fetchCandidatos({
     required int seasonId,
     required int teamId,
     required int plazaId,
+    CambiosCandidatosSeccion? seccion,
     String? search,
   }) async {
     final uri = Uri.parse('$_baseUrl/plazas/candidatos').replace(queryParameters: {
       'season_id': '$seasonId',
       'team_id': '$teamId',
       'plaza_id': '$plazaId',
+      if (seccion != null) 'seccion': seccion.toWire(),
       if (search != null && search.isNotEmpty) 'search': search,
     });
     final req = http.Request('GET', uri)..headers['Accept'] = 'application/json';

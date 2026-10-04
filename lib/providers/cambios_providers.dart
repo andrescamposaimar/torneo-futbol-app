@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/tenant_provider.dart';
+import '../models/cambios_candidato.dart';
 import '../models/cambios_fecha_abierta.dart';
 import '../models/jugador.dart';
 import '../services/cambios_api_service.dart';
@@ -74,27 +75,52 @@ final cambiosSolicitudesControllerProvider = StateNotifierProvider.autoDispose
   },
 );
 
-/// Identifies one plaza's candidate search within a season/team — the
-/// family key for [cambiosCandidatosControllerProvider]. A Dart record is
-/// used instead of a hand-written class: records are value-equatable for
-/// free, which is exactly what a family key needs.
-typedef CambiosCandidatosParams = ({int seasonId, int teamId, int plazaId});
+/// Identifies one plaza's candidate search within a season/team, for ONE of
+/// the two screen sections — the family key for
+/// [cambiosCandidatosControllerProvider]. A Dart record is used instead of a
+/// hand-written class: records are value-equatable for free, which is
+/// exactly what a family key needs. Two different [seccion] values for the
+/// same plaza are two DIFFERENT keys, so each section gets its own
+/// independent controller/state — this is what makes the `padronCompleto`
+/// section's lazy load possible without disturbing `listaEspera`'s eager one.
+typedef CambiosCandidatosParams = ({
+  int seasonId,
+  int teamId,
+  int plazaId,
+  CambiosCandidatosSeccion seccion,
+});
 
 /// Provides a [CambiosCandidatosController] scoped to one plaza's candidate
-/// search ("Pedir cambio"). autoDispose: this list is only relevant while
-/// that specific screen is on screen — unlike the other Cambios controllers,
-/// there's no value in keeping a stale candidate search alive in memory
-/// after the captain navigates away.
+/// search ("Pedir cambio"), for one section. autoDispose: this list is only
+/// relevant while that specific screen is on screen — unlike the other
+/// Cambios controllers, there's no value in keeping a stale candidate search
+/// alive in memory after the captain navigates away.
+///
+/// *** WHY ONLY `listaEspera` AUTO-LOADS ***
+/// The task this screen serves ("Pedir cambio") makes "Lista de Espera" —
+/// the people who actually signed up — the common case: loading it the
+/// instant the candidate step opens costs exactly one request, same as
+/// before these two sections existed. `padronCompleto` is the WIDER,
+/// opt-in population (the whole padrón minus the lista de espera team) — a
+/// captain who never opens that section must never pay for fetching it, so
+/// its controller starts `autoLoad: false` ([CambiosCandidatosIdle]) and
+/// `cambios_solicitar_screen.dart` calls `load()` on it itself, once, the
+/// first time the captain switches to that section.
 final cambiosCandidatosControllerProvider = StateNotifierProvider.autoDispose
     .family<CambiosCandidatosController, CambiosCandidatosState, CambiosCandidatosParams>(
   (ref, params) {
+    final autoLoad = params.seccion == CambiosCandidatosSeccion.listaEspera;
     final controller = CambiosCandidatosController(
       ref.watch(cambiosApiServiceProvider),
       seasonId: params.seasonId,
       teamId: params.teamId,
       plazaId: params.plazaId,
+      seccion: params.seccion,
+      autoLoad: autoLoad,
     );
-    controller.load();
+    if (autoLoad) {
+      controller.load();
+    }
     return controller;
   },
 );

@@ -13,8 +13,11 @@ use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\CadenaResolver;
 use EntreRedes\Cambios\Plazas\CandidatoEstado;
 use EntreRedes\Cambios\Plazas\CandidatosResolver;
+use EntreRedes\Cambios\Plazas\CandidatosSeccion;
 use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
+use EntreRedes\Cambios\Plazas\ListaEsperaResolver;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Plazas\Puntaje;
 
 /**
  * REST controller for the CAPTAIN-facing plantel status endpoint:
@@ -79,6 +82,7 @@ class PlazasController {
     private EventLog $eventLog;
     private CandidatosResolver $candidatosResolver;
     private BloqueoReemplazoPolicy $politicaCC5b;
+    private ?ListaEsperaResolver $listaEsperaResolver;
 
     /** @var callable(): int */
     private $clockFn;
@@ -101,6 +105,18 @@ class PlazasController {
      *        Rest\SolicitudesController's constructor docblock for why this
      *        is injectable rather than a direct `time()` call. Defaults to
      *        the real clock.
+     * @param ListaEsperaResolver|null $listaEsperaResolver Resolves the
+     *        "lista de espera" team id for `?seccion=lista_espera` /
+     *        `?seccion=padron_completo` requests — see
+     *        `listarCandidatos()`'s own docblock, "THE TWO SCREEN SECTIONS".
+     *        Nullable PURELY for backward compatibility with callers (and
+     *        existing tests) constructed before these two sections existed,
+     *        which never pass a `seccion` param and therefore never need
+     *        this collaborator; `Plugin::boot()` always wires a real one.
+     *        `null` here is NOT a usable production configuration — see
+     *        `listarCandidatos()` for what happens when `seccion` is
+     *        requested against a controller instance that was not wired
+     *        with one (a loud failure, never a silent empty section).
      */
     public function __construct(
         CapitanAuthorizer $authorizer,
@@ -109,15 +125,17 @@ class PlazasController {
         EventLog $eventLog,
         CandidatosResolver $candidatosResolver,
         ?BloqueoReemplazoPolicy $politicaCC5b = null,
-        ?callable $clockFn = null
+        ?callable $clockFn = null,
+        ?ListaEsperaResolver $listaEsperaResolver = null
     ) {
-        $this->authorizer         = $authorizer;
-        $this->plazaRepository    = $plazaRepository;
-        $this->fechaRepository    = $fechaRepository;
-        $this->eventLog           = $eventLog;
-        $this->candidatosResolver = $candidatosResolver;
-        $this->politicaCC5b       = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
-        $this->clockFn            = $clockFn ?? static fn (): int => time();
+        $this->authorizer          = $authorizer;
+        $this->plazaRepository     = $plazaRepository;
+        $this->fechaRepository     = $fechaRepository;
+        $this->eventLog            = $eventLog;
+        $this->candidatosResolver  = $candidatosResolver;
+        $this->politicaCC5b        = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
+        $this->clockFn             = $clockFn ?? static fn (): int => time();
+        $this->listaEsperaResolver = $listaEsperaResolver;
     }
 
     public function register_routes(): void {
@@ -151,8 +169,15 @@ class PlazasController {
      *
      * Response 200: { plazas: [ { plaza_id, titular_player_id,
      *         ocupante_player_id, es_titular_el_ocupante, cerrada,
-     *         fechas_faltantes_liberacion,
+     *         puntaje_techo, fechas_faltantes_liberacion,
      *         fechas_faltantes_liberacion_indeterminado }, ... ] }
+     *
+     * `puntaje_techo` is the plaza's own ceiling, as a decimal (e.g. `2.5`)
+     * — added so the captain's "Pedir cambio" screen can DISPLAY the
+     * constraint the candidatos endpoint already enforces, never compute
+     * eligibility against it itself (see `listarCandidatos()`'s own
+     * docblock, "FILTERING HAPPENS HERE, NEVER IN CandidatosResolver", for
+     * the same discipline applied to viability).
      *
      * `ocupante_player_id` is null only when the plaza somehow has no vigent
      * ocupación (should not happen once PlazaRepository::openPlaza() has
@@ -273,7 +298,7 @@ class PlazasController {
     }
 
     /**
-     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&incluir_no_viables=1][&search=..]
+     * GET /entre-redes/v1/cambios/plazas/candidatos?season_id=..&team_id=..&plaza_id=..[&seccion=lista_espera|padron_completo][&incluir_no_viables=1][&search=..]
      *
      * Response 200: { candidatos: [ { player_id, nombre, es_padre, puntaje,
      *         viable, motivo }, ... ] }
@@ -292,6 +317,25 @@ class PlazasController {
      * dictamen engine refuse, instead of this screen showing an optimistic
      * list the engine would then reject.
      *
+     * *** THE TWO SCREEN SECTIONS — `?seccion=` ***
+     * `?seccion=lista_espera` and `?seccion=padron_completo` select ONE of
+     * the two WIDER populations `Plazas\CandidatosResolver::paraSeccion()`
+     * exposes (see that method's own docblock) — the people who actually
+     * signed up, and everyone else in the padrón, respectively. Resolving
+     * which `sp_team` post IS "lista de espera" for $seasonId
+     * (`Plazas\ListaEsperaResolver::resolve()`) can itself fail when neither
+     * an operator override nor the dynamic slug lookup produces an answer;
+     * that failure is NOT caught separately here — it propagates into this
+     * method's own `\Throwable` catch below, which fails the WHOLE response
+     * (a logged 500), never a silently empty `candidatos: []`. See
+     * `Plazas\ListaEsperaResolver`'s own class docblock for why an empty
+     * list would be the wrong failure mode for this specific endpoint.
+     *
+     * `?seccion` is OPTIONAL and purely ADDITIVE: omitting it keeps the
+     * EXACT pre-existing behavior (`CandidatosResolver::paraPlaza()`, the
+     * season-registered pool) for any caller — including the committee's
+     * own tooling — written before these two sections existed.
+     *
      * *** FILTERING HAPPENS HERE, NEVER IN CandidatosResolver ***
      * `paraPlaza()` stays the single, unfiltered source of truth (see its
      * own docblock) — `Reglas\PrioridadDePadresRespetada` needs that FULL
@@ -300,11 +344,13 @@ class PlazasController {
      *   - By DEFAULT, only VIABLE candidates are returned — a captain cannot
      *     act on a non-viable one, and a season's full candidate pool can run
      *     into the hundreds (see CandidatosResolver's own docblock, "COST:
-     *     THIS IS N+1 BY DESIGN"), most of it not actionable.
+     *     THE CEILING FILTER RUNS BEFORE THE N+1, NEVER AFTER"), most of it
+     *     not actionable.
      *   - `?incluir_no_viables=1` opts back into the FULL list, `viable` and
      *     `motivo` intact — for the committee's own tooling, which may want
-     *     to see WHY someone was excluded.
-     *   - `?search=<text>` narrows whatever set the two rules above already
+     *     to see WHY someone was excluded. Applies identically whether
+     *     `?seccion` was given or not.
+     *   - `?search=<text>` narrows whatever set the rules above already
      *     produced to names containing $text, case-insensitively.
      */
     public function listarCandidatos( \WP_REST_Request $request ): \WP_REST_Response {
@@ -316,6 +362,15 @@ class PlazasController {
             return $this->respuestaSolicitudInvalida(
                 'campos_invalidos',
                 'season_id, team_id y plaza_id son obligatorios y deben ser mayores a 0.'
+            );
+        }
+
+        $seccion = trim( (string) ( $request->get_param( 'seccion' ) ?? '' ) );
+
+        if ( '' !== $seccion && ! CandidatosSeccion::esValida( $seccion ) ) {
+            return $this->respuestaSolicitudInvalida(
+                'seccion_invalida',
+                "seccion '{$seccion}' no es valida. Valores aceptados: " . implode( ', ', CandidatosSeccion::todas() ) . '.'
             );
         }
 
@@ -346,7 +401,26 @@ class PlazasController {
             $boundedFechaCounter        = new BoundedFechaCounter( $this->fechaRepository, $this->eventLog );
             $countResolvedFechasSinceFn = $boundedFechaCounter->boundedCountResolvedFechasSinceFn( $seasonId );
 
-            $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
+            if ( '' !== $seccion ) {
+                if ( null === $this->listaEsperaResolver ) {
+                    throw new \RuntimeException(
+                        'PlazasController::listarCandidatos(): a seccion was requested but this controller '
+                        . 'instance was not wired with a ListaEsperaResolver — see the constructor docblock.'
+                    );
+                }
+
+                $listaEsperaTeamId = $this->listaEsperaResolver->resolve( $seasonId );
+
+                $candidatos = $this->candidatosResolver->paraSeccion(
+                    $plaza,
+                    $seccion,
+                    $listaEsperaTeamId,
+                    $this->politicaCC5b,
+                    $countResolvedFechasSinceFn
+                );
+            } else {
+                $candidatos = $this->candidatosResolver->paraPlaza( $plaza, $this->politicaCC5b, $countResolvedFechasSinceFn );
+            }
 
             $incluirNoViables = '1' === (string) $request->get_param( 'incluir_no_viables' );
 
@@ -431,6 +505,7 @@ class PlazasController {
             'es_titular_el_ocupante'                      => null !== $vigente
                 && (int) $vigente['player_id'] === (int) $plaza['titular_player_id'],
             'cerrada'                                      => null !== $plaza['closed_at'],
+            'puntaje_techo'                                => Puntaje::fromHalfPoints( (int) $plaza['puntaje_techo'] )->toDecimal(),
             'fechas_faltantes_liberacion'                  => $fechasFaltantes,
             'fechas_faltantes_liberacion_indeterminado'    => $indeterminado,
         ];

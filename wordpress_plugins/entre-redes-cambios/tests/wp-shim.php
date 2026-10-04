@@ -964,7 +964,8 @@ if ( ! function_exists( 'wp_test_create_posts_table' ) ) {
                 ID INTEGER PRIMARY KEY,
                 post_type TEXT,
                 post_status TEXT,
-                post_title TEXT
+                post_title TEXT,
+                post_name TEXT
             )"
         );
     }
