@@ -194,6 +194,7 @@ Future<void> _pumpScreen(
   // Defaults to an open fecha with both windows open — pass `null` to
   // simulate "no open fecha" (either {"fecha": null} or a failed fetch).
   CambiosFechaAbierta? fecha = _defaultFecha,
+  double? puntaje,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -223,6 +224,7 @@ Future<void> _pumpScreen(
           teamId: 1,
           plaza: _plaza,
           tipo: tipo,
+          puntaje: puntaje,
         ),
       ),
     ),
@@ -685,6 +687,48 @@ void main() {
 
       // _plaza's own puntajeTecho is 3.0 (see this file's top-level fixture).
       expect(find.text('Techo de esta plaza: 3 pts.'), findsOneWidget);
+    });
+  });
+
+  group('CambiosSolicitarScreen — header puntaje', () {
+    testWidgets('renders the titular name and the formatted puntaje, right-aligned',
+        (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion, puntaje: 4.5);
+
+      expect(find.text('Juan Pérez'), findsOneWidget);
+      expect(find.text('4.5 ptos'), findsOneWidget);
+
+      // Right-aligned relative to the name: the puntaje's left edge sits
+      // after the name's left edge within the same header row.
+      final nombrePos = tester.getTopLeft(find.text('Juan Pérez'));
+      final puntajePos = tester.getTopLeft(find.text('4.5 ptos'));
+      expect(puntajePos.dx, greaterThan(nombrePos.dx));
+    });
+
+    testWidgets('a whole-number puntaje renders without a trailing .0', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion, puntaje: 5);
+
+      expect(find.text('5 ptos'), findsOneWidget);
+      expect(find.text('5.0 ptos'), findsNothing);
+    });
+
+    testWidgets('a null puntaje (roster fetch pending or failed) renders nothing on the right',
+        (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion, puntaje: null);
+
+      expect(find.text('Juan Pérez'), findsOneWidget);
+      expect(find.textContaining('ptos'), findsNothing);
+      // Never an invented placeholder either.
+      expect(find.text('0 ptos'), findsNothing);
+      expect(find.text('- ptos'), findsNothing);
+    });
+
+    testWidgets('a puntaje of 0 ("sin calificar") renders nothing on the right, same as null',
+        (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion, puntaje: 0);
+
+      expect(find.text('Juan Pérez'), findsOneWidget);
+      expect(find.textContaining('ptos'), findsNothing);
     });
   });
 

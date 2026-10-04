@@ -211,23 +211,52 @@ class CambiosJugadorCard extends StatelessWidget {
   }
 }
 
-/// Small pill badge used for "Cerrada" / "Baja por cambio" markers.
+/// [CambiosBadge]'s visual variant — [neutral] is the original grey pill
+/// ("Cerrada", "Baja por cambio"); [accent] is a brand-tinted pill for a
+/// badge that should read as distinguishable at a glance (e.g. "Invitado"
+/// vs. "Padre" on `CambiosCandidatoCard`). Extending the SAME widget with a
+/// variant — rather than forking it — keeps every existing call site's look
+/// untouched: [neutral] is the default.
+enum CambiosBadgeVariant { neutral, accent }
+
+/// Small pill badge used for "Cerrada" / "Baja por cambio" markers, and for
+/// "Padre" / "Invitado" on a candidate row.
 /// Public (not `_Badge`) so callers in `cambios_plantel_screen.dart` can
 /// attach their own per-plaza [Key] to each instance.
 class CambiosBadge extends StatelessWidget {
   final String text;
+  final CambiosBadgeVariant variant;
 
-  const CambiosBadge({super.key, required this.text});
+  const CambiosBadge({
+    super.key,
+    required this.text,
+    this.variant = CambiosBadgeVariant.neutral,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final isAccent = variant == CambiosBadgeVariant.accent;
+    // A light tint of the tenant's own primary color, same pairing already
+    // used for `_PlazaHeader`'s tinted strip and the selected puntaje chip
+    // (`cambios_solicitar_screen.dart`) — a solid `primary` text on a very
+    // light `primary` background keeps contrast comfortably accessible
+    // without hard-coding a color literal that would fight the tenant theme.
+    final primary = Theme.of(context).colorScheme.primary;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.grey.shade300,
+        color: isAccent ? primary.withValues(alpha: 0.12) : Colors.grey.shade300,
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Text(text, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: isAccent ? primary : null,
+        ),
+      ),
     );
   }
 }
