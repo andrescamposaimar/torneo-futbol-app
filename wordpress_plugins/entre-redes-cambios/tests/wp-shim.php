@@ -37,6 +37,20 @@ if ( ! class_exists( 'wpdb' ) ) {
         public string $options     = 'wp_options';
         public ?string $last_error = null;
 
+        /**
+         * Every SQL string handed to get_results(), in call order. Added so
+         * a test can assert on the EXACT SQL a method built (e.g. pinning a
+         * `LIKE ... ESCAPE` clause) rather than only on the rows it returns
+         * — a wrong-but-coincidentally-correct-under-SQLite clause can still
+         * return the right rows (see CandidatosResolverTest's SQL-pinning
+         * test for exactly this case). Never cleared automatically; a test
+         * that cares about isolation resets it itself (`$wpdb->queries =
+         * [];`) before the call it wants to inspect.
+         *
+         * @var array<int, string>
+         */
+        public array $queries = [];
+
         private \PDO $pdo;
 
         public function __construct() {
@@ -93,6 +107,7 @@ if ( ! class_exists( 'wpdb' ) ) {
          * @return array<int, array<string, mixed>>
          */
         public function get_results( string $sql, string $output = OBJECT ): array {
+            $this->queries[] = $sql;
             try {
                 $stmt = $this->pdo->query( $sql );
                 return $stmt->fetchAll( \PDO::FETCH_ASSOC );
@@ -127,18 +142,6 @@ if ( ! class_exists( 'wpdb' ) ) {
         public function get_row( string $sql, string $output = OBJECT ): ?array {
             $rows = $this->get_results( $sql );
             return $rows[0] ?? null;
-        }
-
-        /**
-         * Escapes the LIKE wildcards ('%', '_') and the escape character
-         * itself ('\\') in $text, matching WordPress's real
-         * `wpdb::esc_like()` behavior (`addcslashes( $text, '_%\\' )`).
-         * This WP-generic shim previously had no equivalent; added because
-         * a caller now builds a `LIKE '%...%'` pattern from free-text input
-         * and must escape it before wrapping in wildcards.
-         */
-        public function esc_like( string $text ): string {
-            return addcslashes( $text, '_%\\' );
         }
 
         /**

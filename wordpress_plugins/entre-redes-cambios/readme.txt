@@ -31,5 +31,8 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 * Fix: chunk the IN(...) clause JugadorMetricasReader builds from the whole candidate population (batches of 200) instead of one unbounded query, to harden the ?seccion=padron_completo path (~1000 players) against a production 500.
 * Add: persist the most recent unexpected failure (event, exception class, message, UTC timestamp) in the entre_redes_cambios_ultimo_error option, readable via phpMyAdmin, since this host exposes no PHP error log.
 
+= 0.1.4 =
+* Fix: the candidatos search filter (`CandidatosResolver`) built a `LIKE ... ESCAPE '\'` clause that is valid under this plugin's SQLite test shim but a SQL syntax error on real MySQL, where a backslash before the closing quote escapes the quote itself instead of closing the string literal. Every captain search request failed in production. Replaced the escape character with `!`, which has no special meaning in either engine's string-literal parsing or as a `LIKE` wildcard, via a new shared `escapeLikeTerm()` helper.
+
 = 0.1.0 =
 * Initial scaffold: plugin structure, 3-table schema (cambios_fecha, cambios_fecha_partido, cambios_settings), pure PlazosCalculator and EstadoDeriver, FechaRepository, SeedTemporadaService. No REST/admin/cron consumers yet (slice 0).

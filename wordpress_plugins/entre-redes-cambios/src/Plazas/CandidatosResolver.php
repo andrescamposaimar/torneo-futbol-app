@@ -607,6 +607,68 @@ class CandidatosResolver {
     }
 
     /**
+     * Escapes a free-text search term for safe use inside a `LIKE '%…%'`
+     * pattern whose `ESCAPE` character is `'!'` — shared by
+     * `playerIdsRegistradosEnTemporada()`, `playerIdsListaDeEspera()` and
+     * `playerIdsPadronCompleto()`, the only three places this plugin builds a
+     * `LIKE` pattern from captain-supplied input.
+     *
+     * *** WHY NOT `$wpdb->esc_like()` *** It is hardcoded to escape with a
+     * backslash (`addcslashes( $text, '_%\\' )`), which is exactly the
+     * character that must NOT be the escape character here — see "WHY NOT A
+     * BACKSLASH" below. This method escapes the SAME three characters
+     * `esc_like()` does (`%`, `_`, and the escape character itself), just
+     * with `!` standing in for `\`.
+     *
+     * *** WHY NOT A BACKSLASH *** A previous version of these three query
+     * methods used `ESCAPE '\\'` — which, in MySQL, is not merely "a
+     * backslash as the escape character" in the abstract: MySQL's own
+     * string-literal parser ALSO treats a backslash as an escape character
+     * (true unless `NO_BACKSLASH_ESCAPES` is set — see
+     * https://dev.mysql.com/doc/refman/8.4/en/string-literals.html), and
+     * `\'` is one of its documented escape sequences, producing a literal
+     * `'` rather than closing the string. So the SQL text `ESCAPE '\''`
+     * never closes that string literal at all — MySQL keeps scanning for an
+     * unescaped closing quote into the rest of the query, which is a syntax
+     * error in production. This is confirmed against MySQL's own
+     * documentation (string-literals.html and the `LIKE` / `ESCAPE` section
+     * of string-comparison-functions.html), not merely asserted.
+     *
+     * This plugin's whole test suite runs against the SQLite shim in
+     * `tests/wp-shim.php`, and SQLite does NOT give backslash any lexical
+     * meaning inside a string literal — it closes `'\''`'s string at the
+     * first `'`, reads a lone backslash as the one-character `ESCAPE` value,
+     * and happily evaluates the pattern. That is exactly why this plugin's
+     * 654 PHPUnit tests passed while the equivalent query failed on
+     * production MySQL: the two engines disagree about where that string
+     * literal ends, and nothing in this suite can exercise MySQL's parser to
+     * catch that divergence (see CandidatosResolverTest's SQL-pinning test,
+     * whose own docblock repeats this limitation).
+     *
+     * *** WHY `!` *** It has no lexical meaning inside a MySQL or SQLite
+     * string literal (unlike `\`), and no meaning as a `LIKE` wildcard in
+     * either engine (only `%` and `_` are wildcards) — confirmed against
+     * MySQL's documentation above and, empirically, against this plugin's
+     * own SQLite shim (`sqlite3 :memory: "SELECT 'a!b' LIKE '%!!b' ESCAPE
+     * '!'"` → `1`). Any other character outside `%`, `_`, quote and
+     * backslash would work the same way; `!` is simply the one this plugin
+     * standardizes on so there is exactly one answer everywhere this
+     * pattern appears.
+     *
+     * @return string $term with `!`, `%` and `_` each prefixed by `!` — the
+     *         escape character is escaped FIRST, so a term that itself
+     *         contains `!` is never double-escaped by the later `%`/`_`
+     *         passes.
+     */
+    private static function escapeLikeTerm( string $term ): string {
+        $escaped = str_replace( '!', '!!', $term );
+        $escaped = str_replace( '%', '!%', $escaped );
+        $escaped = str_replace( '_', '!_', $escaped );
+
+        return $escaped;
+    }
+
+    /**
      * Every `sp_player` post registered (via the `sp_season` taxonomy) in
      * $seasonId — raw SQL against WordPress core tables, never `WP_Query`,
      * consistent with every other read in this plugin (see PlazaRepository's
@@ -633,9 +695,11 @@ class CandidatosResolver {
      *        whatever case/accent sensitivity the underlying SQL engine's
      *        `LIKE` gives (case-insensitive for both this plugin's SQLite
      *        test shim and MySQL's default collation). The term is escaped
-     *        with `$wpdb->esc_like()` before being wrapped in `%…%` — the
-     *        standard WordPress idiom — so a literal `%` or `_` typed by the
-     *        captain matches itself instead of acting as a wildcard.
+     *        with `escapeLikeTerm()` (NOT `$wpdb->esc_like()`, which is
+     *        hardcoded to a backslash escape — see that method's own
+     *        docblock for why that cannot be used here) before being
+     *        wrapped in `%…%`, so a literal `%` or `_` typed by the captain
+     *        matches itself instead of acting as a wildcard.
      * @return array<int, int>
      * @throws \RuntimeException When the query fails at the wpdb level.
      */
@@ -647,13 +711,16 @@ class CandidatosResolver {
         $params         = [ $seasonId ];
 
         if ( '' !== $search ) {
-            // ESCAPE '\' is explicit here (not just implied by $wpdb->esc_like()'s
-            // backslash escaping) because MySQL treats backslash as the LIKE
-            // escape character BY DEFAULT, but the SQLite test shim backing this
-            // plugin's whole suite does not — the clause makes the behavior
-            // explicit and identical on both engines.
-            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '\\'";
-            $params[]       = '%' . $wpdb->esc_like( $search ) . '%';
+            // ESCAPE '!' — NEVER a backslash: MySQL's own string-literal
+            // parser treats a backslash before the closing quote as an
+            // escaped quote, so `ESCAPE '\'` never actually closes the
+            // string literal and breaks the query on real MySQL. The SQLite
+            // shim backing this suite does not share that lexical rule, so
+            // it accepted the broken clause — see escapeLikeTerm()'s own
+            // docblock for the full explanation (and citations) of why `!`
+            // is the escape character used everywhere in this class.
+            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '!'";
+            $params[]       = '%' . self::escapeLikeTerm( $search ) . '%';
         }
 
         $rows = $wpdb->get_results(
@@ -711,13 +778,16 @@ class CandidatosResolver {
         $params         = [ (string) $teamId ];
 
         if ( '' !== $search ) {
-            // ESCAPE '\' is explicit here (not just implied by $wpdb->esc_like()'s
-            // backslash escaping) because MySQL treats backslash as the LIKE
-            // escape character BY DEFAULT, but the SQLite test shim backing this
-            // plugin's whole suite does not — the clause makes the behavior
-            // explicit and identical on both engines.
-            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '\\'";
-            $params[]       = '%' . $wpdb->esc_like( $search ) . '%';
+            // ESCAPE '!' — NEVER a backslash: MySQL's own string-literal
+            // parser treats a backslash before the closing quote as an
+            // escaped quote, so `ESCAPE '\'` never actually closes the
+            // string literal and breaks the query on real MySQL. The SQLite
+            // shim backing this suite does not share that lexical rule, so
+            // it accepted the broken clause — see escapeLikeTerm()'s own
+            // docblock for the full explanation (and citations) of why `!`
+            // is the escape character used everywhere in this class.
+            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '!'";
+            $params[]       = '%' . self::escapeLikeTerm( $search ) . '%';
         }
 
         $rows = $wpdb->get_results(
@@ -776,13 +846,16 @@ class CandidatosResolver {
         $params         = [ (string) $excludeTeamId ];
 
         if ( '' !== $search ) {
-            // ESCAPE '\' is explicit here (not just implied by $wpdb->esc_like()'s
-            // backslash escaping) because MySQL treats backslash as the LIKE
-            // escape character BY DEFAULT, but the SQLite test shim backing this
-            // plugin's whole suite does not — the clause makes the behavior
-            // explicit and identical on both engines.
-            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '\\'";
-            $params[]       = '%' . $wpdb->esc_like( $search ) . '%';
+            // ESCAPE '!' — NEVER a backslash: MySQL's own string-literal
+            // parser treats a backslash before the closing quote as an
+            // escaped quote, so `ESCAPE '\'` never actually closes the
+            // string literal and breaks the query on real MySQL. The SQLite
+            // shim backing this suite does not share that lexical rule, so
+            // it accepted the broken clause — see escapeLikeTerm()'s own
+            // docblock for the full explanation (and citations) of why `!`
+            // is the escape character used everywhere in this class.
+            $filtroBusqueda = " AND posts.post_title LIKE %s ESCAPE '!'";
+            $params[]       = '%' . self::escapeLikeTerm( $search ) . '%';
         }
 
         $rows = $wpdb->get_results(
