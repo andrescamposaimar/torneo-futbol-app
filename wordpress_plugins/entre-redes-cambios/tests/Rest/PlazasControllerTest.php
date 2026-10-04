@@ -459,10 +459,13 @@ class PlazasControllerTest extends TestCase {
      */
     private function candidatosResolverConDosCandidatos(): CandidatosResolver {
         $candidatosResolver = $this->createMock( CandidatosResolver::class );
-        $candidatosResolver->method( 'paraPlaza' )
+        $candidatosResolver->method( 'buscarPaginado' )
             ->willReturn( [
-                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
-                new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
+                'candidatos' => [
+                    new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                    new CandidatoEstado( 801, false, null, false, 'puntaje_indeterminado' ),
+                ],
+                'total' => 2,
             ] );
 
         return $candidatosResolver;
@@ -504,10 +507,15 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ],
             ],
             $response->get_data()['candidatos']
         );
+        // See listarCandidatos()'s own docblock, "PAGINATION": the header
+        // reports the POPULATION size (2, both candidates), not how many
+        // survived the viable-only filter (1) — that's the whole point of
+        // resolving it before the viability filter runs.
+        $this->assertSame( '2', $response->get_headers()['X-WP-Total'] );
     }
 
     /**
@@ -533,92 +541,232 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
-                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ],
+                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado', 'foto_url' => null ],
             ],
             $response->get_data()['candidatos']
         );
     }
 
     /**
-     * FIX 3: `?search=` narrows on the player's name, case-insensitively —
-     * both candidates are viable here (via incluir_no_viables=1, but search
-     * alone is what this test asserts), only one matches the needle.
+     * `?search=`/`?puntajes[]=` are no longer applied by the controller
+     * itself — see CandidatosResolver::buscarPaginado()'s own docblock for
+     * why they now narrow the POPULATION, inside the resolver, BEFORE
+     * pagination (CandidatosResolverTest covers the actual matching
+     * semantics). This test proves the controller still PARSES both and
+     * forwards them correctly — the delegation contract this layer owns.
      */
-    public function test_listar_candidatos_search_filters_case_insensitively(): void {
-        global $wp_test_post_titles;
-        $wp_test_post_titles = [ 800 => 'Juan Pérez', 801 => 'Martín Gómez' ];
+    public function test_listar_candidatos_forwards_search_and_puntajes_filtro_to_buscar_paginado(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
-        try {
-            $authorizer = $this->createMock( CapitanAuthorizer::class );
-            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plaza           = [ 'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6 ];
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( $plaza );
 
-            $plazaRepository = $this->createMock( PlazaRepository::class );
-            $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
-                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
-            ] );
+        $fechaRepository = $this->createMock( FechaRepository::class );
 
-            $fechaRepository    = $this->createMock( FechaRepository::class );
-            $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )
+            ->method( 'buscarPaginado' )
+            ->with(
+                $plaza,
+                null,
+                null,
+                $this->isInstanceOf( BloqueoReemplazoPolicy::class ),
+                $this->isType( 'callable' ),
+                1,
+                20,
+                'gómez',
+                [ 2.5, 4.0 ]
+            )
+            ->willReturn( [ 'candidatos' => [], 'total' => 0 ] );
 
-            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
-            $response = $controller->listarCandidatos(
-                $this->requestParaCandidatos( [ 'incluir_no_viables' => '1', 'search' => 'gómez' ] )
-            );
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [
+            'search'   => 'gómez',
+            'puntajes' => [ '2.5', '4' ],
+        ] ) );
 
-            $this->assertSame( 200, $response->get_status() );
-            $this->assertSame(
-                [
-                    [ 'player_id' => 801, 'nombre' => 'Martín Gómez', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado' ],
-                ],
-                $response->get_data()['candidatos']
-            );
-        } finally {
-            $wp_test_post_titles = [];
-        }
+        $this->assertSame( 200, $response->get_status() );
     }
 
     /**
-     * FIX 3: `search` is applied ON TOP of the default viable-only filter,
-     * not instead of it — a search matching a NON-viable candidate's name
-     * must still exclude them when incluir_no_viables was not requested.
+     * `?page=`/`?per_page=` default to 1/DEFAULT_PER_PAGE, are clamped to
+     * >= 1, and `?per_page=` is additionally clamped to MAX_PER_PAGE — a
+     * caller cannot opt back into "the whole population in one response".
      */
-    public function test_listar_candidatos_search_combined_with_default_viable_only_filter(): void {
-        global $wp_test_post_titles;
-        $wp_test_post_titles = [ 800 => 'Juan Pérez', 801 => 'Martín Gómez' ];
+    public function test_listar_candidatos_clamps_page_and_per_page(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
-        try {
-            $authorizer = $this->createMock( CapitanAuthorizer::class );
-            $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plaza           = [ 'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6 ];
+        $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( $plaza );
 
-            $plazaRepository = $this->createMock( PlazaRepository::class );
-            $plazaRepository->method( 'findPlaza' )->with( self::PLAZA_ID )->willReturn( [
-                'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
-            ] );
+        $fechaRepository = $this->createMock( FechaRepository::class );
 
-            $fechaRepository    = $this->createMock( FechaRepository::class );
-            $candidatosResolver = $this->candidatosResolverConDosCandidatos();
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )
+            ->method( 'buscarPaginado' )
+            ->with(
+                $plaza,
+                null,
+                null,
+                $this->isInstanceOf( BloqueoReemplazoPolicy::class ),
+                $this->isType( 'callable' ),
+                1,   // page=-5 clamped up to 1
+                100, // per_page=99999 clamped down to MAX_PER_PAGE
+                '',
+                []
+            )
+            ->willReturn( [ 'candidatos' => [], 'total' => 0 ] );
 
-            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
-            // "gómez" matches candidate 801's name, but 801 is not viable and
-            // incluir_no_viables was NOT passed — it must stay excluded.
-            $responseGomez = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'search' => 'gómez' ] ) );
-            $this->assertSame( [], $responseGomez->get_data()['candidatos'] );
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [
+            'page'     => '-5',
+            'per_page' => '99999',
+        ] ) );
 
-            // "pérez" matches candidate 800's name, and 800 IS viable — it
-            // must come through.
-            $responsePerez = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'search' => 'pérez' ] ) );
-            $this->assertSame(
-                [
-                    [ 'player_id' => 800, 'nombre' => 'Juan Pérez', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ],
-                ],
-                $responsePerez->get_data()['candidatos']
-            );
-        } finally {
-            $wp_test_post_titles = [];
-        }
+        $this->assertSame( 200, $response->get_status() );
+    }
+
+    /**
+     * `X-WP-Total` reports buscarPaginado()'s own `total` — the SAME
+     * convention `entre-redes-api`'s `/jugadores` endpoint already uses and
+     * `ApiService.getJugadoresRaw()` already reads — even when the current
+     * page is empty (an out-of-range `?page=`, see
+     * CandidatosResolverTest::test_buscar_paginado_out_of_range_page_is_an_empty_page_not_an_error()).
+     */
+    public function test_listar_candidatos_reports_x_wp_total_header_even_on_an_empty_page(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [ 'candidatos' => [], 'total' => 37 ] );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos( [ 'page' => '99' ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $this->assertSame( [], $response->get_data()['candidatos'] );
+        $this->assertSame( '37', $response->get_headers()['X-WP-Total'] );
+    }
+
+    /**
+     * `foto_url` is resolved via the injected `$fotoResolverFn` — never a
+     * direct WordPress call the test suite could not otherwise exercise.
+     * `false`/`''` both collapse to `null` (the app's fallback-to-icon
+     * signal); a real URL passes through unchanged.
+     */
+    public function test_listar_candidatos_shapes_foto_url_via_the_injected_resolver(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 2,
+        ] );
+
+        $fotoResolverFn = static fn ( int $playerId ): string|false => 800 === $playerId
+            ? 'https://entreredespadres.com.ar/foto-800.jpg'
+            : '';
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            $fotoResolverFn
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $candidatos = $response->get_data()['candidatos'];
+        $this->assertSame( 'https://entreredespadres.com.ar/foto-800.jpg', $candidatos[0]['foto_url'] );
+        $this->assertNull( $candidatos[1]['foto_url'], 'An empty string from the resolver must collapse to null, never a broken image URL.' );
+    }
+
+    /**
+     * A resolver that THROWS for one candidate must degrade only that
+     * candidate's `foto_url` to null — never abort the whole response with a
+     * 500 — and the failure must still be observable through EventLog,
+     * summarized once for the page rather than once per failing row.
+     */
+    public function test_listar_candidatos_tolerates_a_throwing_foto_resolver(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 2,
+        ] );
+
+        $fotoResolverFn = static function ( int $playerId ): string|false {
+            if ( 800 === $playerId ) {
+                throw new \RuntimeException( 'simulated storage failure' );
+            }
+
+            return 'https://entreredespadres.com.ar/foto-801.jpg';
+        };
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            $fotoResolverFn
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $this->assertSame( 200, $response->get_status(), 'One bad photo must never turn the whole page into a 500.' );
+
+        $candidatos = $response->get_data()['candidatos'];
+        $this->assertNull( $candidatos[0]['foto_url'], 'The throwing candidate degrades to null, like a missing photo.' );
+        $this->assertSame( 'https://entreredespadres.com.ar/foto-801.jpg', $candidatos[1]['foto_url'], 'The rest of the page must remain intact.' );
+
+        $this->assertTrue( $this->eventLog->has( 'rest.foto_jugador_fallida' ), 'The failure must be observable through EventLog.' );
+        $evento = $this->eventLog->last();
+        $this->assertSame( [ 800 ], $evento['contexto']['player_ids'] );
+        $this->assertSame( 1, $evento['contexto']['count'] );
     }
 
     public function test_listar_candidatos_missing_fields_returns_400(): void {
@@ -647,7 +795,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository    = $this->createMock( FechaRepository::class );
         $candidatosResolver = $this->createMock( CandidatosResolver::class );
-        $candidatosResolver->expects( $this->never() )->method( 'paraPlaza' );
+        $candidatosResolver->expects( $this->never() )->method( 'buscarPaginado' );
 
         $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
@@ -672,7 +820,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository    = $this->createMock( FechaRepository::class );
         $candidatosResolver = $this->createMock( CandidatosResolver::class );
-        $candidatosResolver->expects( $this->never() )->method( 'paraPlaza' );
+        $candidatosResolver->expects( $this->never() )->method( 'buscarPaginado' );
 
         $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
@@ -741,15 +889,15 @@ class PlazasControllerTest extends TestCase {
             };
 
             $candidatosResolver = $this->createMock( CandidatosResolver::class );
-            $candidatosResolver->method( 'paraPlaza' )->willReturnCallback(
-                static function ( array $plaza, $politica, callable $countResolvedFechasSinceFn ): array {
+            $candidatosResolver->method( 'buscarPaginado' )->willReturnCallback(
+                static function ( array $plaza, ?string $seccion, ?int $listaEsperaTeamId, $politica, callable $countResolvedFechasSinceFn ): array {
                     // Exactly what the real CandidatosResolver does
                     // internally when it evaluates bloqueo por cierre
                     // truncado — invoking the injected counter is what must
                     // fail closed here.
                     $countResolvedFechasSinceFn( 1 );
 
-                    return [];
+                    return [ 'candidatos' => [], 'total' => 0 ];
                 }
             );
 
@@ -774,24 +922,25 @@ class PlazasControllerTest extends TestCase {
     // -------------------------------------------------------------------------
 
     /**
-     * Omitting `?seccion` keeps the EXACT pre-existing behavior —
-     * `paraPlaza()`, never `paraSeccion()` — for any caller written before
-     * these two sections existed. Every other `listarCandidatos()` test
-     * above already proves this path; this test additionally proves
-     * `paraSeccion()` is never touched.
+     * Omitting `?seccion` keeps the EXACT pre-existing population — a `null`
+     * `$seccion` passed to `buscarPaginado()` — for any caller written before
+     * these two sections existed, and never resolves a lista-de-espera team
+     * id it does not need (`$listaEsperaTeamId` stays `null` too).
      */
-    public function test_listar_candidatos_without_seccion_never_calls_para_seccion(): void {
+    public function test_listar_candidatos_without_seccion_passes_null_seccion_to_buscar_paginado(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
         $plazaRepository = $this->createMock( PlazaRepository::class );
-        $plazaRepository->method( 'findPlaza' )->willReturn( [
-            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
-        ] );
+        $plaza           = [ 'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6 ];
+        $plazaRepository->method( 'findPlaza' )->willReturn( $plaza );
 
         $fechaRepository    = $this->createMock( FechaRepository::class );
-        $candidatosResolver = $this->candidatosResolverConDosCandidatos();
-        $candidatosResolver->expects( $this->never() )->method( 'paraSeccion' );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->expects( $this->once() )
+            ->method( 'buscarPaginado' )
+            ->with( $plaza, null, null, $this->isInstanceOf( BloqueoReemplazoPolicy::class ), $this->isType( 'callable' ), 1, 20, '', [] )
+            ->willReturn( [ 'candidatos' => [], 'total' => 0 ] );
 
         $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $candidatosResolver );
 
@@ -824,7 +973,7 @@ class PlazasControllerTest extends TestCase {
         return $listaEsperaResolver;
     }
 
-    public function test_listar_candidatos_seccion_lista_espera_delegates_to_para_seccion_with_the_resolved_team_id(): void {
+    public function test_listar_candidatos_seccion_lista_espera_delegates_to_buscar_paginado_with_the_resolved_team_id(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
@@ -837,10 +986,22 @@ class PlazasControllerTest extends TestCase {
 
         $candidatosResolver = $this->createMock( CandidatosResolver::class );
         $candidatosResolver->expects( $this->once() )
-            ->method( 'paraSeccion' )
-            ->with( $plaza, CandidatosSeccion::LISTA_ESPERA, 14349, $this->isInstanceOf( BloqueoReemplazoPolicy::class ), $this->isType( 'callable' ) )
-            ->willReturn( [ new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ) ] );
-        $candidatosResolver->expects( $this->never() )->method( 'paraPlaza' );
+            ->method( 'buscarPaginado' )
+            ->with(
+                $plaza,
+                CandidatosSeccion::LISTA_ESPERA,
+                14349,
+                $this->isInstanceOf( BloqueoReemplazoPolicy::class ),
+                $this->isType( 'callable' ),
+                1,
+                20,
+                '',
+                []
+            )
+            ->willReturn( [
+                'candidatos' => [ new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ) ],
+                'total'      => 1,
+            ] );
 
         $controller = new PlazasController(
             $authorizer,
@@ -857,12 +1018,12 @@ class PlazasControllerTest extends TestCase {
 
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
-            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null ] ],
+            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ] ],
             $response->get_data()['candidatos']
         );
     }
 
-    public function test_listar_candidatos_seccion_padron_completo_delegates_to_para_seccion(): void {
+    public function test_listar_candidatos_seccion_padron_completo_delegates_to_buscar_paginado(): void {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
 
@@ -875,9 +1036,19 @@ class PlazasControllerTest extends TestCase {
 
         $candidatosResolver = $this->createMock( CandidatosResolver::class );
         $candidatosResolver->expects( $this->once() )
-            ->method( 'paraSeccion' )
-            ->with( $plaza, CandidatosSeccion::PADRON_COMPLETO, 14349, $this->isInstanceOf( BloqueoReemplazoPolicy::class ), $this->isType( 'callable' ) )
-            ->willReturn( [] );
+            ->method( 'buscarPaginado' )
+            ->with(
+                $plaza,
+                CandidatosSeccion::PADRON_COMPLETO,
+                14349,
+                $this->isInstanceOf( BloqueoReemplazoPolicy::class ),
+                $this->isType( 'callable' ),
+                1,
+                20,
+                '',
+                []
+            )
+            ->willReturn( [ 'candidatos' => [], 'total' => 0 ] );
 
         $controller = new PlazasController(
             $authorizer,
@@ -919,7 +1090,7 @@ class PlazasControllerTest extends TestCase {
         );
 
         $candidatosResolver = $this->createMock( CandidatosResolver::class );
-        $candidatosResolver->expects( $this->never() )->method( 'paraSeccion' );
+        $candidatosResolver->expects( $this->never() )->method( 'buscarPaginado' );
 
         $controller = new PlazasController(
             $authorizer,

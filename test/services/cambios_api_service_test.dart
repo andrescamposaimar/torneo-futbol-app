@@ -124,39 +124,109 @@ void main() {
       expect(plazas.single.regresoElegible, isFalse); // 2 fechas faltantes
     });
 
-    test('fetchCandidatos() parses the candidatos list', () async {
+    test('fetchCandidatos() parses the candidatos list, foto_url, and the X-WP-Total header',
+        () async {
       final repo = await _repoWithAccessToken();
       final service = _makeService(
         repo,
         MockClient((request) async {
           expect(request.url.queryParameters['plaza_id'], '10');
           expect(request.url.queryParameters['search'], 'gom');
-          return _jsonResponse({
-            'candidatos': [
-              {
-                'player_id': 200,
-                'nombre': 'Pedro Gómez',
-                'es_padre': false,
-                'puntaje': 3.5,
-                'viable': true,
-                'motivo': null,
-              },
-            ],
-          }, 200);
+          expect(request.url.queryParameters['page'], '2');
+          expect(request.url.queryParameters['per_page'], '20');
+          expect(request.url.queryParametersAll['puntajes[]'], ['2.5', '4']);
+          return http.Response(
+            json.encode({
+              'candidatos': [
+                {
+                  'player_id': 200,
+                  'nombre': 'Pedro Gómez',
+                  'es_padre': false,
+                  'puntaje': 3.5,
+                  'viable': true,
+                  'motivo': null,
+                  'foto_url': 'https://entreredespadres.com.ar/foto-200.jpg',
+                },
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json', 'x-wp-total': '37'},
+          );
         }),
       );
 
-      final candidatos = await service.fetchCandidatos(
+      final pagina = await service.fetchCandidatos(
         seasonId: 7,
         teamId: 1,
         plazaId: 10,
         search: 'gom',
+        puntajes: const [2.5, 4],
+        page: 2,
       );
 
-      expect(candidatos, hasLength(1));
-      expect(candidatos.single.nombre, 'Pedro Gómez');
-      expect(candidatos.single.puntaje, 3.5);
-      expect(candidatos.single.viable, isTrue);
+      expect(pagina.candidatos, hasLength(1));
+      expect(pagina.candidatos.single.nombre, 'Pedro Gómez');
+      expect(pagina.candidatos.single.puntaje, 3.5);
+      expect(pagina.candidatos.single.viable, isTrue);
+      expect(pagina.candidatos.single.fotoUrl, 'https://entreredespadres.com.ar/foto-200.jpg');
+      expect(pagina.total, 37);
+    });
+
+    test('fetchCandidatos() leaves total null when X-WP-Total is missing, even for a full page',
+        () async {
+      // THE dangerous case: a FULL page (20 of 20, the default perPage) with
+      // no header. Falling back to `candidatos.length` here would fabricate
+      // `total: 20`, which `CambiosCandidatosController.hasMoreFor()` reads
+      // as "that's the whole population" — silently truncating infinite
+      // scroll at page 1. See this method's own docblock and
+      // [CambiosCandidatosPagina]'s for why the fallback was removed.
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'candidatos': List.generate(
+                20,
+                (i) => {
+                  'player_id': 200 + i,
+                  'nombre': 'Jugador #${200 + i}',
+                  'es_padre': false,
+                  'puntaje': 3.5,
+                  'viable': true,
+                  'motivo': null,
+                },
+              ),
+            }, 200)),
+      );
+
+      final pagina = await service.fetchCandidatos(seasonId: 7, teamId: 1, plazaId: 10);
+
+      expect(pagina.total, isNull);
+      expect(pagina.candidatos, hasLength(20),
+          reason: 'A missing header must never truncate the page itself.');
+    });
+
+    test('fetchCandidatos() parses a null foto_url as null', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'candidatos': [
+                {
+                  'player_id': 201,
+                  'nombre': 'Sin Foto',
+                  'es_padre': false,
+                  'puntaje': 2.0,
+                  'viable': true,
+                  'motivo': null,
+                  'foto_url': null,
+                },
+              ],
+            }, 200)),
+      );
+
+      final pagina = await service.fetchCandidatos(seasonId: 7, teamId: 1, plazaId: 10);
+
+      expect(pagina.candidatos.single.fotoUrl, isNull);
     });
 
     test('fetchSolicitudes() parses the solicitudes list including a dictamen', () async {

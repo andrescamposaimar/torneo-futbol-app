@@ -9,21 +9,31 @@ import 'cambios_jugador_card.dart';
 /// Modelled on [CambiosJugadorCard]'s container shape (rounded card,
 /// shadow, circular avatar, name, "Pts." trailing column) for visual
 /// consistency with "Mi Plantel" — but NOT a reuse of that widget directly:
-/// `GET /cambios/plazas/candidatos` returns no photo and no posición for a
-/// candidate (only `nombre`, `es_padre`, `puntaje`, `viable`, `motivo`), so
-/// [CambiosJugadorCard]'s colored position strip and `NetworkImage` photo
-/// would have NOTHING real to show on every single row here — not an
-/// occasional missing-data case that widget's placeholders were designed
-/// for, but a structural one for this endpoint. Resolving a [Jugador] per
-/// candidate (the way "Mi Plantel" resolves an off-roster occupant) would
-/// also cost one extra HTTP request PER ROW, which breaks this screen's own
-/// "the common case must cost one request" rule for a list that can run
-/// into the hundreds (`CandidatosResolver`'s own docblock, "COST").
+/// `GET /cambios/plazas/candidatos` returns no posición for a candidate
+/// (only `nombre`, `es_padre`, `puntaje`, `viable`, `motivo`, `foto_url`),
+/// so [CambiosJugadorCard]'s colored position strip would have NOTHING real
+/// to show on every single row here — not an occasional missing-data case
+/// that widget's placeholders were designed for, but a structural one for
+/// this endpoint. Resolving a [Jugador] per candidate (the way "Mi Plantel"
+/// resolves an off-roster occupant) would also cost one extra HTTP request
+/// PER ROW, which breaks this screen's own "the common case must cost one
+/// request" rule for a list that can run into the hundreds
+/// (`CandidatosResolver`'s own docblock, "COST").
+///
+/// [fotoUrl] IS now part of the payload (`Rest\PlazasController::
+/// fotoJugador()`, batched per PAGE the same way the name already is — see
+/// that method's own docblock on the backend) — rendered via the SAME
+/// [CambiosAvatar] widget [CambiosJugadorCard] renders its own
+/// `jugador?.imagen` through: a missing URL falls back to the person icon,
+/// and so does a URL that resolves but fails to LOAD (a 404, a deleted
+/// attachment) — see that widget's own docblock for why a plain ternary on
+/// [fotoUrl] cannot catch the second case.
 class CambiosCandidatoCard extends StatelessWidget {
   final int playerId;
   final String nombre;
   final bool esPadre;
   final double? puntaje;
+  final String? fotoUrl;
   final bool selected;
   final VoidCallback onTap;
 
@@ -33,6 +43,7 @@ class CambiosCandidatoCard extends StatelessWidget {
     required this.nombre,
     required this.esPadre,
     required this.puntaje,
+    this.fotoUrl,
     required this.selected,
     required this.onTap,
   });
@@ -64,7 +75,7 @@ class CambiosCandidatoCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const CircleAvatar(child: Icon(Icons.person)),
+            CambiosAvatar(imageUrl: fotoUrl),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

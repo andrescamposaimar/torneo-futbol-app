@@ -38,10 +38,16 @@ CambiosApiService _baseFakeService() {
 /// A hand-written stub `StateNotifier` subclass — same convention as every
 /// other Cambios controller stub in this app (no mocking package). Tracks
 /// [loadCalls] so a test can assert a section's controller was NEVER asked
-/// to fetch (the lazy `padronCompleto` section, until the captain opens it).
+/// to fetch (the lazy `padronCompleto` section, until the captain opens it),
+/// and [lastQuery]/[lastPuntajes] so a test can assert WHAT a reload was
+/// asked to filter by — the server-side search/puntaje contract this slice
+/// moved into [CambiosCandidatosController] (see that class's own docblock).
 class _StubCandidatosController extends CambiosCandidatosController {
   int loadCalls = 0;
-  final CambiosCandidatosState Function()? onLoad;
+  int loadMoreCalls = 0;
+  String? lastQuery;
+  List<double>? lastPuntajes;
+  final CambiosCandidatosState Function(String query, List<double> puntajes)? onLoad;
 
   _StubCandidatosController(
     CambiosCandidatosState initialState, {
@@ -59,11 +65,18 @@ class _StubCandidatosController extends CambiosCandidatosController {
   }
 
   @override
-  Future<void> load({String query = ''}) async {
+  Future<void> load({String query = '', List<double> puntajes = const []}) async {
     loadCalls++;
+    lastQuery = query;
+    lastPuntajes = puntajes;
     if (onLoad != null) {
-      state = onLoad!();
+      state = onLoad!(query, puntajes);
     }
+  }
+
+  @override
+  Future<void> loadMore() async {
+    loadMoreCalls++;
   }
 }
 
@@ -232,6 +245,42 @@ Future<void> _pumpScreen(
   await tester.pump();
   // Lets the FutureProvider resolve (it's already a completed Future, but
   // still needs a microtask turn).
+  await tester.pump();
+}
+
+/// Like [_pumpScreen], but takes a fully custom [listaEsperaController] stub
+/// instead of a plain initial state — needed by tests that must observe
+/// calls made back to that controller ([_StubCandidatosController.loadCalls]
+/// / `lastQuery` / `lastPuntajes` / `loadMoreCalls`), which a bare state
+/// value cannot carry.
+Future<void> _pumpScreenWithControllers(
+  WidgetTester tester, {
+  required _StubCandidatosController listaEsperaController,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        cambiosCandidatosControllerProvider(_paramsListaEspera).overrideWith((ref) => listaEsperaController),
+        cambiosCandidatosControllerProvider(_paramsPadronCompleto).overrideWith(
+          (ref) => _StubCandidatosController(
+            const CambiosCandidatosIdle(),
+            seccion: CambiosCandidatosSeccion.padronCompleto,
+          ),
+        ),
+        cambiosPlantelControllerProvider(_scope).overrideWith((ref) => _StubPlantelController()),
+        cambiosFechaAbiertaProvider(_scope.seasonId).overrideWith((ref) => Future.value(_defaultFecha)),
+      ],
+      child: MaterialApp(
+        home: CambiosSolicitarScreen(
+          seasonId: 7,
+          teamId: 1,
+          plaza: _plaza,
+          tipo: CambiosSolicitudTipo.sustitucion,
+        ),
+      ),
+    ),
+  );
+  await tester.pump();
   await tester.pump();
 }
 
@@ -559,7 +608,7 @@ void main() {
       final padronController = _StubCandidatosController(
         const CambiosCandidatosIdle(),
         seccion: CambiosCandidatosSeccion.padronCompleto,
-        onLoad: () => const CambiosCandidatosLoaded(candidatos: [], query: ''),
+        onLoad: (query, puntajes) => CambiosCandidatosLoaded(candidatos: const [], query: query, puntajes: puntajes),
       );
 
       await _pumpScreen(
@@ -646,20 +695,57 @@ void main() {
   });
 
   group('CambiosSolicitarScreen — filtro por puntaje (techo de la plaza)', () {
-    testWidgets('every puntaje is shown, and chips above the ceiling are present but disabled',
-        (tester) async {
+    /// `_puntajesFiltro` is now a SERVER-SIDE filter — see
+    /// `CambiosCandidatosController`'s own docblock — so this test drives a
+    /// controller stub whose `onLoad` simulates the backend's own exact
+    /// match over whatever candidatos are seeded, rather than asserting a
+    /// client-side filter that no longer exists.
+    testWidgets(
+        'every puntaje is shown, chips above the ceiling are disabled, and an enabled chip '
+        're-queries the section with the selected puntaje', (tester) async {
       // _plaza's own puntajeTecho is 3.0 — 3.5/4/4.5/5 exceed it.
-      await _pumpScreen(
-        tester,
-        tipo: CambiosSolicitudTipo.sustitucion,
-        listaEsperaState: const CambiosCandidatosLoaded(
-          candidatos: [
-            CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
-            CambiosCandidato(playerId: 201, nombre: 'Marcos Díaz', esPadre: false, puntaje: 3.0, viable: true),
-          ],
-          query: '',
+      const candidatos = [
+        CambiosCandidato(playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
+        CambiosCandidato(playerId: 201, nombre: 'Marcos Díaz', esPadre: false, puntaje: 3.0, viable: true),
+      ];
+
+      final listaEsperaController = _StubCandidatosController(
+        const CambiosCandidatosLoaded(candidatos: candidatos, query: ''),
+        onLoad: (query, puntajes) => CambiosCandidatosLoaded(
+          candidatos: puntajes.isEmpty
+              ? candidatos
+              : candidatos.where((c) => puntajes.contains(c.puntaje)).toList(),
+          query: query,
+          puntajes: puntajes,
         ),
       );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            cambiosCandidatosControllerProvider(_paramsListaEspera)
+                .overrideWith((ref) => listaEsperaController),
+            cambiosCandidatosControllerProvider(_paramsPadronCompleto).overrideWith(
+              (ref) => _StubCandidatosController(
+                const CambiosCandidatosIdle(),
+                seccion: CambiosCandidatosSeccion.padronCompleto,
+              ),
+            ),
+            cambiosPlantelControllerProvider(_scope).overrideWith((ref) => _StubPlantelController()),
+            cambiosFechaAbiertaProvider(_scope.seasonId).overrideWith((ref) => Future.value(_defaultFecha)),
+          ],
+          child: MaterialApp(
+            home: CambiosSolicitarScreen(
+              seasonId: 7,
+              teamId: 1,
+              plaza: _plaza,
+              tipo: CambiosSolicitudTipo.sustitucion,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
 
       // Every one of the 9 valid puntajes is rendered, enabled or not.
       for (final valor in const <double>[5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1]) {
@@ -667,17 +753,21 @@ void main() {
             reason: 'puntaje $valor should always render, disabled or not');
       }
 
-      // Tapping a DISABLED chip (above techo 3.0) does nothing: both
-      // candidates stay visible, neither gets filtered out as if the chip
-      // had actually applied.
+      // Tapping a DISABLED chip (above techo 3.0) must not even trigger a
+      // reload — its onTap is null.
       await tester.tap(find.byKey(const Key('puntaje_chip_5.0')));
       await tester.pump();
+      expect(listaEsperaController.loadCalls, 0);
       expect(find.byKey(const Key('candidato_200')), findsOneWidget);
       expect(find.byKey(const Key('candidato_201')), findsOneWidget);
 
-      // Tapping an ENABLED chip (within techo) DOES filter the list.
+      // Tapping an ENABLED chip (within techo) re-queries the section from
+      // page 1 with the selected puntaje — simulated here by the stub's own
+      // `onLoad`, exactly like the real backend would narrow it.
       await tester.tap(find.byKey(const Key('puntaje_chip_2.5')));
       await tester.pump();
+      expect(listaEsperaController.loadCalls, 1);
+      expect(listaEsperaController.lastPuntajes, [2.5]);
       expect(find.byKey(const Key('candidato_200')), findsOneWidget);
       expect(find.byKey(const Key('candidato_201')), findsNothing);
     });
@@ -687,6 +777,102 @@ void main() {
 
       // _plaza's own puntajeTecho is 3.0 (see this file's top-level fixture).
       expect(find.text('Techo de esta plaza: 3 pts.'), findsOneWidget);
+    });
+  });
+
+  group('CambiosSolicitarScreen — búsqueda y scroll infinito', () {
+    /// THE correctness contract this slice's task brief names explicitly: a
+    /// search must re-query the SERVER (debounced), never filter only the
+    /// pages already loaded on the client — see
+    /// `CambiosCandidatosController`'s own docblock.
+    testWidgets('typing in the search field debounces and re-queries the section from page 1',
+        (tester) async {
+      final listaEsperaController = _StubCandidatosController(
+        const CambiosCandidatosLoaded(candidatos: [], query: ''),
+      );
+
+      await _pumpScreenWithControllers(
+        tester,
+        listaEsperaController: listaEsperaController,
+      );
+
+      await tester.enterText(find.byKey(const Key('candidato_search_field')), 'zapata');
+      // Before the debounce window elapses, no reload has fired yet.
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(listaEsperaController.loadCalls, 0);
+
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(listaEsperaController.loadCalls, 1);
+      expect(listaEsperaController.lastQuery, 'zapata');
+    });
+
+    testWidgets('scrolling near the bottom of the list calls loadMore() on the visible section',
+        (tester) async {
+      final muchosCandidatos = List.generate(
+        30,
+        (i) => CambiosCandidato(playerId: i, nombre: 'Jugador $i', esPadre: false, puntaje: 2.5, viable: true),
+      );
+
+      final listaEsperaController = _StubCandidatosController(
+        CambiosCandidatosLoaded(candidatos: muchosCandidatos, query: '', hasMore: true),
+      );
+
+      await _pumpScreenWithControllers(
+        tester,
+        listaEsperaController: listaEsperaController,
+      );
+
+      await tester.drag(find.byKey(const Key('candidatos_list')), const Offset(0, -4000));
+      await tester.pump();
+
+      expect(listaEsperaController.loadMoreCalls, greaterThan(0));
+    });
+
+    /// THE correctness contract fixed in this slice: a failed `loadMore()`
+    /// used to make the bottom spinner simply disappear, rendering a list
+    /// that STOPPED scrolling look indistinguishable from "that's the whole
+    /// population" — the full-list [CambiosCandidatosError] case already got
+    /// a retry affordance ([_CandidatosErrorView]); this proves the
+    /// bottom-of-list failure now gets its own, equivalent one.
+    testWidgets('a failed loadMore() renders a retry affordance that calls loadMore() again',
+        (tester) async {
+      final muchosCandidatos = List.generate(
+        30,
+        (i) => CambiosCandidato(playerId: i, nombre: 'Jugador $i', esPadre: false, puntaje: 2.5, viable: true),
+      );
+
+      final listaEsperaController = _StubCandidatosController(
+        CambiosCandidatosLoaded(
+          candidatos: muchosCandidatos,
+          query: '',
+          hasMore: true,
+          loadMoreError: true,
+        ),
+      );
+
+      await _pumpScreenWithControllers(
+        tester,
+        listaEsperaController: listaEsperaController,
+      );
+
+      // The retry row sits at the bottom of 30 items — scroll it into view,
+      // same as this group's own loadMore()-triggering test does. The
+      // scroll listener itself may also call loadMore() once it nears the
+      // bottom (it has no reason to special-case a prior failure) — this
+      // test cares only about the TAP, so it captures the call count right
+      // before tapping rather than asserting an exact total.
+      await tester.drag(find.byKey(const Key('candidatos_list')), const Offset(0, -4000));
+      await tester.pump();
+
+      expect(find.byKey(const Key('candidatos_load_more_error')), findsOneWidget);
+      expect(find.text('No pudimos cargar más candidatos.'), findsOneWidget);
+
+      final callsBeforeTap = listaEsperaController.loadMoreCalls;
+
+      await tester.tap(find.text('Reintentar'));
+      await tester.pump();
+
+      expect(listaEsperaController.loadMoreCalls, callsBeforeTap + 1);
     });
   });
 

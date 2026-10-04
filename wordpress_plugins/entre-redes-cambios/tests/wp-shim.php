@@ -130,6 +130,18 @@ if ( ! class_exists( 'wpdb' ) ) {
         }
 
         /**
+         * Escapes the LIKE wildcards ('%', '_') and the escape character
+         * itself ('\\') in $text, matching WordPress's real
+         * `wpdb::esc_like()` behavior (`addcslashes( $text, '_%\\' )`).
+         * This WP-generic shim previously had no equivalent; added because
+         * a caller now builds a `LIKE '%...%'` pattern from free-text input
+         * and must escape it before wrapping in wildcards.
+         */
+        public function esc_like( string $text ): string {
+            return addcslashes( $text, '_%\\' );
+        }
+
+        /**
          * Mimics wpdb::insert(). Returns false on failure, 1 on success.
          * Sets $this->insert_id.
          */

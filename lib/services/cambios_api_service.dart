@@ -190,12 +190,29 @@ class CambiosApiService {
   /// omits the param entirely, which keeps the backend's pre-existing
   /// season-registered pool — kept for backward compatibility, but this
   /// app's own "Pedir cambio" screen always passes one of the two values.
-  Future<List<CambiosCandidato>> fetchCandidatos({
+  ///
+  /// [page]/[perPage] drive the endpoint's OWN pagination — see
+  /// `Rest\PlazasController::listarCandidatos()`'s own docblock on the
+  /// backend, "PAGINATION". [puntajes] is sent as a repeatable
+  /// `puntajes[]=<decimal>` param (e.g. `puntajes[]=3&puntajes[]=4.5`),
+  /// matching the puntaje chips' own values — see
+  /// [CambiosCandidatosController] for how a page's worth of candidatos is
+  /// combined with the ones already loaded.
+  ///
+  /// Returns a [CambiosCandidatosPagina] — see that typedef's own docblock
+  /// for exactly what `total` means and where it comes from (the
+  /// `X-WP-Total` response header, read the SAME way
+  /// [ApiService.getJugadoresRaw] already reads it, never invented
+  /// differently here).
+  Future<CambiosCandidatosPagina> fetchCandidatos({
     required int seasonId,
     required int teamId,
     required int plazaId,
     CambiosCandidatosSeccion? seccion,
     String? search,
+    List<double> puntajes = const [],
+    int page = 1,
+    int perPage = 20,
   }) async {
     final uri = Uri.parse('$_baseUrl/plazas/candidatos').replace(queryParameters: {
       'season_id': '$seasonId',
@@ -203,6 +220,9 @@ class CambiosApiService {
       'plaza_id': '$plazaId',
       if (seccion != null) 'seccion': seccion.toWire(),
       if (search != null && search.isNotEmpty) 'search': search,
+      if (puntajes.isNotEmpty) 'puntajes[]': puntajes.map(_formatPuntaje).toList(),
+      'page': '$page',
+      'per_page': '$perPage',
     });
     final req = http.Request('GET', uri)..headers['Accept'] = 'application/json';
     final response = await _prodeApi.request(req).timeout(const Duration(seconds: 15));
@@ -215,16 +235,32 @@ class CambiosApiService {
       final body = _decodeBody(response);
       final raw = body['candidatos'];
       if (raw is! List) throw const CambiosMalformedResponseException();
-      return raw
+      final candidatos = raw
           .whereType<Map>()
           .map((e) => CambiosCandidato.fromJson(e.cast<String, dynamic>()))
           .toList(growable: false);
+
+      final totalHeader = response.headers['x-wp-total'];
+      final total = totalHeader != null ? int.tryParse(totalHeader) : null;
+
+      // `total` stays null (never falls back to `candidatos.length`) when
+      // the header is missing or unparseable — see [CambiosCandidatosPagina]'s
+      // own docblock for why a fabricated total is actively dangerous here:
+      // a full page's length READS as "that's everything", silently
+      // stopping infinite scroll at page 1 with no error and no retry.
+      return (candidatos: candidatos, total: total);
     } on CambiosMalformedResponseException {
       rethrow;
     } catch (_) {
       throw const CambiosMalformedResponseException();
     }
   }
+
+  /// `3` for `3.0`, `3.5` for `3.5` — the same literal shape
+  /// `_PuntajeChips` already renders, so the query string a captain's chip
+  /// selection produces reads the same as what the screen shows.
+  static String _formatPuntaje(double valor) =>
+      valor == valor.truncateToDouble() ? valor.toInt().toString() : valor.toString();
 
   // ---------------------------------------------------------------------------
   // GET /solicitudes

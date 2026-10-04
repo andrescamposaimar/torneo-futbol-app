@@ -93,9 +93,7 @@ class CambiosJugadorCard extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      imagen != null && imagen.isNotEmpty
-                          ? CircleAvatar(backgroundImage: NetworkImage(imagen))
-                          : const CircleAvatar(child: Icon(Icons.person)),
+                      CambiosAvatar(imageUrl: imagen),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -208,6 +206,46 @@ class CambiosJugadorCard extends StatelessWidget {
     // the caller for this case) — Opacity keeps the badge/name still legible
     // while unmistakably muted.
     return greyedOut ? Opacity(opacity: 0.55, child: card) : card;
+  }
+}
+
+/// Circular player-photo avatar, shared by [CambiosJugadorCard] and
+/// `CambiosCandidatoCard` — the SAME widget, so a fix to one card's avatar
+/// fallback can never silently miss the other (both cards used to build
+/// their own `imagen != null && imagen.isNotEmpty ? CircleAvatar(
+/// backgroundImage: ...) : CircleAvatar(child: Icon(Icons.person))`
+/// ternary inline, independently, and neither handled a load FAILURE).
+///
+/// *** `foregroundImage` + `child`, NEVER `backgroundImage` ALONE ***
+/// [NetworkImage] failing to LOAD (a 404, a deleted WordPress attachment, a
+/// transient network error) does NOT by itself make [CircleAvatar] fall
+/// back to its `child` — `backgroundImage` simply never paints anything on
+/// failure, rendering an empty circle forever even though a URL was
+/// supplied. The fix is the SAME idiom this codebase already uses for
+/// `CampeonAvatar` and `ProdeIdentityCard`'s own avatar (see either's
+/// docblock): `foregroundImage` layers the photo OVER a `child` that is
+/// ALWAYS rendered underneath, and `onForegroundImageError` is a no-op that
+/// merely swallows the failure — the person icon was already visible the
+/// whole time, nothing to switch to.
+class CambiosAvatar extends StatelessWidget {
+  /// The candidate/player's photo URL, or `null`/empty when they have none —
+  /// both render the same person-icon fallback as a load failure does.
+  final String? imageUrl;
+
+  const CambiosAvatar({super.key, this.imageUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final tieneFoto = imageUrl != null && imageUrl!.isNotEmpty;
+
+    return CircleAvatar(
+      key: tieneFoto
+          ? const ValueKey('cambios_avatar_photo')
+          : const ValueKey('cambios_avatar_person'),
+      foregroundImage: tieneFoto ? NetworkImage(imageUrl!) : null,
+      onForegroundImageError: tieneFoto ? (_, __) {} : null,
+      child: const Icon(Icons.person),
+    );
   }
 }
 

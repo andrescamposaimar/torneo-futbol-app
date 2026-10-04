@@ -147,4 +147,92 @@ void main() {
       expect(badgeWidthNarrow, closeTo(badgeWidthShortName, 0.5));
     });
   });
+
+  group('CambiosCandidatoCard — foto', () {
+    testWidgets('no fotoUrl renders the person icon, never a NetworkImage', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Sin Foto',
+          esPadre: false,
+          puntaje: 3.0,
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      expect(find.byIcon(Icons.person), findsOneWidget);
+      final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
+      expect(avatar.foregroundImage, isNull);
+      expect(avatar.onForegroundImageError, isNull);
+    });
+
+    testWidgets('an empty fotoUrl also renders the person icon, same as null', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Foto Vacia',
+          esPadre: false,
+          puntaje: 3.0,
+          fotoUrl: '',
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      expect(find.byIcon(Icons.person), findsOneWidget);
+    });
+
+    /// FIX 6 (avatar fallback on a FAILED load): `CambiosAvatar` wires the
+    /// photo through `foregroundImage` + a `child` rendered UNDERNEATH it
+    /// (the same idiom as `CampeonAvatar`/`ProdeIdentityCard`'s own avatar)
+    /// instead of the old `backgroundImage`-only approach, which left an
+    /// EMPTY circle forever on a 404 or deleted attachment — there was no
+    /// `child` to fall back to. Here the person icon is in the tree
+    /// regardless of whether the photo ever loads, and
+    /// `onForegroundImageError` is a non-null no-op that swallows a failed
+    /// load instead of crashing.
+    testWidgets(
+        'a fotoUrl wires a NetworkImage as the foreground image, with the person icon still '
+        'underneath as the fallback for a failed load', (tester) async {
+      // Flutter's test binding intercepts every HTTP call and returns 400,
+      // so NetworkImage always fails to decode here — same suppression
+      // `prode_identity_card_test.dart`/`campeon_avatar_test.dart` already
+      // use for their own photo avatar tests.
+      final originalOnError = FlutterError.onError;
+      FlutterError.onError = (details) {
+        if (details.exception is NetworkImageLoadException) return;
+        originalOnError?.call(details);
+      };
+
+      try {
+        await tester.pumpWidget(_wrap(
+          CambiosCandidatoCard(
+            playerId: 1,
+            nombre: 'Con Foto',
+            esPadre: false,
+            puntaje: 3.0,
+            fotoUrl: 'https://entreredespadres.com.ar/foto-1.jpg',
+            selected: false,
+            onTap: () {},
+          ),
+        ));
+        await tester.pump();
+
+        final avatar = tester.widget<CircleAvatar>(find.byType(CircleAvatar));
+        final foregroundImage = avatar.foregroundImage;
+        expect(foregroundImage, isA<NetworkImage>());
+        expect(
+            (foregroundImage as NetworkImage).url, 'https://entreredespadres.com.ar/foto-1.jpg');
+
+        // The failure-swallowing callback must be wired...
+        expect(avatar.onForegroundImageError, isNotNull);
+        // ...and the person icon must still be in the tree as the
+        // underlying fallback — never an empty circle.
+        expect(find.byIcon(Icons.person), findsOneWidget);
+      } finally {
+        FlutterError.onError = originalOnError;
+      }
+    });
+  });
 }

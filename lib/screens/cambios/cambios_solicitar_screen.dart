@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,7 +10,6 @@ import '../../models/cambios_solicitud.dart';
 import '../../providers/cambios_providers.dart';
 import '../../services/cambios_api_service.dart';
 import '../../services/cambios_candidatos_controller.dart';
-import '../../services/player_filter_service.dart';
 import '../../utils/date_utils.dart';
 import '../../utils/puntaje_utils.dart';
 import '../../widgets/cambios_candidato_card.dart';
@@ -47,12 +48,20 @@ import '../../widgets/prode_segmented_toggle.dart';
 /// screen that disagrees with the dictamen engine is worse than no screen
 /// at all).
 ///
-/// *** SEARCH + PUNTAJE CHIPS ARE LOCAL, NOT A SECOND SERVER ROUND TRIP ***
-/// Once a section has loaded, typing in the search field or toggling a
-/// puntaje chip narrows the ALREADY-fetched list client-side, via
-/// [PlayerFilterService.filtrar] — see `_candidatosFiltrados()`. This is
-/// what keeps "the common case must cost one request" true even while the
-/// captain is actively narrowing a long "Padrón Completo" list down.
+/// *** SEARCH + PUNTAJE CHIPS ARE SERVER-SIDE, BECAUSE THE LIST IS PAGINATED ***
+/// `GET /cambios/plazas/candidatos` now ALWAYS paginates (see
+/// `Rest\PlazasController::listarCandidatos()`'s own docblock on the
+/// backend, "PAGINATION") — for "Padrón Completo" the real population can
+/// run into the hundreds, so this screen only ever holds whichever pages
+/// [CambiosCandidatosController] has fetched so far, NEVER the whole list in
+/// memory. Typing in the search field (debounced) or toggling a puntaje
+/// chip therefore re-queries the backend from page 1 via
+/// [CambiosCandidatosController.load] — narrowing the list LOCALLY over only
+/// the pages already loaded would silently miss a match that lives on a
+/// page not yet fetched (the exact correctness bug this slice's own task
+/// brief calls out). Scrolling near the bottom of the list calls
+/// [CambiosCandidatosController.loadMore] to append the next page of the
+/// SAME search — see `_onScroll`.
 ///
 /// *** THE PUNTAJE CHIPS TEACH THE CEILING, THEY NEVER HIDE IT ***
 /// Every one of the 9 valid puntajes is always shown — the ones ABOVE
@@ -140,6 +149,8 @@ const List<double> _valoresPuntaje = [5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
 
 class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen> {
   final _searchController = TextEditingController();
+  final _scrollController = ScrollController();
+  Timer? _debounce;
   int? _selectedPlayerId;
   bool _submitting = false;
   String? _error;
@@ -156,15 +167,51 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
       );
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
   void dispose() {
+    _debounce?.cancel();
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onSearchChanged(String query) {
-    setState(() => _searchQuery = query);
+  /// Appends the next page of the CURRENTLY visible section once the
+  /// captain scrolls within 200 logical pixels of the bottom —
+  /// [CambiosCandidatosController.loadMore] itself no-ops when there is
+  /// nothing more to fetch or a fetch is already in flight, so this
+  /// listener firing more than once near the bottom is harmless.
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 200) {
+      ref.read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier).loadMore();
+    }
   }
 
+  /// Debounced — re-queries the VISIBLE section from page 1 once the
+  /// captain stops typing for 300ms (same debounce window
+  /// `players_screen.dart` already uses for its own search field), rather
+  /// than firing one request per keystroke.
+  void _onSearchChanged(String query) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      setState(() => _searchQuery = query);
+      ref
+          .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
+          .load(query: _searchQuery, puntajes: _puntajesFiltro);
+    });
+  }
+
+  /// NOT debounced — a chip tap is a discrete action, not a stream of
+  /// keystrokes — and always re-queries the VISIBLE section from page 1,
+  /// same as [_onSearchChanged].
   void _onPuntajeToggled(double valor) {
     setState(() {
       if (_puntajesFiltro.contains(valor)) {
@@ -173,13 +220,21 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
         _puntajesFiltro.add(valor);
       }
     });
+    ref
+        .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
+        .load(query: _searchQuery, puntajes: _puntajesFiltro);
   }
 
-  /// Switches the visible section and, the FIRST time `padronCompleto` is
-  /// opened, triggers its (until-now-idle) fetch — see this class's own
-  /// docblock, "THE TWO CANDIDATE SECTIONS". Switching back and forth
-  /// afterward never re-fetches: once a section's controller has left
-  /// [CambiosCandidatosIdle], this is a no-op beyond the local [setState].
+  /// Switches the visible section and fetches it with the CURRENTLY active
+  /// search/puntaje filters whenever that section is either still
+  /// [CambiosCandidatosIdle] (the FIRST time `padronCompleto` is opened —
+  /// see this class's own docblock, "THE TWO CANDIDATE SECTIONS") or
+  /// already loaded with DIFFERENT filters than the ones active right now
+  /// (the captain searched/toggled a chip, switched sections, and is now
+  /// switching back — that section's cached page 1 would otherwise show
+  /// stale results next to a search box that no longer matches them).
+  /// Switching back and forth with nothing changed is a no-op beyond the
+  /// local [setState] — the exact behavior a request-count test pins.
   ///
   /// Reading (never watching) `cambiosCandidatosControllerProvider` here is
   /// safe against Riverpod's `autoDispose` teardown ONLY because [build]
@@ -194,8 +249,16 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
 
     final params = _paramsFor(seccion);
     final current = ref.read(cambiosCandidatosControllerProvider(params));
+    final notifier = ref.read(cambiosCandidatosControllerProvider(params).notifier);
+
     if (current is CambiosCandidatosIdle) {
-      ref.read(cambiosCandidatosControllerProvider(params).notifier).load();
+      notifier.load(query: _searchQuery, puntajes: _puntajesFiltro);
+      return;
+    }
+
+    if (current is CambiosCandidatosLoaded &&
+        !mismosFiltros(current.query, current.puntajes, _searchQuery, _puntajesFiltro)) {
+      notifier.load(query: _searchQuery, puntajes: _puntajesFiltro);
     }
   }
 
@@ -328,10 +391,13 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
             Expanded(
               child: _CandidatosList(
                 state: candidatosState,
-                onRetry: () =>
-                    ref.read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier).load(),
-                searchQuery: _searchQuery,
-                puntajesFiltro: _puntajesFiltro,
+                scrollController: _scrollController,
+                onRetry: () => ref
+                    .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
+                    .load(query: _searchQuery, puntajes: _puntajesFiltro),
+                onRetryLoadMore: () => ref
+                    .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
+                    .loadMore(),
                 selectedPlayerId: _selectedPlayerId,
                 onSelect: (playerId) => setState(() => _selectedPlayerId = playerId),
               ),
@@ -519,37 +585,6 @@ class _PuntajeChips extends StatelessWidget {
   }
 }
 
-/// Narrows [candidatos] by [query] and [puntajes] via
-/// [PlayerFilterService.filtrar] (reused, not reimplemented — see
-/// `CambiosSolicitarScreen`'s own docblock) and sorts by puntaje descending
-/// via [PlayerFilterService.comparadorPuntaje]. Both operate on a plain
-/// `Map` shape (`title.rendered` / `metrics.puntaje`) because that service
-/// is shared with `players_screen.dart`'s raw WordPress jugador maps — the
-/// thin wrapper here (and the `_candidato` back-reference) is the ADAPTER
-/// that lets a typed [CambiosCandidato] go through that SAME logic without
-/// reimplementing its string/puntaje matching.
-List<CambiosCandidato> _candidatosFiltrados(
-  List<CambiosCandidato> candidatos, {
-  required String query,
-  required List<double> puntajes,
-}) {
-  final envueltos = candidatos
-      .map((c) => {
-            'title': {'rendered': c.nombre},
-            'metrics': {'puntaje': c.puntaje},
-            '_candidato': c,
-          })
-      .toList();
-
-  final filtrados = PlayerFilterService.filtrar(
-    envueltos,
-    query: query,
-    puntajes: puntajes,
-  )..sort(PlayerFilterService.comparadorPuntaje);
-
-  return filtrados.map((m) => (m as Map)['_candidato'] as CambiosCandidato).toList(growable: false);
-}
-
 /// The candidate list for a `sustitucion` — loading/error/empty/loaded views
 /// for ONE section's already-resolved [state] (the caller, [CambiosSolicitarScreen],
 /// `watch`es BOTH sections' providers itself and hands down only the
@@ -560,19 +595,27 @@ List<CambiosCandidato> _candidatosFiltrados(
 /// every other state in this file already got one: [_PlazaHeader],
 /// [_FechaGapBanner], [_VentanaEstadoBanner], [_CandidatosErrorView],
 /// [_CandidatosEmptyView].
+///
+/// [state]'s own `candidatos` already reflect whatever `?search=`/
+/// `?puntajes[]=` the backend applied — see `CambiosCandidatosController`'s
+/// own docblock for why this widget no longer filters them again locally.
+/// The ONLY thing still done here, client-side, is sorting by puntaje
+/// descending — a pure presentation choice over whatever page(s) have
+/// loaded so far, which never risks missing a match the way a client-side
+/// FILTER over partial data would.
 class _CandidatosList extends StatelessWidget {
   final CambiosCandidatosState state;
+  final ScrollController scrollController;
   final VoidCallback onRetry;
-  final String searchQuery;
-  final List<double> puntajesFiltro;
+  final VoidCallback onRetryLoadMore;
   final int? selectedPlayerId;
   final ValueChanged<int> onSelect;
 
   const _CandidatosList({
     required this.state,
+    required this.scrollController,
     required this.onRetry,
-    required this.searchQuery,
-    required this.puntajesFiltro,
+    required this.onRetryLoadMore,
     required this.selectedPlayerId,
     required this.onSelect,
   });
@@ -583,32 +626,70 @@ class _CandidatosList extends StatelessWidget {
       CambiosCandidatosIdle() => const _CandidatosIdleView(),
       CambiosCandidatosLoading() => const LoadingSeccion(texto: 'Buscando candidatos...'),
       CambiosCandidatosError() => _CandidatosErrorView(onRetry: onRetry),
-      CambiosCandidatosLoaded(:final candidatos) => _buildLoaded(context, candidatos),
+      CambiosCandidatosLoaded loaded => _buildLoaded(context, loaded),
     };
   }
 
-  Widget _buildLoaded(BuildContext context, List<CambiosCandidato> candidatos) {
-    final filtrados = _candidatosFiltrados(
-      candidatos,
-      query: searchQuery,
-      puntajes: puntajesFiltro,
-    );
-
-    if (filtrados.isEmpty) {
+  Widget _buildLoaded(BuildContext context, CambiosCandidatosLoaded loaded) {
+    if (loaded.candidatos.isEmpty) {
       return const _CandidatosEmptyView();
     }
 
+    final ordenados = [...loaded.candidatos]
+      ..sort((a, b) => (b.puntaje ?? 0).compareTo(a.puntaje ?? 0));
+
+    final mostrarCargandoMas = loaded.isLoadingMore;
+    final mostrarErrorCargarMas = loaded.loadMoreError;
+
     return ListView.builder(
       key: const Key('candidatos_list'),
-      itemCount: filtrados.length,
+      controller: scrollController,
+      itemCount: ordenados.length + (mostrarCargandoMas || mostrarErrorCargarMas ? 1 : 0),
       itemBuilder: (context, i) {
-        final c = filtrados[i];
+        if (i >= ordenados.length) {
+          if (mostrarErrorCargarMas) {
+            return Padding(
+              key: const Key('candidatos_load_more_error'),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'No pudimos cargar más candidatos.',
+                      style: TextStyle(fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                    TextButton(
+                      onPressed: onRetryLoadMore,
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(
+              child: SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
+
+        final c = ordenados[i];
         return CambiosCandidatoCard(
           key: Key('candidato_${c.playerId}'),
           playerId: c.playerId,
           nombre: c.nombre,
           esPadre: c.esPadre,
           puntaje: c.puntaje,
+          fotoUrl: c.fotoUrl,
           selected: selectedPlayerId == c.playerId,
           onTap: () => onSelect(c.playerId),
         );

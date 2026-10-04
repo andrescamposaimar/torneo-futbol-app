@@ -53,6 +53,13 @@ class CambiosCandidato {
   /// `puntaje_excede_techo`), null when viable.
   final String? motivo;
 
+  /// The candidate's photo URL (the WordPress featured image of the
+  /// `sp_player` post, 'medium' size — see `Rest\PlazasController::
+  /// fotoJugador()` on the backend), or `null` when the player has none.
+  /// `CambiosCandidatoCard` falls back to a person icon when this is null,
+  /// never a broken image.
+  final String? fotoUrl;
+
   const CambiosCandidato({
     required this.playerId,
     required this.nombre,
@@ -60,10 +67,12 @@ class CambiosCandidato {
     this.puntaje,
     required this.viable,
     this.motivo,
+    this.fotoUrl,
   });
 
   factory CambiosCandidato.fromJson(Map<String, dynamic> json) {
     final rawPuntaje = json['puntaje'];
+    final rawFoto = json['foto_url'];
     return CambiosCandidato(
       playerId: (json['player_id'] as int?) ?? 0,
       nombre: (json['nombre'] as String?) ?? '',
@@ -71,6 +80,7 @@ class CambiosCandidato {
       puntaje: rawPuntaje is num ? rawPuntaje.toDouble() : null,
       viable: json['viable'] == true,
       motivo: json['motivo'] as String?,
+      fotoUrl: rawFoto is String && rawFoto.isNotEmpty ? rawFoto : null,
     );
   }
 
@@ -84,14 +94,36 @@ class CambiosCandidato {
           esPadre == other.esPadre &&
           puntaje == other.puntaje &&
           viable == other.viable &&
-          motivo == other.motivo;
+          motivo == other.motivo &&
+          fotoUrl == other.fotoUrl;
 
   @override
   int get hashCode =>
-      Object.hash(playerId, nombre, esPadre, puntaje, viable, motivo);
+      Object.hash(playerId, nombre, esPadre, puntaje, viable, motivo, fotoUrl);
 
   @override
   String toString() =>
       'CambiosCandidato(playerId: $playerId, nombre: $nombre, '
       'esPadre: $esPadre, puntaje: $puntaje, viable: $viable)';
 }
+
+/// One page of `GET /cambios/plazas/candidatos`, as
+/// [CambiosApiService.fetchCandidatos] returns it: the page's own candidatos,
+/// plus [total] — the size of the WHOLE matching population (after
+/// `search`/`puntajes`, BEFORE pagination — see
+/// `Rest\PlazasController::listarCandidatos()`'s own docblock on the
+/// backend, "PAGINATION"), read from the `X-WP-Total` response header, the
+/// SAME convention `ApiService.getJugadoresRaw()` already reads.
+///
+/// [total] is `null` when the header is missing or unparseable — see
+/// [CambiosApiService.fetchCandidatos]'s own docblock for why this is NEVER
+/// defaulted to `candidatos.length`: that would fabricate a plausible but
+/// false population size (a full page reads identically to "that is the
+/// whole list"), silently truncating infinite scroll one page in. A screen
+/// decides whether more pages remain from [total] and its own page/per-page
+/// math when [total] is known, and otherwise from an honest "was this page
+/// full" signal (see `CambiosCandidatosController`'s own `hasMoreFor()`) —
+/// never from how many items THIS page returned alone (a page can
+/// legitimately come back short of `per_page` while more pages remain — see
+/// that same backend docblock for why).
+typedef CambiosCandidatosPagina = ({List<CambiosCandidato> candidatos, int? total});
