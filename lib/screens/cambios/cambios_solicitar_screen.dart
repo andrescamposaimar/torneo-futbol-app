@@ -489,6 +489,13 @@ class _PlazaHeader extends StatelessWidget {
   /// already names the action, so the arrow carries the direction alone.
   IconData get _icono => esSustitucion ? Icons.arrow_downward : Icons.arrow_upward;
 
+  /// The board's colours too: red off, green on. Reinforcement only — the
+  /// arrow's DIRECTION already carries the meaning on its own, so the header
+  /// still reads correctly for someone who cannot tell the two hues apart.
+  /// Shades match the red/green this app already uses elsewhere rather than
+  /// introducing new literals.
+  Color get _iconoColor => esSustitucion ? Colors.red.shade700 : Colors.green.shade700;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -507,7 +514,7 @@ class _PlazaHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(_icono, size: 18, color: theme.colorScheme.primary),
+          Icon(_icono, size: 18, color: _iconoColor),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
