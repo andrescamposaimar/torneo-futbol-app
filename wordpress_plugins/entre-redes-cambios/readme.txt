@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.9
+Stable tag: 0.1.10
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.10 =
+* Fix: `GET /cambios/plazas/candidatos` could return an EMPTY page while `X-WP-Total` reported a population in the hundreds — the exact production incident: opening "Padrón Completo" with no puntaje chip selected showed "No encontramos candidatos disponibles para esta plaza" on a plaza with a 4.5 techo, even though 81 published players were rated 4.5 and below. Root cause: `Plazas\CandidatosResolver::buscarPaginado()` sorts `puntaje DESC` (0.1.8), and the techo was only enforced AFTER a page was already sliced — so the 31 published players rated 5.0 alone filled page 1 at `per_page=20`, and the per-page filter then stripped every one of them, returning an empty page. The techo now excludes an over-ceiling candidate from the POPULATION itself, in the same place and for the same reason as the unrated-candidate exclusion added in 0.1.9 — before `X-WP-Total` is computed and before pagination. `?incluir_no_viables=1` can no longer surface a `motivo: 'puntaje_excede_techo'` row (there is nothing left in the population for it to surface) but still surfaces a page's own phase-2 rejections (`ocupa_otra_plaza_vigente`, `bloqueado_por_cierre_truncado`) unchanged. `total` is therefore very slightly optimistic — it counts the population before phase-2 verdicts — a materially smaller and more even-handed overcount than the one this removes, since phase-2 non-viables are a small minority scattered across the whole population rather than concentrated at the top of the sort.
+* Fix (app): the Flutter app rendered the empty state the instant a page arrived with zero candidates, even when the server reported more pages remain (`hasMore: true`) — the app-side half of the same incident, since a page can still legitimately come back short or empty after the backend's own per-page phase-2 filter runs. `CambiosCandidatosController` now keeps fetching subsequent pages, without showing the empty state, until a page returns at least one candidate, the server reports no more pages, or a small cap on consecutive empty pages is reached (a defensive bound against a server that kept returning empty pages forever).
 
 = 0.1.9 =
 * Change: `GET /cambios/plazas/candidatos` now excludes a candidate with no resolvable puntaje from the population entirely, in BOTH screen sections ("Lista de Espera" and "Padrón Completo") as well as the default season-registered population — not just the whole padrón-wide population. Without a puntaje there is nothing to evaluate against the plaza's techo, so such a player is not a candidate at all (previously it was rendered as a non-viable row with `motivo: 'puntaje_indeterminado'`, buried last by the 0.1.8 sort). The exclusion happens in `Plazas\CandidatosResolver::buscarPaginado()`, before `X-WP-Total` is computed and before pagination, so it never produces a short page or an inflated total. `Plazas\CandidatosResolver::paraPlaza()` / `::paraSeccion()` (the padres-priority rule's own, unpaginated pool) are unchanged by this — an indeterminate puntaje was already never viable there. The dictamen engine's own refusal of an indeterminate entrante (`Dictamen\Reglas\PuntajeDentroDelTecho`) is unaffected; this is a presentation-layer exclusion, not the enforcement.

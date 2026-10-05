@@ -94,17 +94,82 @@ use EntreRedes\Cambios\Support\ChecksReads;
  * fails some OTHER check (techo, occupying another plaza, blocked by a
  * trunca closure) is still shown.
  *
- * `paraPlaza()` / `paraSeccion()` are DELIBERATELY NOT changed by this rule —
- * they still report an unrated candidate as a non-viable `CandidatoEstado`
- * with `motivoNoViable = 'puntaje_indeterminado'` (via `partitionPorTecho()`
- * below), exactly as before this change. Both still feed
- * `contarPadresViables()` (`Reglas\PrioridadDePadresRespetada`'s own pool),
- * where excluding an unrated candidate from the population would make no
- * observable difference — an indeterminate puntaje was already never
- * viable, so it was never counted there either — and `paraPlaza()` /
- * `paraSeccion()` have their own documented callers and invariants (see
- * "WHY THIS MUST BE THE ONLY IMPLEMENTATION" below) this change has no
- * reason to touch.
+ * *** THE CEILING IS A POPULATION FILTER, NOT A PER-PAGE VERDICT — IN
+ * buscarPaginado() ONLY *** A candidate whose puntaje exceeds the plaza's
+ * techo is, for the exact same "not a candidate at all in THIS method"
+ * reason as the unrated exclusion above, ALSO excluded from the POPULATION
+ * itself — before `$total` is computed and before `array_slice()` takes a
+ * page (see `buscarPaginado()`'s own docblock for exactly where). The
+ * product reading: the app's puntaje chips already render every value above
+ * the plaza's techo disabled and greyed
+ * (`cambios_solicitar_screen.dart`'s own docblock, "THE PUNTAJE CHIPS TEACH
+ * THE CEILING, THEY NEVER HIDE IT") — an over-ceiling candidate can never be
+ * selected, so the list itself should only ever hold candidates who could
+ * be.
+ *
+ * *** THE PRODUCTION INCIDENT THIS FIXES *** Before this change, the techo
+ * was enforced only AFTER a page was already sliced
+ * (`partitionPorTecho()`, called from within this method on the PAGE's own
+ * ids — see "WHY PAGINATION HAPPENS HERE, BEFORE THE N+1, NOT AFTER" below).
+ * `buscarPaginado()`'s own sort puts the HIGHEST puntajes FIRST
+ * (`puntaje DESC, …` — "THE SORT KEY" below), so a population with enough
+ * over-ceiling candidates to fill an entire page on their own made this
+ * method return that page EMPTY while `$total` still reported the whole
+ * (over-ceiling candidates included) population — a captain who had not yet
+ * narrowed `$puntajesFiltro` via a chip would see "no candidates" on a plaza
+ * the server itself said had hundreds. Confirmed in production at a 4.5
+ * techo: 31 published players rated 5.0 alone filled 1.55 pages at
+ * `per_page = 20`, so page 1 was entirely players the old post-slice filter
+ * then stripped to nothing. Moving the check here is free: it reads the SAME
+ * batched `$metricas` the unrated-candidate filter above already reads — no
+ * extra query.
+ *
+ * *** `$total` IS THEREFORE VERY SLIGHTLY OPTIMISTIC — BOUNDED, AND BY DESIGN
+ * *** Both population-level exclusions above (unrated, over-ceiling) run
+ * BEFORE phase 2's per-candidate viability queries
+ * (`evaluarViabilidadDentroDelTecho()` — occupying another plaza, blocked by
+ * a trunca closure elsewhere) ever run, and phase 2 only ever runs for the
+ * page actually requested, never the whole filtered population (see "WHY
+ * PAGINATION HAPPENS HERE, BEFORE THE N+1, NOT AFTER" below — computing a
+ * population-wide phase-2 verdict would mean paying the EXACT N+1 cost this
+ * method exists to avoid, for every page, not just the one requested). So
+ * `$total` counts "candidates within the ceiling with a resolvable puntaje",
+ * not "candidates who would also clear phase 2" — a small overcount whenever
+ * phase 2 would have rejected one of them. This is a materially SMALLER and
+ * more even-handed overcount than the one this change removes: a phase-2
+ * non-viable (a captain's own teammate occupying two plazas, a trunca
+ * closure elsewhere) is a small minority scattered across the WHOLE
+ * population, never concentrated at the top of the sort the way over-ceiling
+ * candidates are — it can shrink a page somewhat, but it can never again
+ * empty an entire page the way the ceiling did. A caller that needs the
+ * population-wide VIABLE count (phase 1 AND phase 2) has
+ * `contarPadresViables()`, which pays that cost deliberately over
+ * `paraPlaza()`'s own unpaginated pool.
+ *
+ * *** `?incluir_no_viables=1` NO LONGER SURFACES AN OVER-CEILING CANDIDATE —
+ * IT NEVER CAN AGAIN *** Before this change, `?incluir_no_viables=1` could
+ * show a `motivo: 'puntaje_excede_techo'` row on the requested page (see
+ * `Rest\PlazasController::listarCandidatos()`'s own docblock). That motivo is
+ * now UNREACHABLE from this method: an over-ceiling candidate is gone from
+ * the population before `partitionPorTecho()` (below) ever runs on the
+ * page's own ids, so there is nothing left for `?incluir_no_viables=1` to
+ * opt back into for THIS specific reason. It still does something coherent —
+ * it still surfaces a candidate the PAGE's own phase 2 rejected
+ * (`ocupa_otra_plaza_vigente` / `bloqueado_por_cierre_truncado`), exactly as
+ * before — see `Rest\PlazasController::listarCandidatos()`'s own updated
+ * docblock for the committee-facing wording of this.
+ *
+ * `paraPlaza()` / `paraSeccion()` are DELIBERATELY NOT changed by either
+ * population-level exclusion above — they still report an unrated candidate
+ * as a non-viable `CandidatoEstado` with `motivoNoViable = 'puntaje_indeterminado'`,
+ * and an over-ceiling candidate with `motivoNoViable = 'puntaje_excede_techo'`
+ * (both via `partitionPorTecho()` below), exactly as before this change.
+ * Both still feed `contarPadresViables()` (`Reglas\PrioridadDePadresRespetada`'s
+ * own pool), where excluding either from the population would make no
+ * observable difference — neither was ever viable, so neither was ever
+ * counted there either — and `paraPlaza()` / `paraSeccion()` have their own
+ * documented callers and invariants (see "WHY THIS MUST BE THE ONLY
+ * IMPLEMENTATION" below) this change has no reason to touch.
  *
  * *** WHY THIS MUST BE THE ONLY IMPLEMENTATION ***
  * If the captain's candidatos screen computed viability on its own (or a
@@ -347,17 +412,27 @@ class CandidatosResolver {
      *      `$puntajesFiltro` or `$search` narrow the population further, and
      *      well before `$total` is computed — an unrated player must never
      *      count towards how many pages exist.
+     *   2b. Exclude every candidate whose puntaje exceeds the plaza's techo
+     *      from the POPULATION itself too — see class docblock, "THE CEILING
+     *      IS A POPULATION FILTER, NOT A PER-PAGE VERDICT". Runs immediately
+     *      after step 2 (so every puntaje here is guaranteed resolvable),
+     *      from the SAME batched metrics read, for the SAME reason: step 3
+     *      below's sort puts the highest puntajes first, so without this
+     *      step an over-ceiling candidate could fill an entire page and never
+     *      even reach `$puntajesFiltro`/pagination — see class docblock, "THE
+     *      PRODUCTION INCIDENT THIS FIXES", for the exact failure this step
+     *      exists to prevent.
      *   3. Apply, in PHP, every remaining CHEAP filter available from that
      *      batched metrics read alone: the caller's own `$puntajesFiltro`
      *      (exact puntaje match — e.g. the app's puntaje chips), narrowing
      *      the POPULATION itself (a non-matching candidate is excluded
-     *      entirely, never just marked non-viable — an unrated candidate is
-     *      already gone by step 2, so this step never has one left to
-     *      consider). `$search`, when given, is pushed into the POPULATION
-     *      query itself (see `playerIdsRegistradosEnTemporada()` et al.'s
-     *      own docblocks for why `post_title LIKE`, not a second
-     *      `get_the_title()` pass, is what keeps this consistent with how
-     *      `nombreJugador()` resolves a name).
+     *      entirely, never just marked non-viable — an unrated OR
+     *      over-ceiling candidate is already gone by steps 2/2b, so this step
+     *      never has one left to consider). `$search`, when given, is pushed
+     *      into the POPULATION query itself (see
+     *      `playerIdsRegistradosEnTemporada()` et al.'s own docblocks for why
+     *      `post_title LIKE`, not a second `get_the_title()` pass, is what
+     *      keeps this consistent with how `nombreJugador()` resolves a name).
      *   4. Slice EXACTLY the requested page out of that filtered,
      *      player_id-ascending list — see "WHY player_id, NEVER puntaje, IS
      *      THE SORT KEY" below.
@@ -367,9 +442,16 @@ class CandidatosResolver {
      *      method existed, that N+1 ran for every candidate who cleared the
      *      techo (`evaluarCandidatos()`, still used by `paraPlaza()` /
      *      `paraSeccion()`); here it runs for at most `$perPage` of them.
-     *      Because step 2 already removed every unrated candidate, the
-     *      `puntaje_indeterminado` branch of `partitionPorTecho()` below is
-     *      NEVER reached from this method — see that method's own docblock.
+     *      Because steps 2/2b already removed every unrated AND every
+     *      over-ceiling candidate, NEITHER the `puntaje_indeterminado` NOR the
+     *      `puntaje_excede_techo` branch of `partitionPorTecho()` below is
+     *      ever reached from this method anymore — see that method's own
+     *      docblock. `partitionPorTecho()` still runs here purely as a
+     *      defensive no-op partition (every id it sees is already within
+     *      techo and rated) rather than being removed from this call site —
+     *      keeping ONE shared implementation of "partition by techo" is the
+     *      same discipline as the rest of this class (see "WHY THIS MUST BE
+     *      THE ONLY IMPLEMENTATION").
      *
      * *** THE SORT KEY: puntaje DESC, THEN nombre ASC, THEN player_id ASC ***
      * The captain's screen ("Pedir cambio") must show the highest-rated,
@@ -426,19 +508,25 @@ class CandidatosResolver {
      *        — see `playerIdsRegistradosEnTemporada()` et al.
      * @param array<int, float> $puntajesFiltro Decimal puntaje values to
      *        keep (exact match) — empty means no filter beyond the plaza's
-     *        own techo. A candidate whose puntaje is unresolvable is already
-     *        excluded from the population unconditionally (see class
-     *        docblock, "AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL —
-     *        IN buscarPaginado() ONLY"), so this filter never has one left to
-     *        consider regardless of whether $puntajesFiltro is empty.
+     *        own techo. A candidate whose puntaje is unresolvable, or exceeds
+     *        the plaza's techo, is already excluded from the population
+     *        unconditionally (see class docblock, "AN UNRESOLVABLE PUNTAJE IS
+     *        NOT A CANDIDATE AT ALL — IN buscarPaginado() ONLY" and "THE
+     *        CEILING IS A POPULATION FILTER, NOT A PER-PAGE VERDICT"), so
+     *        this filter never has either left to consider regardless of
+     *        whether $puntajesFiltro is empty.
      * @return array{candidatos: CandidatoEstado[], total: int} `total` is the
-     *         size of the population AFTER `$puntajesFiltro`/`$search` but
-     *         BEFORE pagination — i.e. "how many pages exist", not "how many
-     *         of THIS page are viable" (viability is only ever resolved for
-     *         the page actually requested — see point 4 above — so a
-     *         population-wide viable count is unavailable here without
-     *         paying the exact N+1 cost this method exists to avoid; a
-     *         caller that needs that count has `contarPadresViables()`).
+     *         size of the population AFTER the unrated/over-ceiling
+     *         exclusions AND `$puntajesFiltro`/`$search`, but BEFORE
+     *         pagination — i.e. "how many pages exist", not "how many of THIS
+     *         page are viable" (phase 2 viability — occupying another plaza,
+     *         a trunca closure elsewhere — is only ever resolved for the page
+     *         actually requested, see point 5 above) and NOT "how many of the
+     *         population would also clear phase 2" — see class docblock,
+     *         "`$total` IS THEREFORE VERY SLIGHTLY OPTIMISTIC — BOUNDED, AND
+     *         BY DESIGN", for exactly what that means and why the bound is
+     *         small. A caller that needs the population-wide VIABLE count
+     *         (phase 1 AND phase 2) has `contarPadresViables()`.
      * @throws \InvalidArgumentException When $seccion is given but is not one
      *         of CandidatosSeccion::todas().
      */
@@ -493,10 +581,31 @@ class CandidatosResolver {
             static fn ( int $playerId ): bool => null !== $metricas[ $playerId ]->puntaje()
         ) );
 
-        // $puntajesFiltro narrows the POPULATION itself — unlike the techo,
-        // which only determines viability (see docblock above) — so it must
-        // run BEFORE $total is computed, exactly like $search already did at
-        // the SQL level.
+        // A candidate whose puntaje exceeds the plaza's techo is likewise not
+        // a candidate at all in this method — excluded from the POPULATION
+        // itself, not merely a per-page non-viable verdict — see class
+        // docblock, "THE CEILING IS A POPULATION FILTER, NOT A PER-PAGE
+        // VERDICT". Runs immediately after the unrated-candidate filter above
+        // (so every puntaje() here is guaranteed non-null — Puntaje::allows()
+        // takes a Puntaje, never null), from the SAME metrics already batched
+        // above (no extra query), and unconditionally — before
+        // $puntajesFiltro, before $total is computed, and before
+        // array_slice() takes a page. Without this, buscarPaginado()'s own
+        // `puntaje DESC` sort (see "THE SORT KEY" below) could fill an entire
+        // page with over-ceiling candidates and return it EMPTY after the
+        // per-page techo partition below stripped every one of them — see
+        // class docblock, "THE PRODUCTION INCIDENT THIS FIXES", for exactly
+        // that failure.
+        $candidatoIds = array_values( array_filter(
+            $candidatoIds,
+            static fn ( int $playerId ): bool => $techo->allows( $metricas[ $playerId ]->puntaje() )
+        ) );
+
+        // $puntajesFiltro narrows the POPULATION itself one step further —
+        // the SAME kind of population narrowing as the unrated/over-ceiling
+        // exclusions just above, only caller-supplied rather than
+        // unconditional — so it must run BEFORE $total is computed, exactly
+        // like $search already did at the SQL level.
         $puntajesFiltroHalfPoints = array_map(
             static fn ( float $p ): int => (int) round( $p * 2 ),
             $puntajesFiltro
@@ -575,19 +684,26 @@ class CandidatosResolver {
      * `evaluarViabilidadDentroDelTecho()` runs ever runs for them — see class
      * docblock, "COST: THE CEILING FILTER RUNS BEFORE THE N+1, NEVER AFTER".
      *
-     * *** THE `puntaje_indeterminado` BRANCH IS STILL LIVE — JUST NOT FROM
-     * buscarPaginado() ANYMORE *** `buscarPaginado()` now excludes every
-     * unrated candidate from its own population BEFORE this method ever runs
-     * (see class docblock, "AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL
-     * — IN buscarPaginado() ONLY"), so `$candidatoIds` arriving from THAT
-     * caller never contains one anymore — this branch is unreachable on that
-     * path. It is NOT dead code: `evaluarCandidatos()` below is also called
-     * by `paraPlaza()` and `paraSeccion()`, which stay unfiltered by design
-     * (same docblock) and still route an unrated candidate through this
-     * exact branch — `CandidatosResolverTest`'s `paraPlaza()`-level tests
+     * *** BOTH BRANCHES ARE STILL LIVE — JUST NOT FROM buscarPaginado()
+     * ANYMORE *** `buscarPaginado()` now excludes every unrated AND every
+     * over-ceiling candidate from its own population BEFORE this method ever
+     * runs (see class docblock, "AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT
+     * ALL — IN buscarPaginado() ONLY" and "THE CEILING IS A POPULATION
+     * FILTER, NOT A PER-PAGE VERDICT"), so `$candidatoIds` arriving from THAT
+     * caller never contains either anymore — both the `puntaje_indeterminado`
+     * AND the `puntaje_excede_techo` branches below are unreachable on that
+     * path (this method still runs there, as a no-op partition over an
+     * already-filtered `$candidatoIds` — see `buscarPaginado()`'s own
+     * docblock, step 5, for why it stays rather than being removed from that
+     * call site). NEITHER branch is dead code: `evaluarCandidatos()` below is
+     * also called by `paraPlaza()` and `paraSeccion()`, which stay unfiltered
+     * by design (same docblocks) and still route an unrated OR over-ceiling
+     * candidate through these exact branches —
+     * `CandidatosResolverTest`'s `paraPlaza()`-level tests
      * (`test_a_candidate_with_no_resolvable_puntaje_is_not_viable()`,
-     * `test_a_candidate_with_stored_puntaje_zero_is_indeterminado_not_an_exception()`)
-     * keep covering it. Do not remove this branch on the assumption that
+     * `test_a_candidate_with_stored_puntaje_zero_is_indeterminado_not_an_exception()`,
+     * `test_ceiling_filter_runs_before_the_per_candidate_viability_queries()`)
+     * keep covering both. Do not remove either branch on the assumption that
      * nothing reaches it.
      *
      * @param array<int, int> $candidatoIds
