@@ -636,10 +636,22 @@ class _PuntajeChips extends StatelessWidget {
 /// [state]'s own `candidatos` already reflect whatever `?search=`/
 /// `?puntajes[]=` the backend applied — see `CambiosCandidatosController`'s
 /// own docblock for why this widget no longer filters them again locally.
-/// The ONLY thing still done here, client-side, is sorting by puntaje
-/// descending — a pure presentation choice over whatever page(s) have
-/// loaded so far, which never risks missing a match the way a client-side
-/// FILTER over partial data would.
+///
+/// *** ORDERING IS THE SERVER'S, NEVER RE-SORTED HERE ***
+/// This widget used to re-sort `state.candidatos` by puntaje descending on
+/// every build — a pure presentation choice that looked correct on page 1
+/// and silently broke the moment the captain scrolled: each NEW page loaded
+/// by `loadMore()` was appended to the end of the already-loaded list (see
+/// `CambiosCandidatosController.loadMore()`), so re-sorting only the
+/// CONCATENATION of pages loaded so far re-sorted each page's own highest
+/// puntaje back to the top of the still-growing list on every rebuild —
+/// visibly reordering rows the captain had already seen. The backend now
+/// owns the FULL ordering (`puntaje DESC, nombre ASC, player_id ASC` — see
+/// `Plazas\CandidatosResolver::buscarPaginado()`'s own docblock, "THE SORT
+/// KEY", on the PHP side) over the WHOLE population, not just the page(s)
+/// loaded so far, so this widget now renders `state.candidatos` exactly as
+/// given — see `CambiosSolicitarScreenTest`'s own test asserting this widget
+/// never reorders what the server returned.
 class _CandidatosList extends StatelessWidget {
   final CambiosCandidatosState state;
   final ScrollController scrollController;
@@ -672,8 +684,7 @@ class _CandidatosList extends StatelessWidget {
       return const _CandidatosEmptyView();
     }
 
-    final ordenados = [...loaded.candidatos]
-      ..sort((a, b) => (b.puntaje ?? 0).compareTo(a.puntaje ?? 0));
+    final candidatos = loaded.candidatos;
 
     final mostrarCargandoMas = loaded.isLoadingMore;
     final mostrarErrorCargarMas = loaded.loadMoreError;
@@ -681,9 +692,9 @@ class _CandidatosList extends StatelessWidget {
     return ListView.builder(
       key: const Key('candidatos_list'),
       controller: scrollController,
-      itemCount: ordenados.length + (mostrarCargandoMas || mostrarErrorCargarMas ? 1 : 0),
+      itemCount: candidatos.length + (mostrarCargandoMas || mostrarErrorCargarMas ? 1 : 0),
       itemBuilder: (context, i) {
-        if (i >= ordenados.length) {
+        if (i >= candidatos.length) {
           if (mostrarErrorCargarMas) {
             return Padding(
               key: const Key('candidatos_load_more_error'),
@@ -719,7 +730,7 @@ class _CandidatosList extends StatelessWidget {
           );
         }
 
-        final c = ordenados[i];
+        final c = candidatos[i];
         return CambiosCandidatoCard(
           key: Key('candidato_${c.playerId}'),
           playerId: c.playerId,

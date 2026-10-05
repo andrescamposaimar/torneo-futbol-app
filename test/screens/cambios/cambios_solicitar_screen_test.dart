@@ -357,6 +357,39 @@ void main() {
       expect(confirmAfter.onPressed, isNotNull);
     });
 
+    testWidgets('renders candidatos in the SERVER order, never re-sorted client-side',
+        (tester) async {
+      // Deliberately NOT puntaje-descending — the backend now owns the
+      // whole-population ordering (`puntaje DESC, nombre ASC, player_id ASC`
+      // — see `Plazas\CandidatosResolver::buscarPaginado()`'s own docblock,
+      // "THE SORT KEY"). A lingering client-side sort (the regression this
+      // test guards against — see `_CandidatosList`'s own docblock, "ORDERING
+      // IS THE SERVER'S, NEVER RE-SORTED HERE") would silently re-order this
+      // into 303 (5.0), 302 (3.0), 301 (1.0) instead of rendering the three
+      // rows exactly as the state hands them over.
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        listaEsperaState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(playerId: 301, nombre: 'Bajo Puntaje', esPadre: false, puntaje: 1.0, viable: true),
+            CambiosCandidato(playerId: 302, nombre: 'Medio Puntaje', esPadre: false, puntaje: 3.0, viable: true),
+            CambiosCandidato(playerId: 303, nombre: 'Alto Puntaje', esPadre: false, puntaje: 5.0, viable: true),
+          ],
+          query: '',
+        ),
+      );
+
+      final y301 = tester.getTopLeft(find.byKey(const Key('candidato_301'))).dy;
+      final y302 = tester.getTopLeft(find.byKey(const Key('candidato_302'))).dy;
+      final y303 = tester.getTopLeft(find.byKey(const Key('candidato_303'))).dy;
+
+      expect(y301, lessThan(y302), reason: 'candidato_301 (1.0) must render ABOVE candidato_302 (3.0) — '
+          'the state order, not puntaje descending.');
+      expect(y302, lessThan(y303), reason: 'candidato_302 (3.0) must render ABOVE candidato_303 (5.0) — '
+          'the state order, not puntaje descending.');
+    });
+
     testWidgets('no open fecha -> shows the honest gap banner and disables submit even '
         'with a candidate selected', (tester) async {
       await _pumpScreen(
