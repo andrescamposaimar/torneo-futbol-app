@@ -486,7 +486,7 @@ void main() {
       expect(find.byKey(const Key('ventana_antes_banner')), findsOneWidget);
       expect(find.byKey(const Key('ventana_cerrada_banner')), findsNothing);
       expect(
-        find.text('Vas a poder pedir un cambio a partir del domingo 11/10.'),
+        find.text('Los cambios se habilitan a partir del domingo 11/10.'),
         findsOneWidget,
       );
 
@@ -792,7 +792,7 @@ void main() {
       await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
 
       // _plaza's own puntajeTecho is 3.0 (see this file's top-level fixture).
-      expect(find.text('Techo de esta plaza: 3 pts.'), findsOneWidget);
+      expect(find.text('Puntaje máximo para este cambio: 3 pts.'), findsOneWidget);
     });
   });
 
@@ -1021,6 +1021,27 @@ void main() {
         find.byKey(const Key('confirmar_solicitud_button')),
       );
       expect(confirmButton.onPressed, isNull);
+    });
+
+    testWidgets('regreso window not open yet -> shows the ventana antes banner with the plural '
+        'regreso copy', (tester) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.regreso,
+        fecha: _fechaAbierta(
+          regresoFase: CambiosVentanaFase.antes,
+          // 2026-10-11 03:00:00 UTC == 2026-10-11 00:00:00 in Buenos Aires
+          // (UTC-3, no DST) — a Sunday.
+          aperturaSolicitudesUtc: DateTime.utc(2026, 10, 11, 3),
+        ),
+      );
+
+      expect(find.byKey(const Key('ventana_antes_banner')), findsOneWidget);
+      expect(find.byKey(const Key('ventana_cerrada_banner')), findsNothing);
+      expect(
+        find.text('Los regresos se habilitan a partir del domingo 11/10.'),
+        findsOneWidget,
+      );
     });
   });
 }
