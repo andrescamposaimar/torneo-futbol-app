@@ -446,7 +446,21 @@ class PlazasController {
      *   - `?incluir_no_viables=1` opts back into the page's FULL list,
      *     `viable` and `motivo` intact — for the committee's own tooling,
      *     which may want to see WHY someone was excluded. Applies
-     *     identically whether `?seccion` was given or not.
+     *     identically whether `?seccion` was given or not. *** THIS NO LONGER
+     *     INCLUDES AN OVER-CEILING CANDIDATE *** — `Plazas\CandidatosResolver
+     *     ::buscarPaginado()` now excludes a candidate whose puntaje exceeds
+     *     the plaza's techo from its own POPULATION, not merely from the
+     *     viable subset of a page (see that method's own docblock, "THE
+     *     CEILING IS A POPULATION FILTER, NOT A PER-PAGE VERDICT"), so there
+     *     is no `motivo: 'puntaje_excede_techo'` row left on any page for this
+     *     flag to surface — the puntaje chips already show the captain which
+     *     values are excluded and why (see `cambios_solicitar_screen.dart`'s
+     *     own docblock, "THE PUNTAJE CHIPS TEACH THE CEILING"). What this flag
+     *     still surfaces, unchanged, is a candidate the PAGE's own phase-2
+     *     check rejected — `motivo: 'ocupa_otra_plaza_vigente'` or
+     *     `'bloqueado_por_cierre_truncado'` — which still runs per-page, after
+     *     pagination, and can still reject a candidate who was in the
+     *     population.
      *   - `?search=<text>` and `?puntajes[]=<decimal>` (repeatable, e.g.
      *     `puntajes[]=3&puntajes[]=4.5`) narrow the POPULATION itself,
      *     BEFORE pagination — see `buscarPaginado()`'s own docblock for why

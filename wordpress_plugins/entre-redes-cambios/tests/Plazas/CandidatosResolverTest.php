@@ -1577,4 +1577,123 @@ class CandidatosResolverTest extends TestCase {
         );
         $this->assertSame( 850, $this->eventLog->last()['contexto']['player_id'] ?? null );
     }
+
+    // -------------------------------------------------------------------------
+    // buscarPaginado() — the techo is a population filter, not a per-page verdict
+    // -------------------------------------------------------------------------
+
+    /**
+     * THE EXACT production regression this slice's task brief describes:
+     * opening "Padrón Completo" with no puntaje chip selected showed "No
+     * encontramos candidatos disponibles para esta plaza" on a plaza with a
+     * 4.5 techo, even though the server reported hundreds of candidates.
+     * Root cause — buscarPaginado()'s own `puntaje DESC` sort (see that
+     * method's own docblock, "THE SORT KEY") put every over-ceiling
+     * candidate on page 1, and the OLD per-page-only techo check
+     * (`partitionPorTecho()`, run AFTER `array_slice()`) then stripped every
+     * one of them, returning an empty page while `total` still counted them.
+     * Reproduced here at the real shape: a block of puntaje-5 candidates
+     * large enough to fill page 1 on their own (`per_page=3` here, mirroring
+     * production's "31 puntaje-5 players at per_page=20" — same ratio,
+     * smaller numbers), a 4.5 techo, and 3 genuinely under-ceiling candidates
+     * who must fill page 1 instead.
+     */
+    public function test_buscar_paginado_returns_viable_candidates_on_page_1_when_every_candidate_above_it_in_sort_order_exceeds_the_ceiling(): void {
+        $plazaId = $this->plaza( 9 ); // techo 4,5
+
+        // Over-ceiling block — sorts FIRST (puntaje DESC) and, at per_page=3,
+        // would fill the ENTIRE first page under the old post-slice filter.
+        for ( $i = 0; $i < 5; $i++ ) {
+            $this->seedPlayer( 2000 + $i, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '5' ] );
+        }
+
+        // Under-ceiling candidates — must be exactly what page 1 returns.
+        $this->seedPlayer( 3000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4,5' ] ); // boundary, admitted
+        $this->seedPlayer( 3001, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
+        $this->seedPlayer( 3002, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            3
+        );
+
+        $this->assertSame(
+            3,
+            $resultado['total'],
+            'total must count only the population under the ceiling, never the 5 over-ceiling candidates.'
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
+        sort( $ids );
+        $this->assertSame(
+            [ 3000, 3001, 3002 ],
+            $ids,
+            'Page 1 must be filled entirely with under-ceiling candidates — the over-ceiling block must never reach pagination at all, let alone fill the page and leave it empty.'
+        );
+
+        foreach ( $resultado['candidatos'] as $c ) {
+            $this->assertTrue( $c->viable(), "player {$c->playerId()} must be viable — every remaining candidate already cleared the ceiling by the time this page is evaluated." );
+        }
+    }
+
+    /**
+     * THE other correctness property the ceiling-as-population-filter change
+     * must preserve: paging through a MIXED population (some over the
+     * ceiling, some under) must still visit every UNDER-ceiling candidate
+     * exactly once — no duplicates, none skipped — exactly the same
+     * guarantee
+     * `test_buscar_paginado_pages_through_the_whole_list_exactly_once_with_no_duplicates()`
+     * already pins for an unfiltered population, now exercised with the
+     * ceiling actually excluding part of it.
+     */
+    public function test_buscar_paginado_pages_through_every_under_ceiling_candidate_exactly_once(): void {
+        $plazaId = $this->plaza( 7 ); // techo 3,5
+
+        // 10 over-ceiling and 10 under-ceiling candidates, interleaved in id
+        // space so a bug that merely shifted an off-by-one instead of truly
+        // filtering would still be caught.
+        for ( $i = 0; $i < 10; $i++ ) {
+            $this->seedPlayer( 4000 + ( $i * 2 ), self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );   // excluded
+            $this->seedPlayer( 4001 + ( $i * 2 ), self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] ); // included
+        }
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $seen = [];
+        for ( $page = 1; $page <= 3; $page++ ) {
+            $resultado = $this->resolver->buscarPaginado(
+                $plaza,
+                null,
+                null,
+                BloqueoReemplazoPolicy::topeTresFechas(),
+                $this->countResolvedFechasSinceFn,
+                $page,
+                5
+            );
+
+            $this->assertSame( 10, $resultado['total'], "total must stay 10 (only the under-ceiling half) regardless of which page (page {$page}) is requested." );
+
+            foreach ( $resultado['candidatos'] as $c ) {
+                $seen[] = $c->playerId();
+            }
+        }
+
+        $this->assertCount( 10, $seen, 'Every under-ceiling candidate must appear exactly once across all pages.' );
+        $this->assertCount( 10, array_unique( $seen ), 'No under-ceiling candidate must be duplicated across pages.' );
+
+        $expected = [];
+        for ( $i = 0; $i < 10; $i++ ) {
+            $expected[] = 4001 + ( $i * 2 );
+        }
+        sort( $expected );
+        sort( $seen );
+        $this->assertSame( $expected, $seen, 'Exactly the 10 under-ceiling ids, none of the 10 over-ceiling ones.' );
+    }
 }
