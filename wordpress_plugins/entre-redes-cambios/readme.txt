@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.8
+Stable tag: 0.1.9
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.9 =
+* Change: `GET /cambios/plazas/candidatos` now excludes a candidate with no resolvable puntaje from the population entirely, in BOTH screen sections ("Lista de Espera" and "Padrón Completo") as well as the default season-registered population — not just the whole padrón-wide population. Without a puntaje there is nothing to evaluate against the plaza's techo, so such a player is not a candidate at all (previously it was rendered as a non-viable row with `motivo: 'puntaje_indeterminado'`, buried last by the 0.1.8 sort). The exclusion happens in `Plazas\CandidatosResolver::buscarPaginado()`, before `X-WP-Total` is computed and before pagination, so it never produces a short page or an inflated total. `Plazas\CandidatosResolver::paraPlaza()` / `::paraSeccion()` (the padres-priority rule's own, unpaginated pool) are unchanged by this — an indeterminate puntaje was already never viable there. The dictamen engine's own refusal of an indeterminate entrante (`Dictamen\Reglas\PuntajeDentroDelTecho`) is unaffected; this is a presentation-layer exclusion, not the enforcement.
 
 = 0.1.8 =
 * Change: `GET /cambios/plazas/candidatos` now orders candidates by `puntaje DESC, nombre ASC, player_id ASC`, over the FULL filtered population before pagination (`Plazas\CandidatosResolver::buscarPaginado()`) — not just `player_id ASC`. A candidate with no resolvable puntaje sorts last. Names are resolved for the whole population via one batched (chunked, 200 ids per query) `Plazas\CandidatosResolver::nombresPorJugador()` read, never one query per candidate. The app's own client-side puntaje sort on "Pedir cambio" (which only ever re-sorted the pages loaded so far, visibly reordering rows on every `loadMore()`) is removed — the screen now renders the server's order as given.
