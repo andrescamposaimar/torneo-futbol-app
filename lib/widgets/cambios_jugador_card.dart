@@ -65,8 +65,6 @@ class CambiosJugadorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final posicion = posicionAbreviada(jugador?.posicion ?? '');
-    final bgColor = posicionColor(posicion);
     final imagen = jugador?.imagen;
 
     final card = Container(
@@ -160,43 +158,7 @@ class CambiosJugadorCard extends StatelessWidget {
             left: 0,
             top: 10,
             bottom: 10,
-            child: FractionallySizedBox(
-              heightFactor: 0.9,
-              child: Container(
-                width: 28,
-                decoration: BoxDecoration(
-                  color: bgColor,
-                  borderRadius: const BorderRadius.only(
-                    topRight: Radius.circular(6),
-                    bottomRight: Radius.circular(6),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 6,
-                      offset: const Offset(2, 2),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: RotatedBox(
-                    quarterTurns: -1,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4.0),
-                      child: Text(
-                        posicion,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            child: CambiosPosicionBadge(posicion: jugador?.posicion ?? ''),
           ),
         ],
       ),
@@ -206,6 +168,67 @@ class CambiosJugadorCard extends StatelessWidget {
     // the caller for this case) — Opacity keeps the badge/name still legible
     // while unmistakably muted.
     return greyedOut ? Opacity(opacity: 0.55, child: card) : card;
+  }
+}
+
+/// The coloured vertical "main position" strip with rotated text, shared by
+/// [CambiosJugadorCard] and `CambiosCandidatoCard` — the SAME widget, so a
+/// fix to one card's position badge can never silently miss the other (same
+/// reasoning as [CambiosAvatar]'s own docblock, applied here instead of to
+/// the photo). A caller wraps this in its own `Positioned` inside its own
+/// `Stack` — this widget only ever renders the strip's box + text, never its
+/// placement, since the two cards position it at slightly different offsets.
+class CambiosPosicionBadge extends StatelessWidget {
+  /// The RAW posición as the backend/model carries it (e.g.
+  /// `'Mediocampista'`, `''`) — never pre-abbreviated by the caller.
+  /// [posicionAbreviada] and [posicionColor] are applied HERE, the one place
+  /// both cards now share that mapping through.
+  final String posicion;
+
+  const CambiosPosicionBadge({super.key, required this.posicion});
+
+  @override
+  Widget build(BuildContext context) {
+    final abreviada = posicionAbreviada(posicion);
+    final bgColor = posicionColor(abreviada);
+
+    return FractionallySizedBox(
+      heightFactor: 0.9,
+      child: Container(
+        width: 28,
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: const BorderRadius.only(
+            topRight: Radius.circular(6),
+            bottomRight: Radius.circular(6),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 6,
+              offset: const Offset(2, 2),
+            ),
+          ],
+        ),
+        child: Center(
+          child: RotatedBox(
+            quarterTurns: -1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: Text(
+                abreviada,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

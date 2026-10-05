@@ -60,6 +60,18 @@ class CambiosCandidato {
   /// never a broken image.
   final String? fotoUrl;
 
+  /// The candidate's main `sp_position` name (e.g. `'Arquero'`), resolved
+  /// for the whole page in one batched call — see `Rest\PlazasController::
+  /// shapeCandidato()` and `Plazas\PosicionResolver` on the backend for
+  /// exactly how "main" is chosen (mirroring `entre-redes-api`'s own
+  /// `/jugadores` endpoint so this screen never disagrees with the
+  /// Players/Team screens about the same player). Empty string (never
+  /// missing/null) when unresolved or absent from an older payload —
+  /// `posicionAbreviada('')` already renders that as "Sin Cargar", the
+  /// SAME defined fallback `CambiosJugadorCard` uses for an unresolved
+  /// `Jugador.posicion`.
+  final String posicion;
+
   const CambiosCandidato({
     required this.playerId,
     required this.nombre,
@@ -68,11 +80,13 @@ class CambiosCandidato {
     required this.viable,
     this.motivo,
     this.fotoUrl,
+    this.posicion = '',
   });
 
   factory CambiosCandidato.fromJson(Map<String, dynamic> json) {
     final rawPuntaje = json['puntaje'];
     final rawFoto = json['foto_url'];
+    final rawPosicion = json['posicion'];
     return CambiosCandidato(
       playerId: (json['player_id'] as int?) ?? 0,
       nombre: (json['nombre'] as String?) ?? '',
@@ -81,6 +95,7 @@ class CambiosCandidato {
       viable: json['viable'] == true,
       motivo: json['motivo'] as String?,
       fotoUrl: rawFoto is String && rawFoto.isNotEmpty ? rawFoto : null,
+      posicion: rawPosicion is String ? rawPosicion : '',
     );
   }
 
@@ -95,11 +110,12 @@ class CambiosCandidato {
           puntaje == other.puntaje &&
           viable == other.viable &&
           motivo == other.motivo &&
-          fotoUrl == other.fotoUrl;
+          fotoUrl == other.fotoUrl &&
+          posicion == other.posicion;
 
   @override
-  int get hashCode =>
-      Object.hash(playerId, nombre, esPadre, puntaje, viable, motivo, fotoUrl);
+  int get hashCode => Object.hash(
+      playerId, nombre, esPadre, puntaje, viable, motivo, fotoUrl, posicion);
 
   @override
   String toString() =>

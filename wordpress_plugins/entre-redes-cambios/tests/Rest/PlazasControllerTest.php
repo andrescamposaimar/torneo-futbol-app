@@ -507,7 +507,7 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null, 'posicion' => 'Sin Posicion' ],
             ],
             $response->get_data()['candidatos']
         );
@@ -541,8 +541,8 @@ class PlazasControllerTest extends TestCase {
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
             [
-                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ],
-                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado', 'foto_url' => null ],
+                [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null, 'posicion' => 'Sin Posicion' ],
+                [ 'player_id' => 801, 'nombre' => 'Jugador #801', 'es_padre' => false, 'puntaje' => null, 'viable' => false, 'motivo' => 'puntaje_indeterminado', 'foto_url' => null, 'posicion' => 'Sin Posicion' ],
             ],
             $response->get_data()['candidatos']
         );
@@ -767,6 +767,156 @@ class PlazasControllerTest extends TestCase {
         $evento = $this->eventLog->last();
         $this->assertSame( [ 800 ], $evento['contexto']['player_ids'] );
         $this->assertSame( 1, $evento['contexto']['count'] );
+    }
+
+    /**
+     * `posicion` is resolved via the injected `$posicionResolverFn` — never
+     * a direct `wp_get_object_terms()` call the test suite could not
+     * otherwise exercise (same seam shape as `$fotoResolverFn` above). The
+     * resolver's own return map is keyed by player id, read back per
+     * candidate in `shapeCandidato()`.
+     */
+    public function test_listar_candidatos_shapes_posicion_via_the_injected_resolver(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 2,
+        ] );
+
+        $posicionResolverFn = static fn ( array $playerIds ): array => [
+            800 => 'Arquero',
+            801 => 'Delantero',
+        ];
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            null,
+            $posicionResolverFn
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $candidatos = $response->get_data()['candidatos'];
+        $this->assertSame( 'Arquero', $candidatos[0]['posicion'] );
+        $this->assertSame( 'Delantero', $candidatos[1]['posicion'] );
+    }
+
+    /**
+     * `$posicionResolverFn` must be called EXACTLY ONCE per page, with every
+     * candidate id on that page in a single array — never once PER
+     * candidate. This is the same N+1 shape `Plazas\PosicionResolver`'s own
+     * class docblock, and this plugin's task brief, both call out: an N+1
+     * was already removed from this exact endpoint once, and the posición
+     * lookup must not reintroduce it.
+     */
+    public function test_listar_candidatos_resolves_posicion_in_one_batched_call_for_the_whole_page(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 801, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+                new CandidatoEstado( 802, false, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 3,
+        ] );
+
+        $calls               = [];
+        $posicionResolverFn = static function ( array $playerIds ) use ( &$calls ): array {
+            $calls[] = $playerIds;
+
+            return array_fill_keys( $playerIds, 'Defensor' );
+        };
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            null,
+            $posicionResolverFn
+        );
+
+        $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $this->assertCount( 1, $calls, 'The resolver must be invoked exactly once for the whole page, never once per candidate.' );
+        $this->assertSame( [ 800, 801, 802 ], $calls[0] );
+    }
+
+    /**
+     * A resolver that does not cover every requested id (a custom test
+     * double, or a future resolver implementation with its own gaps) must
+     * still degrade that ONE candidate's `posicion` to the same
+     * `PosicionResolver::SIN_POSICION` fallback — never an undefined index
+     * warning or a `null` the app was not built to render.
+     */
+    public function test_listar_candidatos_posicion_defaults_to_sin_posicion_when_the_resolver_omits_an_id(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'findPlaza' )->willReturn( [
+            'id' => self::PLAZA_ID, 'season_id' => self::SEASON_ID, 'team_id' => self::TEAM_ID, 'puntaje_techo' => 6,
+        ] );
+
+        $fechaRepository    = $this->createMock( FechaRepository::class );
+        $candidatosResolver = $this->createMock( CandidatosResolver::class );
+        $candidatosResolver->method( 'buscarPaginado' )->willReturn( [
+            'candidatos' => [
+                new CandidatoEstado( 800, true, Puntaje::fromDecimal( 2.5 ), true, null ),
+            ],
+            'total' => 1,
+        ] );
+
+        $posicionResolverFn = static fn ( array $playerIds ): array => [];
+
+        $controller = new PlazasController(
+            $authorizer,
+            $plazaRepository,
+            $fechaRepository,
+            $this->eventLog,
+            $candidatosResolver,
+            null,
+            null,
+            null,
+            null,
+            $posicionResolverFn
+        );
+
+        $response = $controller->listarCandidatos( $this->requestParaCandidatos() );
+
+        $this->assertSame( 'Sin Posicion', $response->get_data()['candidatos'][0]['posicion'] );
     }
 
     public function test_listar_candidatos_missing_fields_returns_400(): void {
@@ -1018,7 +1168,7 @@ class PlazasControllerTest extends TestCase {
 
         $this->assertSame( 200, $response->get_status() );
         $this->assertSame(
-            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null ] ],
+            [ [ 'player_id' => 800, 'nombre' => 'Jugador #800', 'es_padre' => true, 'puntaje' => 2.5, 'viable' => true, 'motivo' => null, 'foto_url' => null, 'posicion' => 'Sin Posicion' ] ],
             $response->get_data()['candidatos']
         );
     }
