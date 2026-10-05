@@ -350,7 +350,11 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
       ),
       body: Column(
         children: [
-          _PlazaHeader(plaza: widget.plaza, puntaje: widget.puntaje),
+          _PlazaHeader(
+            plaza: widget.plaza,
+            puntaje: widget.puntaje,
+            esSustitucion: isSustitucion,
+          ),
           if (fechaAsync.isLoading) const _FechaLoadingBanner(),
           if (!fechaAsync.isLoading && fecha == null) const _FechaGapBanner(),
           if (fecha != null && !ventanaAbierta)
@@ -459,7 +463,26 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
 class _PlazaHeader extends StatelessWidget {
   final CambiosPlaza plaza;
   final double? puntaje;
-  const _PlazaHeader({required this.plaza, required this.puntaje});
+
+  /// Which request this screen is for — the SAME flag the AppBar title and
+  /// [_VentanaEstadoBanner] already key their wording off. It matters here
+  /// because the two tipos move the header's player in OPPOSITE directions:
+  /// a sustitucion takes the titular OUT of the plaza, a regreso brings him
+  /// BACK into it, so one leading icon cannot honestly serve both.
+  final bool esSustitucion;
+
+  const _PlazaHeader({
+    required this.plaza,
+    required this.puntaje,
+    required this.esSustitucion,
+  });
+
+  /// No text label accompanies this icon: a prefix like "Pedir cambio por:"
+  /// pushed the row past its width once the name and puntaje were also on
+  /// it (measured: a 111px overflow at a double text scale), and the AppBar
+  /// title already names the action. The icon carries the direction alone.
+  IconData get _icono =>
+      esSustitucion ? Icons.person_remove_outlined : Icons.person_add_outlined;
 
   @override
   Widget build(BuildContext context) {
@@ -479,6 +502,8 @@ class _PlazaHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          Icon(_icono, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 6),
           Expanded(
             child: Text(
               plaza.titularNombre,
