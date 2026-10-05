@@ -943,6 +943,12 @@ void main() {
       final iconoX = tester.getTopLeft(find.byIcon(Icons.arrow_downward)).dx;
       final nombreX = tester.getTopLeft(find.text('Juan Pérez')).dx;
       expect(nombreX, greaterThan(iconoX));
+
+      // Red off, green on — the substitution board's own colours.
+      expect(
+        tester.widget<Icon>(find.byIcon(Icons.arrow_downward)).color,
+        Colors.red.shade700,
+      );
     });
 
     testWidgets('a regreso leads with an UP arrow, never the down one', (tester) async {
@@ -953,6 +959,10 @@ void main() {
 
       expect(find.byIcon(Icons.arrow_upward), findsOneWidget);
       expect(find.byIcon(Icons.arrow_downward), findsNothing);
+      expect(
+        tester.widget<Icon>(find.byIcon(Icons.arrow_upward)).color,
+        Colors.green.shade700,
+      );
     });
 
     testWidgets('a long name ellipsizes rather than overflowing, even at a double text scale',
