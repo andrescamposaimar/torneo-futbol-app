@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.7
+Stable tag: 0.1.8
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.8 =
+* Change: `GET /cambios/plazas/candidatos` now orders candidates by `puntaje DESC, nombre ASC, player_id ASC`, over the FULL filtered population before pagination (`Plazas\CandidatosResolver::buscarPaginado()`) — not just `player_id ASC`. A candidate with no resolvable puntaje sorts last. Names are resolved for the whole population via one batched (chunked, 200 ids per query) `Plazas\CandidatosResolver::nombresPorJugador()` read, never one query per candidate. The app's own client-side puntaje sort on "Pedir cambio" (which only ever re-sorted the pages loaded so far, visibly reordering rows on every `loadMore()`) is removed — the screen now renders the server's order as given.
 
 = 0.1.7 =
 * Add: `GET /cambios/plazas/candidatos` now returns each candidate's `posicion` (main `sp_position` name, e.g. `Arquero`), resolved for the whole page in a single batched `wp_get_object_terms()` call via the new `Plazas\PosicionResolver` — never one query per candidate (an N+1 was already removed from this same endpoint in 0.1.5/0.1.6; this addition is batched the same way). "Main position" mirrors `entre-redes-api`'s own `/jugadores` choice exactly, so a player never shows one position on "Pedir cambio" and a different one on the Players/Team screens.

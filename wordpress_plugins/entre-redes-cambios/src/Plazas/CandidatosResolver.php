@@ -115,6 +115,15 @@ class CandidatosResolver {
 
     use ChecksReads;
 
+    /**
+     * Max player ids per `nombresPorJugador()` query — same chunking
+     * discipline, and the same value, as
+     * `JugadorMetricasReader::ID_CHUNK_SIZE` (see that class's own class
+     * docblock, "fetchLatestMetaValuesFor() CHUNKS $playerIds, NEVER ONE
+     * UNBOUNDED `IN (...)`", for the full reasoning this reuses verbatim).
+     */
+    private const ID_CHUNK_SIZE = 200;
+
     private \wpdb $wpdb;
     private PlazaRepository $plazaRepository;
     private EventLog $eventLog;
@@ -323,18 +332,39 @@ class CandidatosResolver {
      *      techo (`evaluarCandidatos()`, still used by `paraPlaza()` /
      *      `paraSeccion()`); here it runs for at most `$perPage` of them.
      *
-     * *** WHY player_id, NEVER puntaje, IS THE SORT KEY ***
-     * puntaje is not a SQL column at all (see class docblock, "WHERE THE
-     * CANDIDATE POOL COMES FROM" and `JugadorMetricasReader`'s own class
-     * docblock) and only has 9 possible discrete values (`Puntaje`'s own
-     * class docblock) — ties are the NORM, not the exception, across a
-     * population that can run into the hundreds. Ordering by it would be
-     * unstable across two consecutive page requests (nothing guarantees PHP
-     * resolves ties in the same relative order twice), which would silently
-     * duplicate some candidates across pages and skip others entirely.
-     * `player_id` is unique, and already the ordering every population query
-     * in this class uses (`ORDER BY posts.ID ASC`) — reusing it here is free
-     * and trivially total.
+     * *** THE SORT KEY: puntaje DESC, THEN nombre ASC, THEN player_id ASC ***
+     * The captain's screen ("Pedir cambio") must show the highest-rated,
+     * then alphabetically-first candidates first — `player_id ASC` alone (an
+     * earlier version of this method's sort key, and this docblock) was
+     * never meant to be the PRESENTATION order, only a total order safe for
+     * pagination; sorting by puntaje was deliberately rejected at the time
+     * for exactly the reason below, which remains true in isolation:
+     *
+     *   puntaje is not a SQL column at all (see class docblock, "WHERE THE
+     *   CANDIDATE POOL COMES FROM" and `JugadorMetricasReader`'s own class
+     *   docblock) and only has 9 possible discrete values (`Puntaje`'s own
+     *   class docblock) — ties are the NORM, not the exception, across a
+     *   population that can run into the hundreds. Ordering by puntaje
+     *   ALONE would be unstable across two consecutive page requests
+     *   (nothing guarantees two ties resolve in the same relative order
+     *   twice), silently duplicating some candidates across pages and
+     *   skipping others entirely.
+     *
+     * That objection is about puntaje ALONE, not about puntaje as the FIRST
+     * key of a longer, total tuple. Pagination only needs *a* total order —
+     * any number of unstable keys at the front are made stable the instant a
+     * UNIQUE key follows them in the tuple, because no two rows can ever tie
+     * on every key at once. `player_id` is unique, so appending it LAST
+     * (`puntaje DESC, nombre ASC, player_id ASC`) is exactly as total and
+     * exactly as safe for pagination as `player_id ASC` alone ever was — see
+     * `ordenarCandidatos()`'s own docblock for the comparator, and
+     * `CandidatosResolverTest::test_buscar_paginado_pages_through_the_whole_list_exactly_once_with_no_duplicates()`
+     * for the test that would catch a non-total key (it seeds a population
+     * spanning several puntajes and names specifically to exercise this).
+     * `nombre` sits between the two because it is the natural secondary
+     * reading of "ordered by puntaje" a captain expects ("then
+     * alphabetically"), not because it adds anything to totality that
+     * `player_id` alone would not already provide.
      *
      * @param array<string, mixed> $plaza As returned by
      *        PlazaRepository::findPlaza() — same contract as paraPlaza().
@@ -429,6 +459,17 @@ class CandidatosResolver {
                 }
             ) );
         }
+
+        // Sorted over the FULL filtered population, BEFORE $total is counted
+        // and BEFORE array_slice() takes the page — see this method's own
+        // docblock, "WHY PAGINATION HAPPENS HERE, BEFORE THE N+1, NOT AFTER"
+        // and "THE SORT KEY", for why the order must be global rather than
+        // per page. $nombresPorJugador is ONE batched (chunked) query over
+        // exactly this filtered population — never one query per candidate,
+        // same discipline as the $metricas read above (see
+        // nombresPorJugador()'s own docblock).
+        $nombresPorJugador = $this->nombresPorJugador( $candidatoIds );
+        $candidatoIds      = $this->ordenarCandidatos( $candidatoIds, $metricas, $nombresPorJugador );
 
         $total = count( $candidatoIds );
 
@@ -604,6 +645,187 @@ class CandidatosResolver {
         }
 
         return new CandidatoEstado( $playerId, $metricas->esPadre(), $puntaje, true, null );
+    }
+
+    /**
+     * Sorts $candidatoIds into `buscarPaginado()`'s presentation order —
+     * `puntaje DESC, nombre ASC, player_id ASC` — see that method's own
+     * docblock, "THE SORT KEY", for why this tuple is both the order a
+     * captain expects and a TOTAL order safe for pagination.
+     *
+     * *** UNRATED CANDIDATES (`puntaje === null`) SORT LAST, EXPLICITLY, NOT
+     * BY ACCIDENT *** A stored puntaje of zero (or any other
+     * `puntaje_indeterminado` case — see `JugadorMetricasReader`'s own class
+     * docblock, "A STORED PUNTAJE OF ZERO MEANS 'SIN CALIFICAR'") is already
+     * never viable/selectable (`partitionPorTecho()` above), so burying it at
+     * the bottom of "ordered by puntaje descending" is the reading a captain
+     * would expect — it is PLACED there with a dedicated sentinel
+     * (`$rango = -1`, strictly below `Puntaje::fromHalfPoints()`'s own
+     * minimum of 2), never left to an un-annotated `?? 0` that would instead
+     * tie it with a genuinely-rated 0 candidate (impossible today — 0 itself
+     * is not a valid `Puntaje` — but would silently become possible the
+     * moment that invariant ever changes). See
+     * `CandidatosResolverTest::test_buscar_paginado_orders_candidates_with_no_puntaje_last()`.
+     *
+     * @param array<int, int> $candidatoIds
+     * @param array<int, JugadorMetricas> $metricas Keyed by player_id, as
+     *        resolved by `resolveMuchos()` — MUST be total over
+     *        $candidatoIds.
+     * @param array<int, string> $nombresPorJugador As returned by
+     *        `nombresPorJugador( $candidatoIds )` — need not carry a row for
+     *        EVERY id (a player with no title at all is simply absent, same
+     *        contract as that method's own return type); `nombreParaOrden()`
+     *        supplies the same fallback `Rest\PlazasController::nombreJugador()`
+     *        uses for a missing/blank title, so the sort order never
+     *        disagrees with what the screen renders for that candidate.
+     * @return array<int, int> $candidatoIds, re-ordered.
+     */
+    private function ordenarCandidatos( array $candidatoIds, array $metricas, array $nombresPorJugador ): array {
+        usort(
+            $candidatoIds,
+            function ( int $a, int $b ) use ( $metricas, $nombresPorJugador ): int {
+                $puntajeA = $metricas[ $a ]->puntaje();
+                $puntajeB = $metricas[ $b ]->puntaje();
+
+                $rangoA = null !== $puntajeA ? $puntajeA->halfPoints() : -1;
+                $rangoB = null !== $puntajeB ? $puntajeB->halfPoints() : -1;
+
+                if ( $rangoA !== $rangoB ) {
+                    return $rangoB <=> $rangoA; // descending puntaje, unrated (-1) last
+                }
+
+                $nombreCmp = self::claveOrdenNombre( $this->nombreParaOrden( $a, $nombresPorJugador ) )
+                    <=> self::claveOrdenNombre( $this->nombreParaOrden( $b, $nombresPorJugador ) );
+
+                if ( 0 !== $nombreCmp ) {
+                    return $nombreCmp;
+                }
+
+                return $a <=> $b; // the TOTAL-order tiebreaker — see docblock above
+            }
+        );
+
+        return $candidatoIds;
+    }
+
+    /**
+     * The exact same display-name fallback `Rest\PlazasController::nombreJugador()`
+     * applies ("Jugador #<id>" for a blank/missing title) — reused here so a
+     * candidate's SORT position never disagrees with the NAME the screen
+     * actually renders for them. Deliberately NOT a call to that method
+     * directly: this class has no dependency on `Rest\PlazasController` (nor
+     * on WordPress's `get_the_title()`, which this class avoids everywhere
+     * else — see class docblock, "WHERE THE CANDIDATE POOL COMES FROM")  —
+     * the fallback string is simply duplicated, the same way
+     * `escapeLikeTerm()`'s `ESCAPE '!'` choice is documented once and relied
+     * on by three call sites rather than factored into a shared constant
+     * neither side is coupled to.
+     */
+    private function nombreParaOrden( int $playerId, array $nombresPorJugador ): string {
+        $titulo = trim( (string) ( $nombresPorJugador[ $playerId ] ?? '' ) );
+
+        return '' !== $titulo ? $titulo : 'Jugador #' . $playerId;
+    }
+
+    /**
+     * Folds $nombre into a comparison key that sorts Spanish names the way a
+     * Spanish reader expects: lower-cased, with the accented vowels and `ñ`
+     * mapped to their unaccented base letter, so `Pérez` sorts alongside
+     * `Perez`/`Petrov` rather than after every unaccented name (a naive
+     * byte-wise `<=>` on raw UTF-8 puts every accented letter after `z`,
+     * because its continuation bytes are numerically > ASCII `z`).
+     *
+     * *** WHY A HAND-ROLLED FOLD, NOT `Collator`/`iconv()` ***
+     * PHP's `Collator` (ext-intl) gives the most linguistically correct
+     * answer, but is an OPTIONAL extension this plugin does not otherwise
+     * require (see composer.json) — depending on it here would make this
+     * endpoint's sort order silently diverge between a host that has it and
+     * one that does not, which is worse than a slightly cruder fold that
+     * behaves IDENTICALLY everywhere. `iconv( 'UTF-8', 'ASCII//TRANSLIT',
+     * … )` has the same problem one level down: its transliteration table is
+     * supplied by the SYSTEM's iconv implementation (glibc vs. macOS/BSD vs.
+     * musl), which is not guaranteed consistent between this suite's dev/CI
+     * machine and the production host. The explicit map below has exactly
+     * one behaviour, everywhere, forever — the same reasoning
+     * `escapeLikeTerm()` already applies to `ESCAPE '!'` one concept over
+     * (an engine-agnostic choice over a technically-correct but
+     * environment-dependent one). `mb_strtolower( …, 'UTF-8' )` IS used (it
+     * is bundled with PHP's `mbstring`, which WordPress itself requires —
+     * https://wordpress.org/about/requirements/ — so this plugin already
+     * runs nowhere that lacks it) purely for correct multi-byte
+     * case-folding; the accent map below runs on its (already lower-cased)
+     * output.
+     *
+     * This is NOT full Spanish dictionary collation (`ñ` folds to `n`
+     * instead of sorting between `n` and `o`) — see
+     * `CandidatosResolverTest::test_buscar_paginado_sorts_accented_spanish_names_as_expected()`
+     * for exactly what this guarantees: `Pérez`/`Rodríguez`/`Gómez` land
+     * where an unaccented reading of the same name would, not a byte-order
+     * reading. That is the concrete bug this fold exists to fix; a full RAE
+     * collation is out of scope without taking the ext-intl dependency above.
+     */
+    private static function claveOrdenNombre( string $nombre ): string {
+        static $mapaAcentos = [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u', 'ñ' => 'n',
+        ];
+
+        return strtr( mb_strtolower( $nombre, 'UTF-8' ), $mapaAcentos );
+    }
+
+    /**
+     * Every `post_title`, keyed by player_id, for $playerIds — the batched
+     * (chunked) read `ordenarCandidatos()` needs to sort the FULL filtered
+     * population by name before `buscarPaginado()` slices out a page (see
+     * that method's own docblock, "THE SORT KEY"). ONE query per
+     * `self::ID_CHUNK_SIZE`-sized chunk of $playerIds, never one query per
+     * candidate — same chunking shape, and the same reasoning, as
+     * `JugadorMetricasReader::fetchLatestMetaValuesFor()` (see that method's
+     * own docblock, which this mirrors rather than re-derives).
+     *
+     * @param array<int, int> $playerIds
+     * @return array<int, string> Keyed by player_id — ONLY ids that resolve
+     *         to an actual row are present (mirrors
+     *         `fetchLatestMetaValuesFor()`'s own contract); a candidate
+     *         absent here is handled by `nombreParaOrden()`'s own fallback,
+     *         never by this method.
+     * @throws \RuntimeException When the query fails at the wpdb level, for
+     *         ANY chunk — results already merged from earlier, successful
+     *         chunks are discarded along with the exception, same discipline
+     *         as `fetchLatestMetaValuesFor()` (see "READ FAILURES MUST NEVER
+     *         READ AS 'NOBODY HAS METRICS'" on that class — the equivalent
+     *         failure here would silently mis-sort the whole page instead).
+     */
+    private function nombresPorJugador( array $playerIds ): array {
+        if ( empty( $playerIds ) ) {
+            return [];
+        }
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $nombres = [];
+
+        foreach ( array_chunk( $playerIds, self::ID_CHUNK_SIZE ) as $chunk ) {
+            $placeholders = implode( ', ', array_fill( 0, count( $chunk ), '%d' ) );
+
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT ID AS id, post_title AS nombre
+                       FROM {$p}posts
+                      WHERE ID IN ({$placeholders})",
+                    $chunk
+                ),
+                ARRAY_A
+            );
+
+            $this->assertReadSucceeded( $rows, 'nombresPorJugador', [ 'player_ids_count' => count( $chunk ) ] );
+
+            foreach ( $rows as $row ) {
+                $nombres[ (int) $row['id'] ] = (string) $row['nombre'];
+            }
+        }
+
+        return $nombres;
     }
 
     /**

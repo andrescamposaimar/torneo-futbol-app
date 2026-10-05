@@ -1198,6 +1198,204 @@ class CandidatosResolverTest extends TestCase {
         $this->assertContains( 801, $ids );
     }
 
+    // -------------------------------------------------------------------------
+    // buscarPaginado() — ordering (puntaje DESC, nombre ASC, player_id ASC)
+    // -------------------------------------------------------------------------
+
+    /**
+     * THE correctness test the task brief names explicitly: a population
+     * spanning SEVERAL puntajes and names must page through, across multiple
+     * `?page=` calls, in EXACTLY the global order `puntaje DESC, nombre ASC,
+     * player_id ASC` predicts — no candidate duplicated, none skipped. This
+     * is the test that would catch a non-total sort key (see
+     * `buscarPaginado()`'s own docblock, "THE SORT KEY") — a key that is
+     * only stable WITHIN a page, but not across pages, would show up here as
+     * a duplicate or a gap in $seen.
+     */
+    public function test_buscar_paginado_pages_through_a_mixed_population_in_the_exact_global_order(): void {
+        $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $this->seedPlayer( 301, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '5' ] );
+        $this->seedPlayer( 302, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '5' ] );
+        $this->seedPlayer( 303, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
+        $this->seedPlayer( 304, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
+        $this->seedPlayer( 305, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        $this->seedPlayer( 306, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
+        $this->seedPlayer( 307, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
+
+        foreach ( [ 301 => 'Beta', 302 => 'Alfa', 303 => 'Delta', 304 => 'Charlie', 305 => 'Echo', 306 => 'Zulu', 307 => 'Aaa' ] as $id => $nombre ) {
+            $wpdb->update( "{$p}posts", [ 'post_title' => $nombre ], [ 'ID' => $id ] );
+        }
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $seen = [];
+        for ( $page = 1; $page <= 3; $page++ ) {
+            $resultado = $this->resolver->buscarPaginado(
+                $plaza,
+                null,
+                null,
+                BloqueoReemplazoPolicy::topeTresFechas(),
+                $this->countResolvedFechasSinceFn,
+                $page,
+                3
+            );
+
+            $this->assertSame( 7, $resultado['total'], "total must stay 7 regardless of which page (page {$page}) is requested." );
+
+            foreach ( $resultado['candidatos'] as $c ) {
+                $seen[] = $c->playerId();
+            }
+        }
+
+        $this->assertCount( 7, array_unique( $seen ), 'No candidate must be duplicated or skipped across pages.' );
+        $this->assertSame(
+            [ 302, 301, 304, 303, 305, 307, 306 ],
+            $seen,
+            'Expected global order: puntaje 5 (Alfa before Beta), puntaje 4 (Charlie before Delta), '
+            . 'puntaje 2.5 (Echo), then unrated last, ordered by name (Aaa before Zulu).'
+        );
+    }
+
+    public function test_buscar_paginado_orders_same_puntaje_candidates_by_name(): void {
+        $plazaId = $this->plaza( 10 );
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $this->seedPlayer( 900, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 901, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Zapata' ], [ 'ID' => 900 ] );
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Alvarez' ], [ 'ID' => 901 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame(
+            [ 901, 900 ],
+            array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ),
+            'Candidates tied on puntaje must break the tie alphabetically: Alvarez before Zapata.'
+        );
+    }
+
+    public function test_buscar_paginado_orders_same_puntaje_and_name_candidates_by_player_id(): void {
+        $plazaId = $this->plaza( 10 );
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $this->seedPlayer( 955, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 950, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Gomez' ], [ 'ID' => 955 ] );
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Gomez' ], [ 'ID' => 950 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame(
+            [ 950, 955 ],
+            array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ),
+            'Candidates tied on BOTH puntaje and name must still break the tie deterministically, '
+            . 'by player_id ascending — never left to an unstable PHP sort.'
+        );
+    }
+
+    /**
+     * A naive byte-wise comparison of raw UTF-8 puts every accented letter
+     * AFTER every unaccented one (an accented character's continuation bytes
+     * are numerically greater than ASCII `z`) — this pins that
+     * `claveOrdenNombre()`'s accent fold avoids exactly that, for three real
+     * surnames from this padrón's own population (see
+     * `Puntaje`/`JugadorMetricasReader`'s surrounding docblocks for other
+     * production data this plugin verifies against real names).
+     */
+    public function test_buscar_paginado_sorts_accented_spanish_names_as_expected(): void {
+        $plazaId = $this->plaza( 10 );
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        // 710..712 — NOT 700..702: player 700 is THIS fixture's own titular
+        // (see plaza()'s own `openPlaza( ..., 700, ... )` call), so it is
+        // always excluded as the plaza's incumbent, never a candidate.
+        $this->seedPlayer( 710, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 711, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 712, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Rodríguez' ], [ 'ID' => 710 ] );
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Pérez' ], [ 'ID' => 711 ] );
+        $wpdb->update( "{$p}posts", [ 'post_title' => 'Gómez' ], [ 'ID' => 712 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame(
+            [ 712, 711, 710 ],
+            array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ),
+            'Gómez, Pérez, Rodríguez must sort as a Spanish reader expects (accent-folded '
+            . 'alphabetical: Gómez, Pérez, Rodríguez), never pushed after unaccented names by raw byte order.'
+        );
+    }
+
+    /**
+     * Where an unrated candidate lands is a DECISION, not an accident of
+     * `?? 0` — see `ordenarCandidatos()`'s own docblock. An unrated
+     * candidate is never viable/selectable in the first place
+     * (`partitionPorTecho()`), so this asserts they sort AFTER even the
+     * lowest genuinely-rated puntaje (1.0), never tied with or ahead of one.
+     */
+    public function test_buscar_paginado_orders_candidates_with_no_puntaje_last(): void {
+        $plazaId = $this->plaza( 10 );
+
+        $this->seedPlayer( 600, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
+        $this->seedPlayer( 601, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '1' ] ); // el mas bajo valido
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame(
+            [ 601, 600 ],
+            array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ),
+            'An unrated candidate must sort AFTER even the lowest valid puntaje (1.0) — never tie '
+            . 'with, or sort before, a genuinely-rated candidate.'
+        );
+    }
+
     /**
      * THE EXACT production failure shape, reproduced at the resolver level
      * (where `Rest\PlazasController::listarCandidatos()`'s own top-level
