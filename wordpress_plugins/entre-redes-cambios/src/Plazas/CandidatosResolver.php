@@ -78,6 +78,34 @@ use EntreRedes\Cambios\Support\ChecksReads;
  * and Dictamen\BloqueoReemplazoEvaluator rather than re-deriving either — see
  * "WHY THIS MUST BE THE ONLY IMPLEMENTATION" below.
  *
+ * *** AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL — IN buscarPaginado()
+ * ONLY ***
+ * `buscarPaginado()` — the only entry point the captain-facing candidatos
+ * screen actually calls (`Rest\PlazasController::listarCandidatos()`) —
+ * excludes a candidate with no resolvable puntaje from the POPULATION
+ * itself, before `$total` is computed and before pagination slices a page
+ * (see that method's own docblock for exactly where this runs). The
+ * business reasoning: without a puntaje there is nothing to compare against
+ * the plaza's techo, so such a player is not a candidate at all, in EITHER
+ * screen section ("Lista de Espera" or "Padrón Completo") — not merely a
+ * non-viable one that `?incluir_no_viables=1` can still surface. This
+ * exclusion is unconditional — it does not depend on `?incluir_no_viables`,
+ * which only ever controls whether a candidate who IS in the population but
+ * fails some OTHER check (techo, occupying another plaza, blocked by a
+ * trunca closure) is still shown.
+ *
+ * `paraPlaza()` / `paraSeccion()` are DELIBERATELY NOT changed by this rule —
+ * they still report an unrated candidate as a non-viable `CandidatoEstado`
+ * with `motivoNoViable = 'puntaje_indeterminado'` (via `partitionPorTecho()`
+ * below), exactly as before this change. Both still feed
+ * `contarPadresViables()` (`Reglas\PrioridadDePadresRespetada`'s own pool),
+ * where excluding an unrated candidate from the population would make no
+ * observable difference — an indeterminate puntaje was already never
+ * viable, so it was never counted there either — and `paraPlaza()` /
+ * `paraSeccion()` have their own documented callers and invariants (see
+ * "WHY THIS MUST BE THE ONLY IMPLEMENTATION" below) this change has no
+ * reason to touch.
+ *
  * *** WHY THIS MUST BE THE ONLY IMPLEMENTATION ***
  * If the captain's candidatos screen computed viability on its own (or a
  * future client re-derived it from raw plaza data), it could show a
@@ -312,25 +340,36 @@ class CandidatosResolver {
      *   1. Resolve the population's ids (one query) and their metrics (one
      *      batched query) — same cost as `paraPlaza()`/`paraSeccion()`,
      *      regardless of how many pages exist.
-     *   2. Apply, in PHP, every CHEAP filter available from that batched
-     *      metrics read alone: the caller's own `$puntajesFiltro` (exact
-     *      puntaje match — e.g. the app's puntaje chips), narrowing the
-     *      POPULATION itself (a non-matching candidate is excluded
-     *      entirely, never just marked non-viable). `$search`, when given,
-     *      is pushed into the POPULATION query itself (see
-     *      `playerIdsRegistradosEnTemporada()` et al.'s own docblocks for
-     *      why `post_title LIKE`, not a second `get_the_title()` pass, is
-     *      what keeps this consistent with how `nombreJugador()` resolves a
-     *      name).
-     *   3. Slice EXACTLY the requested page out of that filtered,
+     *   2. Exclude every candidate with no resolvable puntaje from the
+     *      POPULATION itself — see class docblock, "AN UNRESOLVABLE PUNTAJE
+     *      IS NOT A CANDIDATE AT ALL — IN buscarPaginado() ONLY". This runs
+     *      FIRST, from the same batched metrics read, before either
+     *      `$puntajesFiltro` or `$search` narrow the population further, and
+     *      well before `$total` is computed — an unrated player must never
+     *      count towards how many pages exist.
+     *   3. Apply, in PHP, every remaining CHEAP filter available from that
+     *      batched metrics read alone: the caller's own `$puntajesFiltro`
+     *      (exact puntaje match — e.g. the app's puntaje chips), narrowing
+     *      the POPULATION itself (a non-matching candidate is excluded
+     *      entirely, never just marked non-viable — an unrated candidate is
+     *      already gone by step 2, so this step never has one left to
+     *      consider). `$search`, when given, is pushed into the POPULATION
+     *      query itself (see `playerIdsRegistradosEnTemporada()` et al.'s
+     *      own docblocks for why `post_title LIKE`, not a second
+     *      `get_the_title()` pass, is what keeps this consistent with how
+     *      `nombreJugador()` resolves a name).
+     *   4. Slice EXACTLY the requested page out of that filtered,
      *      player_id-ascending list — see "WHY player_id, NEVER puntaje, IS
      *      THE SORT KEY" below.
-     *   4. Run the techo partition AND the per-candidate viability queries
+     *   5. Run the techo partition AND the per-candidate viability queries
      *      (phase 2, `evaluarViabilidadDentroDelTecho()`) ONLY for the
      *      page's own ids — never the whole filtered population. Before this
      *      method existed, that N+1 ran for every candidate who cleared the
      *      techo (`evaluarCandidatos()`, still used by `paraPlaza()` /
      *      `paraSeccion()`); here it runs for at most `$perPage` of them.
+     *      Because step 2 already removed every unrated candidate, the
+     *      `puntaje_indeterminado` branch of `partitionPorTecho()` below is
+     *      NEVER reached from this method — see that method's own docblock.
      *
      * *** THE SORT KEY: puntaje DESC, THEN nombre ASC, THEN player_id ASC ***
      * The captain's screen ("Pedir cambio") must show the highest-rated,
@@ -387,10 +426,11 @@ class CandidatosResolver {
      *        — see `playerIdsRegistradosEnTemporada()` et al.
      * @param array<int, float> $puntajesFiltro Decimal puntaje values to
      *        keep (exact match) — empty means no filter beyond the plaza's
-     *        own techo. A candidate whose puntaje is unresolvable is
-     *        excluded entirely from the population when this is non-empty
-     *        (an indeterminate puntaje can never match a specific requested
-     *        value).
+     *        own techo. A candidate whose puntaje is unresolvable is already
+     *        excluded from the population unconditionally (see class
+     *        docblock, "AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL —
+     *        IN buscarPaginado() ONLY"), so this filter never has one left to
+     *        consider regardless of whether $puntajesFiltro is empty.
      * @return array{candidatos: CandidatoEstado[], total: int} `total` is the
      *         size of the population AFTER `$puntajesFiltro`/`$search` but
      *         BEFORE pagination — i.e. "how many pages exist", not "how many
@@ -439,6 +479,19 @@ class CandidatosResolver {
         ) );
 
         $metricas = $this->metricasReader->resolveMuchos( $candidatoIds );
+
+        // A candidate with no resolvable puntaje is not a candidate at all
+        // in this method — excluded from the POPULATION itself, not merely
+        // marked non-viable — see class docblock, "AN UNRESOLVABLE PUNTAJE
+        // IS NOT A CANDIDATE AT ALL — IN buscarPaginado() ONLY". This runs
+        // FIRST, from the metrics already batched above (no extra query),
+        // and unconditionally (unlike $puntajesFiltro below, this does not
+        // depend on any caller-supplied filter) — before $puntajesFiltro,
+        // before $total is computed, and before array_slice() takes a page.
+        $candidatoIds = array_values( array_filter(
+            $candidatoIds,
+            static fn ( int $playerId ): bool => null !== $metricas[ $playerId ]->puntaje()
+        ) );
 
         // $puntajesFiltro narrows the POPULATION itself — unlike the techo,
         // which only determines viability (see docblock above) — so it must
@@ -521,6 +574,21 @@ class CandidatosResolver {
      * is finalized HERE, before either of the two per-candidate queries
      * `evaluarViabilidadDentroDelTecho()` runs ever runs for them — see class
      * docblock, "COST: THE CEILING FILTER RUNS BEFORE THE N+1, NEVER AFTER".
+     *
+     * *** THE `puntaje_indeterminado` BRANCH IS STILL LIVE — JUST NOT FROM
+     * buscarPaginado() ANYMORE *** `buscarPaginado()` now excludes every
+     * unrated candidate from its own population BEFORE this method ever runs
+     * (see class docblock, "AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL
+     * — IN buscarPaginado() ONLY"), so `$candidatoIds` arriving from THAT
+     * caller never contains one anymore — this branch is unreachable on that
+     * path. It is NOT dead code: `evaluarCandidatos()` below is also called
+     * by `paraPlaza()` and `paraSeccion()`, which stay unfiltered by design
+     * (same docblock) and still route an unrated candidate through this
+     * exact branch — `CandidatosResolverTest`'s `paraPlaza()`-level tests
+     * (`test_a_candidate_with_no_resolvable_puntaje_is_not_viable()`,
+     * `test_a_candidate_with_stored_puntaje_zero_is_indeterminado_not_an_exception()`)
+     * keep covering it. Do not remove this branch on the assumption that
+     * nothing reaches it.
      *
      * @param array<int, int> $candidatoIds
      * @param array<int, JugadorMetricas> $metricas Keyed by player_id — MUST
@@ -653,21 +721,28 @@ class CandidatosResolver {
      * docblock, "THE SORT KEY", for why this tuple is both the order a
      * captain expects and a TOTAL order safe for pagination.
      *
-     * *** UNRATED CANDIDATES (`puntaje === null`) SORT LAST, EXPLICITLY, NOT
-     * BY ACCIDENT *** A stored puntaje of zero (or any other
-     * `puntaje_indeterminado` case — see `JugadorMetricasReader`'s own class
-     * docblock, "A STORED PUNTAJE OF ZERO MEANS 'SIN CALIFICAR'") is already
-     * never viable/selectable (`partitionPorTecho()` above), so burying it at
-     * the bottom of "ordered by puntaje descending" is the reading a captain
-     * would expect — it is PLACED there with a dedicated sentinel
-     * (`$rango = -1`, strictly below `Puntaje::fromHalfPoints()`'s own
-     * minimum of 2), never left to an un-annotated `?? 0` that would instead
-     * tie it with a genuinely-rated 0 candidate (impossible today — 0 itself
-     * is not a valid `Puntaje` — but would silently become possible the
-     * moment that invariant ever changes). See
-     * `CandidatosResolverTest::test_buscar_paginado_orders_candidates_with_no_puntaje_last()`.
+     * *** UNRATED CANDIDATES NO LONGER REACH THIS METHOD AT ALL — THERE IS NO
+     * "UNRATED SORTS LAST" CASE ANYMORE *** An earlier version of this method
+     * sorted an unrated candidate (`puntaje === null`) to the bottom with a
+     * dedicated `-1` sentinel. That branch is GONE, not merely untested: an
+     * unrated candidate is no longer a candidate at all in `buscarPaginado()`
+     * — its ONLY caller — which now excludes one from the population before
+     * `ordenarCandidatos()` ever runs (see class docblock, "AN UNRESOLVABLE
+     * PUNTAJE IS NOT A CANDIDATE AT ALL — IN buscarPaginado() ONLY"). Every
+     * `$playerId` this method receives is therefore GUARANTEED to have a
+     * resolvable puntaje; `puntajeHalfPointsParaOrden()` below enforces that
+     * guarantee by throwing rather than silently reintroducing a sentinel if
+     * it is ever violated — the same "fail loud, never silently degrade"
+     * discipline this class already applies to a failed read (see class
+     * docblock, "WHY THIS MUST BE THE ONLY IMPLEMENTATION" and
+     * `playerIdsRegistradosEnTemporada()`'s own docblock). See
+     * `CandidatosResolverTest::test_buscar_paginado_orders_candidates_with_no_puntaje_last()`,
+     * which now asserts the unrated candidate is ABSENT, not sorted last.
      *
-     * @param array<int, int> $candidatoIds
+     * @param array<int, int> $candidatoIds MUST already exclude every
+     *        candidate with no resolvable puntaje — see
+     *        `puntajeHalfPointsParaOrden()`'s own docblock for what happens
+     *        if that precondition is violated.
      * @param array<int, JugadorMetricas> $metricas Keyed by player_id, as
      *        resolved by `resolveMuchos()` — MUST be total over
      *        $candidatoIds.
@@ -679,19 +754,19 @@ class CandidatosResolver {
      *        uses for a missing/blank title, so the sort order never
      *        disagrees with what the screen renders for that candidate.
      * @return array<int, int> $candidatoIds, re-ordered.
+     * @throws \LogicException Via `puntajeHalfPointsParaOrden()`, when
+     *         $candidatoIds carries a player_id whose puntaje is not
+     *         resolvable — see that method's own docblock.
      */
     private function ordenarCandidatos( array $candidatoIds, array $metricas, array $nombresPorJugador ): array {
         usort(
             $candidatoIds,
             function ( int $a, int $b ) use ( $metricas, $nombresPorJugador ): int {
-                $puntajeA = $metricas[ $a ]->puntaje();
-                $puntajeB = $metricas[ $b ]->puntaje();
-
-                $rangoA = null !== $puntajeA ? $puntajeA->halfPoints() : -1;
-                $rangoB = null !== $puntajeB ? $puntajeB->halfPoints() : -1;
+                $rangoA = $this->puntajeHalfPointsParaOrden( $a, $metricas );
+                $rangoB = $this->puntajeHalfPointsParaOrden( $b, $metricas );
 
                 if ( $rangoA !== $rangoB ) {
-                    return $rangoB <=> $rangoA; // descending puntaje, unrated (-1) last
+                    return $rangoB <=> $rangoA; // descending puntaje
                 }
 
                 $nombreCmp = self::claveOrdenNombre( $this->nombreParaOrden( $a, $nombresPorJugador ) )
@@ -706,6 +781,36 @@ class CandidatosResolver {
         );
 
         return $candidatoIds;
+    }
+
+    /**
+     * $metricas[ $playerId ]->puntaje()->halfPoints() — guarded by an
+     * explicit precondition check rather than called inline, so a violation
+     * fails loud with a clear message instead of a bare "call to a member
+     * function halfPoints() on null" fatal error. See `ordenarCandidatos()`'s
+     * own docblock, "UNRATED CANDIDATES NO LONGER REACH THIS METHOD AT ALL",
+     * for why this should never actually throw in production:
+     * `buscarPaginado()` — `ordenarCandidatos()`'s only caller — already
+     * excludes every unrated candidate from `$candidatoIds` before sorting.
+     *
+     * @throws \LogicException When $playerId's puntaje is not resolvable —
+     *         this means the precondition above was violated upstream, not
+     *         that this method has anything sensible to sort that candidate
+     *         by.
+     */
+    private function puntajeHalfPointsParaOrden( int $playerId, array $metricas ): int {
+        $puntaje = $metricas[ $playerId ]->puntaje();
+
+        if ( null === $puntaje ) {
+            throw new \LogicException(
+                "CandidatosResolver::ordenarCandidatos(): player_id {$playerId} has no resolvable puntaje. "
+                . "buscarPaginado(), this method's only caller, MUST exclude every unrated candidate from "
+                . 'the population before sorting — see ordenarCandidatos()\'s own docblock. Reaching this '
+                . 'means that precondition was violated upstream.'
+            );
+        }
+
+        return $puntaje->halfPoints();
     }
 
     /**
