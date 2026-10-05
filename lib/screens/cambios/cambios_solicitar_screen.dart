@@ -569,7 +569,7 @@ class _PuntajeChips extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Techo de esta plaza: $label pts.',
+            'Puntaje máximo para este cambio: $label pts.',
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black54),
           ),
           const SizedBox(height: 6),
@@ -727,6 +727,7 @@ class _CandidatosList extends StatelessWidget {
           esPadre: c.esPadre,
           puntaje: c.puntaje,
           fotoUrl: c.fotoUrl,
+          posicion: c.posicion,
           selected: selectedPlayerId == c.playerId,
           onTap: () => onSelect(c.playerId),
         );
@@ -877,13 +878,21 @@ class _VentanaEstadoBanner extends StatelessWidget {
   /// kept consistent rather than introducing a third phrasing.
   String get _accion => esSustitucion ? 'un cambio' : 'un regreso';
 
+  /// The PLURAL subject for the `antes` copy — "Los cambios se habilitan..."
+  /// / "Los regresos se habilitan..." — never built by pluralizing [_accion]
+  /// in place: "un cambio" → "Los un cambio" does not read as a sentence.
+  /// Kept as its own getter rather than contorting [_accion] into carrying
+  /// both grammatical numbers, since the `cerrada` copy below still needs
+  /// the SINGULAR form unchanged.
+  String get _accionPlural => esSustitucion ? 'Los cambios' : 'Los regresos';
+
   String get _mensaje {
     if (fase == CambiosVentanaFase.antes) {
       final apertura = aperturaSolicitudesUtc;
       if (apertura == null) {
         return 'Todavía no se abrió el plazo para pedir $_accion en esta fecha.';
       }
-      return 'Vas a poder pedir $_accion a partir del ${formatDiaYFechaCorta(apertura)}.';
+      return '$_accionPlural se habilitan a partir del ${formatDiaYFechaCorta(apertura)}.';
     }
 
     return esSustitucion

@@ -17,6 +17,7 @@ use EntreRedes\Cambios\Plazas\CandidatosSeccion;
 use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
 use EntreRedes\Cambios\Plazas\ListaEsperaResolver;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Plazas\PosicionResolver;
 use EntreRedes\Cambios\Plazas\Puntaje;
 
 /**
@@ -90,6 +91,9 @@ class PlazasController {
     /** @var callable(int): (string|false) */
     private $fotoResolverFn;
 
+    /** @var callable(array<int, int>): array<int, string> */
+    private $posicionResolverFn;
+
     /**
      * Player ids whose photo resolution THREW during the response currently
      * being built — reset at the start of every `listarCandidatos()` call,
@@ -100,6 +104,17 @@ class PlazasController {
      * @var array<int, int>
      */
     private array $fotoResolverFailures = [];
+
+    /**
+     * This PAGE's player_id => main position name, resolved ONCE (batched,
+     * never per row — see `Plazas\PosicionResolver`'s own docblock) right
+     * before `shapeCandidato()` runs for every candidate in the page, and
+     * read back inside it. Reset at the start of every `listarCandidatos()`
+     * call, same lifecycle as `$fotoResolverFailures` above.
+     *
+     * @var array<int, string>
+     */
+    private array $posicionesPorJugador = [];
 
     /** Default `?per_page=` when the request omits it — see listarCandidatos(). */
     private const DEFAULT_PER_PAGE = 20;
@@ -148,6 +163,13 @@ class PlazasController {
      *        `get_the_post_thumbnail_url()` call. Defaults to exactly that
      *        call, at the SAME `'medium'` size `entre-redes-api`'s own
      *        `/jugadores` endpoint already serves.
+     * @param callable(array<int, int>): array<int, string>|null $posicionResolverFn
+     *        Resolves a WHOLE page of candidate ids to their main `sp_position`
+     *        name in one batched call — see `Plazas\PosicionResolver`'s own
+     *        class docblock for why this is injectable rather than a direct
+     *        `wp_get_object_terms()` call (this plugin's SQLite test shim has
+     *        no taxonomy equivalent, same reasoning as `$fotoResolverFn`
+     *        above). Defaults to `(new PosicionResolver())->resolverParaIds()`.
      */
     public function __construct(
         CapitanAuthorizer $authorizer,
@@ -158,7 +180,8 @@ class PlazasController {
         ?BloqueoReemplazoPolicy $politicaCC5b = null,
         ?callable $clockFn = null,
         ?ListaEsperaResolver $listaEsperaResolver = null,
-        ?callable $fotoResolverFn = null
+        ?callable $fotoResolverFn = null,
+        ?callable $posicionResolverFn = null
     ) {
         $this->authorizer          = $authorizer;
         $this->plazaRepository     = $plazaRepository;
@@ -169,6 +192,7 @@ class PlazasController {
         $this->clockFn             = $clockFn ?? static fn (): int => time();
         $this->listaEsperaResolver = $listaEsperaResolver;
         $this->fotoResolverFn      = $fotoResolverFn ?? static fn ( int $playerId ) => get_the_post_thumbnail_url( $playerId, 'medium' );
+        $this->posicionResolverFn  = $posicionResolverFn ?? static fn ( array $playerIds ): array => ( new PosicionResolver() )->resolverParaIds( $playerIds );
     }
 
     public function register_routes(): void {
@@ -335,7 +359,14 @@ class PlazasController {
      *
      * Response 200 (header `X-WP-Total: <int>`, see "PAGINATION" below):
      * { candidatos: [ { player_id, nombre, es_padre, puntaje, viable, motivo,
-     *         foto_url }, ... ] }
+     *         foto_url, posicion }, ... ] }
+     *
+     * `posicion` is the candidate's main `sp_position` NAME (e.g. `Arquero`,
+     * `Sin Posicion`), resolved for the whole page in ONE batched call — see
+     * `Plazas\PosicionResolver`'s own class docblock for exactly how "main"
+     * is chosen (mirroring `entre-redes-api`'s own `/jugadores` endpoint so
+     * this screen never disagrees with the Players/Team screens about the
+     * same player).
      *
      * THE single endpoint the captain's screen calls to know who is
      * available for a plaza AND why someone is not — backed entirely by
@@ -521,13 +552,20 @@ class PlazasController {
                 ) );
             }
 
-            // Names/photos are primed for exactly the PAGE this response
-            // returns — never the whole population — see
-            // primePlayerTitles()'s own docblock and fotoJugador()'s.
-            $this->primePlayerTitles( array_map(
+            // Names/photos/posiciones are all resolved for exactly the PAGE
+            // this response returns — never the whole population — see
+            // primePlayerTitles()'s own docblock, fotoJugador()'s, and
+            // Plazas\PosicionResolver's own class docblock. Posición is
+            // resolved in ONE batched call for the whole page here (never
+            // one call per candidate inside shapeCandidato() itself), the
+            // exact N+1 shape this endpoint already removed for the name and
+            // the photo.
+            $pageIds = array_map(
                 static fn ( CandidatoEstado $c ): int => $c->playerId(),
                 $candidatos
-            ) );
+            );
+            $this->primePlayerTitles( $pageIds );
+            $this->posicionesPorJugador = ( $this->posicionResolverFn )( $pageIds );
 
             $this->fotoResolverFailures = [];
             $candidatosShape            = array_map( [ $this, 'shapeCandidato' ], $candidatos );
@@ -582,6 +620,7 @@ class PlazasController {
             'viable'    => $c->viable(),
             'motivo'    => $c->motivoNoViable(),
             'foto_url'  => $this->fotoJugador( $c->playerId() ),
+            'posicion'  => $this->posicionesPorJugador[ $c->playerId() ] ?? PosicionResolver::SIN_POSICION,
         ];
     }
 

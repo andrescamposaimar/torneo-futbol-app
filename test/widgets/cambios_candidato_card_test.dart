@@ -235,4 +235,90 @@ void main() {
       }
     });
   });
+
+  group('CambiosCandidatoCard — posicion', () {
+    testWidgets('renders the abbreviated posicion text via CambiosPosicionBadge', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Juan Pérez',
+          esPadre: false,
+          puntaje: 4.5,
+          posicion: 'Mediocampista',
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      // posicionAbreviada('Mediocampista') == 'Medio.' — see posicion_utils.dart.
+      expect(find.text('Medio.'), findsOneWidget);
+      expect(find.byType(CambiosPosicionBadge), findsOneWidget);
+    });
+
+    testWidgets('an empty/unresolved posicion renders "Sin Cargar", never a blank badge',
+        (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Juan Pérez',
+          esPadre: false,
+          puntaje: 4.5,
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      expect(find.text('Sin Cargar'), findsOneWidget);
+    });
+
+    testWidgets('the SAME posicion renders the SAME badge color CambiosJugadorCard uses '
+        '(shared CambiosPosicionBadge, never a second color map)', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 1,
+          nombre: 'Juan Pérez',
+          esPadre: false,
+          puntaje: 4.5,
+          posicion: 'Arquero',
+          selected: false,
+          onTap: () {},
+        ),
+      ));
+
+      final badge = tester.widget<CambiosPosicionBadge>(find.byType(CambiosPosicionBadge));
+      expect(badge.posicion, 'Arquero');
+
+      final strip = tester.widget<Container>(
+        find.descendant(
+          of: find.byType(CambiosPosicionBadge),
+          matching: find.byWidgetPredicate((w) => w is Container && w.decoration is BoxDecoration),
+        ),
+      );
+      final decoration = strip.decoration as BoxDecoration;
+      expect(decoration.color, Colors.cyan.shade700, reason: 'Arquero is cyan — posicionColor().');
+    });
+
+    testWidgets(
+        'no RenderFlex overflow at a narrow phone width with BOTH a long name and the position '
+        'badge rendered together', (tester) async {
+      await tester.pumpWidget(_wrap(
+        CambiosCandidatoCard(
+          playerId: 3,
+          nombre: 'Rogel, Gaston Alejandro',
+          esPadre: false,
+          puntaje: 4.5,
+          posicion: 'Mediocampista',
+          selected: false,
+          onTap: () {},
+        ),
+        size: const Size(320, 667),
+      ));
+
+      expect(tester.takeException(), isNull);
+      expect(find.byWidgetPredicate((w) => w.runtimeType.toString() == 'ErrorWidget'),
+          findsNothing);
+      expect(find.text('Medio.'), findsOneWidget);
+      expect(find.text('Rogel, Gaston Alejandro'), findsOneWidget);
+    });
+  });
 }

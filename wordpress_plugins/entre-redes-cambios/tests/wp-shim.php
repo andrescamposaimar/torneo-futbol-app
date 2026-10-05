@@ -890,6 +890,49 @@ if ( ! function_exists( 'get_the_title' ) ) {
     }
 }
 
+if ( ! function_exists( 'wp_get_object_terms' ) ) {
+    /**
+     * Minimal shim for Plazas\PosicionResolver's DEFAULT resolution path
+     * (`Rest\PlazasController`'s own `$posicionResolverFn` default) — real
+     * WordPress batches one taxonomy query across every id in $object_ids;
+     * this shim has no taxonomy table to query, so it is data-driven via
+     * $wp_test_position_terms, same convention as $wp_test_postmeta /
+     * $wp_test_post_titles above: $wp_test_position_terms[$playerId] is a
+     * plain list of term ids, in the exact order a test wants
+     * `wp_get_object_terms()` to "return" them for that player (this is
+     * what PosicionResolverTest exercises to prove "first match in returned
+     * order wins" — see that class's own docblock). Empty/unset for a given
+     * id reproduces "no sp_position term assigned", same as every other
+     * shim here defaulting to "no data" when a test seeds nothing.
+     *
+     * Only `[ 'fields' => 'all_with_object_id' ]` is supported — the one
+     * shape PosicionResolver actually calls with — so each returned row is
+     * a bare \stdClass carrying just the two properties that call asks for.
+     *
+     * @param array<int, int>|int $object_ids
+     * @param string|array<int, string> $taxonomies
+     * @param array<string, mixed> $args
+     * @return array<int, \stdClass>
+     */
+    function wp_get_object_terms( $object_ids, $taxonomies, array $args = [] ): array {
+        global $wp_test_position_terms;
+
+        $ids  = is_array( $object_ids ) ? $object_ids : [ $object_ids ];
+        $rows = [];
+
+        foreach ( $ids as $id ) {
+            foreach ( ( $wp_test_position_terms[ (int) $id ] ?? [] ) as $termId ) {
+                $row            = new \stdClass();
+                $row->object_id = (int) $id;
+                $row->term_id   = (int) $termId;
+                $rows[]         = $row;
+            }
+        }
+
+        return $rows;
+    }
+}
+
 if ( ! function_exists( 'get_posts' ) ) {
     /**
      * Minimal shim for Rest\PlazasController::primePlayerTitles() /
