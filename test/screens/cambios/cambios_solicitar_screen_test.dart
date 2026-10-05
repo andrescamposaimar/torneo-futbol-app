@@ -208,7 +208,23 @@ Future<void> _pumpScreen(
   // simulate "no open fecha" (either {"fecha": null} or a failed fetch).
   CambiosFechaAbierta? fecha = _defaultFecha,
   double? puntaje,
+  String? titularNombre,
 }) async {
+  final plaza = null == titularNombre
+      ? _plaza
+      : CambiosPlaza(
+          plazaId: _plaza.plazaId,
+          titularPlayerId: _plaza.titularPlayerId,
+          titularNombre: titularNombre,
+          ocupantePlayerId: _plaza.ocupantePlayerId,
+          ocupanteNombre: _plaza.ocupanteNombre,
+          esTitularElOcupante: _plaza.esTitularElOcupante,
+          cerrada: _plaza.cerrada,
+          puntajeTecho: _plaza.puntajeTecho,
+          fechasFaltantesLiberacion: _plaza.fechasFaltantesLiberacion,
+          fechasFaltantesLiberacionIndeterminado: _plaza.fechasFaltantesLiberacionIndeterminado,
+        );
+
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -235,7 +251,7 @@ Future<void> _pumpScreen(
         home: CambiosSolicitarScreen(
           seasonId: 7,
           teamId: 1,
-          plaza: _plaza,
+          plaza: plaza,
           tipo: tipo,
           puntaje: puntaje,
         ),
@@ -915,6 +931,51 @@ void main() {
 
       expect(find.text('Juan Pérez'), findsOneWidget);
       expect(find.textContaining('ptos'), findsNothing);
+    });
+
+    testWidgets('a sustitucion leads the name with an OUTGOING icon', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion, puntaje: 4.5);
+
+      expect(find.byIcon(Icons.person_remove_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.person_add_outlined), findsNothing);
+
+      // Reading order: icon first, then the name it qualifies.
+      final iconoX = tester.getTopLeft(find.byIcon(Icons.person_remove_outlined)).dx;
+      final nombreX = tester.getTopLeft(find.text('Juan Pérez')).dx;
+      expect(nombreX, greaterThan(iconoX));
+    });
+
+    testWidgets('a regreso leads with an INCOMING icon, never the outgoing one', (tester) async {
+      // The two tipos move this player in OPPOSITE directions: a sustitucion
+      // takes the titular OUT of the plaza, a regreso brings him BACK. The
+      // outgoing icon here would state the opposite of what is happening.
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.regreso, puntaje: 4.5);
+
+      expect(find.byIcon(Icons.person_add_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.person_remove_outlined), findsNothing);
+    });
+
+    testWidgets('a long name ellipsizes rather than overflowing, even at a double text scale',
+        (tester) async {
+      // 320px with the widget-test font, whose glyphs are square: the same
+      // pressure a real device puts on this row when the reader has large
+      // text turned on. An earlier version of this header carried a
+      // "Pedir cambio por: " prefix and overflowed here by 111px.
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        puntaje: 4.5,
+        titularNombre: 'Von Hohenzollern-Sigmaringen, Maximiliano Alejandro',
+      );
+
+      expect(tester.takeException(), isNull);
+      // The puntaje survives whole — the NAME is what gives way.
+      expect(find.text('4.5 ptos'), findsOneWidget);
+      expect(find.byIcon(Icons.person_remove_outlined), findsOneWidget);
     });
   });
 
