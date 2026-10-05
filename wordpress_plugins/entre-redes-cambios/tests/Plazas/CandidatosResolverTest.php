@@ -1211,6 +1211,13 @@ class CandidatosResolverTest extends TestCase {
      * `buscarPaginado()`'s own docblock, "THE SORT KEY") — a key that is
      * only stable WITHIN a page, but not across pages, would show up here as
      * a duplicate or a gap in $seen.
+     *
+     * Two unrated candidates (306, 307) are seeded ALONGSIDE the rated ones
+     * specifically to prove the exclusion filter (see class docblock, "AN
+     * UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL — IN buscarPaginado()
+     * ONLY") holds even mid-population, not only at the edges: `total` must
+     * count only the 5 rated candidates, and neither 306 nor 307 may ever
+     * appear on any page, regardless of how many pages are requested.
      */
     public function test_buscar_paginado_pages_through_a_mixed_population_in_the_exact_global_order(): void {
         $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
@@ -1222,8 +1229,8 @@ class CandidatosResolverTest extends TestCase {
         $this->seedPlayer( 303, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
         $this->seedPlayer( 304, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4' ] );
         $this->seedPlayer( 305, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
-        $this->seedPlayer( 306, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
-        $this->seedPlayer( 307, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
+        $this->seedPlayer( 306, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje — must be excluded
+        $this->seedPlayer( 307, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '0' ] ); // "sin calificar" — must be excluded too
 
         foreach ( [ 301 => 'Beta', 302 => 'Alfa', 303 => 'Delta', 304 => 'Charlie', 305 => 'Echo', 306 => 'Zulu', 307 => 'Aaa' ] as $id => $nombre ) {
             $wpdb->update( "{$p}posts", [ 'post_title' => $nombre ], [ 'ID' => $id ] );
@@ -1232,7 +1239,7 @@ class CandidatosResolverTest extends TestCase {
         $plaza = $this->plazaRepository->findPlaza( $plazaId );
 
         $seen = [];
-        for ( $page = 1; $page <= 3; $page++ ) {
+        for ( $page = 1; $page <= 2; $page++ ) {
             $resultado = $this->resolver->buscarPaginado(
                 $plaza,
                 null,
@@ -1243,19 +1250,21 @@ class CandidatosResolverTest extends TestCase {
                 3
             );
 
-            $this->assertSame( 7, $resultado['total'], "total must stay 7 regardless of which page (page {$page}) is requested." );
+            $this->assertSame( 5, $resultado['total'], "total must count only the 5 rated candidates, regardless of which page (page {$page}) is requested." );
 
             foreach ( $resultado['candidatos'] as $c ) {
                 $seen[] = $c->playerId();
             }
         }
 
-        $this->assertCount( 7, array_unique( $seen ), 'No candidate must be duplicated or skipped across pages.' );
+        $this->assertCount( 5, array_unique( $seen ), 'No rated candidate must be duplicated or skipped across pages.' );
+        $this->assertNotContains( 306, $seen, 'An unrated candidate (no puntaje key at all) must never appear on any page.' );
+        $this->assertNotContains( 307, $seen, 'A candidate whose stored puntaje is "0" ("sin calificar") must never appear on any page.' );
         $this->assertSame(
-            [ 302, 301, 304, 303, 305, 307, 306 ],
+            [ 302, 301, 304, 303, 305 ],
             $seen,
-            'Expected global order: puntaje 5 (Alfa before Beta), puntaje 4 (Charlie before Delta), '
-            . 'puntaje 2.5 (Echo), then unrated last, ordered by name (Aaa before Zulu).'
+            'Expected global order over the RATED population only: puntaje 5 (Alfa before Beta), '
+            . 'puntaje 4 (Charlie before Delta), then puntaje 2.5 (Echo) — no unrated candidate present at all.'
         );
     }
 
@@ -1364,13 +1373,16 @@ class CandidatosResolverTest extends TestCase {
     }
 
     /**
-     * Where an unrated candidate lands is a DECISION, not an accident of
-     * `?? 0` — see `ordenarCandidatos()`'s own docblock. An unrated
-     * candidate is never viable/selectable in the first place
-     * (`partitionPorTecho()`), so this asserts they sort AFTER even the
-     * lowest genuinely-rated puntaje (1.0), never tied with or ahead of one.
+     * UPDATED from #144's original behavior (where an unrated candidate
+     * sorted last via a dedicated `-1` sentinel in `ordenarCandidatos()`): a
+     * player with no resolvable puntaje is no longer a candidate at all —
+     * there is nowhere for them to "sort" because they never enter the
+     * population in the first place (see class docblock, "AN UNRESOLVABLE
+     * PUNTAJE IS NOT A CANDIDATE AT ALL — IN buscarPaginado() ONLY"). This
+     * asserts the unrated candidate is ABSENT and `total` reflects only the
+     * rated one, never that they appear last.
      */
-    public function test_buscar_paginado_orders_candidates_with_no_puntaje_last(): void {
+    public function test_buscar_paginado_excludes_candidates_with_no_puntaje_instead_of_sorting_them_last(): void {
         $plazaId = $this->plaza( 10 );
 
         $this->seedPlayer( 600, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // sin puntaje
@@ -1388,11 +1400,11 @@ class CandidatosResolverTest extends TestCase {
             10
         );
 
+        $this->assertSame( 1, $resultado['total'], 'total must count only the rated candidate.' );
         $this->assertSame(
-            [ 601, 600 ],
+            [ 601 ],
             array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ),
-            'An unrated candidate must sort AFTER even the lowest valid puntaje (1.0) — never tie '
-            . 'with, or sort before, a genuinely-rated candidate.'
+            'A candidate with no resolvable puntaje must be absent entirely — never present and sorted last.'
         );
     }
 
@@ -1414,6 +1426,15 @@ class CandidatosResolverTest extends TestCase {
      * asserts the whole page still resolves with the other candidates
      * intact, exactly like the fix's task brief requires ("the request still
      * succeeds").
+     *
+     * UPDATED for the "exclude unrated candidates" change: the puntaje-zero
+     * player is no longer merely non-viable (`puntaje_indeterminado`) — it is
+     * absent from the result and from `total` entirely (see class docblock,
+     * "AN UNRESOLVABLE PUNTAJE IS NOT A CANDIDATE AT ALL — IN
+     * buscarPaginado() ONLY"). The original 500-regression this test exists
+     * for is still exercised: `resolveMuchos()` still runs over the whole
+     * population including the puntaje-zero row, so a regression there would
+     * still surface here as a thrown exception, not a passing test.
      */
     public function test_buscar_paginado_does_not_500_when_one_padron_completo_candidate_has_a_stored_puntaje_of_zero(): void {
         $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
@@ -1434,16 +1455,126 @@ class CandidatosResolverTest extends TestCase {
             10
         );
 
-        $this->assertSame( 3, $resultado['total'] );
+        $this->assertSame( 2, $resultado['total'], 'total must count only the 2 rated candidates.' );
 
         $porId = [];
         foreach ( $resultado['candidatos'] as $c ) {
             $porId[ $c->playerId() ] = $c;
         }
 
-        $this->assertFalse( $porId[800]->viable() );
-        $this->assertSame( 'puntaje_indeterminado', $porId[800]->motivoNoViable() );
+        $this->assertArrayNotHasKey( 800, $porId, 'The puntaje-zero ("sin calificar") candidate must be absent entirely, not merely non-viable.' );
         $this->assertTrue( $porId[801]->viable() );
         $this->assertTrue( $porId[802]->viable() );
+    }
+
+    // -------------------------------------------------------------------------
+    // buscarPaginado() — unrated candidates are excluded, not just non-viable
+    // -------------------------------------------------------------------------
+
+    /**
+     * THE user-facing rule this slice's task brief states directly: without
+     * a puntaje there is nothing to evaluate against the plaza's techo, so
+     * such a player is not a candidate at all — in NEITHER screen section.
+     * Covers the default (season-registered), `lista_espera`, AND
+     * `padron_completo` populations in one test, since all three go through
+     * the SAME exclusion filter in `buscarPaginado()` (see class docblock).
+     */
+    public function test_buscar_paginado_excludes_unrated_candidates_from_every_seccion(): void {
+        $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
+
+        // Default (season-registered) population.
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] ); // rated
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // unrated
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultadoDefault = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame( 1, $resultadoDefault['total'] );
+        $this->assertSame( [ 800 ], array_map( static fn ( $c ) => $c->playerId(), $resultadoDefault['candidatos'] ) );
+
+        // lista_espera population.
+        $this->seedPlayer( 820, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] ); // rated
+        $this->seedEquipoMembership( 820, self::LISTA_ESPERA_TEAM_ID );
+        $this->seedPlayer( 821, self::SEASON_ID, [ 'caracter' => 'Invitado' ] ); // unrated
+        $this->seedEquipoMembership( 821, self::LISTA_ESPERA_TEAM_ID );
+
+        $resultadoListaEspera = $this->resolver->buscarPaginado(
+            $plaza,
+            CandidatosSeccion::LISTA_ESPERA,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame( 1, $resultadoListaEspera['total'] );
+        $this->assertSame( [ 820 ], array_map( static fn ( $c ) => $c->playerId(), $resultadoListaEspera['candidatos'] ) );
+
+        // padron_completo population.
+        $this->seedPlayerSinTemporada( 900, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] ); // rated
+        $this->seedPlayerSinTemporada( 901, [ 'caracter' => 'Invitado' ] ); // unrated
+
+        $resultadoPadronCompleto = $this->resolver->buscarPaginado(
+            $plaza,
+            CandidatosSeccion::PADRON_COMPLETO,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultadoPadronCompleto['candidatos'] );
+        $this->assertContains( 900, $ids );
+        $this->assertNotContains( 901, $ids );
+        $this->assertNotContains( 801, $ids, 'An unrated season-registered player must stay excluded from padron_completo too.' );
+    }
+
+    /**
+     * THE regression this slice's task brief calls out explicitly: a stored
+     * puntaje that is neither empty, nor "0", but genuinely malformed (not
+     * one of the 9 valid puntajes) must still record `metrics.puntaje_invalido`
+     * via `JugadorMetricasReader::extractPuntaje()` — see that class's own
+     * class docblock, "AN OTHERWISE-INVALID STORED VALUE DEGRADES TO NULL
+     * TOO, BUT IS LOGGED" — even though the candidate is now excluded from
+     * `buscarPaginado()`'s population entirely rather than merely marked
+     * non-viable. The exclusion filter must never swallow that signal.
+     */
+    public function test_buscar_paginado_still_logs_puntaje_invalido_for_an_excluded_malformed_candidate(): void {
+        $plazaId = $this->plaza( 10 );
+
+        $this->seedPlayer( 850, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => 'no-es-un-numero' ] );
+        $this->seedPlayer( 851, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertSame( 1, $resultado['total'], 'The malformed-puntaje candidate must be excluded from total, same as a genuinely unrated one.' );
+        $this->assertSame( [ 851 ], array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ) );
+
+        $this->assertTrue(
+            $this->eventLog->has( 'metrics.puntaje_invalido' ),
+            'A malformed stored puntaje must still be logged, even though the candidate is now excluded rather than just non-viable.'
+        );
+        $this->assertSame( 850, $this->eventLog->last()['contexto']['player_id'] ?? null );
     }
 }
