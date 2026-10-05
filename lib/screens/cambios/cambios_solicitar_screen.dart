@@ -477,12 +477,17 @@ class _PlazaHeader extends StatelessWidget {
     required this.esSustitucion,
   });
 
-  /// No text label accompanies this icon: a prefix like "Pedir cambio por:"
-  /// pushed the row past its width once the name and puntaje were also on
-  /// it (measured: a 111px overflow at a double text scale), and the AppBar
-  /// title already names the action. The icon carries the direction alone.
-  IconData get _icono =>
-      esSustitucion ? Icons.person_remove_outlined : Icons.person_add_outlined;
+  /// The football substitution board's own vocabulary: an arrow DOWN for the
+  /// player leaving, an arrow UP for the player coming back. Deliberately not
+  /// a `swap_*` icon — this icon sits beside ONE player's name, so it has to
+  /// say what happens to HIM, not that a substitution exists. `swap_horiz`
+  /// would belong on the confirm button, not here.
+  ///
+  /// No text label accompanies it: a "Pedir cambio por: " prefix was tried and
+  /// pushed the row past its width once the name and puntaje were also on it
+  /// (measured: a 111px overflow at a double text scale). The AppBar title
+  /// already names the action, so the arrow carries the direction alone.
+  IconData get _icono => esSustitucion ? Icons.arrow_downward : Icons.arrow_upward;
 
   @override
   Widget build(BuildContext context) {

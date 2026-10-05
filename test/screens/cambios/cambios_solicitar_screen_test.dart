@@ -933,26 +933,26 @@ void main() {
       expect(find.textContaining('ptos'), findsNothing);
     });
 
-    testWidgets('a sustitucion leads the name with an OUTGOING icon', (tester) async {
+    testWidgets('a sustitucion leads the name with a DOWN arrow (the player leaving)', (tester) async {
       await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion, puntaje: 4.5);
 
-      expect(find.byIcon(Icons.person_remove_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.person_add_outlined), findsNothing);
+      expect(find.byIcon(Icons.arrow_downward), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_upward), findsNothing);
 
       // Reading order: icon first, then the name it qualifies.
-      final iconoX = tester.getTopLeft(find.byIcon(Icons.person_remove_outlined)).dx;
+      final iconoX = tester.getTopLeft(find.byIcon(Icons.arrow_downward)).dx;
       final nombreX = tester.getTopLeft(find.text('Juan Pérez')).dx;
       expect(nombreX, greaterThan(iconoX));
     });
 
-    testWidgets('a regreso leads with an INCOMING icon, never the outgoing one', (tester) async {
+    testWidgets('a regreso leads with an UP arrow, never the down one', (tester) async {
       // The two tipos move this player in OPPOSITE directions: a sustitucion
       // takes the titular OUT of the plaza, a regreso brings him BACK. The
-      // outgoing icon here would state the opposite of what is happening.
+      // down arrow here would state the opposite of what is happening.
       await _pumpScreen(tester, tipo: CambiosSolicitudTipo.regreso, puntaje: 4.5);
 
-      expect(find.byIcon(Icons.person_add_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.person_remove_outlined), findsNothing);
+      expect(find.byIcon(Icons.arrow_upward), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_downward), findsNothing);
     });
 
     testWidgets('a long name ellipsizes rather than overflowing, even at a double text scale',
@@ -975,7 +975,7 @@ void main() {
       expect(tester.takeException(), isNull);
       // The puntaje survives whole — the NAME is what gives way.
       expect(find.text('4.5 ptos'), findsOneWidget);
-      expect(find.byIcon(Icons.person_remove_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_downward), findsOneWidget);
     });
   });
 
