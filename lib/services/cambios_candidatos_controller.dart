@@ -115,6 +115,27 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
   /// round trip returns, never correctness.
   static const int _perPage = 20;
 
+  /// *** WHY A PAGE CAN STILL COME BACK EMPTY WHILE MORE PAGES REMAIN ***
+  /// Even after `Plazas\CandidatosResolver::buscarPaginado()` stopped
+  /// letting an over-ceiling candidate fill a page (see that method's own
+  /// docblock, "THE CEILING IS A POPULATION FILTER, NOT A PER-PAGE
+  /// VERDICT"), a page can still legitimately return FEWER items than
+  /// `_perPage` — or zero — because the backend's own phase-2 viability
+  /// check (occupying another plaza, blocked by a trunca closure elsewhere)
+  /// still runs PER PAGE, after pagination (see that method's own docblock,
+  /// "`$total` IS THEREFORE VERY SLIGHTLY OPTIMISTIC"). An empty page is
+  /// therefore NOT by itself proof the list is exhausted — only `hasMore`
+  /// (computed from the server's own total/page math, see [hasMoreFor]) is.
+  /// [maxConsecutiveEmptyPages] is the hard bound against the pathological
+  /// case: a server that keeps reporting `hasMore: true` while returning
+  /// empty page after empty page must still make this controller STOP,
+  /// rather than fetch forever chasing a row that never comes — see
+  /// `_fetchSkippingEmptyPages`'s own docblock for how the bound is applied.
+  /// Public (not private) so the test suite can drive exactly this many
+  /// empty pages without guessing a magic number.
+  @visibleForTesting
+  static const int maxConsecutiveEmptyPages = 3;
+
   int _page = 1;
 
   /// Monotonically increasing request-generation counter. Captured into a
@@ -157,35 +178,34 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
   /// themselves changed (a debounced search keystroke, a puntaje chip
   /// toggle, or the first time a lazy section is opened). Use [loadMore] to
   /// append the NEXT page of the SAME search instead.
+  ///
+  /// *** AN EMPTY PAGE 1 IS NOT, BY ITSELF, "NO CANDIDATES" *** See
+  /// `_fetchSkippingEmptyPages`'s own docblock for why: this delegates to it
+  /// starting at page 1, so [state] stays [CambiosCandidatosLoading] — never
+  /// the misleading empty state — for as long as the server keeps reporting
+  /// `hasMore: true` on an empty page, up to [maxConsecutiveEmptyPages].
   Future<void> load({String query = '', List<double> puntajes = const []}) async {
     final generation = ++_requestGeneration;
     state = const CambiosCandidatosLoading();
     _page = 1;
     try {
-      final pagina = await _service.fetchCandidatos(
-        seasonId: seasonId,
-        teamId: teamId,
-        plazaId: plazaId,
-        seccion: seccion,
-        search: query.isEmpty ? null : query,
-        puntajes: puntajes,
-        page: _page,
-        perPage: _perPage,
-      );
-      // A newer load()/loadMore() already started while this one was in
-      // flight — see [_requestGeneration]'s own docblock. Abandon this
-      // result; the newer call owns [state] now.
-      if (generation != _requestGeneration) return;
-      state = CambiosCandidatosLoaded(
-        candidatos: pagina.candidatos,
+      final resultado = await _fetchSkippingEmptyPages(
+        generation: generation,
+        fromPage: _page,
         query: query,
         puntajes: puntajes,
-        hasMore: hasMoreFor(
-          loadedCount: _page * _perPage,
-          total: pagina.total,
-          perPage: _perPage,
-          lastPageCount: pagina.candidatos.length,
-        ),
+      );
+      // A newer load()/loadMore() already started while this one was in
+      // flight — see [_requestGeneration]'s own docblock, and
+      // `_fetchSkippingEmptyPages`'s own `stale` field. Abandon this result;
+      // the newer call owns [state] now.
+      if (resultado.stale || generation != _requestGeneration) return;
+      _page = resultado.page;
+      state = CambiosCandidatosLoaded(
+        candidatos: resultado.candidatos,
+        query: query,
+        puntajes: puntajes,
+        hasMore: resultado.hasMore,
       );
     } catch (_) {
       if (generation != _requestGeneration) return;
@@ -209,6 +229,12 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
   /// a list the captain was already looking at). Calling [loadMore] again —
   /// the screen's own retry affordance, or simply scrolling back to the
   /// bottom — clears the error the same way a successful fetch would.
+  ///
+  /// Same empty-page continuation as [load] — see
+  /// `_fetchSkippingEmptyPages`'s own docblock — except there is already
+  /// something real on screen here, so continuation happens silently behind
+  /// `isLoadingMore: true` rather than by staying in a full-screen loading
+  /// state.
   Future<void> loadMore() async {
     final current = state;
     if (current is! CambiosCandidatosLoaded) return;
@@ -226,33 +252,24 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
 
     final nextPage = _page + 1;
     try {
-      final pagina = await _service.fetchCandidatos(
-        seasonId: seasonId,
-        teamId: teamId,
-        plazaId: plazaId,
-        seccion: seccion,
-        search: current.query.isEmpty ? null : current.query,
+      final resultado = await _fetchSkippingEmptyPages(
+        generation: generation,
+        fromPage: nextPage,
+        query: current.query,
         puntajes: current.puntajes,
-        page: nextPage,
-        perPage: _perPage,
       );
       // A newer load()/loadMore() already started while this one was in
       // flight — see [_requestGeneration]'s own docblock. Abandon this
       // result (including the page-cursor advance below): applying it now
       // would merge a page fetched for a query the screen no longer shows
       // into whatever the newer call already rendered.
-      if (generation != _requestGeneration) return;
-      _page = nextPage;
+      if (resultado.stale || generation != _requestGeneration) return;
+      _page = resultado.page;
       state = CambiosCandidatosLoaded(
-        candidatos: [...current.candidatos, ...pagina.candidatos],
+        candidatos: [...current.candidatos, ...resultado.candidatos],
         query: current.query,
         puntajes: current.puntajes,
-        hasMore: hasMoreFor(
-          loadedCount: _page * _perPage,
-          total: pagina.total,
-          perPage: _perPage,
-          lastPageCount: pagina.candidatos.length,
-        ),
+        hasMore: resultado.hasMore,
       );
     } catch (_) {
       if (generation != _requestGeneration) return;
@@ -264,6 +281,99 @@ class CambiosCandidatosController extends StateNotifier<CambiosCandidatosState> 
         isLoadingMore: false,
         loadMoreError: true,
       );
+    }
+  }
+
+  /// Fetches starting at [fromPage], transparently skipping forward through
+  /// any EMPTY page the server returns while it still reports `hasMore:
+  /// true` — shared by [load] (from page 1) and [loadMore] (from the next
+  /// page), so neither ever has to render the empty state, or append
+  /// nothing, for a page that was stripped empty by the backend's own
+  /// per-page phase-2 viability check (occupying another plaza, blocked by a
+  /// trunca closure elsewhere — see `Plazas\CandidatosResolver::
+  /// buscarPaginado()`'s own docblock on the backend, "`$total` IS
+  /// THEREFORE VERY SLIGHTLY OPTIMISTIC"). This is the app-side half of the
+  /// same production incident the backend's own ceiling-as-population-filter
+  /// fix addresses: EITHER side returning an empty page while more pages
+  /// plausibly remain must never read as "no candidates" to the captain.
+  ///
+  /// *** THE CAP — WHY AN UNBOUNDED LOOP WOULD BE WORSE THAN THE BUG ***
+  /// A server that kept returning empty pages while reporting `hasMore:
+  /// true` forever (a bug, a misconfigured per_page, or simply a VERY long
+  /// stretch of phase-2 non-viable candidates) would make this loop fetch
+  /// forever if left unbounded — turning "a short delay before the list
+  /// renders" into "the screen never renders at all", which is a worse
+  /// failure than the empty state this method exists to avoid. After
+  /// [maxConsecutiveEmptyPages] CONSECUTIVE empty pages, this method stops
+  /// and returns whatever it has (empty, if every page tried was empty) —
+  /// [load]/[loadMore] then render that as a normal terminal state (the
+  /// empty view if genuinely nothing came back, same as before this
+  /// continuation existed), never a hang. A page that eventually comes back
+  /// NON-empty resets the streak implicitly by ending the loop right there.
+  ///
+  /// *** STALENESS IS CHECKED INSIDE THE LOOP, NOT JUST AFTER IT *** Each
+  /// iteration `await`s a real network call — the one point where a NEWER
+  /// [load]/[loadMore] call can start and bump [_requestGeneration] (see
+  /// that field's own docblock). Checking only once, after this method
+  /// returns, would let this loop keep burning network requests for filters
+  /// the screen no longer shows; checking after EVERY page keeps a stale
+  /// chase as short as a single extra request.
+  ///
+  /// @return [stale] `true` means [generation] no longer matches
+  ///         [_requestGeneration] — the caller must discard [candidatos]
+  ///         entirely rather than apply it (same discipline [load]/
+  ///         [loadMore] already applied to a single-page result before this
+  ///         method existed). [page] is the LAST page this method actually
+  ///         fetched (whether or not it was empty) — the caller's new
+  ///         `_page` cursor. [hasMore] is [hasMoreFor] over that last page.
+  Future<
+      ({
+        List<CambiosCandidato> candidatos,
+        int page,
+        bool hasMore,
+        bool stale,
+      })> _fetchSkippingEmptyPages({
+    required int generation,
+    required int fromPage,
+    required String query,
+    required List<double> puntajes,
+  }) async {
+    var page = fromPage;
+    var consecutiveEmptyPages = 0;
+
+    while (true) {
+      final pagina = await _service.fetchCandidatos(
+        seasonId: seasonId,
+        teamId: teamId,
+        plazaId: plazaId,
+        seccion: seccion,
+        search: query.isEmpty ? null : query,
+        puntajes: puntajes,
+        page: page,
+        perPage: _perPage,
+      );
+
+      if (generation != _requestGeneration) {
+        return (candidatos: const <CambiosCandidato>[], page: page, hasMore: false, stale: true);
+      }
+
+      final hasMore = hasMoreFor(
+        loadedCount: page * _perPage,
+        total: pagina.total,
+        perPage: _perPage,
+        lastPageCount: pagina.candidatos.length,
+      );
+
+      if (pagina.candidatos.isNotEmpty || !hasMore) {
+        return (candidatos: pagina.candidatos, page: page, hasMore: hasMore, stale: false);
+      }
+
+      consecutiveEmptyPages++;
+      if (consecutiveEmptyPages >= maxConsecutiveEmptyPages) {
+        return (candidatos: const <CambiosCandidato>[], page: page, hasMore: hasMore, stale: false);
+      }
+
+      page++;
     }
   }
 }
