@@ -46,6 +46,9 @@ class TitularesListImporterTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
         $wpdb->query( "DELETE FROM {$p}cambios_capitan" );
 
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [];
+
         wp_test_create_posts_table( $wpdb );
         $wpdb->query(
             "CREATE TABLE IF NOT EXISTS {$p}term_relationships (
@@ -88,6 +91,9 @@ class TitularesListImporterTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}posts" );
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
+
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [];
     }
 
     // -------------------------------------------------------------------------
@@ -160,15 +166,35 @@ class TitularesListImporterTest extends TestCase {
         return $rows;
     }
 
+    /**
+     * Seeds every row's player AND, by convention, tags the SECOND row
+     * (`line === 2`) of each distinct team as the titular goalkeeper
+     * (`sp_position` term 3, "Arquero") via `$wp_test_position_terms` — see
+     * `tests/wp-shim.php`'s own docblock on that global. Line 1 is always
+     * the `es_capitan` row (see `elevenRows()`); line 2 is an arbitrary but
+     * stable choice for the goalkeeper so every happy-path fixture in this
+     * file satisfies `planificar()`'s "a team without a goalkeeper cannot
+     * exist" check (0.1.13) without every caller having to set this up by
+     * hand. `test_a_team_with_no_arquero_titular_is_a_hard_error()` and
+     * `test_more_than_one_arquero_titular_per_team_is_a_hard_error()` below
+     * explicitly override this convention to exercise that check itself.
+     */
     private function seedRosterFor( array $rows ): void {
-        $seeded = [];
+        global $wp_test_position_terms;
+
+        $seeded          = [];
+        $arqueroAsignado = [];
         foreach ( $rows as $row ) {
             $id = $row['titular_player_id'];
-            if ( isset( $seeded[ $id ] ) ) {
-                continue; // A duplicate-player fixture reuses the same id on purpose.
+            if ( ! isset( $seeded[ $id ] ) ) {
+                $seeded[ $id ] = true;
+                $this->seedPlayer( $id );
             }
-            $seeded[ $id ] = true;
-            $this->seedPlayer( $id );
+
+            if ( 2 === $row['line'] && ! isset( $arqueroAsignado[ $row['team_id'] ] ) ) {
+                $wp_test_position_terms[ $id ] = [ 3 ]; // Arquero
+                $arqueroAsignado[ $row['team_id'] ] = true;
+            }
         }
     }
 
@@ -356,6 +382,50 @@ class TitularesListImporterTest extends TestCase {
 
         $this->assertTrue( $plan->hasErrors() );
         $this->assertStringContainsString( 'ninguna fila tiene es_capitan=1', implode( "\n", $plan->errors() ) );
+    }
+
+    // -------------------------------------------------------------------------
+    // A team without a goalkeeper cannot exist (0.1.13)
+    // -------------------------------------------------------------------------
+
+    public function test_a_team_with_no_arquero_titular_is_a_hard_error(): void {
+        global $wp_test_position_terms;
+
+        $this->seedTeam( 9001 );
+        $rows = $this->elevenRows( 9001 );
+        $this->seedRosterFor( $rows );
+
+        // seedRosterFor() tags line 2 as the goalkeeper by convention — undo
+        // that here so this team's 11 titulares resolve to NO goalkeeper at
+        // all, the exact condition under test.
+        $wp_test_position_terms = [];
+
+        $plan = $this->importer->planificar( $rows, [], self::SEASON_ID, self::FECHA_DESDE_ID );
+
+        $this->assertTrue( $plan->hasErrors() );
+        $errors = implode( "\n", $plan->errors() );
+        $this->assertStringContainsString( '9001', $errors );
+        $this->assertStringContainsString( 'ninguna de sus filas corresponde a un arquero titular', $errors );
+        $this->assertSame( [], $plan->rowsToOpen(), 'A team without a goalkeeper must never reach rowsToOpen().' );
+    }
+
+    public function test_more_than_one_arquero_titular_per_team_is_a_hard_error(): void {
+        global $wp_test_position_terms;
+
+        $this->seedTeam( 9001 );
+        $rows = $this->elevenRows( 9001 );
+        $this->seedRosterFor( $rows ); // tags line 2 (900102) as the goalkeeper.
+
+        // Also tag line 3 (900103) as a titular goalkeeper — now two.
+        $wp_test_position_terms[900103] = [ 3 ];
+
+        $plan = $this->importer->planificar( $rows, [], self::SEASON_ID, self::FECHA_DESDE_ID );
+
+        $this->assertTrue( $plan->hasErrors() );
+        $errors = implode( "\n", $plan->errors() );
+        $this->assertStringContainsString( '9001', $errors );
+        $this->assertStringContainsString( '2 filas corresponden a arquero titular', $errors );
+        $this->assertSame( [], $plan->rowsToOpen() );
     }
 
     public function test_every_hard_error_is_reported_together_not_just_the_first(): void {

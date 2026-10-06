@@ -8,6 +8,7 @@ use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Capitania\CapitanRepository;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Plazas\PosicionResolver;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Support\ChecksReads;
 use EntreRedes\Cambios\Support\OpensTransactions;
@@ -115,6 +116,26 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * ONE conformación moment, for one season), so both are supplied once, by
  * the CLI caller, as arguments to `planificar()` / `aplicarPlazas()` — see
  * `tools/importar-titulares.php`.
+ *
+ * *** A TEAM WITHOUT A GOALKEEPER CANNOT EXIST (0.1.13) ***
+ * The process owner's invariant is explicit: every team has exactly one
+ * goalkeeper, so exactly one of its 11 plazas IS the goalkeeper's plaza — a
+ * team without one cannot exist (see `Migrations\InitialSchema`'s own class
+ * docblock on `cambios_plaza.es_arco` for the full reasoning). The moment to
+ * enforce that is HERE, at roster creation, never after: `planificar()`
+ * resolves every row's `titular_player_id` `sp_position` in ONE batched
+ * `PosicionResolver::resolverParaIds()` call (same batching discipline as
+ * every other population-wide lookup in this plugin) and refuses a team
+ * whose 11 titulares include zero — or more than one — resolving as the
+ * titular goalkeeper (`PosicionResolver::esPosicionDelArqueroTitular()`,
+ * term 3 ONLY), mirroring the existing `es_capitan` "exactly one" check
+ * immediately above it. This is a VALIDATION only; the actual `es_arco`
+ * value each opened plaza gets is derived and persisted independently, at
+ * write time, by `Plazas\PlazaRepository::doOpenPlaza()` — see that
+ * method's own docblock. Both read the SAME underlying `sp_position` data,
+ * so as long as nobody edits a titular's position between `planificar()` and
+ * `aplicarPlazas()` (an admin-run, single-operator workflow — not a
+ * concurrent one), the two can never disagree.
  */
 class TitularesListImporter {
 
@@ -126,19 +147,28 @@ class TitularesListImporter {
     private CapitanRepository $capitanRepository;
     private FechaRepository $fechaRepository;
     private EventLog $eventLog;
+    private PosicionResolver $posicionResolver;
 
+    /**
+     * @param PosicionResolver|null $posicionResolver Defaults to a plain
+     *        instance — overridable in tests, same pattern as every other
+     *        optional collaborator in this plugin. See class docblock,
+     *        "A TEAM WITHOUT A GOALKEEPER CANNOT EXIST".
+     */
     public function __construct(
         \wpdb $wpdb,
         PlazaRepository $plazaRepository,
         CapitanRepository $capitanRepository,
         FechaRepository $fechaRepository,
-        EventLog $eventLog
+        EventLog $eventLog,
+        ?PosicionResolver $posicionResolver = null
     ) {
         $this->wpdb              = $wpdb;
         $this->plazaRepository   = $plazaRepository;
         $this->capitanRepository = $capitanRepository;
         $this->fechaRepository   = $fechaRepository;
         $this->eventLog          = $eventLog;
+        $this->posicionResolver  = $posicionResolver ?? new PosicionResolver();
     }
 
     /**
@@ -165,6 +195,17 @@ class TitularesListImporter {
         $teamStatuses              = $this->loadTeamStatuses();
         $playerStatuses            = $this->loadPlayerStatuses();
         $playersRegisteredInSeason = $this->loadPlayersRegisteredInSeason( $seasonId );
+
+        // See class docblock, "A TEAM WITHOUT A GOALKEEPER CANNOT EXIST" —
+        // ONE batched call over every row's titular_player_id, regardless of
+        // whether that id later turns out to be invalid (an unresolved id
+        // simply resolves to PosicionResolver::SIN_POSICION, which is never
+        // "Arquero" — harmless).
+        $titularIds = array_values( array_unique( array_map(
+            static fn ( array $row ): int => $row['titular_player_id'],
+            $rows
+        ) ) );
+        $posiciones = $this->posicionResolver->resolverParaIds( $titularIds );
 
         // A duplicate titular anywhere in the file is a contradiction no
         // single row can be blamed for alone — collected up front, across
@@ -213,6 +254,22 @@ class TitularesListImporter {
                 $errors[] = "Equipo {$label} (team_id {$teamId}): ninguna fila tiene es_capitan=1.";
             } elseif ( $capitanCount > 1 ) {
                 $errors[] = "Equipo {$label} (team_id {$teamId}): {$capitanCount} filas tienen es_capitan=1, debe ser exactamente 1.";
+            }
+
+            // See class docblock, "A TEAM WITHOUT A GOALKEEPER CANNOT EXIST"
+            // — same "exactly one" shape as the es_capitan check just above.
+            $arcoCount = 0;
+            foreach ( $teamRows as $row ) {
+                $posicion = $posiciones[ $row['titular_player_id'] ] ?? PosicionResolver::SIN_POSICION;
+                if ( PosicionResolver::esPosicionDelArqueroTitular( $posicion ) ) {
+                    ++$arcoCount;
+                }
+            }
+
+            if ( 0 === $arcoCount ) {
+                $errors[] = "Equipo {$label} (team_id {$teamId}): ninguna de sus filas corresponde a un arquero titular (sp_position 'Arquero') — un equipo sin plaza de arquero no puede existir.";
+            } elseif ( $arcoCount > 1 ) {
+                $errors[] = "Equipo {$label} (team_id {$teamId}): {$arcoCount} filas corresponden a arquero titular (sp_position 'Arquero'), debe ser exactamente 1.";
             }
 
             $resolved   = [];
