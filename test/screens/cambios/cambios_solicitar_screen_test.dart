@@ -1022,6 +1022,40 @@ void main() {
     });
   });
 
+  group('CambiosSolicitarScreen — botón de envío', () {
+    testWidgets('a sustitucion names the action: "Solicitar Cambio"', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
+
+      expect(find.widgetWithText(ElevatedButton, 'Solicitar Cambio'), findsOneWidget);
+      expect(find.text('Confirmar'), findsNothing);
+    });
+
+    testWidgets('a regreso says "Solicitar Regreso", never "Solicitar Cambio"', (tester) async {
+      // A regreso is the END of a cambio, never a new one — labelling it
+      // "Solicitar Cambio" would name the opposite action.
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.regreso);
+
+      expect(find.widgetWithText(ElevatedButton, 'Solicitar Regreso'), findsOneWidget);
+      expect(find.text('Solicitar Cambio'), findsNothing);
+    });
+
+    testWidgets('the button carries its own weight: tall, and primary-filled, not a tonal default',
+        (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
+
+      final boton = find.byKey(const Key('confirmar_solicitud_button'));
+      expect(tester.getSize(boton).height, greaterThanOrEqualTo(52));
+
+      // Under Material 3 an ElevatedButton defaults to a surface-tinted
+      // background; this screen's primary action sets its own colour, so a
+      // future theme change cannot quietly turn it back into a low-emphasis
+      // button.
+      final style = tester.widget<ElevatedButton>(boton).style;
+      expect(style?.backgroundColor, isNotNull);
+      expect(style?.foregroundColor, isNotNull);
+    });
+  });
+
   group('CambiosSolicitarScreen — regreso', () {
     testWidgets('shows a direct confirm, no search field or candidate list', (tester) async {
       await _pumpScreen(tester, tipo: CambiosSolicitudTipo.regreso);
