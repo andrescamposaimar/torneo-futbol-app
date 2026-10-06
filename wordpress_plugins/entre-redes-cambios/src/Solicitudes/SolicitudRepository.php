@@ -758,7 +758,18 @@ class SolicitudRepository {
             // be exactly as false as returning "everything was applied".
             $this->rollbackTransaction( __FUNCTION__, $e, [ 'ids' => $ids ] );
 
-            $this->eventLog->record( 'solicitud.lote_abortado', [
+            // `solicitud.lote_escritura_fallida` — deliberately NOT the same
+            // event as abortarLote()'s `solicitud.lote_abortado` (used for
+            // ordinary pre-flight rejections, before any write has run: a
+            // stale solicitud, a corrupt dictamen_original, a season
+            // mismatch). THIS is a genuine wpdb-level write failure mid-
+            // transaction — already rolled back above — and the operator has
+            // NO php error log on this shared host (see
+            // Observability\WpEventLog's class docblock, "THE
+            // entre_redes_cambios_ultimo_error OPTION"). The codigo must
+            // contain `fallid` or it silently never reaches that option,
+            // leaving a Friday lote failure completely invisible.
+            $this->eventLog->record( 'solicitud.lote_escritura_fallida', [
                 'ids'                 => $ids,
                 'motivo'              => 'escritura fallida a mitad del lote: ' . $e->getMessage(),
                 'ultima_id_intentada' => $ultimoIdIntentado,

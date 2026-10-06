@@ -62,7 +62,7 @@ class SolicitudRepositoryTest extends TestCase {
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
         $this->fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
-        $this->settings        = new Settings( $wpdb );
+        $this->settings        = new Settings( $wpdb, $this->eventLog );
 
         $assembler = new DictamenContextAssembler(
             $this->plazaRepository,
@@ -630,6 +630,25 @@ class SolicitudRepositoryTest extends TestCase {
 
         $this->assertSame( EstadoSolicitud::APROBADA, $this->repo->findSolicitud( $idA )['estado'] );
         $this->assertSame( EstadoSolicitud::APROBADA, $this->repo->findSolicitud( $idB )['estado'] );
+
+        // THE fix: a mid-lote write failure must be durably visible — see
+        // SolicitudRepository::publicarLote()'s own comment at the catch
+        // block. `solicitud.lote_abortado` (the pre-flight rejection event)
+        // does NOT contain 'fallid' and never reaches
+        // entre_redes_cambios_ultimo_error — this genuine write failure must
+        // use a DIFFERENT, 'fallid'-containing codigo instead.
+        $this->assertTrue( $this->eventLog->has( 'solicitud.lote_escritura_fallida' ) );
+        $this->assertFalse( $this->eventLog->has( 'solicitud.lote_abortado' ), 'A write failure must not ALSO log the pre-flight abort codigo.' );
+
+        $eventoFallido = null;
+        foreach ( $this->eventLog->all() as $evento ) {
+            if ( 'solicitud.lote_escritura_fallida' === $evento['evento'] ) {
+                $eventoFallido = $evento;
+            }
+        }
+
+        $this->assertNotNull( $eventoFallido );
+        $this->assertStringContainsString( 'fallid', $eventoFallido['evento'], 'The codigo must contain "fallid" to reach entre_redes_cambios_ultimo_error — see Observability\\WpEventLog\'s class docblock.' );
     }
 
     // -------------------------------------------------------------------------
