@@ -12,6 +12,8 @@ use EntreRedes\Cambios\Dictamen\DictamenSnapshot;
 use EntreRedes\Cambios\Dictamen\Motivo;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
+use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
@@ -23,7 +25,9 @@ use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
  *        the captain sees BEFORE anyone approves anything whether their
  *        request clears every rule, and if not, exactly why.
  *   GET  /entre-redes/v1/cambios/solicitudes  — every solicitud the captain's
- *        team has made, with its estado and its ORIGINAL dictamen snapshot.
+ *        team has made, with its estado, its ORIGINAL dictamen snapshot, and
+ *        (added for the "Mis Solicitudes" sale/entra display — see
+ *        shapeLado()'s own docblock) who leaves and who comes in.
  *
  * The process owner's tray (approve/reject/publish the lote) is a later
  * slice's job — see this plugin's task brief for slice 4d. Nothing here ever
@@ -55,11 +59,33 @@ class SolicitudesController {
     private SolicitudRepository $solicitudRepository;
     private DictamenPipeline $dictamenPipeline;
     private EventLog $eventLog;
+    private PlazaRepository $plazaRepository;
+    private JugadorMetricasReader $jugadorMetricasReader;
 
     /** @var callable(): int */
     private $clockFn;
 
     /**
+     * This PAGE's (i.e. this ONE `listar()` call's) player_id => JugadorMetricas,
+     * resolved ONCE via `JugadorMetricasReader::resolveMuchos()` right before
+     * `shapeSolicitudRow()` runs for every row, and read back inside
+     * `shapeLado()` — same batching discipline as
+     * `Rest\PlazasController::$posicionesPorJugador`. Reset at the start of
+     * every `listar()` call.
+     *
+     * @var array<int, \EntreRedes\Cambios\Plazas\JugadorMetricas>
+     */
+    private array $metricasPorJugador = [];
+
+    /**
+     * @param PlazaRepository $plazaRepository Needed to resolve the plaza's
+     *        `titular_player_id` for a `regreso` row's "entra" side — see
+     *        `shapeLado()`'s own docblock for why a `regreso` derives this
+     *        from the plaza, never from a stored `entrante_player_id` (which
+     *        is always NULL for that `tipo`).
+     * @param JugadorMetricasReader $jugadorMetricasReader Resolves puntaje
+     *        for every "sale"/"entra" player on the page, batched — see
+     *        `listar()`'s own docblock, "BATCHED, NEVER ONE QUERY PER ROW".
      * @param callable(): int|null $clockFn Returns the current instant as a
      *        Unix epoch. Defaults to `time()` — every production call site
      *        gets the real clock without having to say so. Tests inject a
@@ -73,13 +99,17 @@ class SolicitudesController {
         SolicitudRepository $solicitudRepository,
         DictamenPipeline $dictamenPipeline,
         EventLog $eventLog,
+        PlazaRepository $plazaRepository,
+        JugadorMetricasReader $jugadorMetricasReader,
         ?callable $clockFn = null
     ) {
-        $this->authorizer          = $authorizer;
-        $this->solicitudRepository = $solicitudRepository;
-        $this->dictamenPipeline    = $dictamenPipeline;
-        $this->eventLog            = $eventLog;
-        $this->clockFn             = $clockFn ?? static fn (): int => time();
+        $this->authorizer            = $authorizer;
+        $this->solicitudRepository   = $solicitudRepository;
+        $this->dictamenPipeline      = $dictamenPipeline;
+        $this->eventLog              = $eventLog;
+        $this->plazaRepository       = $plazaRepository;
+        $this->jugadorMetricasReader = $jugadorMetricasReader;
+        $this->clockFn               = $clockFn ?? static fn (): int => time();
     }
 
     public function register_routes(): void {
@@ -230,8 +260,10 @@ class SolicitudesController {
      *
      * Response 200: { solicitudes: [ { id, plaza_id, tipo,
      *         entrante_player_id, fecha_id, estado, solicitada_at,
-     *         resuelta_at, nota, dictamen: { procede, motivos } }, ... ] } —
-     *         every solicitud the team has ever made, in ANY estado (see
+     *         resuelta_at, nota, dictamen: { procede, motivos },
+     *         sale: { player_id, nombre, puntaje },
+     *         entra: { player_id, nombre, puntaje } }, ... ] } — every
+     *         solicitud the team has ever made, in ANY estado (see
      *         SolicitudRepository::listByEquipo()'s own docblock for why
      *         this is NOT the same subset listPendientes()/listAprobadas()
      *         expose to the process owner).
@@ -240,6 +272,38 @@ class SolicitudesController {
      * — what was true the moment the captain made the request — never
      * `dictamen_aplicado`, which only exists once a solicitud is
      * `publicada` and is out of scope for this endpoint.
+     *
+     * *** `sale` / `entra` — RESOLVED HERE, PER `tipo`, SO THE APP NEVER HAS
+     * TO KNOW THE RULE ***
+     * - `sustitucion`: `sale` is the solicitud's own stored
+     *   `saliente_player_id` (the plaza's vigent occupant AT THE MOMENT the
+     *   solicitud was created — see `Migrations\InitialSchema::
+     *   sqlCambiosSolicitud()`'s own docblock); `entra` is the stored
+     *   `entrante_player_id`.
+     * - `regreso`: `entrante_player_id` is always NULL (see
+     *   `Dictamen\SolicitudDeCambio`'s class docblock — who returns is never
+     *   a choice this request makes). `entra` is instead the plaza's
+     *   PERMANENT `titular_player_id` (`Plazas\PlazaRepository::
+     *   listPlazasByEquipo()`, resolved once for the whole team below —
+     *   never a per-row `findPlaza()` call); `sale` is the SAME stored
+     *   `saliente_player_id` as a `sustitucion` — the suplente the titular
+     *   would be displacing.
+     *
+     * *** BATCHED, NEVER ONE QUERY PER ROW ***
+     * Every player id this response needs a name or a puntaje for (every
+     * `sale`/`entra` across every row) is collected FIRST, then resolved in
+     * exactly one `primePlayerTitles()` call (warms `get_the_title()`'s cache
+     * for the whole page) and one `JugadorMetricasReader::resolveMuchos()`
+     * call — mirroring `Rest\PlazasController::listar()`'s own discipline for
+     * `titular_player_id`/`ocupante_player_id`. `listPlazasByEquipo()` itself
+     * is also called exactly ONCE for the whole team, never once per
+     * `regreso` row.
+     *
+     * *** DEGRADING, NEVER FABRICATING *** See `shapeLado()`'s own docblock:
+     * a `player_id` this endpoint cannot resolve (e.g. a `saliente_player_id`
+     * that predates the column) becomes a `sale`/`entra` object that is
+     * ENTIRELY null — never a guessed id — and a puntaje that cannot be
+     * resolved is `null`, never a fabricated `0`.
      */
     public function listar( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -268,10 +332,60 @@ class SolicitudesController {
         try {
             $rows = $this->solicitudRepository->listByEquipo( $seasonId, $teamId );
 
-            return new \WP_REST_Response(
-                [ 'solicitudes' => array_map( [ $this, 'shapeSolicitudRow' ], $rows ) ],
-                200
+            if ( empty( $rows ) ) {
+                return new \WP_REST_Response( [ 'solicitudes' => [] ], 200 );
+            }
+
+            // titular_player_id per plaza — resolved ONCE for the whole team
+            // (never once per `regreso` row) — see this method's own
+            // docblock, "BATCHED, NEVER ONE QUERY PER ROW".
+            $titularPorPlaza = [];
+            foreach ( $this->plazaRepository->listPlazasByEquipo( $seasonId, $teamId ) as $plaza ) {
+                $titularPorPlaza[ (int) $plaza['id'] ] = (int) $plaza['titular_player_id'];
+            }
+
+            // Both sides of EVERY row, resolved from the row itself (never a
+            // second read per row) — see shapeLado()'s own docblock for how
+            // each tipo derives its pair.
+            $salePorSolicitud  = [];
+            $entraPorSolicitud = [];
+            $playerIds         = [];
+
+            foreach ( $rows as $row ) {
+                $id = (int) $row['id'];
+
+                $saleId = null !== $row['saliente_player_id'] ? (int) $row['saliente_player_id'] : null;
+
+                $entraId = SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo']
+                    ? ( null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null )
+                    : ( $titularPorPlaza[ (int) $row['plaza_id'] ] ?? null );
+
+                $salePorSolicitud[ $id ]  = $saleId;
+                $entraPorSolicitud[ $id ] = $entraId;
+
+                if ( null !== $saleId ) {
+                    $playerIds[] = $saleId;
+                }
+                if ( null !== $entraId ) {
+                    $playerIds[] = $entraId;
+                }
+            }
+
+            $playerIds = array_values( array_unique( $playerIds ) );
+
+            $this->primePlayerTitles( $playerIds );
+            $this->metricasPorJugador = $this->jugadorMetricasReader->resolveMuchos( $playerIds );
+
+            $solicitudes = array_map(
+                fn ( array $row ): array => $this->shapeSolicitudRow(
+                    $row,
+                    $salePorSolicitud[ (int) $row['id'] ],
+                    $entraPorSolicitud[ (int) $row['id'] ]
+                ),
+                $rows
             );
+
+            return new \WP_REST_Response( [ 'solicitudes' => $solicitudes ], 200 );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'rest.solicitudes_listar_fallida', [
                 'season_id' => $seasonId,
@@ -307,9 +421,13 @@ class SolicitudesController {
     /**
      * @param array<string, mixed> $row As returned by
      *        SolicitudRepository::listByEquipo().
+     * @param int|null $salePlayerId As resolved by listar() — see that
+     *        method's own docblock.
+     * @param int|null $entraPlayerId As resolved by listar() — see that
+     *        method's own docblock.
      * @return array<string, mixed>
      */
-    private function shapeSolicitudRow( array $row ): array {
+    private function shapeSolicitudRow( array $row, ?int $salePlayerId, ?int $entraPlayerId ): array {
         $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
 
         return [
@@ -326,6 +444,92 @@ class SolicitudesController {
                 'procede' => $snapshot->procede(),
                 'motivos' => $snapshot->motivos(),
             ],
+            'sale'               => $this->shapeLado( $salePlayerId ),
+            'entra'              => $this->shapeLado( $entraPlayerId ),
         ];
+    }
+
+    /**
+     * Shapes ONE side ("sale" or "entra") of a solicitud row into
+     * `{ player_id, nombre, puntaje }`.
+     *
+     * *** `$playerId === null` MEANS "NOT RECORDED" — THE WHOLE OBJECT
+     * DEGRADES, NOTHING IS GUESSED ***
+     * This happens for a `saliente_player_id` that predates the 0.1.11
+     * column (see `Migrations\InitialSchema::sqlCambiosSolicitud()`'s own
+     * docblock) or, in principle, a `regreso` whose plaza was not found in
+     * `listar()`'s `titularPorPlaza` map. There is no id to attach a name or
+     * a puntaje to, so every field is null — the app renders this as "not
+     * recorded", never as a blank or a zero that could be mistaken for a
+     * real fact (see this plugin's own task brief: "absent data rendered as
+     * fact" is the exact failure mode this must avoid).
+     *
+     * *** `nombre` FALLS BACK TO "Jugador #<id>", NEVER NULL, ONCE AN ID IS
+     * KNOWN *** Same discipline as `Rest\PlazasController::nombreJugador()`:
+     * an unresolved post title is not "no name", it is "we have the id but
+     * not yet a cached title" — an honest placeholder tied to the real id,
+     * not a fabricated one.
+     *
+     * `puntaje` stays genuinely nullable — same contract as
+     * `Rest\PlazasController::shapeCandidato()`'s own `puntaje` field — so
+     * the app can render a name with NO brackets at all when it is unknown,
+     * rather than fabricating a `[0]` or printing an empty `[]`/`[-]`.
+     *
+     * @return array{player_id: int|null, nombre: string|null, puntaje: float|null}
+     */
+    private function shapeLado( ?int $playerId ): array {
+        if ( null === $playerId ) {
+            return [
+                'player_id' => null,
+                'nombre'    => null,
+                'puntaje'   => null,
+            ];
+        }
+
+        $metricas = $this->metricasPorJugador[ $playerId ] ?? null;
+
+        return [
+            'player_id' => $playerId,
+            'nombre'    => $this->nombreJugador( $playerId ),
+            'puntaje'   => null !== $metricas && null !== $metricas->puntaje()
+                ? $metricas->puntaje()->toDecimal()
+                : null,
+        ];
+    }
+
+    /**
+     * Bulk-primes WordPress's post object cache for every id in
+     * $playerIds, so the get_the_title() calls nombreJugador() makes right
+     * after this hit cache instead of issuing one fresh query PER PLAYER —
+     * identical to `Rest\PlazasController::primePlayerTitles()` (duplicated
+     * here rather than shared: this controller has no common base class with
+     * that one, and the method is a two-line wrapper around a WordPress
+     * core function).
+     *
+     * @param array<int, int> $playerIds
+     */
+    private function primePlayerTitles( array $playerIds ): void {
+        if ( empty( $playerIds ) ) {
+            return;
+        }
+
+        get_posts( [
+            'post_type'      => 'sp_player',
+            'post__in'       => $playerIds,
+            'posts_per_page' => -1,
+        ] );
+    }
+
+    /**
+     * @return string The trimmed post title for $playerId, or
+     *         "Jugador #<id>" when it comes back empty (or the post does
+     *         not exist) — see `shapeLado()`'s own docblock for why this is
+     *         an honest placeholder, not a fabrication. Same fallback
+     *         discipline as `Rest\PlazasController::nombreJugador()`.
+     */
+    private function nombreJugador( int $playerId ): string {
+        $titulo = trim( (string) get_the_title( $playerId ) );
+
+        return '' !== $titulo ? $titulo : 'Jugador #' . $playerId;
     }
 }

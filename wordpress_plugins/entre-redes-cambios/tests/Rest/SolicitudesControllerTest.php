@@ -16,6 +16,7 @@ use EntreRedes\Cambios\Dictamen\DictamenPipeline;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Rest\SolicitudesController;
@@ -65,6 +66,8 @@ class SolicitudesControllerTest extends TestCase {
 
     private InMemoryEventLog $eventLog;
     private DictamenPipeline $pipeline;
+    private PlazaRepository $plazaRepository;
+    private JugadorMetricasReader $jugadorMetricasReader;
     private int $plazaId;
 
     /**
@@ -103,7 +106,9 @@ class SolicitudesControllerTest extends TestCase {
 
         $assembler = new DictamenContextAssembler( $plazaRepository, $fechaRepository, $settings, $wpdb, $this->eventLog );
 
-        $this->pipeline = new DictamenPipeline( $assembler, $this->eventLog );
+        $this->pipeline              = new DictamenPipeline( $assembler, $this->eventLog );
+        $this->plazaRepository       = $plazaRepository;
+        $this->jugadorMetricasReader = new JugadorMetricasReader( $wpdb, $this->eventLog );
 
         // Genesis fecha: any past date, purely to satisfy openPlaza()'s
         // assertFechaExistsInSeason() guard — irrelevant to the plazo window.
@@ -418,6 +423,7 @@ class SolicitudesControllerTest extends TestCase {
             'plaza_id'           => $this->plazaId,
             'tipo'               => 'sustitucion',
             'entrante_player_id' => 888,
+            'saliente_player_id' => self::PLAYER_ID,
             'fecha_id'           => self::SOLICITUD_FECHA_ID,
             'estado'             => 'pendiente',
             'solicitada_at'      => '2026-01-03 12:00:00',
@@ -445,6 +451,281 @@ class SolicitudesControllerTest extends TestCase {
         $this->assertSame( 7, $data['solicitudes'][0]['id'] );
         $this->assertSame( 888, $data['solicitudes'][0]['entrante_player_id'] );
         $this->assertFalse( $data['solicitudes'][0]['dictamen']['procede'] );
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /cambios/solicitudes — sale/entra
+    // -------------------------------------------------------------------------
+
+    /**
+     * `sustitucion`: `sale` is the stored `saliente_player_id`, `entra` is
+     * the stored `entrante_player_id` — both resolved to a name and a
+     * puntaje.
+     */
+    public function test_listar_resuelve_sale_y_entra_para_sustitucion(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ self::PLAYER_ID => 'Campos, Andres', 888 => 'Grigorjew, Gerardo' ];
+
+        $this->seedPuntaje( self::PLAYER_ID, 4.5 );
+        // 888 already seeded with 2.5 in setUp().
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [
+            'id'                 => 7,
+            'tipo'               => 'sustitucion',
+            'entrante_player_id' => 888,
+            'saliente_player_id' => self::PLAYER_ID,
+        ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $data      = $response->get_data();
+        $solicitud = $data['solicitudes'][0];
+
+        $this->assertSame( [ 'player_id' => self::PLAYER_ID, 'nombre' => 'Campos, Andres', 'puntaje' => 4.5 ], $solicitud['sale'] );
+        $this->assertSame( [ 'player_id' => 888, 'nombre' => 'Grigorjew, Gerardo', 'puntaje' => 2.5 ], $solicitud['entra'] );
+
+        $wp_test_post_titles = [];
+    }
+
+    /**
+     * `regreso`: `entrante_player_id` is always NULL — `entra` must instead
+     * be the plaza's PERMANENT titular (`cambios_plaza.titular_player_id`,
+     * self::PLAYER_ID here — see setUp()'s `openPlaza()` call), resolved via
+     * `PlazaRepository::listPlazasByEquipo()`, never a stored
+     * `entrante_player_id`. `sale` stays the stored `saliente_player_id` —
+     * the suplente the titular would displace.
+     */
+    public function test_listar_para_regreso_entra_es_el_titular_y_sale_el_ocupante_vigente(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ self::PLAYER_ID => 'Campos, Andres', 999 => 'Pérez, Martín' ];
+
+        $this->seedPuntaje( self::PLAYER_ID, 4.5 );
+        $this->seedPuntaje( 999, 3.0 );
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [
+            'id'                 => 9,
+            'tipo'               => 'regreso',
+            'entrante_player_id' => null,
+            'saliente_player_id' => 999,
+        ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $solicitud = $response->get_data()['solicitudes'][0];
+
+        $this->assertSame( [ 'player_id' => 999, 'nombre' => 'Pérez, Martín', 'puntaje' => 3.0 ], $solicitud['sale'] );
+        $this->assertSame( [ 'player_id' => self::PLAYER_ID, 'nombre' => 'Campos, Andres', 'puntaje' => 4.5 ], $solicitud['entra'] );
+
+        $wp_test_post_titles = [];
+    }
+
+    /**
+     * A `saliente_player_id` of NULL (a row that predates the 0.1.11 column)
+     * must degrade `sale` to an ENTIRELY null object — never a guessed id,
+     * never a fabricated name or puntaje.
+     */
+    public function test_listar_degrada_sale_a_null_cuando_no_hay_saliente_registrado(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [
+            'id'                 => 11,
+            'tipo'               => 'sustitucion',
+            'entrante_player_id' => 888,
+            'saliente_player_id' => null,
+        ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $solicitud = $response->get_data()['solicitudes'][0];
+
+        $this->assertSame( [ 'player_id' => null, 'nombre' => null, 'puntaje' => null ], $solicitud['sale'] );
+        $this->assertNotNull( $solicitud['entra']['player_id'] );
+    }
+
+    /**
+     * A player with no resolvable puntaje (no `sp_metrics` row at all) must
+     * still get a name — the degrade is scoped to `puntaje` alone, never
+     * spreading to `nombre` — see `shapeLado()`'s own docblock.
+     */
+    public function test_listar_degrada_solo_el_puntaje_cuando_no_es_resoluble_el_nombre_se_mantiene(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 888 => 'Sin Puntaje, Jugador' ];
+
+        // Deliberately NOT seeding sp_metrics for 888 this time — the
+        // setUp() seed is for a DIFFERENT test's isolation, so this test
+        // clears postmeta for player 888 specifically by never writing it
+        // (setUp() seeds a row for 888, so clear it first).
+        global $wpdb;
+        $wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->prefix}postmeta WHERE post_id = %d", 888 ) );
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [
+            'id'                 => 13,
+            'tipo'               => 'sustitucion',
+            'entrante_player_id' => 888,
+            'saliente_player_id' => self::PLAYER_ID,
+        ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $solicitud = $response->get_data()['solicitudes'][0];
+
+        $this->assertSame( 888, $solicitud['entra']['player_id'] );
+        $this->assertSame( 'Sin Puntaje, Jugador', $solicitud['entra']['nombre'] );
+        $this->assertNull( $solicitud['entra']['puntaje'] );
+
+        $wp_test_post_titles = [];
+    }
+
+    /**
+     * Names and puntajes for a MULTI-ROW list must resolve in ONE batched
+     * call per meta_key (`JugadorMetricasReader::resolveMuchos()`), never
+     * one query per row/player — asserted here by counting the actual
+     * `postmeta` SELECTs a wpdb proxy observes, regardless of how many
+     * solicitud rows or distinct players are involved.
+     */
+    public function test_listar_resuelve_nombres_y_puntajes_en_una_sola_llamada_batcheada_para_varias_filas(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ self::PLAYER_ID => 'Campos, Andres', 888 => 'Grigorjew, Gerardo', 999 => 'Pérez, Martín' ];
+        $this->seedPuntaje( self::PLAYER_ID, 4.5 );
+        $this->seedPuntaje( 999, 3.0 );
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $rowA = $this->baseRow( [ 'id' => 21, 'tipo' => 'sustitucion', 'entrante_player_id' => 888, 'saliente_player_id' => self::PLAYER_ID ] );
+        $rowB = $this->baseRow( [ 'id' => 22, 'tipo' => 'sustitucion', 'entrante_player_id' => 999, 'saliente_player_id' => self::PLAYER_ID ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $rowA, $rowB ] );
+
+        global $wpdb;
+        $countingWpdb = $this->wpdbCountingPostmetaSelects( $wpdb );
+
+        // plazaRepository stays the REAL, non-counting one — listPlazasByEquipo()
+        // reads cambios_plaza, never postmeta, and this test only cares about
+        // postmeta-level batching.
+        $jugadorMetricasReaderConContador = new JugadorMetricasReader( $countingWpdb, $this->eventLog );
+
+        $controller = new SolicitudesController(
+            $authorizer,
+            $repo,
+            $this->pipeline,
+            $this->eventLog,
+            $this->plazaRepository,
+            $jugadorMetricasReaderConContador,
+            fn (): int => $this->fixedNow
+        );
+
+        $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+
+        // Exactly 2 — one per meta_key (sp_metrics, caracter) — regardless of
+        // 2 rows sharing 3 distinct player ids across sale/entra.
+        $this->assertSame(
+            2,
+            $countingWpdb->countPostmetaSelects(),
+            'Puntaje/caracter resolution must be ONE batched call per meta_key, never one per row.'
+        );
+
+        $wp_test_post_titles = [];
+    }
+
+    /**
+     * @param \wpdb $real A live wpdb sharing THIS test's SQLite connection.
+     * @return \wpdb A proxy whose own `countPostmetaSelects()` reports how
+     *         many `postmeta` SELECTs it has executed so far.
+     */
+    private function wpdbCountingPostmetaSelects( \wpdb $real ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix ) extends \wpdb {
+            private int $postmetaSelectCount = 0;
+
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, 'FROM ' . $this->prefix . 'postmeta' ) ) {
+                    $this->postmetaSelectCount++;
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+
+            public function countPostmetaSelects(): int {
+                return $this->postmetaSelectCount;
+            }
+        };
+    }
+
+    /**
+     * A solicitud row with every field `shapeSolicitudRow()` reads, with
+     * overrides applied on top — keeps every sale/entra test above focused
+     * on what it actually varies instead of repeating the full shape.
+     *
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private function baseRow( array $overrides ): array {
+        return array_merge( [
+            'id'                 => 1,
+            'plaza_id'           => $this->plazaId,
+            'tipo'               => 'sustitucion',
+            'entrante_player_id' => 888,
+            'saliente_player_id' => self::PLAYER_ID,
+            'fecha_id'           => self::SOLICITUD_FECHA_ID,
+            'estado'             => 'pendiente',
+            'solicitada_at'      => '2026-01-03 12:00:00',
+            'resuelta_at'        => null,
+            'nota'               => null,
+            'dictamen_original'  => json_encode( [ 'procede' => true, 'motivos' => [], 'evaluado_at' => '2026-01-01 00:00:00' ] ),
+        ], $overrides );
     }
 
     public function test_listar_missing_season_or_team_returns_400(): void {
@@ -510,7 +791,15 @@ class SolicitudesControllerTest extends TestCase {
      * against.
      */
     private function newController( CapitanAuthorizer $authorizer, SolicitudRepository $repo ): SolicitudesController {
-        return new SolicitudesController( $authorizer, $repo, $this->pipeline, $this->eventLog, fn (): int => $this->fixedNow );
+        return new SolicitudesController(
+            $authorizer,
+            $repo,
+            $this->pipeline,
+            $this->eventLog,
+            $this->plazaRepository,
+            $this->jugadorMetricasReader,
+            fn (): int => $this->fixedNow
+        );
     }
 
     private function seedFecha( int $fechaId, string $playDate ): void {

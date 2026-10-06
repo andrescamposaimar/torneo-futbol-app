@@ -98,11 +98,15 @@ final class Plugin {
                 $eventLog
             );
 
+            $jugadorMetricasReader = new Plazas\JugadorMetricasReader( $wpdb, $eventLog );
+
             $solicitudesController = new Rest\SolicitudesController(
                 $capitanAuthorizer,
                 $solicitudRepository,
                 $dictamenPipeline,
-                $eventLog
+                $eventLog,
+                $plazaRepository,
+                $jugadorMetricasReader
             );
 
             $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository, $eventLog );
