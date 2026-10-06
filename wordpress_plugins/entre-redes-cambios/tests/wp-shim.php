@@ -909,21 +909,35 @@ if ( ! function_exists( 'wp_get_object_terms' ) ) {
      * shape PosicionResolver actually calls with — so each returned row is
      * a bare \stdClass carrying just the two properties that call asks for.
      *
+     * *** CALL TRACKING, FOR THE "ONE BATCHED CALL, NEVER ONE PER CANDIDATE"
+     * TESTS *** Every invocation appends the (int-cast) $object_ids it was
+     * called with to `$wp_test_position_terms_calls` — purely additive
+     * instrumentation, never consulted to produce this function's own
+     * return value, so it changes nothing for any test that does not read
+     * it. Tests that care how many times (and with which ids) this was
+     * called — e.g. CandidatosResolverTest's population-wide position
+     * lookup — read this global directly; tests that do not care simply
+     * never look at it. Reset in tearDown() alongside $wp_test_position_terms.
+     *
      * @param array<int, int>|int $object_ids
      * @param string|array<int, string> $taxonomies
      * @param array<string, mixed> $args
      * @return array<int, \stdClass>
      */
     function wp_get_object_terms( $object_ids, $taxonomies, array $args = [] ): array {
-        global $wp_test_position_terms;
+        global $wp_test_position_terms, $wp_test_position_terms_calls;
 
-        $ids  = is_array( $object_ids ) ? $object_ids : [ $object_ids ];
+        $ids = is_array( $object_ids ) ? $object_ids : [ $object_ids ];
+        $ids = array_map( 'intval', $ids );
+
+        $wp_test_position_terms_calls[] = $ids;
+
         $rows = [];
 
         foreach ( $ids as $id ) {
-            foreach ( ( $wp_test_position_terms[ (int) $id ] ?? [] ) as $termId ) {
+            foreach ( ( $wp_test_position_terms[ $id ] ?? [] ) as $termId ) {
                 $row            = new \stdClass();
-                $row->object_id = (int) $id;
+                $row->object_id = $id;
                 $row->term_id   = (int) $termId;
                 $rows[]         = $row;
             }
