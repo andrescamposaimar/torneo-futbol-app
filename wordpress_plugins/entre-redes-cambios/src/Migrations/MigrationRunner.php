@@ -52,6 +52,42 @@ class MigrationRunner {
         'cambios_decision',
     ];
 
+    /**
+     * Run the migrations ONLY when the schema recorded in the database is
+     * older than the code's own version — safe to call on every request.
+     *
+     * *** WHY THIS EXISTS, AND THE INCIDENT THAT MOTIVATED IT ***
+     * `run()` is reachable from exactly one place: `register_activation_hook`
+     * in the plugin's main file. That hook fires when an operator clicks
+     * "Activate" — NOT when they upload a new zip over an already-active
+     * plugin, which is how this plugin is actually deployed (see the repo's
+     * build-plugin.sh and the "Reemplazar el actual con el subido" flow).
+     *
+     * Through 0.1.0 → 0.1.10 that went unnoticed because no release changed
+     * the schema. 0.1.11 adds `cambios_solicitud.saliente_player_id`, and
+     * without this method that column would simply never be created on the
+     * live site: the first solicitud would write to a column that does not
+     * exist.
+     *
+     * The `cambios_db_version` option already existed for precisely this
+     * purpose — `run()` writes it on every activation — but nothing ever
+     * READ it outside that same activation path. A value written and never
+     * read is not a guard; it is a comment that looks like one.
+     *
+     * Cost: one `get_option()` per request against an autoloaded option
+     * WordPress has already cached, and `dbDelta` runs only when the version
+     * actually moved.
+     */
+    public static function runIfOutdated( EventLog $eventLog ): void {
+        $installed = (string) get_option( self::DB_VERSION_OPTION, '0' );
+
+        if ( version_compare( $installed, ENTRE_REDES_CAMBIOS_VERSION, '>=' ) ) {
+            return;
+        }
+
+        self::run( $eventLog );
+    }
+
     public static function run( EventLog $eventLog ): void {
         $installed = get_option( self::DB_VERSION_OPTION, '0' );
         $current   = ENTRE_REDES_CAMBIOS_VERSION;

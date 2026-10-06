@@ -38,6 +38,11 @@ final class Plugin {
         }
         self::$booted = true;
 
+        // Schema upgrades must land on a plain zip replace, not only on a
+        // click of "Activate" — see MigrationRunner::runIfOutdated()'s own
+        // docblock for the incident this guards against.
+        Migrations\MigrationRunner::runIfOutdated( new Observability\WpEventLog() );
+
         add_action( 'rest_api_init', static function (): void {
             global $wpdb;
 

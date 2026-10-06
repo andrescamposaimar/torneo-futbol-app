@@ -37,4 +37,42 @@ class MigrationRunnerTest extends TestCase {
 
         $this->assertSame( ENTRE_REDES_CAMBIOS_VERSION, get_option( 'cambios_db_version' ) );
     }
+
+    /**
+     * The deployment reality this guards: a new zip is uploaded over an
+     * ALREADY ACTIVE plugin, so `register_activation_hook` — run()'s only
+     * other caller — never fires. Without an upgrade-time run, a release that
+     * adds a column would leave that column uncreated on the live site.
+     */
+    public function test_run_if_outdated_migrates_when_the_stored_version_is_older(): void {
+        update_option( 'cambios_db_version', '0.0.1' );
+
+        MigrationRunner::runIfOutdated( new InMemoryEventLog() );
+
+        $this->assertSame(
+            ENTRE_REDES_CAMBIOS_VERSION,
+            get_option( 'cambios_db_version' ),
+            'An older stored schema version must trigger the migration on a plain plugin upgrade.'
+        );
+    }
+
+    public function test_run_if_outdated_migrates_when_no_version_was_ever_stored(): void {
+        update_option( 'cambios_db_version', false );
+
+        MigrationRunner::runIfOutdated( new InMemoryEventLog() );
+
+        $this->assertSame( ENTRE_REDES_CAMBIOS_VERSION, get_option( 'cambios_db_version' ) );
+    }
+
+    public function test_run_if_outdated_is_a_no_op_once_the_stored_version_is_current(): void {
+        update_option( 'cambios_db_version', ENTRE_REDES_CAMBIOS_VERSION );
+
+        $eventLog = new InMemoryEventLog();
+        MigrationRunner::runIfOutdated( $eventLog );
+
+        // Nothing to assert about the schema (dbDelta is idempotent anyway);
+        // what matters is that the current version is left untouched and the
+        // call is cheap enough to sit on every request.
+        $this->assertSame( ENTRE_REDES_CAMBIOS_VERSION, get_option( 'cambios_db_version' ) );
+    }
 }
