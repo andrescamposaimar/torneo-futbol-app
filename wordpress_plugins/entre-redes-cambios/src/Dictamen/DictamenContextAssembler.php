@@ -173,11 +173,21 @@ final class DictamenContextAssembler {
     }
 
     /**
+     * @param bool $exencionArco Forwarded verbatim into the resulting
+     *        `DictamenContext::exencionArco()` — see that accessor's own
+     *        docblock. `false` for every ordinary caller; `true` ONLY for
+     *        movement 1 of a grouped goalkeeper reassignment, passed by
+     *        `Dictamen\DictamenPipeline::evaluateGrupo()` when
+     *        `Calendario\Settings::exencionArcoActiva()` is on. This
+     *        assembler does not read that setting itself, nor does it know
+     *        anything about "grouped requests" — it only threads through a
+     *        caller-supplied fact, the same pattern as every other
+     *        constructor-injected policy in this class.
      * @throws \RuntimeException When the plaza or the fecha named by
      *         $solicitud does not exist, or when any underlying query fails
      *         — see class docblock.
      */
-    public function assemble( SolicitudDeCambio $solicitud ): DictamenContext {
+    public function assemble( SolicitudDeCambio $solicitud, bool $exencionArco = false ): DictamenContext {
         $plaza = $this->plazaRepository->findPlaza( $solicitud->plazaId() );
 
         if ( null === $plaza ) {
@@ -273,7 +283,8 @@ final class DictamenContextAssembler {
             $entranteEsPadre,
             $padresViablesParaLaPlaza,
             $entranteEsArquero,
-            $plazaEsDelArquero
+            $plazaEsDelArquero,
+            $exencionArco
         );
     }
 

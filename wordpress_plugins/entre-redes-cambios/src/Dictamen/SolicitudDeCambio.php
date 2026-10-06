@@ -27,11 +27,36 @@ namespace EntreRedes\Cambios\Dictamen;
  * `gmdate()` before comparing against `DictamenContext::plazosUtc()` — see
  * that rule's docblock for why the comparison frame must be UTC on both
  * sides.
+ *
+ * *** `TIPO_REASIGNACION_ARQUERO` — A THIRD VOCABULARY VALUE, NEVER A THIRD
+ * SHAPE OF THIS CLASS (0.1.15) ***
+ * `cambios_solicitud.tipo` has always reused THIS class's own `TIPO_*`
+ * constants as its persisted enum vocabulary (see
+ * `Migrations\InitialSchema::sqlCambiosSolicitud()`'s docblock, and
+ * `Solicitudes\SolicitudRepository::crear()` writing `$solicitud->tipo()`
+ * straight into that column) — rather than introduce a parallel string
+ * constant somewhere in `Solicitudes\*` that could silently drift from this
+ * one, `TIPO_REASIGNACION_ARQUERO` is added HERE, alongside the two it has
+ * always shared a column with.
+ *
+ * It does NOT get a third named constructor. A grouped goalkeeper
+ * reassignment ("la exención del arco" — see `Dictamen\Reglas\PuntajeDentroDelTecho`
+ * and `Dictamen\Reglas\EntranteDisponible`'s own docblocks) is TWO ordinary
+ * movements, each judged by running the existing ten-rule dictamen ONCE per
+ * movement — see `Dictamen\DictamenPipeline::evaluateGrupo()`. Both of those
+ * per-movement `SolicitudDeCambio` instances are built with
+ * `self::sustitucion()`, exactly like any other substitution; this class's
+ * "TWO SHAPES, ONE CLASS" guarantee (see class docblock above) is therefore
+ * untouched — no caller may ever construct a `SolicitudDeCambio` whose own
+ * `tipo()` reads `reasignacion_arquero`. This constant exists purely so
+ * `Solicitudes\SolicitudRepository` has ONE place to read the persisted
+ * row-level tipo from, the same as it already does for the other two.
  */
 final class SolicitudDeCambio {
 
-    public const TIPO_SUSTITUCION = 'sustitucion';
-    public const TIPO_REGRESO     = 'regreso';
+    public const TIPO_SUSTITUCION          = 'sustitucion';
+    public const TIPO_REGRESO              = 'regreso';
+    public const TIPO_REASIGNACION_ARQUERO = 'reasignacion_arquero';
 
     private int $seasonId;
     private int $teamId;

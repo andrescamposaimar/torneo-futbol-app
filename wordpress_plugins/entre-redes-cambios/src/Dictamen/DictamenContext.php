@@ -110,6 +110,32 @@ final class DictamenContext {
     private bool $plazaEsDelArquero;
 
     /**
+     * Whether THIS evaluation is movement 1 of a grouped goalkeeper
+     * reassignment ("la exención del arco") — i.e. the plaza being evaluated
+     * is the goal plaza, the entrante is the field titular moving into it,
+     * and `Calendario\Settings::exencionArcoActiva()` was on when
+     * `Dictamen\DictamenPipeline::evaluateGrupo()` assembled this context.
+     * `false` for EVERY other evaluation: an ordinary `sustitucion`/`regreso`,
+     * AND movement 2 of a grouped reassignment (the outside player filling
+     * the vacated field plaza is judged by the ORDINARY rules — see
+     * `Solicitudes\SolicitudRepository`'s class docblock for why nothing
+     * about movement 2 needs this flag).
+     *
+     * Exactly two rules read this — `Reglas\PuntajeDentroDelTecho` (skips the
+     * plaza's techo entirely for this leg: goalkeeping is a different skill,
+     * not a higher-scoring substitute position) and `Reglas\EntranteDisponible`
+     * (does not treat the titular's own, still-open field-plaza occupation as
+     * `entrante_ocupa_otra_plaza_vigente` for this leg) — see each rule's own
+     * docblock. Every other rule ignores this property entirely; it is a
+     * context FACT, never a rule constructor argument, precisely so a rule
+     * never has to sniff `DictamenContext` for "am I being asked to evaluate
+     * movement 1" through some other proxy (the plaza's `es_arco`, the
+     * solicitud's shape, anything else) that could drift from what
+     * `DictamenPipeline::evaluateGrupo()` actually intended.
+     */
+    private bool $exencionArco;
+
+    /**
      * @param array<string, mixed>                          $plaza As returned by
      *        Plazas\PlazaRepository::findPlaza() — MUST be the plaza named by
      *        `$solicitud->plazaId()`.
@@ -157,6 +183,12 @@ final class DictamenContext {
      *        See this property's own docblock.
      * @param bool                                            $plazaEsDelArquero
      *        See this property's own docblock.
+     * @param bool                                            $exencionArco
+     *        See this property's own docblock. Defaults `false` — every
+     *        existing caller (an ordinary `sustitucion`/`regreso`) gets
+     *        exactly today's behavior with no change; only
+     *        `Dictamen\DictamenContextAssembler::assemble()`'s caller for
+     *        movement 1 of a grouped reassignment ever passes `true`.
      */
     public function __construct(
         SolicitudDeCambio $solicitud,
@@ -170,7 +202,8 @@ final class DictamenContext {
         bool $entranteEsPadre = false,
         int $padresViablesParaLaPlaza = 0,
         bool $entranteEsArquero = false,
-        bool $plazaEsDelArquero = false
+        bool $plazaEsDelArquero = false,
+        bool $exencionArco = false
     ) {
         $this->solicitud                        = $solicitud;
         $this->plaza                            = $plaza;
@@ -184,6 +217,7 @@ final class DictamenContext {
         $this->padresViablesParaLaPlaza         = $padresViablesParaLaPlaza;
         $this->entranteEsArquero                = $entranteEsArquero;
         $this->plazaEsDelArquero                = $plazaEsDelArquero;
+        $this->exencionArco                     = $exencionArco;
     }
 
     public function solicitud(): SolicitudDeCambio {
@@ -233,6 +267,10 @@ final class DictamenContext {
 
     public function plazaEsDelArquero(): bool {
         return $this->plazaEsDelArquero;
+    }
+
+    public function exencionArco(): bool {
+        return $this->exencionArco;
     }
 
     /** @return callable(int): int */

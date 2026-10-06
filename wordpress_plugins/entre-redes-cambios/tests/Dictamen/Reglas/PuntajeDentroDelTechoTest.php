@@ -80,4 +80,41 @@ class PuntajeDentroDelTechoTest extends TestCase {
         $this->assertNotNull( $motivo, 'A sustitucion with no resolvable puntaje must fail closed, never procede silently.' );
         $this->assertSame( 'entrante_puntaje_indeterminado', $motivo->codigo() );
     }
+
+    /**
+     * THE exención del arco (0.1.15): movement 1 of a grouped goalkeeper
+     * reassignment — `DictamenContext::exencionArco() === true` — must skip
+     * the techo entirely, even when the entrante's puntaje is well above it.
+     * Without the `exencionArco()` check in the rule, this is exactly
+     * `test_fails_above_the_techo()` above and would fail.
+     */
+    public function test_exencion_arco_skips_the_techo_even_when_exceeded(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [
+                'entrantePuntaje' => Puntaje::fromDecimal( 5.0 ), // far above the 3.0 techo
+                'exencionArco'    => true,
+            ]
+        );
+
+        $this->assertNull(
+            ( new PuntajeDentroDelTecho() )->evaluate( $ctx ),
+            'exencionArco() must skip the techo check entirely for movement 1 of a grouped reassignment.'
+        );
+    }
+
+    /**
+     * The exemption also skips the "indeterminado" fail-closed branch: with
+     * no ceiling to compare against for this leg, an unresolved puntaje is
+     * nothing this rule has an opinion about.
+     */
+    public function test_exencion_arco_skips_the_check_even_with_no_resolvable_puntaje(): void {
+        $ctx = $this->ctxFavorableSustitucion(
+            [
+                'entrantePuntaje' => null,
+                'exencionArco'    => true,
+            ]
+        );
+
+        $this->assertNull( ( new PuntajeDentroDelTecho() )->evaluate( $ctx ) );
+    }
 }
