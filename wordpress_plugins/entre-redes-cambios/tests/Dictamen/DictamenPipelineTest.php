@@ -51,7 +51,7 @@ class DictamenPipelineTest extends TestCase {
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
         $this->fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
-        $settings              = new Settings( $wpdb );
+        $settings              = new Settings( $wpdb, $this->eventLog );
 
         $assembler = new DictamenContextAssembler(
             $this->plazaRepository,
@@ -208,6 +208,43 @@ class DictamenPipelineTest extends TestCase {
     }
 
     /**
+     * ISOLATES the mechanism the design actually relies on: "exemption OFF
+     * disables the grouped request type because EntranteDisponible ALWAYS
+     * rejects leg 1" (the field titular structurally occupies his own field
+     * plaza — see EntranteDisponible's class docblock, "SCOPED EXEMPTION")
+     * — never because of the techo, which only happens to ALSO fire in the
+     * test above (222's puntaje there, 3.0, exceeds the goal plaza's techo,
+     * 2.5). Here 222's puntaje is lowered to EXACTLY 2.5 — within the techo
+     * (`Puntaje::allows()`'s own "regla del 2,5" floor treats it as
+     * admitted) — so `puntaje_excede_techo` cannot fire at all, and only
+     * `entrante_ocupa_otra_plaza_vigente` can explain the rejection. Without
+     * this test, widening the techo later would leave every other test in
+     * this file green for the WRONG reason.
+     */
+    public function test_evaluate_grupo_rejects_leg_arco_via_entrante_disponible_when_exencion_is_off_and_within_techo(): void {
+        $plazas = $this->seedPlazasDeReasignacion();
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $this->seedPuntaje( 222, 2.5 ); // overrides seedPlazasDeReasignacion()'s 3.0 — AT the techo, not over it.
+        $this->seedPuntaje( 333, 2.5 ); // within plazaCampo's own 3.0 techo — no campo-side objection either.
+
+        $instante = ( new \DateTimeImmutable( '2026-05-25 12:00:00', new \DateTimeZone( 'UTC' ) ) )->getTimestamp();
+
+        $legArco  = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazas['plazaArcoId'], 222, 5, $instante );
+        $legCampo = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazas['plazaCampoId'], 333, 5, $instante );
+
+        $pipelineSinExencion = new DictamenPipeline( $this->assembler(), $this->eventLog, null, false, false );
+
+        $dictamen = $pipelineSinExencion->evaluateGrupo( $legArco, $legCampo );
+
+        $this->assertFalse( $dictamen->procede() );
+        $this->assertNull( $dictamen->motivo( 'puntaje_excede_techo' ), 'Within techo — this must NOT be why the group is rejected.' );
+        $this->assertNotNull(
+            $dictamen->motivo( 'entrante_ocupa_otra_plaza_vigente' ),
+            'The titular structurally occupies his own field plaza — THIS is why exencion OFF rejects movement 1.'
+        );
+    }
+
+    /**
      * Movement 2 is judged by the ORDINARY rules regardless of the
      * exemption setting — an outside player over the VACATED plaza's own
      * techo is rejected exactly like any ordinary sustitucion.
@@ -269,7 +306,7 @@ class DictamenPipelineTest extends TestCase {
         $legArco  = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazas['plazaArcoId'], 222, 5, $instante );
         $legCampo = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazas['plazaCampoId'], 333, 5, $instante );
 
-        // exemption OFF: leg arco ALSO breaks on techo (222's puntaje 5.0 > 2.5).
+        // exemption OFF: leg arco ALSO breaks on techo (222's puntaje 3.0 > 2.5).
         $pipelineSinExencion = new DictamenPipeline( $this->assembler(), $this->eventLog, null, false, false );
 
         $dictamen = $pipelineSinExencion->evaluateGrupo( $legArco, $legCampo );
@@ -281,13 +318,49 @@ class DictamenPipelineTest extends TestCase {
         $this->assertGreaterThanOrEqual( 2, count( $codigos ), 'Both legs\' motivos must be present, never truncated to one.' );
     }
 
+    /**
+     * EACH motivo must carry WHICH LEG produced it — see
+     * DictamenPipeline::evaluateGrupo()'s class docblock, "EACH MOTIVO IS
+     * TAGGED WITH WHICH LEG PRODUCED IT". Both legs break here on the SAME
+     * codigo (`puntaje_excede_techo`) specifically so a naive
+     * "first occurrence wins" attribution could not fake this test — only a
+     * per-motivo tag survives the union correctly.
+     */
+    public function test_evaluate_grupo_tags_each_motivo_with_the_movement_that_produced_it(): void {
+        $plazas = $this->seedPlazasDeReasignacion();
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $this->seedPuntaje( 333, 4.0 ); // leg campo: over its 3.0 techo
+
+        $instante = ( new \DateTimeImmutable( '2026-05-25 12:00:00', new \DateTimeZone( 'UTC' ) ) )->getTimestamp();
+
+        $legArco  = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazas['plazaArcoId'], 222, 5, $instante );
+        $legCampo = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazas['plazaCampoId'], 333, 5, $instante );
+
+        // exemption OFF: leg arco ALSO breaks on techo (222's puntaje 3.0 > 2.5) —
+        // same codigo as leg campo's own breach, on purpose.
+        $pipelineSinExencion = new DictamenPipeline( $this->assembler(), $this->eventLog, null, false, false );
+
+        $dictamen = $pipelineSinExencion->evaluateGrupo( $legArco, $legCampo );
+
+        $porTecho = array_values( array_filter(
+            $dictamen->motivos(),
+            static fn ( $m ) => 'puntaje_excede_techo' === $m->codigo()
+        ) );
+
+        $this->assertCount( 2, $porTecho, 'Both legs must independently report puntaje_excede_techo.' );
+
+        $movimientos = array_map( static fn ( $m ) => $m->movimiento(), $porTecho );
+        sort( $movimientos );
+        $this->assertSame( [ 'arco', 'campo' ], $movimientos );
+    }
+
     private function assembler(): DictamenContextAssembler {
         global $wpdb;
 
         return new DictamenContextAssembler(
             $this->plazaRepository,
             $this->fechaRepository,
-            new Settings( $wpdb ),
+            new Settings( $wpdb, $this->eventLog ),
             $wpdb,
             $this->eventLog
         );

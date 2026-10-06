@@ -314,11 +314,25 @@ class BandejaPage {
                     <strong style="color:green;"><?php esc_html_e( 'Dictamen: procede.', 'entre-redes-cambios' ); ?></strong>
                 <?php else : ?>
                     <strong style="color:#b32d2e;"><?php esc_html_e( 'Dictamen: NO procede.', 'entre-redes-cambios' ); ?></strong>
-                    <ul>
-                        <?php foreach ( (array) $solicitud['dictamen_motivos'] as $motivo ) : ?>
-                        <li><?php echo esc_html( (string) ( $motivo['mensaje'] ?? '' ) ); ?></li>
+                    <?php if ( ! empty( $solicitud['es_grupo'] ) ) : ?>
+                        <?php foreach ( $this->agruparMotivosPorMovimiento( (array) $solicitud['dictamen_motivos'] ) as $movimiento => $motivosDelMovimiento ) : ?>
+                            <?php if ( empty( $motivosDelMovimiento ) ) : ?>
+                                <?php continue; ?>
+                            <?php endif; ?>
+                            <p style="margin:4px 0 0 0;"><strong><?php echo esc_html( $this->etiquetaMovimiento( $movimiento ) ); ?></strong></p>
+                            <ul>
+                                <?php foreach ( $motivosDelMovimiento as $motivo ) : ?>
+                                <li><?php echo esc_html( (string) ( $motivo['mensaje'] ?? '' ) ); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
                         <?php endforeach; ?>
-                    </ul>
+                    <?php else : ?>
+                        <ul>
+                            <?php foreach ( (array) $solicitud['dictamen_motivos'] as $motivo ) : ?>
+                            <li><?php echo esc_html( (string) ( $motivo['mensaje'] ?? '' ) ); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
                 <?php endif; ?>
             </p>
 
@@ -683,5 +697,51 @@ class BandejaPage {
         $titulo = trim( (string) get_the_title( $postId ) );
 
         return '' !== $titulo ? $titulo : $fallbackLabel . ' #' . $postId;
+    }
+
+    /**
+     * Splits a GROUPED request's motivos by which movement produced them —
+     * see `Dictamen\DictamenPipeline::evaluateGrupo()`'s class docblock,
+     * "EACH MOTIVO IS TAGGED WITH WHICH LEG PRODUCED IT". Several codigos
+     * (`plaza_sin_ocupacion_vigente`, `fuera_de_plazo`,
+     * `entrante_es_el_saliente`…) can come from EITHER leg, so rendering a
+     * single pooled list would leave the process owner unable to tell which
+     * movement is actually the problem — defeating the whole point of
+     * judging the pair together (see class docblock, "THE EXPLICIT
+     * CONFIRMATION GATE"). `'sin_movimiento'` is a defensive catch-all for a
+     * motivo with no attribution — should never happen for a grouped
+     * request produced by `evaluateGrupo()`, but keeps this method total
+     * rather than silently dropping one it does not recognize.
+     *
+     * @param array<int, array{codigo: string, mensaje: string, datos: array<string, mixed>}> $motivos
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function agruparMotivosPorMovimiento( array $motivos ): array {
+        $grupos = [
+            'arco'           => [],
+            'campo'          => [],
+            'sin_movimiento' => [],
+        ];
+
+        foreach ( $motivos as $motivo ) {
+            $movimiento = (string) ( $motivo['datos']['movimiento'] ?? '' );
+            $clave      = isset( $grupos[ $movimiento ] ) ? $movimiento : 'sin_movimiento';
+
+            $grupos[ $clave ][] = $motivo;
+        }
+
+        return $grupos;
+    }
+
+    /** Short, factual Spanish label for one of agruparMotivosPorMovimiento()'s groups. */
+    private function etiquetaMovimiento( string $movimiento ): string {
+        switch ( $movimiento ) {
+            case 'arco':
+                return __( 'Arco', 'entre-redes-cambios' );
+            case 'campo':
+                return __( 'Campo', 'entre-redes-cambios' );
+            default:
+                return __( 'Otros motivos', 'entre-redes-cambios' );
+        }
     }
 }

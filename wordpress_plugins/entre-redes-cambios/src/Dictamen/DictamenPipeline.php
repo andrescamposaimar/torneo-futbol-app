@@ -48,6 +48,19 @@ use EntreRedes\Cambios\Observability\EventLog;
  * by whoever constructs this pipeline — see that setting's own docblock);
  * movement 2 is assembled exactly like `evaluate()` assembles any ordinary
  * `sustitucion`, with no exemption at all.
+ *
+ * *** EACH MOTIVO IS TAGGED WITH WHICH LEG PRODUCED IT (0.1.16) ***
+ * Before unioning, every motivo from movement 1's Dictamen is tagged
+ * `Motivo::conMovimiento('arco')` and every motivo from movement 2's is
+ * tagged `conMovimiento('campo')` — see that method's own docblock. Several
+ * codigos (`plaza_sin_ocupacion_vigente`, `fuera_de_plazo`,
+ * `entrante_es_el_saliente`…) can come from EITHER leg, so without this a
+ * process owner reading the pooled motivo list has no way to tell which
+ * movement is actually the problem — defeating the whole point of judging
+ * the pair together (see `Admin\BandejaPage`'s class docblock, "so the
+ * process owner judges the WHOLE move, not half of it"). Each `Regla` stays
+ * completely unaware this is happening: the tag is applied here, AFTER both
+ * legs' Dictamen already exist, never inside `DictamenEngine::evaluate()`.
  */
 final class DictamenPipeline {
 
@@ -146,7 +159,20 @@ final class DictamenPipeline {
             $dictamenArco  = $engine->evaluate( $ctxArco );
             $dictamenCampo = $engine->evaluate( $ctxCampo );
 
-            return Dictamen::from( array_merge( $dictamenArco->motivos(), $dictamenCampo->motivos() ) );
+            // Tagged BEFORE the union — see class docblock, "EACH MOTIVO IS
+            // TAGGED WITH WHICH LEG PRODUCED IT" — so a codigo that can come
+            // from either leg (e.g. `fuera_de_plazo`) is still attributable
+            // once both lists are merged into one.
+            $motivosArco  = array_map(
+                static fn ( Motivo $motivo ): Motivo => $motivo->conMovimiento( 'arco' ),
+                $dictamenArco->motivos()
+            );
+            $motivosCampo = array_map(
+                static fn ( Motivo $motivo ): Motivo => $motivo->conMovimiento( 'campo' ),
+                $dictamenCampo->motivos()
+            );
+
+            return Dictamen::from( array_merge( $motivosArco, $motivosCampo ) );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'dictamen.grupo.fallido', [
                 'season_id'      => $legArco->seasonId(),
