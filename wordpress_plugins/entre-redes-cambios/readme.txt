@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.10
+Stable tag: 0.1.11
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.11 =
+* Add: `cambios_solicitud` gains `saliente_player_id`, captured once at `Solicitudes\SolicitudRepository::crear()` time from the plaza's vigent ocupación — never re-derived later, so an old solicitud keeps naming who actually left even after the plaza's chain has since advanced. `GET /cambios/solicitudes` now returns `sale`/`entra` objects (`{ player_id, nombre, puntaje }`) for every row: for a `sustitucion`, `sale` is this stored saliente and `entra` is the stored `entrante_player_id`; for a `regreso` (whose `entrante_player_id` is always NULL — who returns is never a choice the request makes), `entra` is instead the plaza's permanent `titular_player_id` and `sale` is the same stored saliente — the suplente the titular displaces. Names and puntajes for the whole page are resolved in one batched call each (`get_posts()`/`get_the_title()` cache priming, `Plazas\JugadorMetricasReader::resolveMuchos()`), never one query per row. An unresolvable puntaje stays `null` rather than a fabricated value; a `saliente_player_id` that predates this column (a row created before 0.1.11) degrades its whole `sale` side to `{ player_id: null, nombre: null, puntaje: null }` rather than guessing.
+* Add (app): "Mis Solicitudes" now renders `Sale: <Apellido, Nombre> [<puntaje>]` and `Entra: <Apellido, Nombre> [<puntaje>]` under each pedido, using the app's existing `formatearPuntaje()` so a whole-number puntaje never renders with a spurious decimal. An unknown puntaje omits the brackets entirely rather than showing `[]` or `[-]`; an unrecorded side (predates the backend column) renders as "Sin registrar" instead of a blank line.
 
 = 0.1.10 =
 * Fix: `GET /cambios/plazas/candidatos` could return an EMPTY page while `X-WP-Total` reported a population in the hundreds — the exact production incident: opening "Padrón Completo" with no puntaje chip selected showed "No encontramos candidatos disponibles para esta plaza" on a plaza with a 4.5 techo, even though 81 published players were rated 4.5 and below. Root cause: `Plazas\CandidatosResolver::buscarPaginado()` sorts `puntaje DESC` (0.1.8), and the techo was only enforced AFTER a page was already sliced — so the 31 published players rated 5.0 alone filled page 1 at `per_page=20`, and the per-page filter then stripped every one of them, returning an empty page. The techo now excludes an over-ceiling candidate from the POPULATION itself, in the same place and for the same reason as the unrated-candidate exclusion added in 0.1.9 — before `X-WP-Total` is computed and before pagination. `?incluir_no_viables=1` can no longer surface a `motivo: 'puntaje_excede_techo'` row (there is nothing left in the population for it to surface) but still surfaces a page's own phase-2 rejections (`ocupa_otra_plaza_vigente`, `bloqueado_por_cierre_truncado`) unchanged. `total` is therefore very slightly optimistic — it counts the population before phase-2 verdicts — a materially smaller and more even-handed overcount than the one this removes, since phase-2 non-viables are a small minority scattered across the whole population rather than concentrated at the top of the sort.

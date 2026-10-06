@@ -38,6 +38,11 @@ final class Plugin {
         }
         self::$booted = true;
 
+        // Schema upgrades must land on a plain zip replace, not only on a
+        // click of "Activate" — see MigrationRunner::runIfOutdated()'s own
+        // docblock for the incident this guards against.
+        Migrations\MigrationRunner::runIfOutdated( new Observability\WpEventLog() );
+
         add_action( 'rest_api_init', static function (): void {
             global $wpdb;
 
@@ -98,11 +103,15 @@ final class Plugin {
                 $eventLog
             );
 
+            $jugadorMetricasReader = new Plazas\JugadorMetricasReader( $wpdb, $eventLog );
+
             $solicitudesController = new Rest\SolicitudesController(
                 $capitanAuthorizer,
                 $solicitudRepository,
                 $dictamenPipeline,
-                $eventLog
+                $eventLog,
+                $plazaRepository,
+                $jugadorMetricasReader
             );
 
             $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository, $eventLog );

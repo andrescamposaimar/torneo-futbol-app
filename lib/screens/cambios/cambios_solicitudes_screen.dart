@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../models/cambios_solicitud.dart';
 import '../../providers/cambios_providers.dart';
 import '../../services/cambios_solicitudes_controller.dart';
+import '../../utils/puntaje_utils.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import '../../widgets/loading_seccion.dart';
 import 'cambios_motivo_mensajes.dart';
@@ -220,6 +221,10 @@ class _SolicitudCard extends StatelessWidget {
                   'Resuelto el ${dateFormat.format(solicitud.resueltaAt!)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                 ),
+              const SizedBox(height: 6),
+              _LadoRow(etiqueta: 'Sale', lado: solicitud.sale),
+              const SizedBox(height: 2),
+              _LadoRow(etiqueta: 'Entra', lado: solicitud.entra),
               if (solicitud.nota != null && solicitud.nota!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text('Nota de la comisión: ${solicitud.nota}',
@@ -254,6 +259,74 @@ class _SolicitudCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sale / Entra row
+// ---------------------------------------------------------------------------
+
+/// Renders one side ("Sale" or "Entra") of a solicitud's player pair —
+/// `<etiqueta>: <Apellido, Nombre> [<puntaje>]`. See
+/// `CambiosSolicitudLado`'s own docblock for what each field means and when
+/// it degrades.
+///
+/// *** NEVER `[]` OR `[-]` *** `formatearPuntaje()` already collapses an
+/// unknown puntaje to `'-'`, but that sentinel belongs INSIDE a bracket pair
+/// everywhere else this app renders a puntaje (see `cambios_solicitar_screen
+/// .dart`'s own `_PlazaHeader`) — never here: a `null` puntaje omits the
+/// bracket entirely rather than printing an empty or placeholder pair, so a
+/// reader never mistakes "we don't know" for "rated at the sentinel".
+///
+/// *** OVERFLOW ***
+/// `Row` + `Expanded(Text(..., overflow: ellipsis, maxLines: 1))` for the
+/// name, with the fixed-width puntaje chip OUTSIDE the `Expanded` — the same
+/// shape `cambios_solicitar_screen.dart`'s own `_PlazaHeader` uses, chosen
+/// for the same reason: an unbounded `Text` inside a `Row` with no
+/// `Expanded` overflows the moment a name is long enough, and this screen is
+/// exactly as narrow as that one.
+class _LadoRow extends StatelessWidget {
+  final String etiqueta;
+  final CambiosSolicitudLado lado;
+
+  const _LadoRow({required this.etiqueta, required this.lado});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final estilo = theme.textTheme.bodyMedium;
+
+    if (lado.playerId == null) {
+      return Text(
+        '$etiqueta: Sin registrar',
+        style: estilo?.copyWith(color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+      );
+    }
+
+    final puntajeTexto = formatearPuntaje(lado.puntaje);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text('$etiqueta: ', style: estilo?.copyWith(fontWeight: FontWeight.w600)),
+        Expanded(
+          child: Text(
+            lado.nombre ?? 'Jugador #${lado.playerId}',
+            style: estilo,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ),
+        // formatearPuntaje() already collapses an unknown puntaje to '-' —
+        // that sentinel is deliberately NOT shown here (see class docblock):
+        // no brackets at all when the puntaje could not be resolved.
+        if (puntajeTexto != '-')
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text('[$puntajeTexto]', style: estilo),
+          ),
+      ],
     );
   }
 }

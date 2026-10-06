@@ -448,6 +448,41 @@ class InitialSchema {
      * see `Solicitudes\SolicitudRepository::marcarPublicadaWithinTransaction()`'s
      * docblock. `NULL` means exactly what `dictamen_aplicado`'s `NULL`
      * means: "never published".
+     *
+     * *** `saliente_player_id` — ADDED IN 0.1.11, WHY IT IS A WRITE-TIME
+     * SNAPSHOT, NEVER A READ-TIME DERIVATION ***
+     * The captain-facing "Mis Solicitudes" screen needs to show WHO LEAVES a
+     * plaza, not just who comes in — but "who currently occupies this plaza"
+     * is not a fact fixed in time: `cambios_ocupacion`'s chain for a plaza
+     * keeps advancing (a `publicarLote()` run, a later `regreso`), so
+     * re-deriving "the saliente" from the CURRENT vigent ocupación at READ
+     * time would make an old solicitud silently relabel itself with whoever
+     * happens to occupy the plaza TODAY — stating something false about the
+     * past. `Solicitudes\SolicitudRepository::crear()` therefore reads
+     * `Plazas\PlazaRepository::findOcupacionVigente()` ONCE, at the exact
+     * moment the solicitud is created, and freezes that player_id here —
+     * same discipline as `dictamen_original` (a snapshot of a fact that can
+     * go stale), applied to "who this request would replace" instead. This
+     * is the vigent occupant AT REQUEST TIME for BOTH `tipo` values: for a
+     * `sustitucion` that occupant is exactly who the `entrante_player_id`
+     * would replace; for a `regreso` it is the suplente currently holding
+     * the plaza the titular is asking to reclaim (see
+     * `Rest\SolicitudesController::listar()`'s own docblock for how each
+     * `tipo` derives its "entra" side from this same moment).
+     *
+     * `NULL` here means "not recorded" — either the plaza genuinely had no
+     * vigent ocupación at the instant of `crear()` (should not happen once
+     * `PlazaRepository::openPlaza()` has run, same invariant
+     * `findOcupacionVigente()` itself documents, but `crear()` does not
+     * assume it), or the row predates this column (added once
+     * `cambios_solicitud` was confirmed EMPTY in production — see
+     * `Migrations\MigrationRunner`'s own docblock for why a plain
+     * `dbDelta()`-driven column add, not a versioned backfill migration, is
+     * sufficient here: there is no existing row to migrate). Every reader of
+     * this column MUST treat `NULL` as "unknown", never guess a value —
+     * see `Rest\SolicitudesController`'s own docblock for how the REST
+     * response and the app both degrade this to a visible "not recorded"
+     * state instead of fabricating a name.
      */
     private static function sqlCambiosSolicitud( string $p, string $charset ): string {
         return "CREATE TABLE {$p}cambios_solicitud (
@@ -457,6 +492,7 @@ class InitialSchema {
   plaza_id BIGINT UNSIGNED NOT NULL,
   tipo ENUM('sustitucion','regreso') NOT NULL,
   entrante_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  saliente_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
   fecha_id BIGINT UNSIGNED NOT NULL,
   solicitada_por BIGINT UNSIGNED NOT NULL,
   solicitada_at DATETIME NOT NULL,
