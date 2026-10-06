@@ -98,7 +98,7 @@ class DictamenContextAssemblerTest extends TestCase {
     }
 
     protected function tearDown(): void {
-        global $wpdb;
+        global $wpdb, $wp_test_position_terms;
         $p = $wpdb->prefix;
         $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
@@ -107,6 +107,7 @@ class DictamenContextAssemblerTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}posts" );
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}cambios_settings" );
+        $wp_test_position_terms = []; // see tests/wp-shim.php's wp_get_object_terms() docblock
         InitialSchema::up(); // restore seeds for any test that runs after this file
     }
 
@@ -240,6 +241,98 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->assertNull( $ctx->entrantePuntaje() );
         $this->assertSame( [], $ctx->entranteOcupacionesEnOtrasPlazas() );
         $this->assertSame( [], $ctx->entrantePlazasConCierreTruncado() );
+    }
+
+    // -------------------------------------------------------------------------
+    // assemble() — arquero/plaza position resolution (Reglas\ArqueroNoOcupaPlazaDeCampo)
+    // -------------------------------------------------------------------------
+
+    public function test_assemble_resolves_plaza_es_del_arquero_true_when_titular_is_the_titular_goalkeeper(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 3 ] ]; // 3 => Arquero
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+
+        $ctx = $this->assembler->assemble( $solicitud );
+
+        $this->assertTrue( $ctx->plazaEsDelArquero() );
+    }
+
+    /**
+     * *** THE INVARIANT THIS WHOLE RULE DEPENDS ON, PINNED END TO END ***
+     * A plaza whose titular resolves as "Arquero Sup." (term 125, the
+     * BACKUP goalkeeper position) must assemble as a FIELD plaza —
+     * plazaEsDelArquero() === false — even though that SAME player would
+     * resolve entranteEsArquero() === true as an entrante. See
+     * Plazas\PosicionResolver's own class docblock for the full reasoning:
+     * unifying the two predicates would silently create extra "goal plazas"
+     * this season.
+     */
+    public function test_assemble_treats_a_titular_with_the_backup_goalkeeper_position_as_a_field_plaza(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 125 ] ]; // 125 => Arquero Sup.
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+
+        $ctx = $this->assembler->assemble( $solicitud );
+
+        $this->assertFalse(
+            $ctx->plazaEsDelArquero(),
+            'A titular whose position is "Arquero Sup." (term 125) must NOT make this the goalkeeper\'s plaza — only term 3 ("Arquero") may.'
+        );
+    }
+
+    public function test_assemble_resolves_entrante_es_arquero_true_for_either_goalkeeper_position(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 888 => [ 125 ] ]; // backup goalkeeper entrante
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+
+        $ctx = $this->assembler->assemble( $solicitud );
+
+        $this->assertTrue( $ctx->entranteEsArquero() );
+    }
+
+    public function test_assemble_resolves_entrante_es_arquero_false_for_a_field_position(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 888 => [ 9 ] ]; // Delantero
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+
+        $ctx = $this->assembler->assemble( $solicitud );
+
+        $this->assertFalse( $ctx->entranteEsArquero() );
+    }
+
+    public function test_assemble_resolves_entrante_es_arquero_false_for_a_regreso(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 3 ] ]; // the plaza's own titular is a goalkeeper
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+
+        $solicitud = SolicitudDeCambio::regreso( self::SEASON_ID, 100, $plazaId, 5, time() );
+
+        $ctx = $this->assembler->assemble( $solicitud );
+
+        $this->assertFalse( $ctx->entranteEsArquero(), 'A regreso carries no entrante — entranteEsArquero() must stay false by convention, same as entrantePuntaje()/entranteEsPadre().' );
+        $this->assertTrue( $ctx->plazaEsDelArquero(), 'plazaEsDelArquero() is a fact about the PLAZA, independent of the solicitud tipo, and must still resolve for a regreso.' );
     }
 
     // -------------------------------------------------------------------------

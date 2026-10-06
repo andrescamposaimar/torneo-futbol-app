@@ -7,6 +7,7 @@ namespace EntreRedes\Cambios\Tests\Dictamen;
 use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Dictamen\DictamenEngine;
 use EntreRedes\Cambios\Dictamen\DictamenEngineFactory;
+use EntreRedes\Cambios\Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteDisponible;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoEsElSaliente;
@@ -20,17 +21,17 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * THE test that protects the ruleset's completeness itself: this is the
- * ONLY place — production or test — allowed to assert "these nine, no
+ * ONLY place — production or test — allowed to assert "these ten, no
  * more, no fewer" against DictamenEngineFactory. Every other test consumes
  * the factory rather than re-listing the rules, so a future rule dropped
  * from create()/reglas() fails HERE, loudly, instead of nowhere.
  */
 class DictamenEngineFactoryTest extends TestCase {
 
-    public function test_reglas_returns_exactly_the_nine_rules_of_the_reglamento(): void {
+    public function test_reglas_returns_exactly_the_ten_rules_of_the_reglamento(): void {
         $reglas = DictamenEngineFactory::reglas();
 
-        $this->assertCount( 9, $reglas );
+        $this->assertCount( 10, $reglas );
 
         $clases = array_map( static fn ( object $r ): string => get_class( $r ), $reglas );
 
@@ -45,6 +46,7 @@ class DictamenEngineFactoryTest extends TestCase {
                 PlazaNoCerrada::class,
                 RegresoSoloConMinimoCumplido::class,
                 PrioridadDePadresRespetada::class,
+                ArqueroNoOcupaPlazaDeCampo::class,
             ],
             $clases
         );

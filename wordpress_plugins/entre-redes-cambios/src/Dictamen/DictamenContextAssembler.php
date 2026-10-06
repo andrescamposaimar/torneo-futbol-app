@@ -12,6 +12,7 @@ use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\CandidatosResolver;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Plazas\PosicionResolver;
 
 /**
  * Builds a `DictamenContext` from the real database for a given
@@ -99,6 +100,16 @@ use EntreRedes\Cambios\Plazas\PlazaRepository;
  * collaborator's own class docblock, "WHY THIS EXISTS", for the
  * screen-disagrees-with-engine failure that drift would otherwise cause).
  * This assembler delegates to it, never re-deriving the cap itself.
+ *
+ * *** ARQUERO/PLAZA POSITION RESOLUTION — ONE BATCHED CALL, NEVER TWO ***
+ * `DictamenContext::entranteEsArquero()` / `::plazaEsDelArquero()` feed
+ * `Reglas\ArqueroNoOcupaPlazaDeCampo` — see that rule's own class docblock
+ * for the two deliberately-distinct position predicates this reads off
+ * `Plazas\PosicionResolver`. This assembler resolves BOTH the entrante's and
+ * the plaza's titular's position in a single `PosicionResolver::resolverParaIds()`
+ * call (at most two ids, for one solicitud) rather than one call per id —
+ * the same batching discipline `Plazas\CandidatosResolver::buscarPaginado()`
+ * applies over its whole population, just over a trivially small input here.
  */
 final class DictamenContextAssembler {
 
@@ -111,6 +122,7 @@ final class DictamenContextAssembler {
     private CandidatosResolver $candidatosResolver;
     private BloqueoReemplazoPolicy $politicaCC5b;
     private BoundedFechaCounter $boundedFechaCounter;
+    private PosicionResolver $posicionResolver;
 
     /**
      * @param BloqueoReemplazoPolicy|null $politicaCC5b The SAME policy value
@@ -124,6 +136,9 @@ final class DictamenContextAssembler {
      *        instance built from $plazaRepository/$wpdb — overridable in
      *        tests, same pattern as every other optional collaborator in
      *        this class.
+     * @param PosicionResolver|null $posicionResolver Defaults to a plain
+     *        instance — overridable in tests, same pattern as every other
+     *        optional collaborator in this class.
      */
     public function __construct(
         PlazaRepository $plazaRepository,
@@ -133,7 +148,8 @@ final class DictamenContextAssembler {
         EventLog $eventLog,
         ?BloqueoReemplazoPolicy $politicaCC5b = null,
         ?CandidatosResolver $candidatosResolver = null,
-        ?JugadorMetricasReader $metricasReader = null
+        ?JugadorMetricasReader $metricasReader = null,
+        ?PosicionResolver $posicionResolver = null
     ) {
         $this->plazaRepository     = $plazaRepository;
         $this->fechaRepository     = $fechaRepository;
@@ -144,6 +160,7 @@ final class DictamenContextAssembler {
         $this->metricasReader      = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
         $this->candidatosResolver  = $candidatosResolver ?? new CandidatosResolver( $wpdb, $plazaRepository, $eventLog, $this->metricasReader );
         $this->boundedFechaCounter = new BoundedFechaCounter( $fechaRepository, $eventLog );
+        $this->posicionResolver    = $posicionResolver ?? new PosicionResolver();
     }
 
     /**
@@ -232,6 +249,9 @@ final class DictamenContextAssembler {
             $this->settings->timezone()
         );
 
+        [ 'entranteEsArquero' => $entranteEsArquero, 'plazaEsDelArquero' => $plazaEsDelArquero ] =
+            $this->resolverPosicionesArquero( $plaza, $entrantePlayerId );
+
         return new DictamenContext(
             $solicitud,
             $plaza,
@@ -242,13 +262,41 @@ final class DictamenContextAssembler {
             $plazosUtc,
             $countResolvedFechasSinceFn,
             $entranteEsPadre,
-            $padresViablesParaLaPlaza
+            $padresViablesParaLaPlaza,
+            $entranteEsArquero,
+            $plazaEsDelArquero
         );
     }
 
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Resolves, in ONE batched `PosicionResolver::resolverParaIds()` call,
+     * both booleans `Reglas\ArqueroNoOcupaPlazaDeCampo` needs — see that
+     * rule's own class docblock and this class's own docblock, "ARQUERO/
+     * PLAZA POSITION RESOLUTION — ONE BATCHED CALL, NEVER TWO".
+     *
+     * @param array<string, mixed> $plaza MUST carry `titular_player_id`.
+     * @return array{entranteEsArquero: bool, plazaEsDelArquero: bool}
+     */
+    private function resolverPosicionesArquero( array $plaza, ?int $entrantePlayerId ): array {
+        $titularPlayerId = (int) $plaza['titular_player_id'];
+
+        $idsParaResolver = [ $titularPlayerId ];
+        if ( null !== $entrantePlayerId ) {
+            $idsParaResolver[] = $entrantePlayerId;
+        }
+
+        $posiciones = $this->posicionResolver->resolverParaIds( array_values( array_unique( $idsParaResolver ) ) );
+
+        return [
+            'entranteEsArquero' => null !== $entrantePlayerId
+                && PosicionResolver::esPosicionDeArquero( $posiciones[ $entrantePlayerId ] ),
+            'plazaEsDelArquero' => PosicionResolver::esPosicionDelArqueroTitular( $posiciones[ $titularPlayerId ] ),
+        ];
+    }
 
     /**
      * `PlazaRepository::listPlazasConCierreTruncadoDeJugador()` has no
