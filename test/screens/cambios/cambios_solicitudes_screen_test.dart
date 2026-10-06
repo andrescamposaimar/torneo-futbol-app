@@ -99,8 +99,12 @@ void main() {
         state: CambiosSolicitudesLoaded(solicitudes: [
           _solicitud(
             id: 1,
+            // DIFFERENT puntajes on purpose. With the same value on both
+            // sides, this test cannot tell "each side shows its own player's
+            // puntaje" from "one value rendered twice" — and neither can a
+            // screenshot, which is how the weakness was noticed.
             sale: const CambiosSolicitudLado(playerId: 777, nombre: 'Campos, Andres', puntaje: 4.5),
-            entra: const CambiosSolicitudLado(playerId: 200, nombre: 'Grigorjew, Gerardo', puntaje: 4.5),
+            entra: const CambiosSolicitudLado(playerId: 200, nombre: 'Grigorjew, Gerardo', puntaje: 3.0),
           ),
         ]),
         onRetry: () {},
@@ -111,7 +115,11 @@ void main() {
       expect(find.text('Campos, Andres'), findsOneWidget);
       expect(find.text('Entra: '), findsOneWidget);
       expect(find.text('Grigorjew, Gerardo'), findsOneWidget);
-      expect(find.text('[4.5]'), findsNWidgets(2));
+
+      // Each bracket carries ITS OWN side's puntaje — exactly one of each,
+      // never the same number twice.
+      expect(find.text('[4.5]'), findsOneWidget);
+      expect(find.text('[3]'), findsOneWidget);
     });
 
     testWidgets('a whole-number puntaje renders without a spurious decimal (formatearPuntaje)',
