@@ -855,6 +855,56 @@ void main() {
       expect(listaEsperaController.lastQuery, 'zapata');
     });
 
+    testWidgets('the clear button only exists while there is something to clear', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
+
+      expect(find.byKey(const Key('candidato_search_clear')), findsNothing);
+
+      await tester.enterText(find.byKey(const Key('candidato_search_field')), 'zap');
+      await tester.pump();
+
+      expect(find.byKey(const Key('candidato_search_clear')), findsOneWidget);
+    });
+
+    testWidgets('clearing the search re-queries IMMEDIATELY, without waiting out the debounce',
+        (tester) async {
+      // Emptying the box is one discrete decision, not a stream of
+      // keystrokes. Making the captain wait 300ms to get the full list back
+      // would be a delay with no purpose.
+      final listaEsperaController = _StubCandidatosController(
+        const CambiosCandidatosLoaded(candidatos: [], query: ''),
+      );
+
+      await _pumpScreenWithControllers(tester, listaEsperaController: listaEsperaController);
+
+      await tester.enterText(find.byKey(const Key('candidato_search_field')), 'zapata');
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(listaEsperaController.loadCalls, 1);
+      expect(listaEsperaController.lastQuery, 'zapata');
+
+      await tester.tap(find.byKey(const Key('candidato_search_clear')));
+      // No debounce window pumped on purpose — a single frame is enough.
+      await tester.pump();
+
+      expect(listaEsperaController.loadCalls, 2);
+      expect(listaEsperaController.lastQuery, '');
+      expect(find.byKey(const Key('candidato_search_clear')), findsNothing);
+    });
+
+    testWidgets('the search box stays compact', (tester) async {
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
+
+      final alto = tester.getSize(find.byKey(const Key('candidato_search_field'))).height;
+
+      // Measured at 43.0; the threshold sits just above it rather than at
+      // some round number far away. What actually holds this height is
+      // `isDense: true` plus the explicit `contentPadding` — verified by
+      // dropping them and watching this fail. Swapping the hint back for a
+      // `labelText` does NOT on its own cross the threshold, so this test
+      // does not guard that; it guards the density.
+      expect(alto, lessThan(48));
+    });
+
     testWidgets('scrolling near the bottom of the list calls loadMore() on the visible section',
         (tester) async {
       final muchosCandidatos = List.generate(
