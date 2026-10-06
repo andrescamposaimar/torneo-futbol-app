@@ -283,6 +283,48 @@ class InitialSchema {
      * `cambios_ocupacion` row for this same player_id, it never rewrites this
      * column.
      *
+     * *** `es_arco` — ADDED IN 0.1.13, A STORED FACT, NEVER A DERIVATION ***
+     * The process owner stated the invariant plainly: every team has exactly
+     * one goalkeeper, therefore exactly one of its 11 plazas IS the
+     * goalkeeper's plaza — a team without that plaza cannot exist. Before
+     * this column existed, "is this the goalkeeper's plaza" was answered by
+     * re-deriving it on every read from the titular's CURRENT `sp_position`
+     * (`Plazas\PosicionResolver::esPosicionDelArqueroTitular()`, term 3
+     * only — see that method's own docblock for why term 125, "Arquero
+     * Sup.", is deliberately excluded). That worked only as long as nobody
+     * ever touched a player's position in WordPress: fixing a data-entry
+     * error on a titular's `sp_position` would silently strip the team of
+     * its goal plaza, and `Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo`
+     * (0.1.12) would then block EVERY candidate from entering EVERY one of
+     * that team's 11 plazas — including the one that is still, in reality,
+     * the goal — with nothing anywhere explaining why.
+     *
+     * `es_arco` is therefore WRITTEN ONCE and read as a plain fact from then
+     * on:
+     *   - `Plazas\PlazaRepository::doOpenPlaza()` derives it from the
+     *     titular's position AT THE MOMENT the plaza is opened (via
+     *     `PosicionResolver::esPosicionDelArqueroTitular()`) and persists it
+     *     — every NEW plaza (any future season's `Plazas\Alta\TitularesListImporter`
+     *     run) gets a correct value from birth, with no separate backfill
+     *     step required.
+     *   - `Migrations\MigrationRunner::backfillEsArco()` derives it, once,
+     *     for the 330 plazas that existed in production BEFORE this column
+     *     did — see that method's own docblock.
+     *   - `Dictamen\DictamenContextAssembler` and
+     *     `Plazas\CandidatosResolver::buscarPaginado()` (both 0.1.12) now
+     *     read THIS column directly instead of re-deriving it — a titular's
+     *     `sp_position` changing later in WordPress no longer moves "which
+     *     plaza is the goal" out from under either reader.
+     *
+     * The invariant this column backs — exactly one `es_arco = 1` per
+     * `(season_id, team_id)` — is checked by
+     * `Migrations\MigrationRunner::checkEsArcoInvariant()` (loud, an
+     * EventLog event plus an `admin_notice`, same discipline as that class's
+     * own `checkStorageEngine()`) and enforced PREVENTIVELY at roster-creation
+     * time by `Plazas\Alta\TitularesListImporter::planificar()`, which refuses
+     * to import a team whose 11 titulares include zero or more than one
+     * goalkeeper.
+     *
      * `puntaje_techo` is the ceiling SNAPSHOTTED at conformación (March) —
      * see Plazas\Puntaje for the ×2 integer encoding. It NEVER moves for the
      * lifetime of the plaza, no matter who occupies it later; only the
@@ -301,6 +343,7 @@ class InitialSchema {
   season_id BIGINT UNSIGNED NOT NULL,
   team_id BIGINT UNSIGNED NOT NULL,
   titular_player_id BIGINT UNSIGNED NOT NULL,
+  es_arco TINYINT(1) NOT NULL DEFAULT 0,
   puntaje_techo SMALLINT UNSIGNED NOT NULL,
   created_at DATETIME NOT NULL,
   closed_at DATETIME NULL DEFAULT NULL,

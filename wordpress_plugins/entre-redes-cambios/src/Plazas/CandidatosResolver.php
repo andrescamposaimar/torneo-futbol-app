@@ -608,25 +608,29 @@ class CandidatosResolver {
         // THIS plaza is NOT the goalkeeper's plaza — the hiding-from-the-list
         // half of Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo's rule (see that
         // class's own docblock for why this is a convenience, never a
-        // substitute for the dictamen's own enforcement). Same discipline as
-        // the two exclusions just above: unconditional, runs from a position
-        // lookup resolved for the WHOLE remaining population in ONE batched
-        // `PosicionResolver::resolverParaIds()` call (plus the plaza's own
-        // titular, so the "is this the goalkeeper's plaza" check costs no
-        // extra query either) — never one call per candidate, the same
-        // chunking discipline `JugadorMetricasReader::fetchLatestMetaValuesFor()`
-        // already applies to this exact population. Runs BEFORE $total is
-        // computed and BEFORE array_slice() takes a page: a filter that ran
-        // AFTER pagination would produce short or empty pages the app reads
-        // as "no candidates available" — the exact bug the ceiling filter
-        // above was fixed for today.
-        $titularPlayerId    = (int) ( $plaza['titular_player_id'] ?? 0 );
-        $posicionesArquero  = $this->posicionResolver->resolverParaIds(
-            array_values( array_unique( array_merge( $candidatoIds, [ $titularPlayerId ] ) ) )
-        );
-        $plazaEsDelArquero = PosicionResolver::esPosicionDelArqueroTitular( $posicionesArquero[ $titularPlayerId ] );
+        // substitute for the dictamen's own enforcement). "Is THIS plaza the
+        // goalkeeper's plaza" is answered by the plaza's own STORED
+        // `es_arco` flag (0.1.13 — see Migrations\InitialSchema's own class
+        // docblock), never re-derived from the titular's CURRENT
+        // `sp_position`, so resolving it costs no query at all, let alone a
+        // batched one. Only the CANDIDATES' own positions still need a live
+        // lookup — ONE batched `PosicionResolver::resolverParaIds()` call
+        // over the whole remaining population — never one call per
+        // candidate, the same chunking discipline
+        // `JugadorMetricasReader::fetchLatestMetaValuesFor()` already
+        // applies to this exact population. That lookup is also SKIPPED
+        // entirely when the plaza IS the goalkeeper's own (no candidate
+        // needs excluding), so a goal plaza's own candidate list pays no
+        // extra cost either. Runs BEFORE $total is computed and BEFORE
+        // array_slice() takes a page: a filter that ran AFTER pagination
+        // would produce short or empty pages the app reads as "no candidates
+        // available" — the exact bug the ceiling filter above was fixed for
+        // today.
+        $plazaEsDelArquero = (bool) ( $plaza['es_arco'] ?? false );
 
         if ( ! $plazaEsDelArquero ) {
+            $posicionesArquero = $this->posicionResolver->resolverParaIds( $candidatoIds );
+
             $candidatoIds = array_values( array_filter(
                 $candidatoIds,
                 static fn ( int $playerId ): bool => ! PosicionResolver::esPosicionDeArquero( $posicionesArquero[ $playerId ] )

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Migrations;
 
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Plazas\PosicionResolver;
 
 /**
  * Version-aware migration runner.
@@ -30,6 +31,16 @@ use EntreRedes\Cambios\Observability\EventLog;
  * after migrations, and surfaces this loudly (an EventLog event plus an
  * admin_notice) instead of leaving it to be discovered as data corruption
  * months later.
+ *
+ * *** ES_ARCO BACKFILL + INVARIANT CHECK (0.1.13) ***
+ * `cambios_plaza.es_arco` (added this release — see InitialSchema's own
+ * docblock) replaces a previously DERIVED fact ("is this the goalkeeper's
+ * plaza") with a STORED one. `backfillEsArco()` derives it once for every
+ * plaza that predates the column; `checkEsArcoInvariant()` verifies, loudly,
+ * that every team still has EXACTLY one such plaza — same
+ * EventLog-event-plus-admin_notice discipline as checkStorageEngine() above,
+ * for the same reason: a broken invariant here must never be discovered by
+ * accident.
  */
 class MigrationRunner {
 
@@ -97,11 +108,170 @@ class MigrationRunner {
         InitialSchema::up();
 
         if ( version_compare( (string) $installed, $current, '<' ) ) {
-            // Reserved for one-time upgrade tasks. None exist yet in slice 0.
+            // One-time upgrade task (0.1.13): backfill cambios_plaza.es_arco
+            // for every plaza that existed BEFORE this column did — see
+            // backfillEsArco()'s own docblock. Runs BEFORE the version option
+            // is bumped, same ordering discipline as every other migration
+            // step here: if this ever threw, the stored version must stay
+            // old so a retry on the next request runs it again.
+            self::backfillEsArco( $eventLog );
             update_option( self::DB_VERSION_OPTION, $current );
         }
 
         self::checkStorageEngine( $eventLog );
+        self::checkEsArcoInvariant( $eventLog );
+    }
+
+    /**
+     * ONE-TIME BACKFILL (0.1.13): `cambios_plaza.es_arco` did not exist
+     * before this release, and a new column defaults to `0` — which, read
+     * literally, would mean "no team has a goalkeeper's plaza", the exact
+     * broken state this column exists to prevent (see InitialSchema's own
+     * docblock on `es_arco`). Unlike `cambios_solicitud.saliente_player_id`
+     * (0.1.11), `cambios_plaza` is NOT empty in production (330 plazas
+     * across 30 teams at the time this was written), so a plain `dbDelta()`
+     * column add is not sufficient on its own — every existing row needs its
+     * `es_arco` DERIVED, once, from its titular's `sp_position`.
+     *
+     * *** IDEMPOTENT, SAFE TO RE-RUN ***
+     * This recomputes `es_arco` for EVERY plaza row from the SAME rule
+     * `PlazaRepository::doOpenPlaza()` now applies to a brand-new plaza
+     * (`PosicionResolver::esPosicionDelArqueroTitular()`, term 3 only) —
+     * running it twice (e.g. a retried activation, or a future manual
+     * re-trigger) writes the exact same value back and changes nothing. It
+     * is wired as a one-time task (guarded by the version check in run()
+     * above) purely because there is no reason to pay this cost on every
+     * activation once it has already run — not because running it again
+     * would be unsafe.
+     *
+     * *** EVERY PLAZA, NOT JUST THE OPEN ONES ***
+     * `closed_at` is not filtered on here: `es_arco` is a fact about the
+     * PLAZA (which player is its permanent titular), independent of whether
+     * the plaza is still open — see InitialSchema's own docblock, "the plaza
+     * has `closed_at` for a plaza that stops existing entirely". Nothing in
+     * this slice ever sets `closed_at`, so this distinction is moot in
+     * practice today, but deriving the fact correctly costs nothing extra.
+     *
+     * *** ONE BATCHED POSITION LOOKUP, NEVER ONE PER PLAZA ***
+     * Every distinct `titular_player_id` across every plaza is resolved in
+     * ONE `PosicionResolver::resolverParaIds()` call — the same batching
+     * discipline `Dictamen\DictamenContextAssembler` and
+     * `Plazas\CandidatosResolver::buscarPaginado()` already apply — before
+     * writing anything. The actual writes are still one `$wpdb->update()`
+     * per plaza (this runs once, ever, for a few hundred rows; the N+1 here
+     * is not worth the extra complexity of a bulk `CASE WHEN` statement).
+     */
+    private static function backfillEsArco( EventLog $eventLog ): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $rows = $wpdb->get_results( "SELECT id, titular_player_id FROM {$p}cambios_plaza", ARRAY_A );
+
+        if ( ! is_array( $rows ) || [] === $rows ) {
+            return;
+        }
+
+        $titularIds = array_values( array_unique( array_map(
+            static fn ( array $row ): int => (int) $row['titular_player_id'],
+            $rows
+        ) ) );
+
+        $posicionResolver = new PosicionResolver();
+        $posiciones       = $posicionResolver->resolverParaIds( $titularIds );
+
+        $actualizadas = 0;
+        foreach ( $rows as $row ) {
+            $plazaId         = (int) $row['id'];
+            $titularPlayerId = (int) $row['titular_player_id'];
+            $esArco          = PosicionResolver::esPosicionDelArqueroTitular( $posiciones[ $titularPlayerId ] ) ? 1 : 0;
+
+            $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+                $p . 'cambios_plaza',
+                [ 'es_arco' => $esArco ],
+                [ 'id' => $plazaId ]
+            );
+            ++$actualizadas;
+        }
+
+        $eventLog->record( 'plaza.es_arco_backfill', [
+            'plazas_actualizadas' => $actualizadas,
+        ] );
+    }
+
+    /**
+     * Loud verification of the invariant `es_arco` exists to back: exactly
+     * one `es_arco = 1` plaza per `(season_id, team_id)` among the OPEN
+     * plazas (`closed_at IS NULL`) — zero is broken (the team has no goal),
+     * two is broken (more than one plaza claims to be it). See InitialSchema's
+     * own docblock and this feature's task brief for the full reasoning.
+     *
+     * Same discipline as `checkStorageEngine()` above: a violation must
+     * never be discovered by accident months later, so this records an
+     * `EventLog` event AND raises an `admin_notice`, instead of merely
+     * returning a value nothing reads. Also same LIMITATION as
+     * `checkStorageEngine()`: this only runs from `run()`, i.e. on plugin
+     * activation or an actual version upgrade — never on every request — so
+     * a violation introduced BETWEEN two activations (e.g. a manual DB edit,
+     * or a bug in a future slice) stays silent until the next one. Widening
+     * this to run on every request, or wiring it into
+     * `Plazas\Alta\TitularesListImporter`'s own CLI tool, is a reasonable
+     * follow-up this slice deliberately leaves out — `planificar()`'s own
+     * "no arquero among titulares" check is the PREVENTIVE half of this
+     * story; this method is the DETECTIVE half, for drift after the fact.
+     *
+     * TOLERANT ON PURPOSE, same reasoning as `checkStorageEngine()`: an empty
+     * `cambios_plaza` table (a fresh install) produces zero groups, which is
+     * not a violation of anything.
+     */
+    private static function checkEsArcoInvariant( EventLog $eventLog ): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            "SELECT season_id, team_id, SUM(es_arco) AS arco_count
+               FROM {$p}cambios_plaza
+              WHERE closed_at IS NULL
+              GROUP BY season_id, team_id",
+            ARRAY_A
+        );
+
+        if ( ! is_array( $rows ) ) {
+            return;
+        }
+
+        $violaciones = [];
+        foreach ( $rows as $row ) {
+            $arcoCount = (int) $row['arco_count'];
+
+            if ( 1 !== $arcoCount ) {
+                $violaciones[] = [
+                    'season_id'     => (int) $row['season_id'],
+                    'team_id'       => (int) $row['team_id'],
+                    'es_arco_count' => $arcoCount,
+                ];
+            }
+        }
+
+        if ( empty( $violaciones ) ) {
+            return;
+        }
+
+        $eventLog->record( 'arco.invariante_violada', [ 'equipos' => $violaciones ] );
+
+        add_action( 'admin_notices', static function () use ( $violaciones ): void {
+            $detalle = implode( ', ', array_map(
+                static fn ( array $v ): string => "team_id {$v['team_id']} (temporada {$v['season_id']}): {$v['es_arco_count']} plaza(s) de arquero",
+                $violaciones
+            ) );
+
+            printf(
+                '<div class="notice notice-error"><p>%s</p></div>',
+                esc_html(
+                    'entre-redes-cambios: los siguientes equipos no tienen exactamente una plaza de arquero (es_arco=1): '
+                    . $detalle . '. Cada equipo debe tener EXACTAMENTE una — revisar el titular de las plazas en cambios_plaza.'
+                )
+            );
+        } );
     }
 
     /**

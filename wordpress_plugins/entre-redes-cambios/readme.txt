@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.12
+Stable tag: 0.1.13
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,12 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.13 =
+* Add: `cambios_plaza` gains `es_arco TINYINT(1) NOT NULL DEFAULT 0` — "is this the goalkeeper's plaza" is now a STORED fact instead of a derivation re-computed on every read from the titular's `sp_position`. Slice 1 of the "exención del arco" feature (later slices add the grouped request type and its UI). Written once: `Plazas\PlazaRepository::doOpenPlaza()` derives and persists it for every NEW plaza (`PosicionResolver::esPosicionDelArqueroTitular()`, term 3 "Arquero" ONLY — never term 125 "Arquero Sup."), and `Migrations\MigrationRunner::backfillEsArco()` derives it once, idempotently, for the 330 plazas that existed in production before this column did.
+* Add: `Migrations\MigrationRunner::checkEsArcoInvariant()` — loudly verifies, after every migration run, that exactly one `es_arco=1` plaza exists per `(season_id, team_id)` among the open plazas (zero or two is a violation), recording an `arco.invariante_violada` EventLog event plus an `admin_notice`, same discipline as the existing `checkStorageEngine()`.
+* Add: `Plazas\Alta\TitularesListImporter::planificar()` now refuses a team whose 11 titulares include zero — or more than one — resolved titular goalkeeper, naming the team, mirroring the existing `es_capitan` "exactly one" check.
+* Change: `Dictamen\DictamenContextAssembler` and `Plazas\CandidatosResolver::buscarPaginado()` now read the plaza's stored `es_arco` column instead of re-deriving "is this the goalkeeper's plaza" from the titular's current `sp_position` on every call — a titular's position changing later in WordPress (e.g. a data-entry fix) no longer silently moves which plaza is "the goal" out from under an in-flight solicitud or a captain's candidate list. `PosicionResolver::esPosicionDeArquero()` (the CANDIDATE definition, term 3 OR 125) is unchanged and still resolved live — only the PLAZA definition moved to the stored column.
 
 = 0.1.12 =
 * Add: a new dictamen rule, `Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo` (motivo `arquero_no_ocupa_plaza_de_campo`) — a goalkeeper may not take over a plaza that is not the goalkeeper's plaza. "Goalkeeper" (the CANDIDATE definition) means `sp_position` term 3 ("Arquero") OR term 125 ("Arquero Sup." — the process owner confirmed explicitly that a backup goalkeeper counts); "the goalkeeper's plaza" (the PLAZA definition) means the plaza's TITULAR position is term 3 ONLY — there are exactly 30 of those per season, one per team, which is what keeps "the goal" an identifiable, singular plaza. The two definitions are deliberately disjoint and are never unified. The rule is asymmetric on purpose: it only blocks goalkeeper → field plaza, never field player → goalkeeper's plaza (the pending "exención del arco" direction stays legitimate). Registered in `DictamenEngineFactory::reglas()` (now ten rules) — `Solicitudes\SolicitudRepository::publicarLote()` re-runs the full dictamen before applying, so a hand-crafted or stale-client request is still refused here regardless of what the candidate list showed.

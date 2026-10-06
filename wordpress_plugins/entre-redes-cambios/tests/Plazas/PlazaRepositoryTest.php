@@ -50,10 +50,11 @@ class PlazaRepositoryTest extends TestCase {
     }
 
     protected function tearDown(): void {
-        global $wpdb;
+        global $wpdb, $wp_test_position_terms;
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_plaza" );
         $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_fecha" );
+        $wp_test_position_terms = [];
     }
 
     /**
@@ -247,6 +248,47 @@ class PlazaRepositoryTest extends TestCase {
 
         $this->assertSame( 1, $this->countVigentesFor( $plazaId ) );
         $this->assertSame( 1, $this->countOcupacionesFor( $plazaId ) );
+    }
+
+    /**
+     * See class docblock reference to Migrations\InitialSchema's own
+     * `es_arco` documentation, and PlazaRepository's class docblock, "`es_arco`
+     * IS DERIVED AND PERSISTED HERE" — a brand-new plaza must get a correct
+     * `es_arco` from birth, with no separate backfill step.
+     */
+    public function test_open_plaza_persists_es_arco_true_when_the_titular_is_the_titular_goalkeeper(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 3 ] ]; // Arquero
+
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+
+        $plaza = $this->repo->findPlaza( $plazaId );
+        $this->assertSame( 1, (int) $plaza['es_arco'] );
+    }
+
+    public function test_open_plaza_persists_es_arco_false_when_the_titular_is_a_field_player(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 9 ] ]; // Delantero
+
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+
+        $plaza = $this->repo->findPlaza( $plazaId );
+        $this->assertSame( 0, (int) $plaza['es_arco'] );
+    }
+
+    /**
+     * Term 125 ("Arquero Sup.", the BACKUP goalkeeper) must NOT make
+     * es_arco=1 — same exclusion as `PosicionResolver::esPosicionDelArqueroTitular()`'s
+     * own class docblock: only term 3 identifies the goalkeeper's plaza.
+     */
+    public function test_open_plaza_persists_es_arco_false_for_a_backup_goalkeeper_titular(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 125 ] ]; // Arquero Sup.
+
+        $plazaId = $this->repo->openPlaza( 359, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+
+        $plaza = $this->repo->findPlaza( $plazaId );
+        $this->assertSame( 0, (int) $plaza['es_arco'] );
     }
 
     public function test_open_plaza_rolls_back_when_the_FIRST_insert_fails(): void {
