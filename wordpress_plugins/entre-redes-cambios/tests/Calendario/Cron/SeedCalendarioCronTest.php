@@ -132,8 +132,8 @@ class SeedCalendarioCronTest extends TestCase {
         global $wpdb;
 
         $items    = $this->buildMatchdayItems( '2026-05-30', [ 373, 374, 375 ], 1000 );
-        $settings = new Settings( $wpdb );
         $eventLog = new InMemoryEventLog();
+        $settings = new Settings( $wpdb, $eventLog );
 
         $result = ( new SeedCalendarioCron() )->execute( $wpdb, $eventLog, $settings, $this->apiClient( $items ) );
 
@@ -160,7 +160,7 @@ class SeedCalendarioCronTest extends TestCase {
         global $wpdb;
 
         $items    = $this->buildMatchdayItems( '2026-05-30', [ 373, 374, 375 ], 2000 );
-        $settings = new Settings( $wpdb );
+        $settings = new Settings( $wpdb, new InMemoryEventLog() );
 
         ( new SeedCalendarioCron() )->execute( $wpdb, new InMemoryEventLog(), $settings, $this->apiClient( $items ) );
 
@@ -185,7 +185,7 @@ class SeedCalendarioCronTest extends TestCase {
     public function test_a_failing_fetch_leaves_the_table_exactly_as_it_was_and_records_the_failure(): void {
         global $wpdb;
 
-        $settings = new Settings( $wpdb );
+        $settings = new Settings( $wpdb, new InMemoryEventLog() );
 
         // Seed once successfully so there is a REAL calendar to leave
         // untouched — not merely an empty table, which a bug could satisfy
@@ -222,7 +222,7 @@ class SeedCalendarioCronTest extends TestCase {
     public function test_the_lock_prevents_a_second_overlapping_run(): void {
         global $wpdb;
 
-        $settings = new Settings( $wpdb );
+        $settings = new Settings( $wpdb, new InMemoryEventLog() );
 
         // Simulates a run already in progress — exactly what a second
         // WP-Cron firing, or an operator's manual --apply overlapping the

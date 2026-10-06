@@ -80,7 +80,7 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
         $this->fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
-        $this->settings        = new Settings( $wpdb );
+        $this->settings        = new Settings( $wpdb, $this->eventLog );
 
         $this->assembler = new DictamenContextAssembler(
             $this->plazaRepository,

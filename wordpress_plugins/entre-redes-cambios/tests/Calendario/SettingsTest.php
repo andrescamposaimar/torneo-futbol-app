@@ -6,6 +6,7 @@ namespace EntreRedes\Cambios\Tests\Calendario;
 
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -18,9 +19,16 @@ use PHPUnit\Framework\TestCase;
  * silent by design (a wrong fallback just quietly returns a different value,
  * never an error), so this file is what actually catches a typo in a
  * setting_key string or a mismatched JSON shape.
+ *
+ * *** A GENUINE READ FAILURE, SEPARATELY FROM "THE ROW IS ABSENT" ***
+ * See "wpdbThatFailsGetVar() — simulating a genuine read failure" below for
+ * how a real wpdb-level failure (as opposed to a merely absent row) is
+ * simulated, and `exencionArcoActiva()`'s own docblock for why that ONE
+ * getter must fail CLOSED rather than fall back to its seeded default.
  */
 class SettingsTest extends TestCase {
 
+    private InMemoryEventLog $eventLog;
     private Settings $settings;
 
     protected function setUp(): void {
@@ -30,7 +38,8 @@ class SettingsTest extends TestCase {
         $p = $wpdb->prefix;
         $wpdb->query( "DELETE FROM {$p}cambios_settings" );
 
-        $this->settings = new Settings( $wpdb );
+        $this->eventLog = new InMemoryEventLog();
+        $this->settings = new Settings( $wpdb, $this->eventLog );
     }
 
     protected function tearDown(): void {
@@ -258,5 +267,94 @@ class SettingsTest extends TestCase {
                 "Settings' fallback for '{$seedKey}' has drifted from InitialSchema::SEED_DEFAULTS."
             );
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // exencionArcoActiva() — a genuine read failure fails CLOSED (0.1.16)
+    // -------------------------------------------------------------------------
+
+    /**
+     * A \wpdb subclass whose get_var() sets $wpdb->last_error and returns
+     * null (exactly wpdb's own documented failure shape) whenever the SQL
+     * contains $mustContain, instead of actually running the query — same
+     * pattern as PlazaRepositoryTest::wpdbThatFailsGetResults(), adapted to
+     * get_var() since Settings reads scalars, not row sets.
+     */
+    private function wpdbThatFailsGetVar( \wpdb $real, string $mustContain ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix, $mustContain ) extends \wpdb {
+            private string $mustContain;
+
+            public function __construct( \PDO $pdo, string $prefix, string $mustContain ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix      = $prefix;
+                $this->mustContain = $mustContain;
+            }
+
+            public function get_var( string $sql ): ?string {
+                if ( str_contains( $sql, $this->mustContain ) ) {
+                    $this->last_error = 'simulated get_var failure for test';
+                    return null;
+                }
+
+                return parent::get_var( $sql );
+            }
+        };
+    }
+
+    /**
+     * THE core regression this fix exists for: a failed read must NEVER
+     * silently grant the exemption by falling back to the seeded default
+     * ('1', ON) — see Settings::exencionArcoActiva()'s own docblock, "FAILS
+     * CLOSED, NOT TO THE SEEDED DEFAULT".
+     */
+    public function test_exencion_arco_activa_falla_cerrado_cuando_la_lectura_falla(): void {
+        global $wpdb;
+
+        // The seeded default is '1' (ON) — proof this is not merely testing
+        // an absent row, which would ALSO resolve to '1' without this fix.
+        $this->assertSame( '1', InitialSchema::SEED_DEFAULTS['exencion_arco_activa'] );
+
+        $failingWpdb = $this->wpdbThatFailsGetVar( $wpdb, 'exencion_arco_activa' );
+        $settings    = new Settings( $failingWpdb, $this->eventLog );
+
+        $this->assertFalse(
+            $settings->exencionArcoActiva(),
+            'A failed read must fail CLOSED (refuse the relaxation), never fall back to the unsafe ON default.'
+        );
+    }
+
+    public function test_exencion_arco_activa_registra_un_evento_fallido_cuando_la_lectura_falla(): void {
+        global $wpdb;
+
+        $failingWpdb = $this->wpdbThatFailsGetVar( $wpdb, 'exencion_arco_activa' );
+        $settings    = new Settings( $failingWpdb, $this->eventLog );
+
+        $settings->exencionArcoActiva();
+
+        $this->assertTrue( $this->eventLog->has( 'settings.lectura_fallida' ) );
+        $last = $this->eventLog->last();
+        $this->assertSame( 'exencion_arco_activa', $last['contexto']['setting_key'] );
+        $this->assertStringContainsString( 'simulated get_var failure', (string) $last['contexto']['last_error'] );
+    }
+
+    /**
+     * An ABSENT row (no failure at all) must still resolve to the seeded
+     * default, exactly like every other getter — this fix changes nothing
+     * about that ordinary, non-failure path.
+     */
+    public function test_exencion_arco_activa_sigue_usando_el_default_sembrado_cuando_la_fila_esta_ausente(): void {
+        $this->assertTrue( $this->settings->exencionArcoActiva() );
+        $this->assertFalse( $this->eventLog->has( 'settings.lectura_fallida' ) );
+    }
+
+    public function test_exencion_arco_activa_no_registra_evento_fallido_en_una_lectura_exitosa(): void {
+        $this->putSetting( 'exencion_arco_activa', '0' );
+
+        $this->assertFalse( $this->settings->exencionArcoActiva() );
+        $this->assertFalse( $this->eventLog->has( 'settings.lectura_fallida' ) );
     }
 }

@@ -102,7 +102,7 @@ class SolicitudesControllerTest extends TestCase {
 
         $plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
         $fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
-        $settings        = new Settings( $wpdb );
+        $settings        = new Settings( $wpdb, $this->eventLog );
 
         $assembler = new DictamenContextAssembler( $plazaRepository, $fechaRepository, $settings, $wpdb, $this->eventLog );
 

@@ -98,7 +98,7 @@ final class Plugin {
             $capitanAuthorizer = new Capitania\CapitanAuthorizer( $tokenVerifier, $sessionGateway, $capitanRepository );
 
             $fechaRepository = new Calendario\FechaRepository( $wpdb, $eventLog );
-            $settings        = new Calendario\Settings( $wpdb );
+            $settings        = new Calendario\Settings( $wpdb, $eventLog );
             $plazaRepository = new Plazas\PlazaRepository( $wpdb, $eventLog );
 
             // CC5b — which of the two BloqueoReemplazoPolicy readings applies
@@ -216,7 +216,7 @@ final class Plugin {
                 $authorizer      = new Admin\ProcessOwnerAuthorizer();
                 $plazaRepository = new Plazas\PlazaRepository( $wpdb, $eventLog );
                 $fechaRepository = new Calendario\FechaRepository( $wpdb, $eventLog );
-                $settings        = new Calendario\Settings( $wpdb );
+                $settings        = new Calendario\Settings( $wpdb, $eventLog );
 
                 $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
                 $prioridadPadresActiva  = $settings->prioridadPadresActiva();

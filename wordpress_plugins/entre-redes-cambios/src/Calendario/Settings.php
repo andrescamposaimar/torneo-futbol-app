@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Calendario;
 
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Observability\EventLog;
 
 /**
  * Typed accessor for Cambios operator settings stored in cambios_settings.
@@ -13,13 +14,49 @@ use EntreRedes\Cambios\Migrations\InitialSchema;
  * InitialSchema::SEED_DEFAULTS when the row is absent — never a separate
  * hardcoded literal, so the fallback and the seed can never silently drift
  * apart (mirrors entre-redes-prode's Fecha\Settings).
+ *
+ * *** A FAILED READ IS NOT THE SAME FACT AS "THE ROW IS ABSENT" ***
+ * `readString()`'s underlying `$wpdb->get_var()` returns `null` both when no
+ * row matches `setting_key` AND when the query itself fails at the wpdb
+ * level (a transient DB hiccup) — those are different facts, and `readInt()`
+ * / `readBool()` / `readOffset()` all build on `readString()`, so every
+ * getter in this class inherits whichever behaviour it chooses here.
+ * `readStringResult()` is what tells the two apart (via `$wpdb->last_error`,
+ * same check as `Support\ChecksReads::assertReadSucceeded()`) and logs a
+ * genuine failure as `settings.lectura_fallida` — a code containing
+ * `fallid`, this plugin's own convention (see `Observability\WpEventLog`'s
+ * class docblock) for reaching the durable `entre_redes_cambios_ultimo_error`
+ * option, the operator's only diagnostic channel on this shared host.
+ *
+ * *** WHICH DIRECTION IS SAFE IS DECIDED PER SETTING, NEVER BLANKET ***
+ * Collapsing a genuine failure into `$default` is fine ONLY when `$default`
+ * is already the conservative reading for that setting. Audited here,
+ * getter by getter:
+ *
+ *   - `timezone()` / `seasonId()` / the four `plazo*Offset()` methods /
+ *     `listaEsperaTeamIdOverride()`: pure configuration, not a fairness gate
+ *     — a failed read falling back to the seeded default is the SAME value
+ *     a working read would almost always return anyway (these rows are
+ *     seeded once and rarely touched), so no special handling beyond the
+ *     logging `readStringResult()` already does for every call.
+ *   - `prioridadPadresActiva()`: default `false` (OFF, no extra gate) is
+ *     already the safe/inert direction — a failed read collapsing to it
+ *     changes nothing about what the ruleset enforces. No special handling
+ *     needed; this is the getter `exencionArcoActiva()` below is contrasted
+ *     against.
+ *   - `exencionArcoActiva()`: the ONLY getter whose seeded default ('1', ON)
+ *     is the UNSAFE direction — collapsing a failure into it would silently
+ *     GRANT the techo exemption during a DB hiccup. This getter therefore
+ *     does NOT delegate to the generic `readBool()` — see its own docblock.
  */
 class Settings {
 
     private \wpdb $wpdb;
+    private EventLog $eventLog;
 
-    public function __construct( \wpdb $wpdb ) {
-        $this->wpdb = $wpdb;
+    public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
+        $this->wpdb     = $wpdb;
+        $this->eventLog = $eventLog;
     }
 
     /**
@@ -96,9 +133,34 @@ class Settings {
      * default: the process owner's own request was for a SWITCH to turn it
      * OFF when needed, not an opt-in gate for a soft preference nobody was
      * enforcing yet.
+     *
+     * *** FAILS CLOSED, NOT TO THE SEEDED DEFAULT ***
+     * Every other boolean/typed getter in this class is content to collapse
+     * a genuine read failure into its seeded default — see class docblock,
+     * "WHICH DIRECTION IS SAFE IS DECIDED PER SETTING". This one CANNOT: its
+     * default is `'1'` (ON), and ON is exactly what relaxes
+     * `Reglas\PuntajeDentroDelTecho` / `Reglas\EntranteDisponible`'s checks
+     * for movement 1 of a grouped goalkeeper reassignment. Resolving a
+     * transient DB failure to ON would silently grant that relaxation —
+     * the exact "a hiccup reads as permission" bug this method exists to
+     * refuse. On a genuine failure this returns `false` (OFF) instead,
+     * which — per `DictamenPipeline::evaluateGrupo()` — means a grouped
+     * request is refused (via the ordinary techo) until the read works
+     * again: noisy and safe, never silent and permissive. An ABSENT row
+     * (no failure, just nothing seeded) still resolves to the seeded
+     * default exactly like every other getter.
      */
     public function exencionArcoActiva(): bool {
-        return $this->readBool( 'exencion_arco_activa', (string) InitialSchema::SEED_DEFAULTS['exencion_arco_activa'] );
+        $resultado = $this->readStringResult(
+            'exencion_arco_activa',
+            (string) InitialSchema::SEED_DEFAULTS['exencion_arco_activa']
+        );
+
+        if ( $resultado['failed'] ) {
+            return false;
+        }
+
+        return '1' === $resultado['value'];
     }
 
     /**
@@ -140,6 +202,28 @@ class Settings {
     }
 
     private function readString( string $key, string $default ): string {
+        return $this->readStringResult( $key, $default )['value'];
+    }
+
+    /**
+     * Does the actual `cambios_settings` read and tells "absent row" apart
+     * from "the query failed" — see class docblock, "A FAILED READ IS NOT
+     * THE SAME FACT AS 'THE ROW IS ABSENT'". `$wpdb->get_var()` returns
+     * `null` for both, so `$wpdb->last_error` (set by the query that JUST
+     * ran, same discipline as `Support\ChecksReads::assertReadSucceeded()`)
+     * is what distinguishes them.
+     *
+     * A genuine failure is logged as `settings.lectura_fallida` — contains
+     * `fallid`, so it reaches `entre_redes_cambios_ultimo_error` (see
+     * `Observability\WpEventLog`'s class docblock) — and `value` is still
+     * `$default`, so every CALLER that does not special-case `failed` keeps
+     * behaving exactly as before this method existed. Only
+     * `exencionArcoActiva()` inspects `failed` itself, because its default
+     * is the unsafe direction — see that method's own docblock.
+     *
+     * @return array{value: string, failed: bool}
+     */
+    private function readStringResult( string $key, string $default ): array {
         $p     = $this->wpdb->prefix;
         $value = $this->wpdb->get_var(
             $this->wpdb->prepare(
@@ -148,7 +232,20 @@ class Settings {
             )
         );
 
-        return null === $value ? $default : (string) $value;
+        $lastError = (string) ( $this->wpdb->last_error ?? '' );
+        $failed    = null === $value && '' !== $lastError;
+
+        if ( $failed ) {
+            $this->eventLog->record( 'settings.lectura_fallida', [
+                'setting_key' => $key,
+                'last_error'  => $lastError,
+            ] );
+        }
+
+        return [
+            'value'  => null === $value ? $default : (string) $value,
+            'failed' => $failed,
+        ];
     }
 
     private function readInt( string $key, int $default ): int {

@@ -57,7 +57,7 @@ class FechaControllerTest extends TestCase {
 
         $this->eventLog        = new InMemoryEventLog();
         $this->fechaRepository = new FechaRepository( $wpdb, $this->eventLog );
-        $this->settings         = new Settings( $wpdb );
+        $this->settings         = new Settings( $wpdb, $this->eventLog );
     }
 
     protected function tearDown(): void {

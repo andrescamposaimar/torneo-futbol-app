@@ -131,7 +131,9 @@ final class SeedCalendarioCron {
     public static function run(): void {
         global $wpdb;
 
-        ( new self() )->execute( $wpdb, new WpEventLog(), new Settings( $wpdb ), self::buildDefaultApiClient() );
+        $eventLog = new WpEventLog();
+
+        ( new self() )->execute( $wpdb, $eventLog, new Settings( $wpdb, $eventLog ), self::buildDefaultApiClient() );
     }
 
     /**
