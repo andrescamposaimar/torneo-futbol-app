@@ -425,15 +425,21 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
                   suffixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  // White fill with a visible border, NOT a grey fill with
+                  // none: a greyed-out box with no outline is the standard
+                  // signal for a DISABLED field, which is how the first
+                  // version read. The border is what says "you can type
+                  // here"; the light fill is what keeps it from competing
+                  // with the candidate list below.
                   filled: true,
-                  fillColor: Colors.grey.shade100,
+                  fillColor: Colors.white,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+                    borderSide: BorderSide(color: Colors.grey.shade400),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+                    borderSide: BorderSide(color: Colors.grey.shade400),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
