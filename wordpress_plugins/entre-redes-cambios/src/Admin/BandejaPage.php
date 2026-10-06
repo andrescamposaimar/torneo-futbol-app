@@ -286,23 +286,53 @@ class BandejaPage {
                 echo esc_html(
                     sprintf(
                         /* translators: 1: who is leaving, 2: who is entering */
-                        __( 'Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
+                        ( ! empty( $solicitud['es_grupo'] ) )
+                            ? __( 'Arco — Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' )
+                            : __( 'Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
                         (string) ( $solicitud['quien_sale_nombre'] ?? '—' ),
                         (string) ( $solicitud['quien_entra_nombre'] ?? '—' )
                     )
                 );
                 ?>
             </p>
+            <?php if ( ! empty( $solicitud['es_grupo'] ) ) : ?>
+            <p>
+                <?php
+                echo esc_html(
+                    sprintf(
+                        /* translators: 1: who is leaving the field plaza, 2: who is entering it */
+                        __( 'Campo — Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
+                        (string) ( $solicitud['quien_sale_campo_nombre'] ?? '—' ),
+                        (string) ( $solicitud['quien_entra_campo_nombre'] ?? '—' )
+                    )
+                );
+                ?>
+            </p>
+            <?php endif; ?>
             <p>
                 <?php if ( $solicitud['dictamen_procede'] ) : ?>
                     <strong style="color:green;"><?php esc_html_e( 'Dictamen: procede.', 'entre-redes-cambios' ); ?></strong>
                 <?php else : ?>
                     <strong style="color:#b32d2e;"><?php esc_html_e( 'Dictamen: NO procede.', 'entre-redes-cambios' ); ?></strong>
-                    <ul>
-                        <?php foreach ( (array) $solicitud['dictamen_motivos'] as $motivo ) : ?>
-                        <li><?php echo esc_html( (string) ( $motivo['mensaje'] ?? '' ) ); ?></li>
+                    <?php if ( ! empty( $solicitud['es_grupo'] ) ) : ?>
+                        <?php foreach ( $this->agruparMotivosPorMovimiento( (array) $solicitud['dictamen_motivos'] ) as $movimiento => $motivosDelMovimiento ) : ?>
+                            <?php if ( empty( $motivosDelMovimiento ) ) : ?>
+                                <?php continue; ?>
+                            <?php endif; ?>
+                            <p style="margin:4px 0 0 0;"><strong><?php echo esc_html( $this->etiquetaMovimiento( $movimiento ) ); ?></strong></p>
+                            <ul>
+                                <?php foreach ( $motivosDelMovimiento as $motivo ) : ?>
+                                <li><?php echo esc_html( (string) ( $motivo['mensaje'] ?? '' ) ); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
                         <?php endforeach; ?>
-                    </ul>
+                    <?php else : ?>
+                        <ul>
+                            <?php foreach ( (array) $solicitud['dictamen_motivos'] as $motivo ) : ?>
+                            <li><?php echo esc_html( (string) ( $motivo['mensaje'] ?? '' ) ); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
                 <?php endif; ?>
             </p>
 
@@ -613,26 +643,53 @@ class BandejaPage {
 
         if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
             $quienEntraId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
+        } elseif ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $row['tipo'] ) {
+            // Movement 1 — see class docblock, "GROUPED REQUESTS": the field
+            // titular moving into goal, exactly like a `sustitucion`'s own
+            // `entrante_player_id` branch above.
+            $quienEntraId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
         } else {
             $quienEntraId = null !== $plaza ? (int) $plaza['titular_player_id'] : null;
         }
 
+        // Movement 2 of a `reasignacion_arquero` — the vacated field plaza —
+        // is a SECOND "Sale/Entra" pair the tray must show alongside
+        // movement 1's, so the process owner judges the WHOLE move, not half
+        // of it (see class docblock, "THE EXPLICIT CONFIRMATION GATE" and
+        // `renderFilaSolicitud()` below). `null` for every other tipo, which
+        // has no second movement.
+        $esGrupo           = SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $row['tipo'];
+        $quienSaleCampoId  = null;
+        $quienEntraCampoId = null;
+
+        if ( $esGrupo ) {
+            $plazaCampo        = $this->plazaRepository->findPlaza( (int) $row['plaza_campo_id'] );
+            $vigenteCampo      = null !== $plazaCampo ? $this->plazaRepository->findOcupacionVigente( (int) $plazaCampo['id'] ) : null;
+            $quienSaleCampoId  = null !== $vigenteCampo ? (int) $vigenteCampo['player_id'] : null;
+            $quienEntraCampoId = null !== $row['entrante_campo_player_id'] ? (int) $row['entrante_campo_player_id'] : null;
+        }
+
         return [
-            'id'                  => (int) $row['id'],
-            'team_id'             => (int) $row['team_id'],
-            'team_nombre'         => $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ),
-            'plaza_id'            => (int) $row['plaza_id'],
-            'tipo'                => (string) $row['tipo'],
-            'fecha_id'            => (int) $row['fecha_id'],
-            'quien_sale_id'       => $quienSaleId,
-            'quien_sale_nombre'   => null !== $quienSaleId ? $this->nombrePost( $quienSaleId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
-            'quien_entra_id'      => $quienEntraId,
-            'quien_entra_nombre'  => null !== $quienEntraId ? $this->nombrePost( $quienEntraId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
-            'estado'              => (string) $row['estado'],
-            'solicitada_at'       => (string) $row['solicitada_at'],
-            'dictamen_procede'    => $snapshot->procede(),
-            'dictamen_motivos'    => $snapshot->motivos(),
-            'decisiones'          => $this->solicitudRepository->listDecisiones( (int) $row['id'] ),
+            'id'                       => (int) $row['id'],
+            'team_id'                  => (int) $row['team_id'],
+            'team_nombre'              => $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ),
+            'plaza_id'                 => (int) $row['plaza_id'],
+            'tipo'                     => (string) $row['tipo'],
+            'fecha_id'                 => (int) $row['fecha_id'],
+            'quien_sale_id'            => $quienSaleId,
+            'quien_sale_nombre'        => null !== $quienSaleId ? $this->nombrePost( $quienSaleId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'quien_entra_id'           => $quienEntraId,
+            'quien_entra_nombre'       => null !== $quienEntraId ? $this->nombrePost( $quienEntraId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'es_grupo'                 => $esGrupo,
+            'quien_sale_campo_id'      => $quienSaleCampoId,
+            'quien_sale_campo_nombre'  => null !== $quienSaleCampoId ? $this->nombrePost( $quienSaleCampoId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'quien_entra_campo_id'     => $quienEntraCampoId,
+            'quien_entra_campo_nombre' => null !== $quienEntraCampoId ? $this->nombrePost( $quienEntraCampoId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'estado'                   => (string) $row['estado'],
+            'solicitada_at'            => (string) $row['solicitada_at'],
+            'dictamen_procede'         => $snapshot->procede(),
+            'dictamen_motivos'         => $snapshot->motivos(),
+            'decisiones'               => $this->solicitudRepository->listDecisiones( (int) $row['id'] ),
         ];
     }
 
@@ -640,5 +697,51 @@ class BandejaPage {
         $titulo = trim( (string) get_the_title( $postId ) );
 
         return '' !== $titulo ? $titulo : $fallbackLabel . ' #' . $postId;
+    }
+
+    /**
+     * Splits a GROUPED request's motivos by which movement produced them —
+     * see `Dictamen\DictamenPipeline::evaluateGrupo()`'s class docblock,
+     * "EACH MOTIVO IS TAGGED WITH WHICH LEG PRODUCED IT". Several codigos
+     * (`plaza_sin_ocupacion_vigente`, `fuera_de_plazo`,
+     * `entrante_es_el_saliente`…) can come from EITHER leg, so rendering a
+     * single pooled list would leave the process owner unable to tell which
+     * movement is actually the problem — defeating the whole point of
+     * judging the pair together (see class docblock, "THE EXPLICIT
+     * CONFIRMATION GATE"). `'sin_movimiento'` is a defensive catch-all for a
+     * motivo with no attribution — should never happen for a grouped
+     * request produced by `evaluateGrupo()`, but keeps this method total
+     * rather than silently dropping one it does not recognize.
+     *
+     * @param array<int, array{codigo: string, mensaje: string, datos: array<string, mixed>}> $motivos
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    private function agruparMotivosPorMovimiento( array $motivos ): array {
+        $grupos = [
+            'arco'           => [],
+            'campo'          => [],
+            'sin_movimiento' => [],
+        ];
+
+        foreach ( $motivos as $motivo ) {
+            $movimiento = (string) ( $motivo['datos']['movimiento'] ?? '' );
+            $clave      = isset( $grupos[ $movimiento ] ) ? $movimiento : 'sin_movimiento';
+
+            $grupos[ $clave ][] = $motivo;
+        }
+
+        return $grupos;
+    }
+
+    /** Short, factual Spanish label for one of agruparMotivosPorMovimiento()'s groups. */
+    private function etiquetaMovimiento( string $movimiento ): string {
+        switch ( $movimiento ) {
+            case 'arco':
+                return __( 'Arco', 'entre-redes-cambios' );
+            case 'campo':
+                return __( 'Campo', 'entre-redes-cambios' );
+            default:
+                return __( 'Otros motivos', 'entre-redes-cambios' );
+        }
     }
 }

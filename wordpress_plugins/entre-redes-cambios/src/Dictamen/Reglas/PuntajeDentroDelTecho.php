@@ -33,28 +33,24 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  * `sustitucion` with no resolvable puntaje is reported as its own motivo
  * instead — fail closed, never fail open.
  *
- * *** KNOWN GAP, DELIBERATELY NOT IMPLEMENTED: EL ARQUERO QUE PASA AL CAMPO
- * ***
- * The reglamento's text reads as allowing a field player to occupy a
- * goalkeeper's plaza even when that player's own puntaje exceeds the plaza's
- * techo — goalkeeping is treated as a different skill, not a higher-scoring
- * substitute position. This rule enforces the GENERAL case only (a techo
- * blocks regardless of position) because implementing the exception needs
- * TWO things this slice does not have:
- *
- *   1. The process owner's confirmation that the exception is real policy,
- *      not just informal understanding.
- *   2. A MODEL FIELD that does not exist yet: nothing in `cambios_plaza`
- *      marks a plaza as "the goalkeeper's plaza" — no column on that
- *      table distinguishes playing position at all, and goalkeeper-ness
- *      lives on `sp_position` (SportsPress), a concept this schema never
- *      joins against. Adding a
- *      one-off `if ($esArquero)` here without that column would mean
- *      guessing at a data point that plainly is not there — see this
- *      slice's task instructions: "no inventes el dato".
- *
- * Both must exist before a second implementation (arquero-aware) can be
- * added; until then, this rule stays the strict, position-agnostic reading.
+ * *** THE GAP ABOVE IS NOW CLOSED: EL CAMPO QUE PASA AL ARCO (0.1.15) ***
+ * Earlier releases of this rule enforced the techo unconditionally and
+ * documented a known, deliberately-unimplemented gap: the reglamento reads as
+ * allowing a field player to occupy the goalkeeper's plaza even when that
+ * player's own puntaje exceeds the plaza's techo — goalkeeping is a
+ * different skill, not a higher-scoring substitute position. Closing that
+ * gap needed two things this rule's own docblock named explicitly: the
+ * process owner's confirmation that the exception is real policy (it is —
+ * see `Solicitudes\SolicitudRepository`'s class docblock), and a model field
+ * identifying "the goalkeeper's plaza" without guessing (`cambios_plaza.es_arco`,
+ * added in 0.1.13, well before this gap closed). Both now exist, so THIS
+ * rule skips its own check entirely for that one leg — see
+ * `DictamenContext::exencionArco()`'s own docblock for exactly which
+ * evaluation that is, and why the flag lives on the context rather than on
+ * this rule's constructor (unlike `Reglas\PrioridadDePadresRespetada`'s
+ * `$activa`, which is a global POLICY toggle — this is a per-evaluation FACT
+ * about which leg of which solicitud is being judged, so it cannot be fixed
+ * once at `DictamenEngineFactory::create()` time the way a policy can).
  */
 final class PuntajeDentroDelTecho implements Regla {
 
@@ -62,6 +58,17 @@ final class PuntajeDentroDelTecho implements Regla {
     private const CODE_INDETERMINADO = 'entrante_puntaje_indeterminado';
 
     public function evaluate( DictamenContext $ctx ): ?Motivo {
+        if ( $ctx->exencionArco() ) {
+            // Movement 1 of a grouped goalkeeper reassignment — the goal
+            // plaza's techo does not apply. See class docblock, "THE GAP
+            // ABOVE IS NOW CLOSED: EL CAMPO QUE PASA AL ARCO". Skips the
+            // check entirely, including the "indeterminado" fail-closed
+            // branch below: with no ceiling to compare against, an
+            // unresolved puntaje is nothing this rule has an opinion about
+            // for this leg.
+            return null;
+        }
+
         $entrantePuntaje = $ctx->entrantePuntaje();
 
         if ( null === $entrantePuntaje ) {

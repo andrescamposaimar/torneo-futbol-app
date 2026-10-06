@@ -47,12 +47,12 @@ use EntreRedes\Cambios\Dictamen\Regla;
  *
  * *** THE RULE IS ASYMMETRIC, ON PURPOSE ***
  * This rule ONLY blocks goalkeeper -> field plaza. It must NEVER block
- * field player -> goalkeeper's plaza: that direction is the whole point of
- * the pending "exención del arco" (see this plugin's own README /
- * PuntajeDentroDelTecho's class docblock, "KNOWN GAP, DELIBERATELY NOT
- * IMPLEMENTED: EL ARQUERO QUE PASA AL CAMPO") and is legitimate today. This
- * rule therefore has no opinion at all when `entranteEsArquero()` is false —
- * it returns null immediately, regardless of `plazaEsDelArquero()`.
+ * field player -> goalkeeper's plaza: that direction is "la exención del
+ * arco" (see `Solicitudes\SolicitudRepository`'s class docblock, "GROUPED
+ * REQUESTS", and `PuntajeDentroDelTecho`'s class docblock, "THE GAP ABOVE IS
+ * NOW CLOSED") and is legitimate today — implemented, not pending, since
+ * 0.1.15. This rule therefore has no opinion at all when `entranteEsArquero()`
+ * is false — it returns null immediately, regardless of `plazaEsDelArquero()`.
  *
  * *** DOES NOT APPLY TO A `regreso` ***
  * A `regreso` never carries an entrante (SolicitudDeCambio::regreso()'s own

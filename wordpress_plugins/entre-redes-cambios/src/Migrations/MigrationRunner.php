@@ -79,6 +79,20 @@ use EntreRedes\Cambios\Plazas\PosicionResolver;
  * degradation could), left as a documented follow-up rather than fixed here
  * to keep this release's diff focused on the incident actually confirmed in
  * production.
+ *
+ * *** 0.1.15 NEEDS NO BACKFILL, AND NO TAXONOMY ORDERING CARE ***
+ * `cambios_solicitud` gains the `reasignacion_arquero` tipo plus
+ * `plaza_campo_id` / `entrante_campo_player_id` / `ocupacion_campo_id` (see
+ * `InitialSchema::sqlCambiosSolicitud()`'s own docblock) for the grouped
+ * goalkeeper reassignment. Unlike `es_arco`'s 0.1.13 backfill above, this
+ * needs no one-time upgrade task here at all: `cambios_solicitud` was still
+ * EMPTY in production (no existing row to migrate, same precondition the
+ * `saliente_player_id` column already relied on in 0.1.11), and none of the
+ * new columns, nor widening the `tipo` ENUM, ever reads a SportsPress
+ * taxonomy — so the `init`-priority-11 ordering this class's own docblock
+ * explains at length for `es_arco` simply does not apply here.
+ * `InitialSchema::up()` — already called unconditionally by `run()` above —
+ * picks the change up via its own idempotent `dbDelta()`.
  */
 class MigrationRunner {
 

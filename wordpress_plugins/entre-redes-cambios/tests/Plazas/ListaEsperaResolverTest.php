@@ -40,8 +40,8 @@ class ListaEsperaResolverTest extends TestCase {
         $wpdb->query( "CREATE TABLE IF NOT EXISTS {$p}terms ( term_id INTEGER PRIMARY KEY, name TEXT, slug TEXT )" );
         $wpdb->query( "DELETE FROM {$p}terms" );
 
-        $this->settings = new Settings( $wpdb );
         $this->eventLog = new InMemoryEventLog();
+        $this->settings = new Settings( $wpdb, $this->eventLog );
         $this->resolver = new ListaEsperaResolver( $wpdb, $this->settings, $this->eventLog );
     }
 

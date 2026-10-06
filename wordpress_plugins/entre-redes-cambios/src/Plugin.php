@@ -98,7 +98,7 @@ final class Plugin {
             $capitanAuthorizer = new Capitania\CapitanAuthorizer( $tokenVerifier, $sessionGateway, $capitanRepository );
 
             $fechaRepository = new Calendario\FechaRepository( $wpdb, $eventLog );
-            $settings        = new Calendario\Settings( $wpdb );
+            $settings        = new Calendario\Settings( $wpdb, $eventLog );
             $plazaRepository = new Plazas\PlazaRepository( $wpdb, $eventLog );
 
             // CC5b — which of the two BloqueoReemplazoPolicy readings applies
@@ -120,6 +120,14 @@ final class Plugin {
             // two silently disagreeing.
             $prioridadPadresActiva = $settings->prioridadPadresActiva();
 
+            // "La exención del arco" (see Dictamen\Reglas\PuntajeDentroDelTecho's
+            // own docblock and Solicitudes\SolicitudRepository's class
+            // docblock, "GROUPED REQUESTS") is a REAL, persisted setting,
+            // default ON — unlike $prioridadPadresActiva above, read once
+            // here and threaded into the pipeline so DictamenPipeline::
+            // evaluateGrupo() never has to read Settings itself.
+            $exencionArcoActiva = $settings->exencionArcoActiva();
+
             $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                 $plazaRepository,
                 $fechaRepository,
@@ -133,7 +141,8 @@ final class Plugin {
                 $dictamenContextAssembler,
                 $eventLog,
                 $bloqueoReemplazoPolicy,
-                $prioridadPadresActiva
+                $prioridadPadresActiva,
+                $exencionArcoActiva
             );
 
             $solicitudRepository = new Solicitudes\SolicitudRepository(
@@ -207,10 +216,11 @@ final class Plugin {
                 $authorizer      = new Admin\ProcessOwnerAuthorizer();
                 $plazaRepository = new Plazas\PlazaRepository( $wpdb, $eventLog );
                 $fechaRepository = new Calendario\FechaRepository( $wpdb, $eventLog );
-                $settings        = new Calendario\Settings( $wpdb );
+                $settings        = new Calendario\Settings( $wpdb, $eventLog );
 
                 $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
                 $prioridadPadresActiva  = $settings->prioridadPadresActiva();
+                $exencionArcoActiva     = $settings->exencionArcoActiva();
 
                 $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                     $plazaRepository,
@@ -225,7 +235,8 @@ final class Plugin {
                     $dictamenContextAssembler,
                     $eventLog,
                     $bloqueoReemplazoPolicy,
-                    $prioridadPadresActiva
+                    $prioridadPadresActiva,
+                    $exencionArcoActiva
                 );
 
                 $solicitudRepository = new Solicitudes\SolicitudRepository(

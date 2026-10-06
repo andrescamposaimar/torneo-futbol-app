@@ -70,7 +70,7 @@ class BandejaPageTest extends TestCase {
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
         $fechaRepository       = new FechaRepository( $wpdb, new InMemoryEventLog() );
-        $settings              = new Settings( $wpdb );
+        $settings              = new Settings( $wpdb, $this->eventLog );
 
         $assembler = new DictamenContextAssembler(
             $this->plazaRepository,
@@ -307,6 +307,139 @@ class BandejaPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // shapeSolicitud() — grouped goalkeeper reassignment (0.1.15)
+    // -------------------------------------------------------------------------
+
+    /**
+     * The tray must show BOTH movements of a grouped request clearly enough
+     * that the process owner can judge the whole move, not half of it — see
+     * BandejaPage's class docblock reference to the committee's tray in the
+     * task brief. `shapeSolicitud()` is the data this test pins;
+     * `renderFilaSolicitud()` only decides how to print it.
+     */
+    public function test_shape_solicitud_expone_ambos_movimientos_de_una_reasignacion_de_arquero(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArcoId            = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-03-01 00:00:00' );
+
+        $wp_test_position_terms = [];
+        $plazaCampoId           = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $wp_test_position_terms = [];
+
+        $this->seedPuntaje( 222, 3.0 );
+        $this->seedPuntaje( 333, 2.5 );
+
+        $id = $this->solicitudRepository->crearReasignacionArquero(
+            self::SEASON_ID, 100, $plazaArcoId, 222, $plazaCampoId, 333, 5, $this->instanteEnPlazo(), 777, '2026-05-27 10:00:00'
+        );
+
+        $row = $this->solicitudRepository->findSolicitud( $id );
+
+        $ref = new \ReflectionMethod( BandejaPage::class, 'shapeSolicitud' );
+        $shaped = $ref->invoke( $this->page, $row );
+
+        $this->assertTrue( $shaped['es_grupo'] );
+        $this->assertSame( 111, $shaped['quien_sale_id'], 'Movement 1: the current goalkeeper leaves.' );
+        $this->assertSame( 222, $shaped['quien_entra_id'], 'Movement 1: the field titular enters the goal.' );
+        $this->assertSame( 222, $shaped['quien_sale_campo_id'], 'Movement 2: the SAME titular leaves the field plaza.' );
+        $this->assertSame( 333, $shaped['quien_entra_campo_id'], 'Movement 2: the outside player enters it.' );
+
+        $wp_test_position_terms = [];
+    }
+
+    public function test_shape_solicitud_no_marca_es_grupo_para_una_sustitucion_ordinaria(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 888, 2.5 );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, $this->instanteEnPlazo() );
+        $id        = $this->solicitudRepository->crear( $solicitud, 777, $this->evaluatePipeline( $solicitud ), '2026-05-27 10:00:00' );
+
+        $row    = $this->solicitudRepository->findSolicitud( $id );
+        $ref    = new \ReflectionMethod( BandejaPage::class, 'shapeSolicitud' );
+        $shaped = $ref->invoke( $this->page, $row );
+
+        $this->assertFalse( $shaped['es_grupo'] );
+        $this->assertNull( $shaped['quien_entra_campo_id'] );
+    }
+
+    /**
+     * THE point of the whole fix (see Dictamen\DictamenPipeline's class
+     * docblock, "EACH MOTIVO IS TAGGED WITH WHICH LEG PRODUCED IT"): a
+     * rejected GROUPED request's tray must show which movement each motivo
+     * belongs to, not a single pooled list. `fuera_de_plazo` is deliberately
+     * the SAME codigo on both legs here (both movements share one
+     * `$instanteEpoch`) — a naive "pool everything" render would print it
+     * twice with no way to tell them apart; this pins that the "Arco" group
+     * and the "Campo" group each get their OWN copy.
+     */
+    public function test_render_fila_solicitud_agrupa_los_motivos_de_un_grupo_rechazado_por_movimiento(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArcoId            = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-03-01 00:00:00' );
+
+        $wp_test_position_terms = [];
+        $plazaCampoId           = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $wp_test_position_terms = [];
+
+        $this->seedPuntaje( 222, 3.0 );
+        $this->seedPuntaje( 333, 2.5 );
+
+        // WAY before the fecha's apertura window — both legs share this
+        // instant, so BOTH independently fail SolicitudEnPlazo with the
+        // SAME codigo, 'fuera_de_plazo'.
+        $instanteFueraDePlazo = strtotime( '2026-01-01 00:00:00' );
+
+        $id = $this->solicitudRepository->crearReasignacionArquero(
+            self::SEASON_ID, 100, $plazaArcoId, 222, $plazaCampoId, 333, 5, $instanteFueraDePlazo, 777, '2026-05-27 10:00:00'
+        );
+
+        $row    = $this->solicitudRepository->findSolicitud( $id );
+        $shaped = ( new \ReflectionMethod( BandejaPage::class, 'shapeSolicitud' ) )->invoke( $this->page, $row );
+
+        $this->assertFalse( $shaped['dictamen_procede'] );
+
+        $codigos = array_map( static fn ( $m ) => $m['codigo'], $shaped['dictamen_motivos'] );
+        $this->assertSame( [ 'fuera_de_plazo', 'fuera_de_plazo' ], $codigos, 'Both legs must independently reject on the same codigo.' );
+
+        ob_start();
+        ( new \ReflectionMethod( BandejaPage::class, 'renderFilaSolicitud' ) )->invoke( $this->page, $shaped, 'http://example.test/admin.php', false );
+        $html = (string) ob_get_clean();
+
+        // Looking for the exact `<strong>Arco</strong>` / `<strong>Campo</strong>`
+        // GROUP HEADINGS (etiquetaMovimiento()'s markup) — NOT the plain-text
+        // "Arco — Sale: ... Entra: ..." movement summary every grouped
+        // request already renders regardless of this fix, which would make
+        // a bare substr( 'Arco' ) search pass even with no grouping at all.
+        $posArco  = strpos( $html, '<strong>Arco</strong>' );
+        $posCampo = strpos( $html, '<strong>Campo</strong>' );
+
+        $posicionesLi = [];
+        $offset       = 0;
+        while ( false !== ( $pos = strpos( $html, 'fuera de plazo', $offset ) ) ) {
+            $posicionesLi[] = $pos;
+            $offset         = $pos + 1;
+        }
+
+        $this->assertNotFalse( $posArco, 'The tray must show an "Arco" GROUP HEADING (<strong>Arco</strong>), not just the movement summary.' );
+        $this->assertNotFalse( $posCampo, 'The tray must show a "Campo" GROUP HEADING (<strong>Campo</strong>), not just the movement summary.' );
+        $this->assertSame( 1, substr_count( $html, '<strong>Arco</strong>' ), 'Exactly one Arco group heading — the motivos must not be pooled.' );
+        $this->assertSame( 1, substr_count( $html, '<strong>Campo</strong>' ), 'Exactly one Campo group heading — the motivos must not be pooled.' );
+        $this->assertStringNotContainsString( 'Otros motivos', $html, 'Every motivo here IS attributed — none should fall into the "no attribution" catch-all group.' );
+        $this->assertCount( 2, $posicionesLi, 'Both legs\' fuera_de_plazo motivo must be rendered, once each.' );
+        $this->assertLessThan( $posicionesLi[0], $posArco, 'The Arco heading must come before its own motivo.' );
+        $this->assertLessThan( $posicionesLi[1], $posCampo, 'The Campo heading must come before its own motivo.' );
+        $this->assertLessThan( $posCampo, $posArco, 'Arco is rendered before Campo.' );
+    }
+
+    // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
 
@@ -359,7 +492,7 @@ class BandejaPageTest extends TestCase {
 
         $eventLog  = new InMemoryEventLog();
         $fechaRepo = new FechaRepository( $wpdb, $eventLog );
-        $settings  = new Settings( $wpdb );
+        $settings  = new Settings( $wpdb, $eventLog );
         $assembler = new DictamenContextAssembler( $this->plazaRepository, $fechaRepo, $settings, $wpdb, $eventLog );
         $pipeline  = new DictamenPipeline( $assembler, $eventLog );
 

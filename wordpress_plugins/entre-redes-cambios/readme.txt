@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.14
+Stable tag: 0.1.16
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,23 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.16 =
+* Fix: `Calendario\Settings::exencionArcoActiva()` now fails CLOSED on a genuine `cambios_settings` read failure (distinguished from an absent row via `$wpdb->last_error`) instead of silently falling back to its seeded ON default — a transient DB hiccup could otherwise read as "the operator left the exemption on" and relax the goal plaza's techo. The failure is recorded as `settings.lectura_fallida` (reaches `entre_redes_cambios_ultimo_error`). Every other `Settings` getter's fallback direction was audited and documented; none needed to change.
+* Fix: stale docblock cross-references to "la exención del arco" as a pending/unimplemented gap (`ArqueroNoOcupaPlazaDeCampo`, its test, and `PuntajeDentroDelTecho`'s own renamed heading) now correctly describe it as implemented since 0.1.15.
+* Change: `Dictamen\Motivo::conMovimiento()` tags each motivo from a grouped goalkeeper reassignment with which leg produced it ('arco'/'campo'); `Admin\BandejaPage` now groups a rejected grouped request's motivos by movement instead of rendering one pooled list, so the process owner can tell which half of the move actually failed.
+* Fix: a mid-`publicarLote()` write failure now records `solicitud.lote_escritura_fallida` (reaches `entre_redes_cambios_ultimo_error`) instead of the pre-flight `solicitud.lote_abortado`, which never did.
+* Test: `SolicitudRepository::assertPlazasDeReasignacionArquero()` — the sole guard against mis-paired or cross-team/season plazas — now has coverage for every throw branch.
+* Test: pins the write order `publicarLote()` relies on for a grouped reassignment (the vacated field plaza before the goal plaza) and isolates the exemption-OFF rejection to `entrante_ocupa_otra_plaza_vigente` rather than an incidental techo breach.
+
+= 0.1.15 =
+* Add: `Dictamen\SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO` and `cambios_solicitud` support for GROUPED goalkeeper reassignments — one request carrying two movements (the goal plaza's occupant becomes a field titular; an outside player fills the field plaza that titular leaves behind), approved/rejected/published as a single unit, per the process owner's explicit request ("deberíamos hacer que el pedido se agrupe uno solo y que la aprobación sea en grupo"). Slice 2 of "la exención del arco" (slice 1, 0.1.13, added the stored `cambios_plaza.es_arco` fact this slice reads).
+* Add: `DictamenContext::exencionArco()` — a per-evaluation context flag, `false` everywhere except movement 1 of a grouped reassignment. Exactly two of the ten existing rules read it: `Reglas\PuntajeDentroDelTecho` skips the goal plaza's techo entirely for that leg, and `Reglas\EntranteDisponible` does not treat the titular's own, still-open field-plaza occupation as a conflict for that leg. Every other rule, and movement 2 (the vacated field plaza), is unchanged — judged by the ordinary ten-rule ruleset with no exemption at all.
+* Add: `Dictamen\DictamenPipeline::evaluateGrupo()` — assembles two ordinary `DictamenContext`s (one per movement) and unions their motivos into one `Dictamen`, rather than teaching the ruleset about pairs.
+* Add: `Calendario\Settings::exencionArcoActiva()` (`cambios_settings` key `exencion_arco_activa`, default ON) — a real, persisted switch for the whole exemption. When off, movement 1 is judged exactly like an ordinary `sustitucion` (no techo skip, no occupied-plaza exemption), which in practice refuses every grouped request, since its entrante structurally always already occupies the field plaza he is meant to vacate.
+* Add: `Solicitudes\SolicitudRepository::crearReasignacionArquero()` and `cambios_solicitud` columns `plaza_campo_id` / `entrante_campo_player_id` / `ocupacion_campo_id` — the vacated field plaza and its new occupant are snapshotted at request time, same "saliente_player_id lesson" (0.1.11) as every other write-time fact this table freezes rather than re-derives later. No backfill needed (the table was confirmed empty in production) and no SportsPress taxonomy dependency, unlike `es_arco`'s 0.1.13 backfill.
+* Change: `Solicitudes\SolicitudRepository::publicarLote()` now applies a grouped reassignment's two movements inside its one atomic transaction, in a fixed order (the vacated field plaza first, the goal plaza second) that guarantees the titular never occupies two plazas at once, not even momentarily uncommitted. The fresh re-evaluation `publicarLote()` already ran for every ordinary solicitud now re-runs BOTH movements for a grouped one, via `evaluateGrupo()`, so a grouped request that no longer holds still aborts the whole lote.
+* Change: `Admin\BandejaPage` now renders both movements of a grouped request ("Arco — Sale/Entra" and "Campo — Sale/Entra") so the process owner can judge the whole move, not half of it.
 
 = 0.1.14 =
 * Fix: a production incident left all 30 teams' `cambios_plaza.es_arco` at `0` after the 0.1.13 upgrade. Root cause: `Migrations\MigrationRunner::runIfOutdated()` ran from `Plugin::boot()` on `plugins_loaded` — BEFORE SportsPress registers its `sp_position` taxonomy on `init` (priority 10) — so `wp_get_object_terms()` returned a `WP_Error` for every call the `es_arco` backfill made, and `Plazas\PosicionResolver::resolverParaIds()` silently read that as "nobody has a position". `Plugin::boot()` now defers the migration call to an `init`-priority-11 callback (strictly after SportsPress's own priority 10), so the taxonomy always exists by the time it runs.

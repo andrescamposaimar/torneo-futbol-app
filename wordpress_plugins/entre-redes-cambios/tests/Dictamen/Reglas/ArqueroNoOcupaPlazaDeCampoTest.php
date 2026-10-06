@@ -52,9 +52,9 @@ class ArqueroNoOcupaPlazaDeCampoTest extends TestCase {
 
     /**
      * THE ASYMMETRY, PINNED: a field player taking over the goalkeeper's OWN
-     * plaza is explicitly legitimate today (the pending "exención del arco"
-     * direction) — this rule must never block it, regardless of
-     * plazaEsDelArquero().
+     * plaza is explicitly legitimate today ("la exención del arco" direction,
+     * implemented since 0.1.15 — see PuntajeDentroDelTecho's class docblock)
+     * — this rule must never block it, regardless of plazaEsDelArquero().
      */
     public function test_does_not_fail_when_a_field_player_is_entrante_for_the_goalkeepers_plaza(): void {
         $ctx = $this->ctxFavorableSustitucion( [

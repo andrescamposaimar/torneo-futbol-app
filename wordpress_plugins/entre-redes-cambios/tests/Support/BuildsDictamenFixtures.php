@@ -213,6 +213,12 @@ trait BuildsDictamenFixtures {
             // these are two deliberately distinct booleans, never one.
             'entranteEsArquero'               => false,
             'plazaEsDelArquero'                => false,
+            // false by default — only movement 1 of a grouped goalkeeper
+            // reassignment ever sets this true (see DictamenContext::exencionArco()'s
+            // own docblock); the favorable baseline every OTHER rule's test
+            // relies on must stay unaffected unless a test explicitly
+            // overrides it.
+            'exencionArco'                     => false,
         ];
 
         $o = array_merge( $defaults, $overrides );
@@ -229,7 +235,8 @@ trait BuildsDictamenFixtures {
             $o['entranteEsPadre'],
             $o['padresViablesParaLaPlaza'],
             $o['entranteEsArquero'],
-            $o['plazaEsDelArquero']
+            $o['plazaEsDelArquero'],
+            $o['exencionArco']
         );
     }
 }

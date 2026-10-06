@@ -172,7 +172,7 @@ use EntreRedes\Cambios\Observability\WpEventLog;
 global $wpdb;
 
 $eventLog = new WpEventLog();
-$settings = new Settings( $wpdb );
+$settings = new Settings( $wpdb, $eventLog );
 $seasonId = isset( $args['season-id'] ) ? (int) $args['season-id'] : $settings->seasonId();
 
 $fechaRepository = new FechaRepository( $wpdb, $eventLog );

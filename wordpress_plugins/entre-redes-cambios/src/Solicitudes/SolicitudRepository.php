@@ -92,6 +92,53 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * `cambios_decision` for every decision, in the SAME transaction as the
  * `estado` write — never one without the other (see
  * `insertDecisionWithinTransaction()`'s own docblock).
+ *
+ * *** GROUPED REQUESTS — `reasignacion_arquero` (0.1.15) ***
+ * The process owner was explicit about two things at once: a team's
+ * goalkeeper may be replaced by one of the team's own field titulares, but
+ * ONLY if, in the SAME decision, an outside player fills the field plaza
+ * that titular leaves behind — "deberíamos hacer que el pedido se agrupe
+ * uno solo y que la aprobación sea en grupo" — and separately, "todo cambio
+ * necesita aprobación". So this is ONE `cambios_solicitud` row carrying TWO
+ * movements, approved/rejected/published as a unit:
+ *
+ *   - Movement 1 (the goal plaza): the current goalkeeper is succeeded by
+ *     the field titular. The goal plaza's techo does NOT apply to him when
+ *     `Calendario\Settings::exencionArcoActiva()` is on — goalkeeping is a
+ *     different skill, not a higher-scoring substitute position (see
+ *     `Dictamen\Reglas\PuntajeDentroDelTecho`'s own docblock).
+ *   - Movement 2 (the vacated field plaza): an outside player fills it,
+ *     under the ORDINARY rules — no exemption, the plaza's own techo
+ *     applies (already equal to that titular's puntaje, since a plaza's
+ *     techo is snapshotted from its titular at `PlazaRepository::openPlaza()`
+ *     time), the player must not already occupy a plaza, must not be a
+ *     goalkeeper, and so on. Nothing new was added to the ten-rule ruleset
+ *     for this movement — see `Dictamen\DictamenPipeline::evaluateGrupo()`'s
+ *     own docblock for why running the SAME ruleset twice, once per
+ *     movement, and unioning the motivos, is enough.
+ *
+ * `crearReasignacionArquero()` builds both movements as ordinary
+ * `Dictamen\SolicitudDeCambio::sustitucion()` instances, evaluates them
+ * together via `evaluateGrupo()`, and persists ONE row — `plaza_id` /
+ * `entrante_player_id` / `saliente_player_id` for movement 1 (reusing the
+ * columns every other tipo already has), `plaza_campo_id` /
+ * `entrante_campo_player_id` for movement 2 (new in 0.1.15 — see
+ * `Migrations\InitialSchema::sqlCambiosSolicitud()`'s own docblock for why
+ * `plaza_campo_id` is snapshotted rather than re-derived later).
+ *
+ * `publicarLote()` applies BOTH movements inside its one ambient
+ * transaction, in a specific order that matters: movement 2 (vacate the
+ * field plaza, install the outside player) runs BEFORE movement 1 (vacate
+ * the goal plaza, install the titular there). Doing it in the OPPOSITE
+ * order would, for one write in the middle of the transaction, have the
+ * titular occupying BOTH the goal plaza and his old field plaza at once —
+ * an intermediate state this class never allows to exist, not even
+ * uncommitted. Movement-2-first means the titular instead passes through
+ * occupying ZERO plazas for that one intermediate write, which is always
+ * safe. Both writes land in the SAME transaction as every other solicitud in
+ * the lote, so a failure in either movement — or in any OTHER solicitud in
+ * the same lote — rolls back everything, exactly like `publicarLote()`'s
+ * class docblock already promises for the lote as a whole.
  */
 class SolicitudRepository {
 
@@ -210,6 +257,138 @@ class SolicitudRepository {
             'solicitada_por'     => $solicitadaPor,
             'dictamen_procede'   => $dictamen->procede(),
             'dictamen_motivos'   => $snapshot->motivoCodigos(),
+        ] );
+
+        return $id;
+    }
+
+    /**
+     * Persists a brand-new GROUPED goalkeeper reassignment — see class
+     * docblock, "GROUPED REQUESTS". Builds both movements as ordinary
+     * `Dictamen\SolicitudDeCambio::sustitucion()` instances, evaluates them
+     * together via `DictamenPipeline::evaluateGrupo()`, and inserts ONE
+     * `cambios_solicitud` row, `pendiente`, with the UNIONED dictamen frozen
+     * as `dictamen_original` — same "the dictamen is never an approval"
+     * discipline as `crear()`: a solicitud whose unioned dictamen objects is
+     * still persisted, never rejected at creation time.
+     *
+     * @param int $plazaArcoId        The goal plaza (`cambios_plaza.es_arco = 1`).
+     * @param int $titularPlayerId    The field titular moving into goal —
+     *        movement 1's entrante.
+     * @param int $plazaCampoId       The field plaza that titular leaves
+     *        behind (`cambios_plaza.es_arco = 0`) — snapshotted here, see
+     *        `Migrations\InitialSchema::sqlCambiosSolicitud()`'s own
+     *        docblock for why this is never re-derived later from "whichever
+     *        plaza the titular currently occupies".
+     * @param int $entranteCampoPlayerId The outside player filling
+     *        `$plazaCampoId` — movement 2's entrante.
+     * @throws \InvalidArgumentException When `$plazaArcoId` is not the
+     *         goalkeeper's plaza, `$plazaCampoId` IS the goalkeeper's plaza,
+     *         or either plaza does not belong to `$teamId`/`$seasonId` — a
+     *         structural precondition of this tipo, checked here rather than
+     *         left to surface as a confusing dictamen motivo later. This is
+     *         NOT a business objection a Regla reports (compare
+     *         `Dictamen\DictamenContextAssembler::assemble()`'s own
+     *         \RuntimeException for "the plaza does not exist" — same
+     *         category of failure, a malformed request, not a reglamento
+     *         violation).
+     * @throws SolicitudPersistenceException When the insert fails at the
+     *         wpdb level.
+     */
+    public function crearReasignacionArquero(
+        int $seasonId,
+        int $teamId,
+        int $plazaArcoId,
+        int $titularPlayerId,
+        int $plazaCampoId,
+        int $entranteCampoPlayerId,
+        int $fechaId,
+        int $instanteEpoch,
+        int $solicitadaPor,
+        string $now
+    ): int {
+        $this->assertPlazasDeReasignacionArquero( $plazaArcoId, $plazaCampoId, $teamId, $seasonId );
+
+        $legArco  = SolicitudDeCambio::sustitucion( $seasonId, $teamId, $plazaArcoId, $titularPlayerId, $fechaId, $instanteEpoch );
+        $legCampo = SolicitudDeCambio::sustitucion( $seasonId, $teamId, $plazaCampoId, $entranteCampoPlayerId, $fechaId, $instanteEpoch );
+
+        $dictamen = $this->dictamenPipeline->evaluateGrupo( $legArco, $legCampo );
+        $snapshot = DictamenSnapshot::fromDictamen( $dictamen, $now );
+
+        $vigenteArco      = $this->plazaRepository->findOcupacionVigente( $plazaArcoId );
+        $salientePlayerId = null !== $vigenteArco ? (int) $vigenteArco['player_id'] : null;
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $result = $wpdb->insert(
+            $p . 'cambios_solicitud',
+            [
+                'season_id'                => $seasonId,
+                'team_id'                  => $teamId,
+                'plaza_id'                 => $plazaArcoId,
+                'tipo'                     => SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO,
+                'entrante_player_id'       => $titularPlayerId,
+                'saliente_player_id'       => $salientePlayerId,
+                'plaza_campo_id'           => $plazaCampoId,
+                'entrante_campo_player_id' => $entranteCampoPlayerId,
+                'fecha_id'                 => $fechaId,
+                'solicitada_por'           => $solicitadaPor,
+                'solicitada_at'            => $now,
+                'solicitud_instante_epoch' => $instanteEpoch,
+                'dictamen_original'        => $snapshot->toJson(),
+                'dictamen_aplicado'        => null,
+                'estado'                   => EstadoSolicitud::PENDIENTE,
+                'resuelta_por'             => null,
+                'resuelta_at'              => null,
+                'nota'                     => null,
+                'created_at'               => $now,
+                'updated_at'               => $now,
+            ]
+        );
+
+        if ( false === $result ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'      => 'crearReasignacionArquero',
+                'motivo'         => 'insert cambios_solicitud fallo',
+                'season_id'      => $seasonId,
+                'team_id'        => $teamId,
+                'plaza_arco_id'  => $plazaArcoId,
+                'plaza_campo_id' => $plazaCampoId,
+                'last_error'     => $wpdb->last_error,
+            ] );
+
+            throw new SolicitudPersistenceException( 'insert cambios_solicitud', $wpdb->last_error );
+        }
+
+        $id = (int) $wpdb->insert_id;
+
+        if ( $id <= 0 ) {
+            $this->eventLog->record( 'escritura.fallida', [
+                'operacion'  => 'crearReasignacionArquero',
+                'motivo'     => 'insert cambios_solicitud devolvio insert_id <= 0',
+                'season_id'  => $seasonId,
+                'team_id'    => $teamId,
+                'last_error' => $wpdb->last_error,
+            ] );
+
+            throw new SolicitudPersistenceException( 'insert cambios_solicitud', $wpdb->last_error );
+        }
+
+        $this->eventLog->record( 'solicitud.creada', [
+            'solicitud_id'             => $id,
+            'season_id'                => $seasonId,
+            'team_id'                  => $teamId,
+            'plaza_id'                 => $plazaArcoId,
+            'tipo'                     => SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO,
+            'entrante_player_id'       => $titularPlayerId,
+            'saliente_player_id'       => $salientePlayerId,
+            'plaza_campo_id'           => $plazaCampoId,
+            'entrante_campo_player_id' => $entranteCampoPlayerId,
+            'fecha_id'                 => $fechaId,
+            'solicitada_por'           => $solicitadaPor,
+            'dictamen_procede'         => $dictamen->procede(),
+            'dictamen_motivos'         => $snapshot->motivoCodigos(),
         ] );
 
         return $id;
@@ -445,17 +624,27 @@ class SolicitudRepository {
 
             $seasonIds[ $id ] = (int) $row['season_id'];
 
-            $solicitudObj = $this->reconstruirSolicitud( $row );
-
             // Both the fresh re-evaluation AND the parse of the ORIGINAL
             // snapshot live in the same try/catch on purpose: a corrupt
             // `dictamen_original` (bad JSON from a data problem elsewhere)
             // must abort THIS lote with an explicit motivo and an EventLog
             // event — exactly like a re-evaluation failure — never escape as
             // a raw, unlogged exception that takes the whole request down.
+            //
+            // A `reasignacion_arquero` row re-runs BOTH movements fresh via
+            // `evaluateGrupo()` — see class docblock, "GROUPED REQUESTS" —
+            // so a grouped request that no longer holds (either movement)
+            // aborts the whole lote exactly like any other stale solicitud.
             try {
-                $dictamenFresco = $this->dictamenPipeline->evaluate( $solicitudObj );
-                $original       = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+                if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $row['tipo'] ) {
+                    [ $legArco, $legCampo ] = $this->reconstruirLegsGrupo( $row );
+                    $dictamenFresco          = $this->dictamenPipeline->evaluateGrupo( $legArco, $legCampo );
+                } else {
+                    $solicitudObj   = $this->reconstruirSolicitud( $row );
+                    $dictamenFresco = $this->dictamenPipeline->evaluate( $solicitudObj );
+                }
+
+                $original = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
             } catch ( \Throwable $e ) {
                 return $this->abortarLote(
                     $ids,
@@ -511,7 +700,25 @@ class SolicitudRepository {
                 $plazaId = (int) $row['plaza_id'];
                 $fechaId = (int) $row['fecha_id'];
 
-                if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
+                if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $row['tipo'] ) {
+                    $plazaCampoId = (int) $row['plaza_campo_id'];
+
+                    // Movement 2 FIRST — see class docblock, "GROUPED
+                    // REQUESTS", for why this order (never the reverse) is
+                    // what keeps the titular from ever occupying two plazas
+                    // at once, even momentarily inside this uncommitted
+                    // transaction: this closes his OWN field-plaza
+                    // occupation and installs the outside player, so by the
+                    // time movement 1 opens his goal-plaza occupation below
+                    // he already occupies zero plazas, not two.
+                    $ocupacionCampoId = $this->plazaRepository->succeedOcupacionWithinTransaction(
+                        $plazaCampoId,
+                        (int) $row['entrante_campo_player_id'],
+                        $fechaId,
+                        'reemplazada',
+                        $now
+                    );
+
                     $ocupacionId = $this->plazaRepository->succeedOcupacionWithinTransaction(
                         $plazaId,
                         (int) $row['entrante_player_id'],
@@ -519,11 +726,23 @@ class SolicitudRepository {
                         'reemplazada',
                         $now
                     );
+
+                    $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId, $ocupacionCampoId );
+                } elseif ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
+                    $ocupacionId = $this->plazaRepository->succeedOcupacionWithinTransaction(
+                        $plazaId,
+                        (int) $row['entrante_player_id'],
+                        $fechaId,
+                        'reemplazada',
+                        $now
+                    );
+
+                    $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId );
                 } else {
                     $ocupacionId = $this->plazaRepository->closeOcupacionByRegresoTitularWithinTransaction( $plazaId, $fechaId, $now );
-                }
 
-                $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId );
+                    $this->marcarPublicadaWithinTransaction( $id, $resueltaPor, $now, $prepared[ $id ]['dictamen'], $ocupacionId );
+                }
 
                 // One cambios_decision row PER solicitud published — see
                 // class docblock, "cambios_decision" — inside this SAME
@@ -539,7 +758,18 @@ class SolicitudRepository {
             // be exactly as false as returning "everything was applied".
             $this->rollbackTransaction( __FUNCTION__, $e, [ 'ids' => $ids ] );
 
-            $this->eventLog->record( 'solicitud.lote_abortado', [
+            // `solicitud.lote_escritura_fallida` — deliberately NOT the same
+            // event as abortarLote()'s `solicitud.lote_abortado` (used for
+            // ordinary pre-flight rejections, before any write has run: a
+            // stale solicitud, a corrupt dictamen_original, a season
+            // mismatch). THIS is a genuine wpdb-level write failure mid-
+            // transaction — already rolled back above — and the operator has
+            // NO php error log on this shared host (see
+            // Observability\WpEventLog's class docblock, "THE
+            // entre_redes_cambios_ultimo_error OPTION"). The codigo must
+            // contain `fallid` or it silently never reaches that option,
+            // leaving a Friday lote failure completely invisible.
+            $this->eventLog->record( 'solicitud.lote_escritura_fallida', [
                 'ids'                 => $ids,
                 'motivo'              => 'escritura fallida a mitad del lote: ' . $e->getMessage(),
                 'ultima_id_intentada' => $ultimoIdIntentado,
@@ -727,14 +957,16 @@ class SolicitudRepository {
      *
      * `$ocupacionId` is the id `succeedOcupacionWithinTransaction()` /
      * `closeOcupacionByRegresoTitularWithinTransaction()` just returned for
-     * THIS solicitud — persisted here so undoing a badly-published lote never
-     * again requires cross-referencing the EventLog by `plaza_id` and
-     * timestamp by hand.
+     * THIS solicitud (movement 1, for a `reasignacion_arquero`) — persisted
+     * here so undoing a badly-published lote never again requires
+     * cross-referencing the EventLog by `plaza_id` and timestamp by hand.
+     * `$ocupacionCampoId` is the SAME thing for movement 2 — null for every
+     * other tipo, which has no second movement.
      *
      * @throws SolicitudPersistenceException When the update fails at the
      *         wpdb level.
      */
-    private function marcarPublicadaWithinTransaction( int $id, int $resueltaPor, string $now, Dictamen $dictamenAplicado, int $ocupacionId ): void {
+    private function marcarPublicadaWithinTransaction( int $id, int $resueltaPor, string $now, Dictamen $dictamenAplicado, int $ocupacionId, ?int $ocupacionCampoId = null ): void {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -746,6 +978,7 @@ class SolicitudRepository {
                 'resuelta_at'        => $now,
                 'dictamen_aplicado'  => DictamenSnapshot::fromDictamen( $dictamenAplicado, $now )->toJson(),
                 'ocupacion_id'       => $ocupacionId,
+                'ocupacion_campo_id' => $ocupacionCampoId,
                 'updated_at'         => $now,
             ],
             [ 'id' => $id ]
@@ -791,6 +1024,95 @@ class SolicitudRepository {
             (int) $row['fecha_id'],
             (int) $row['solicitud_instante_epoch']
         );
+    }
+
+    /**
+     * Same job as `reconstruirSolicitud()` above, but for a `reasignacion_arquero`
+     * row: rebuilds BOTH movements as ordinary `Dictamen\SolicitudDeCambio::sustitucion()`
+     * instances from the columns `crearReasignacionArquero()` snapshotted —
+     * `plaza_campo_id` / `entrante_campo_player_id` for movement 2, never
+     * re-derived from "whichever plaza the titular currently occupies" (see
+     * `Migrations\InitialSchema::sqlCambiosSolicitud()`'s own docblock).
+     *
+     * @param array<string, mixed> $row
+     * @return array{0: SolicitudDeCambio, 1: SolicitudDeCambio} [$legArco, $legCampo]
+     */
+    private function reconstruirLegsGrupo( array $row ): array {
+        $legArco = SolicitudDeCambio::sustitucion(
+            (int) $row['season_id'],
+            (int) $row['team_id'],
+            (int) $row['plaza_id'],
+            (int) $row['entrante_player_id'],
+            (int) $row['fecha_id'],
+            (int) $row['solicitud_instante_epoch']
+        );
+
+        $legCampo = SolicitudDeCambio::sustitucion(
+            (int) $row['season_id'],
+            (int) $row['team_id'],
+            (int) $row['plaza_campo_id'],
+            (int) $row['entrante_campo_player_id'],
+            (int) $row['fecha_id'],
+            (int) $row['solicitud_instante_epoch']
+        );
+
+        return [ $legArco, $legCampo ];
+    }
+
+    /**
+     * Structural preconditions of a `reasignacion_arquero` request — checked
+     * BEFORE the dictamen ever runs, same category of failure as
+     * `Dictamen\DictamenContextAssembler::assemble()`'s "the plaza does not
+     * exist" \RuntimeException: a malformed request, never a reglamento
+     * objection a `Regla` should report as a Motivo.
+     *
+     * @throws \RuntimeException When either plaza does not exist.
+     * @throws \InvalidArgumentException When $plazaArcoId is not the
+     *         goalkeeper's plaza, $plazaCampoId IS the goalkeeper's plaza, or
+     *         either plaza does not belong to $teamId/$seasonId.
+     */
+    private function assertPlazasDeReasignacionArquero( int $plazaArcoId, int $plazaCampoId, int $teamId, int $seasonId ): void {
+        if ( $plazaArcoId === $plazaCampoId ) {
+            throw new \InvalidArgumentException(
+                "SolicitudRepository::crearReasignacionArquero(): plaza_arco_id and plaza_campo_id must be different plazas (both {$plazaArcoId})."
+            );
+        }
+
+        $plazaArco = $this->plazaRepository->findPlaza( $plazaArcoId );
+
+        if ( null === $plazaArco ) {
+            throw new \RuntimeException( "SolicitudRepository::crearReasignacionArquero(): plaza_arco_id {$plazaArcoId} does not exist." );
+        }
+
+        $plazaCampo = $this->plazaRepository->findPlaza( $plazaCampoId );
+
+        if ( null === $plazaCampo ) {
+            throw new \RuntimeException( "SolicitudRepository::crearReasignacionArquero(): plaza_campo_id {$plazaCampoId} does not exist." );
+        }
+
+        if ( ! (bool) ( $plazaArco['es_arco'] ?? false ) ) {
+            throw new \InvalidArgumentException(
+                "SolicitudRepository::crearReasignacionArquero(): plaza_arco_id {$plazaArcoId} is not the goalkeeper's plaza (es_arco=0)."
+            );
+        }
+
+        if ( (bool) ( $plazaCampo['es_arco'] ?? false ) ) {
+            throw new \InvalidArgumentException(
+                "SolicitudRepository::crearReasignacionArquero(): plaza_campo_id {$plazaCampoId} IS the goalkeeper's plaza — movement 2 must target a field plaza."
+            );
+        }
+
+        if ( (int) $plazaArco['team_id'] !== $teamId || (int) $plazaCampo['team_id'] !== $teamId ) {
+            throw new \InvalidArgumentException(
+                'SolicitudRepository::crearReasignacionArquero(): both plazas must belong to team_id ' . $teamId . '.'
+            );
+        }
+
+        if ( (int) $plazaArco['season_id'] !== $seasonId || (int) $plazaCampo['season_id'] !== $seasonId ) {
+            throw new \InvalidArgumentException(
+                'SolicitudRepository::crearReasignacionArquero(): both plazas must belong to season_id ' . $seasonId . '.'
+            );
+        }
     }
 
     /**
