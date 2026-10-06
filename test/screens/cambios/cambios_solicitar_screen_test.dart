@@ -891,6 +891,22 @@ void main() {
       expect(find.byKey(const Key('candidato_search_clear')), findsNothing);
     });
 
+    testWidgets('the search box reads as enabled: a visible border, not a flat grey block',
+        (tester) async {
+      // A grey fill with no outline is the standard signal for a DISABLED
+      // field — which is exactly how the first version of this box read.
+      await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
+
+      final decoration = tester
+          .widget<TextField>(find.byKey(const Key('candidato_search_field')))
+          .decoration!;
+      final borde = decoration.enabledBorder as OutlineInputBorder;
+
+      expect(borde.borderSide.style, BorderStyle.solid);
+      expect(borde.borderSide.width, greaterThan(0));
+      expect(decoration.fillColor, Colors.white);
+    });
+
     testWidgets('the search box stays compact', (tester) async {
       await _pumpScreen(tester, tipo: CambiosSolicitudTipo.sustitucion);
 
