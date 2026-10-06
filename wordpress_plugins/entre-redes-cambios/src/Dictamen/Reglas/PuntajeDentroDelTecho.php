@@ -33,8 +33,7 @@ use EntreRedes\Cambios\Plazas\Puntaje;
  * `sustitucion` with no resolvable puntaje is reported as its own motivo
  * instead — fail closed, never fail open.
  *
- * *** THE GAP ABOVE IS NOW CLOSED: EL ARQUERO QUE PASA AL CAMPO — WAIT, EL
- * CAMPO QUE PASA AL ARCO (0.1.15) ***
+ * *** THE GAP ABOVE IS NOW CLOSED: EL CAMPO QUE PASA AL ARCO (0.1.15) ***
  * Earlier releases of this rule enforced the techo unconditionally and
  * documented a known, deliberately-unimplemented gap: the reglamento reads as
  * allowing a field player to occupy the goalkeeper's plaza even when that
@@ -62,10 +61,11 @@ final class PuntajeDentroDelTecho implements Regla {
         if ( $ctx->exencionArco() ) {
             // Movement 1 of a grouped goalkeeper reassignment — the goal
             // plaza's techo does not apply. See class docblock, "THE GAP
-            // ABOVE IS NOW CLOSED". Skips the check entirely, including the
-            // "indeterminado" fail-closed branch below: with no ceiling to
-            // compare against, an unresolved puntaje is nothing this rule
-            // has an opinion about for this leg.
+            // ABOVE IS NOW CLOSED: EL CAMPO QUE PASA AL ARCO". Skips the
+            // check entirely, including the "indeterminado" fail-closed
+            // branch below: with no ceiling to compare against, an
+            // unresolved puntaje is nothing this rule has an opinion about
+            // for this leg.
             return null;
         }
 
