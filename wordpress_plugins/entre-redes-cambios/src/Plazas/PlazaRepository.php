@@ -130,6 +130,26 @@ use EntreRedes\Cambios\Support\OpensTransactions;
  * directly against whatever transaction the caller already opened, and do
  * NOT record their own EventLog event — the caller does, once its own
  * COMMIT has actually succeeded.
+ *
+ * *** `es_arco` IS DERIVED AND PERSISTED HERE, ONCE, AT OPEN TIME (0.1.13) ***
+ * `doOpenPlaza()` resolves the titular's `sp_position` via
+ * `PosicionResolver::esPosicionDelArqueroTitular()` (term 3, "Arquero",
+ * ONLY — never term 125) and writes the result into `cambios_plaza.es_arco`
+ * as part of the SAME insert that creates the plaza — never left to default
+ * to `0` and fixed up later. This is what makes `es_arco` correct from birth
+ * for every plaza THIS class ever opens (including a future season's
+ * `Plazas\Alta\TitularesListImporter` run), with no separate backfill step
+ * needed beyond the ONE-TIME `Migrations\MigrationRunner::backfillEsArco()`
+ * that covers plazas opened BEFORE this column existed. Every reader of
+ * "is this the goalkeeper's plaza" (`Dictamen\DictamenContextAssembler`,
+ * `Plazas\CandidatosResolver::buscarPaginado()`) reads THIS stored column,
+ * never re-derives it — see InitialSchema's own class docblock on `es_arco`
+ * for the full reasoning and the production incident this prevents. The
+ * `PosicionResolver` dependency defaults to a plain instance (same optional-
+ * collaborator pattern as `CandidatosResolver`/`DictamenContextAssembler`),
+ * so every existing caller of `openPlaza()`/`openPlazaWithinTransaction()`
+ * — both signatures are UNCHANGED by this addition — keeps working with no
+ * code change of its own.
  */
 class PlazaRepository {
 
@@ -148,10 +168,19 @@ class PlazaRepository {
 
     private \wpdb $wpdb;
     private EventLog $eventLog;
+    private PosicionResolver $posicionResolver;
 
-    public function __construct( \wpdb $wpdb, EventLog $eventLog ) {
-        $this->wpdb     = $wpdb;
-        $this->eventLog = $eventLog;
+    /**
+     * @param PosicionResolver|null $posicionResolver Defaults to a plain
+     *        instance — overridable in tests, same pattern as every other
+     *        optional collaborator in this plugin (CandidatosResolver,
+     *        DictamenContextAssembler). See class docblock, "`es_arco` IS
+     *        DERIVED AND PERSISTED HERE".
+     */
+    public function __construct( \wpdb $wpdb, EventLog $eventLog, ?PosicionResolver $posicionResolver = null ) {
+        $this->wpdb             = $wpdb;
+        $this->eventLog         = $eventLog;
+        $this->posicionResolver = $posicionResolver ?? new PosicionResolver();
     }
 
     /**
@@ -916,12 +945,19 @@ class PlazaRepository {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
+        // See class docblock, "`es_arco` IS DERIVED AND PERSISTED HERE" — a
+        // single-id resolverParaIds() call, same as every other optional
+        // PosicionResolver collaborator in this plugin.
+        $posiciones = $this->posicionResolver->resolverParaIds( [ $titularPlayerId ] );
+        $esArco     = PosicionResolver::esPosicionDelArqueroTitular( $posiciones[ $titularPlayerId ] ) ? 1 : 0;
+
         $plazaResult = $wpdb->insert(
             $p . 'cambios_plaza',
             [
                 'season_id'         => $seasonId,
                 'team_id'           => $teamId,
                 'titular_player_id' => $titularPlayerId,
+                'es_arco'           => $esArco,
                 'puntaje_techo'     => $puntajeTecho->halfPoints(),
                 'created_at'        => $now,
                 'closed_at'         => null,
