@@ -123,6 +123,17 @@ class SolicitudRepository {
      * dictamen objects is stored exactly the same way as one that clears
      * every rule; only `aprobar()` / `rechazar()` decide anything.
      *
+     * *** WHY THE SALIENTE IS CAPTURED HERE, NOT DERIVED LATER ***
+     * `saliente_player_id` is resolved from `PlazaRepository::findOcupacionVigente()`
+     * ONCE, right here, and frozen into the row — see
+     * `Migrations\InitialSchema::sqlCambiosSolicitud()`'s own docblock for
+     * the full reasoning (a plaza's vigent occupant changes over time, so
+     * reading it later would silently relabel an old solicitud with today's
+     * occupant instead of the one who actually left). A plaza with no vigent
+     * ocupación at this exact instant (should not happen once
+     * `PlazaRepository::openPlaza()` has run, but this method does not
+     * assume it) stores `NULL`, never a guess.
+     *
      * @throws SolicitudPersistenceException When the insert fails at the
      *         wpdb level.
      */
@@ -132,6 +143,9 @@ class SolicitudRepository {
 
         $snapshot = DictamenSnapshot::fromDictamen( $dictamen, $now );
 
+        $vigente           = $this->plazaRepository->findOcupacionVigente( $solicitud->plazaId() );
+        $salientePlayerId  = null !== $vigente ? (int) $vigente['player_id'] : null;
+
         $result = $wpdb->insert(
             $p . 'cambios_solicitud',
             [
@@ -140,6 +154,7 @@ class SolicitudRepository {
                 'plaza_id'                 => $solicitud->plazaId(),
                 'tipo'                     => $solicitud->tipo(),
                 'entrante_player_id'       => $solicitud->entrantePlayerId(),
+                'saliente_player_id'       => $salientePlayerId,
                 'fecha_id'                 => $solicitud->fechaId(),
                 'solicitada_por'           => $solicitadaPor,
                 'solicitada_at'            => $now,
@@ -190,6 +205,7 @@ class SolicitudRepository {
             'plaza_id'           => $solicitud->plazaId(),
             'tipo'               => $solicitud->tipo(),
             'entrante_player_id' => $solicitud->entrantePlayerId(),
+            'saliente_player_id' => $salientePlayerId,
             'fecha_id'           => $solicitud->fechaId(),
             'solicitada_por'     => $solicitadaPor,
             'dictamen_procede'   => $dictamen->procede(),

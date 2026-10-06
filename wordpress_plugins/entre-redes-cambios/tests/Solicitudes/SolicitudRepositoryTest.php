@@ -209,6 +209,86 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertNull( $this->repo->findSolicitud( 999999 ) );
     }
 
+    // -------------------------------------------------------------------------
+    // crear() — saliente_player_id write-time capture
+    // -------------------------------------------------------------------------
+
+    public function test_crear_guarda_el_ocupante_vigente_como_saliente_player_id(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() );
+        $id        = $this->repo->crear( $solicitud, 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        $row = $this->repo->findSolicitud( $id );
+        $this->assertSame( 777, (int) $row['saliente_player_id'] );
+    }
+
+    /**
+     * THE WHOLE POINT of storing `saliente_player_id` at write time instead
+     * of deriving it later from the plaza's current occupant (see
+     * `Migrations\InitialSchema::sqlCambiosSolicitud()`'s own docblock): once
+     * the chain advances past the moment a solicitud was created, re-reading
+     * "who occupies this plaza now" would silently relabel an OLD solicitud
+     * with a occupant who was not even there when it was made. This pins the
+     * value by advancing the chain AFTER `crear()` and asserting the stored
+     * column never moved.
+     */
+    public function test_saliente_player_id_no_cambia_cuando_la_cadena_avanza_despues_de_crear(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
+        $this->seedFecha( 2, self::SEASON_ID, '2026-05-23' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() );
+        $id        = $this->repo->crear( $solicitud, 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        $this->assertSame( 777, (int) $this->repo->findSolicitud( $id )['saliente_player_id'] );
+
+        // The chain advances AFTER the solicitud was created — the plaza's
+        // vigent occupant is now 888, not 777.
+        $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-05-28 00:00:00' );
+        $vigenteAhora = $this->plazaRepository->findOcupacionVigente( $plazaId );
+        $this->assertSame( 888, (int) $vigenteAhora['player_id'], 'Fixture sanity: the chain really did advance.' );
+
+        // The already-persisted solicitud must still read the ORIGINAL
+        // saliente — never the plaza's new current occupant.
+        $this->assertSame(
+            777,
+            (int) $this->repo->findSolicitud( $id )['saliente_player_id'],
+            'saliente_player_id must stay pinned to who occupied the plaza AT CREATION TIME.'
+        );
+    }
+
+    public function test_crear_guarda_saliente_player_id_null_cuando_la_plaza_no_tiene_ocupacion_vigente(): void {
+        // No openPlaza() call — plaza_id 999999 has no cambios_plaza row and
+        // therefore no cambios_ocupacion chain at all.
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 999999, 888, 5, time() );
+        $id        = $this->repo->crear( $solicitud, 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        $row = $this->repo->findSolicitud( $id );
+
+        // assertArrayHasKey FIRST — without it, a missing 'saliente_player_id'
+        // column/key would read back as PHP's own "undefined array key" null,
+        // which assertNull() alone cannot tell apart from a column that
+        // genuinely exists and was explicitly stored as NULL.
+        $this->assertArrayHasKey( 'saliente_player_id', $row );
+        $this->assertNull( $row['saliente_player_id'] );
+    }
+
+    public function test_crear_regreso_tambien_guarda_el_ocupante_vigente_como_saliente(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-01-01' );
+        $this->seedFecha( 2, self::SEASON_ID, '2026-01-08' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-01-01 00:00:00' );
+        $this->plazaRepository->succeedOcupacion( $plazaId, 999, 2, 'reemplazada', '2026-01-05 00:00:00' );
+
+        $solicitud = SolicitudDeCambio::regreso( self::SEASON_ID, 100, $plazaId, 2, time() );
+        $id        = $this->repo->crear( $solicitud, 777, Dictamen::from( [] ), '2026-05-27 10:00:00' );
+
+        // The suplente (999) currently holds the plaza — THEY are who leaves
+        // when the titular (777) comes back, never the titular itself.
+        $this->assertSame( 999, (int) $this->repo->findSolicitud( $id )['saliente_player_id'] );
+    }
+
     public function test_list_pendientes_and_aprobadas_filter_by_season_and_estado(): void {
         $now = '2026-05-27 10:00:00';
 
