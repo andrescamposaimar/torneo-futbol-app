@@ -209,6 +209,19 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
     });
   }
 
+  /// NOT debounced, for the same reason a chip tap is not: emptying the box
+  /// is one discrete decision, not a stream of keystrokes, and making the
+  /// captain wait 300ms to get the full list back would be a delay with no
+  /// purpose. Re-queries the VISIBLE section from page 1.
+  void _onSearchCleared() {
+    _debounce?.cancel();
+    _searchController.clear();
+    setState(() => _searchQuery = '');
+    ref
+        .read(cambiosCandidatosControllerProvider(_paramsFor(_seccion)).notifier)
+        .load(query: '', puntajes: _puntajesFiltro);
+  }
+
   /// NOT debounced — a chip tap is a discrete action, not a stream of
   /// keystrokes — and always re-queries the VISIBLE section from page 1,
   /// same as [_onSearchChanged].
@@ -376,14 +389,56 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              // A search box, not a form field. `labelText` reserved vertical
+              // room for a floating label and made this the tallest thing on
+              // the screen; a hint costs nothing when empty and disappears
+              // when it stops being useful. Filled + borderless + dense is
+              // the same treatment `players_screen.dart` already gives its
+              // own search, so the two screens read as one app.
               child: TextField(
                 key: const Key('candidato_search_field'),
                 controller: _searchController,
                 onChanged: _onSearchChanged,
-                decoration: const InputDecoration(
-                  labelText: 'Buscar jugador',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
+                textInputAction: TextInputAction.search,
+                style: const TextStyle(fontSize: 15),
+                decoration: InputDecoration(
+                  hintText: 'Buscar jugador',
+                  hintStyle: TextStyle(fontSize: 15, color: Colors.grey.shade600),
+                  prefixIcon: Icon(Icons.search, size: 20, color: Colors.grey.shade600),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  // Rebuilt from the controller rather than from this
+                  // screen's state: the query itself is debounced by 300ms,
+                  // and a clear button that appeared a third of a second
+                  // after the first keystroke would feel broken.
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _searchController,
+                    builder: (context, value, _) => value.text.isEmpty
+                        ? const SizedBox.shrink()
+                        : IconButton(
+                            key: const Key('candidato_search_clear'),
+                            icon: Icon(Icons.close, size: 18, color: Colors.grey.shade600),
+                            splashRadius: 18,
+                            tooltip: 'Borrar búsqueda',
+                            onPressed: _onSearchCleared,
+                          ),
+                  ),
+                  suffixIconConstraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  filled: true,
+                  fillColor: Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.5),
+                  ),
                 ),
               ),
             ),
