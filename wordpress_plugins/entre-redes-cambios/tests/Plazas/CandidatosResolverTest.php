@@ -1863,15 +1863,72 @@ class CandidatosResolverTest extends TestCase {
     }
 
     /**
+     * *** THE TEST THAT PROVES THE WHOLE POINT OF THE SLICE (0.1.13) ***
+     * `cambios_plaza.es_arco` is captured ONCE, at `openPlaza()` time, from
+     * the titular's `sp_position` AS IT WAS THEN. This pins that
+     * `buscarPaginado()` keeps treating the plaza as the goalkeeper's own
+     * even after `sp_position` changes later in WordPress — under the OLD
+     * derived-at-read-time behavior this plaza would flip to a field plaza
+     * and a goalkeeper candidate would be wrongly excluded, failing this
+     * assertion.
+     */
+    public function test_buscar_paginado_reads_the_stored_es_arco_flag_not_the_titulars_current_position(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 700 => [ 3 ] ]; // 700 is the titular goalkeeper AT PLAZA-CREATION TIME.
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        // The titular's position is changed LATER in WordPress, and a NEW
+        // goalkeeper candidate shows up — es_arco was already written and
+        // must not move.
+        $wp_test_position_terms = [
+            700 => [ 9 ], // now resolves as "Delantero".
+            800 => [ 3 ], // a goalkeeper candidate.
+        ];
+
+        $plaza     = $this->plazaRepository->findPlaza( $plazaId );
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
+
+        $this->assertContains(
+            800,
+            $ids,
+            'A goalkeeper candidate must remain available: the plaza\'s STORED es_arco=1 must win over the titular\'s CURRENT sp_position.'
+        );
+    }
+
+    /**
      * *** NEVER ONE QUERY PER CANDIDATE ***
-     * The position lookup for `buscarPaginado()`'s whole population (plus
-     * the plaza's own titular) must run as exactly ONE
-     * `PosicionResolver::resolverParaIds()` call — which this shim's
-     * `wp_get_object_terms()` surfaces as exactly one entry in
-     * `$wp_test_position_terms_calls` — never one call per candidate, the
-     * same batching discipline
+     * The position lookup for `buscarPaginado()`'s whole CANDIDATE
+     * population must run as exactly ONE `PosicionResolver::resolverParaIds()`
+     * call — which this shim's `wp_get_object_terms()` surfaces as exactly
+     * one entry in `$wp_test_position_terms_calls` — never one call per
+     * candidate, the same batching discipline
      * `JugadorMetricasReader::fetchLatestMetaValuesFor()` already applies to
      * this exact population (see that class's own class docblock).
+     *
+     * *** THE PLAZA'S OWN TITULAR IS NO LONGER PART OF THIS CALL (0.1.13) ***
+     * Before 0.1.13, "is this the goalkeeper's plaza" was itself derived from
+     * the titular's position, so the batched call covered the titular's id
+     * TOO. It is now read straight off the plaza's stored `es_arco` column
+     * (see `Migrations\InitialSchema`'s own class docblock) — no query at
+     * all — so the one batched call this test pins covers ONLY the
+     * candidates. `$wp_test_position_terms_calls` is reset right before
+     * `buscarPaginado()` runs, below, because fixture setup
+     * (`$this->plaza()`) now ALSO triggers its own single
+     * `PosicionResolver` call — to derive and persist THAT plaza's own
+     * `es_arco` at write time (`Plazas\PlazaRepository::doOpenPlaza()`) —
+     * which this test does not care about.
      */
     public function test_buscar_paginado_resolves_positions_for_the_population_in_exactly_one_batched_call(): void {
         global $wp_test_position_terms_calls;
@@ -1882,6 +1939,8 @@ class CandidatosResolverTest extends TestCase {
         $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
 
         $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $wp_test_position_terms_calls = []; // see docblock above — discard the plaza-creation call.
 
         $this->resolver->buscarPaginado(
             $plaza,
@@ -1896,13 +1955,13 @@ class CandidatosResolverTest extends TestCase {
         $this->assertCount(
             1,
             $wp_test_position_terms_calls,
-            'The position lookup for the whole population must run in exactly ONE batched call, never one per candidate.'
+            'The position lookup for the candidate population must run in exactly ONE batched call, never one per candidate.'
         );
 
         $idsResueltos = $wp_test_position_terms_calls[0];
         sort( $idsResueltos );
-        $expected = [ 700, 800, 801, 802 ]; // the plaza's titular (700) plus every candidate
+        $expected = [ 800, 801, 802 ]; // every candidate — the plaza's own titular is read from es_arco, not resolved here.
         sort( $expected );
-        $this->assertSame( $expected, $idsResueltos, 'The one batched call must cover the plaza\'s titular AND every candidate in the population.' );
+        $this->assertSame( $expected, $idsResueltos, 'The one batched call must cover every candidate in the population.' );
     }
 }

@@ -101,15 +101,24 @@ use EntreRedes\Cambios\Plazas\PosicionResolver;
  * screen-disagrees-with-engine failure that drift would otherwise cause).
  * This assembler delegates to it, never re-deriving the cap itself.
  *
- * *** ARQUERO/PLAZA POSITION RESOLUTION — ONE BATCHED CALL, NEVER TWO ***
+ * *** ARQUERO/PLAZA POSITION RESOLUTION — PLAZA READS A STORED FLAG; ONLY THE
+ * ENTRANTE IS RESOLVED LIVE (CHANGED IN 0.1.13) ***
  * `DictamenContext::entranteEsArquero()` / `::plazaEsDelArquero()` feed
  * `Reglas\ArqueroNoOcupaPlazaDeCampo` — see that rule's own class docblock
- * for the two deliberately-distinct position predicates this reads off
- * `Plazas\PosicionResolver`. This assembler resolves BOTH the entrante's and
- * the plaza's titular's position in a single `PosicionResolver::resolverParaIds()`
- * call (at most two ids, for one solicitud) rather than one call per id —
- * the same batching discipline `Plazas\CandidatosResolver::buscarPaginado()`
- * applies over its whole population, just over a trivially small input here.
+ * for the two deliberately-distinct position predicates this used to read
+ * off `Plazas\PosicionResolver`. Before 0.1.13, `plazaEsDelArquero()` was
+ * DERIVED on every call from the plaza's titular's CURRENT `sp_position` —
+ * which meant fixing a data-entry error on that position in WordPress could
+ * silently flip which plaza was "the goal" out from under an
+ * already-in-flight solicitud. `cambios_plaza.es_arco` (see
+ * `Migrations\InitialSchema`'s own class docblock) is now the stored,
+ * write-time-derived fact for that question — `resolverPosicionesArquero()`
+ * below reads `$plaza['es_arco']` directly, no query, no `PosicionResolver`
+ * call at all for the plaza's own side. Only `entranteEsArquero()` still
+ * needs a LIVE lookup (the ENTRANTE is a candidate, not a stored record —
+ * there is nothing to read a flag off), so the batched
+ * `PosicionResolver::resolverParaIds()` call this assembler still makes now
+ * covers AT MOST ONE id (the entrante's), never the plaza's titular's.
  */
 final class DictamenContextAssembler {
 
@@ -273,28 +282,30 @@ final class DictamenContextAssembler {
     // -------------------------------------------------------------------------
 
     /**
-     * Resolves, in ONE batched `PosicionResolver::resolverParaIds()` call,
-     * both booleans `Reglas\ArqueroNoOcupaPlazaDeCampo` needs — see that
-     * rule's own class docblock and this class's own docblock, "ARQUERO/
-     * PLAZA POSITION RESOLUTION — ONE BATCHED CALL, NEVER TWO".
+     * `plazaEsDelArquero` reads the plaza's own STORED `es_arco` flag — no
+     * query, no derivation — while `entranteEsArquero` still needs a LIVE
+     * `PosicionResolver::resolverParaIds()` lookup (at most one id: the
+     * entrante's). See this class's own docblock, "ARQUERO/PLAZA POSITION
+     * RESOLUTION", for why these two can no longer share one batched call:
+     * the plaza's side is not a position lookup at all anymore.
      *
-     * @param array<string, mixed> $plaza MUST carry `titular_player_id`.
+     * @param array<string, mixed> $plaza MUST carry `es_arco` (as persisted
+     *        by `Plazas\PlazaRepository::doOpenPlaza()` / backfilled by
+     *        `Migrations\MigrationRunner::backfillEsArco()`).
      * @return array{entranteEsArquero: bool, plazaEsDelArquero: bool}
      */
     private function resolverPosicionesArquero( array $plaza, ?int $entrantePlayerId ): array {
-        $titularPlayerId = (int) $plaza['titular_player_id'];
+        $plazaEsDelArquero = (bool) ( $plaza['es_arco'] ?? false );
 
-        $idsParaResolver = [ $titularPlayerId ];
-        if ( null !== $entrantePlayerId ) {
-            $idsParaResolver[] = $entrantePlayerId;
+        if ( null === $entrantePlayerId ) {
+            return [ 'entranteEsArquero' => false, 'plazaEsDelArquero' => $plazaEsDelArquero ];
         }
 
-        $posiciones = $this->posicionResolver->resolverParaIds( array_values( array_unique( $idsParaResolver ) ) );
+        $posiciones = $this->posicionResolver->resolverParaIds( [ $entrantePlayerId ] );
 
         return [
-            'entranteEsArquero' => null !== $entrantePlayerId
-                && PosicionResolver::esPosicionDeArquero( $posiciones[ $entrantePlayerId ] ),
-            'plazaEsDelArquero' => PosicionResolver::esPosicionDelArqueroTitular( $posiciones[ $titularPlayerId ] ),
+            'entranteEsArquero' => PosicionResolver::esPosicionDeArquero( $posiciones[ $entrantePlayerId ] ),
+            'plazaEsDelArquero' => $plazaEsDelArquero,
         ];
     }
 

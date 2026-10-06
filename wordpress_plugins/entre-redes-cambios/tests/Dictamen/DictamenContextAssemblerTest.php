@@ -335,6 +335,36 @@ class DictamenContextAssemblerTest extends TestCase {
         $this->assertTrue( $ctx->plazaEsDelArquero(), 'plazaEsDelArquero() is a fact about the PLAZA, independent of the solicitud tipo, and must still resolve for a regreso.' );
     }
 
+    /**
+     * *** THE TEST THAT PROVES THE WHOLE POINT OF THE SLICE (0.1.13) ***
+     * `cambios_plaza.es_arco` is captured ONCE, at `openPlaza()` time, from
+     * the titular's `sp_position` AS IT WAS THEN. This pins that
+     * `plazaEsDelArquero()` keeps answering from that STORED flag even after
+     * `sp_position` changes later in WordPress (e.g. an operator fixing a
+     * data-entry error) — under the OLD derived-at-read-time behavior this
+     * plaza would flip to a field plaza and this assertion would fail.
+     */
+    public function test_assemble_reads_the_stored_es_arco_flag_not_the_titulars_current_position(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 777 => [ 3 ] ]; // 777 is the titular goalkeeper AT PLAZA-CREATION TIME.
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedFecha( 5, self::SEASON_ID );
+        $this->putSpMetrics( 888, [ 'puntaje' => '2,5' ] );
+
+        // The titular's position is changed LATER in WordPress — es_arco was
+        // already written and must not move.
+        $wp_test_position_terms = [ 777 => [ 9 ] ]; // now resolves as "Delantero".
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, time() );
+        $ctx       = $this->assembler->assemble( $solicitud );
+
+        $this->assertTrue(
+            $ctx->plazaEsDelArquero(),
+            'plazaEsDelArquero() must reflect the STORED es_arco flag captured at plaza-creation time, never the titular\'s CURRENT sp_position.'
+        );
+    }
+
     // -------------------------------------------------------------------------
     // assemble() — a half-built context must never be assembled
     // -------------------------------------------------------------------------
