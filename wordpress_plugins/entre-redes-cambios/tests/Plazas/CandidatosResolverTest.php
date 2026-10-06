@@ -1706,6 +1706,73 @@ class CandidatosResolverTest extends TestCase {
     // own docblock on where this runs and why).
     // -------------------------------------------------------------------------
 
+    /**
+     * The three goalkeeper-exclusion tests below all pass `seccion = null`,
+     * which exercises the DEFAULT season-registered population — not the two
+     * sections a captain actually opens. The filter lives after the
+     * population `match` in `buscarPaginado()`, so it covers all three by
+     * construction, but "by construction" is an argument, not a test: this
+     * one pins the sections the user sees.
+     */
+    public function test_buscar_paginado_excludes_goalkeepers_from_a_field_plaza_in_every_seccion(): void {
+        global $wp_test_position_terms;
+
+        $plazaId = $this->plaza( 10 ); // techo 5.0 — nobody excluded by techo here
+        $plaza   = $this->plazaRepository->findPlaza( $plazaId );
+
+        // lista_espera: one field player, one Arquero (3), one Arquero Sup. (125).
+        $this->seedPlayer( 820, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedEquipoMembership( 820, self::LISTA_ESPERA_TEAM_ID );
+        $this->seedPlayer( 821, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedEquipoMembership( 821, self::LISTA_ESPERA_TEAM_ID );
+        $this->seedPlayer( 822, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedEquipoMembership( 822, self::LISTA_ESPERA_TEAM_ID );
+
+        // padron_completo: same shape, outside the season.
+        $this->seedPlayerSinTemporada( 900, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayerSinTemporada( 901, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayerSinTemporada( 902, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        // 700 is the plaza's titular and has no seeded position -> field plaza.
+        $wp_test_position_terms = [
+            821 => [ 3 ],   // Arquero
+            822 => [ 125 ], // Arquero Sup.
+            901 => [ 3 ],
+            902 => [ 125 ],
+        ];
+
+        $listaEspera = $this->resolver->buscarPaginado(
+            $plaza,
+            CandidatosSeccion::LISTA_ESPERA,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $idsListaEspera = array_map( static fn ( $c ) => $c->playerId(), $listaEspera['candidatos'] );
+        $this->assertContains( 820, $idsListaEspera );
+        $this->assertNotContains( 821, $idsListaEspera, 'An Arquero must not be offered for a field plaza in lista_espera.' );
+        $this->assertNotContains( 822, $idsListaEspera, 'An Arquero Sup. must not be offered for a field plaza in lista_espera.' );
+        $this->assertSame( 1, $listaEspera['total'], 'total must count only the candidates the section can actually offer.' );
+
+        $padron = $this->resolver->buscarPaginado(
+            $plaza,
+            CandidatosSeccion::PADRON_COMPLETO,
+            self::LISTA_ESPERA_TEAM_ID,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            50
+        );
+
+        $idsPadron = array_map( static fn ( $c ) => $c->playerId(), $padron['candidatos'] );
+        $this->assertContains( 900, $idsPadron );
+        $this->assertNotContains( 901, $idsPadron, 'An Arquero must not be offered for a field plaza in padron_completo.' );
+        $this->assertNotContains( 902, $idsPadron, 'An Arquero Sup. must not be offered for a field plaza in padron_completo.' );
+    }
+
     public function test_buscar_paginado_excludes_a_titular_goalkeeper_candidate_from_a_field_plaza(): void {
         global $wp_test_position_terms;
         $wp_test_position_terms = [ 800 => [ 3 ] ]; // 800 is a titular goalkeeper (Arquero)
