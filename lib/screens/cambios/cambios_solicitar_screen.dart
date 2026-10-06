@@ -435,14 +435,32 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
               width: double.infinity,
               child: ElevatedButton(
                 key: const Key('confirmar_solicitud_button'),
+                // The primary colour is set EXPLICITLY, not inherited. Under
+                // Material 3 an ElevatedButton is a LOW-emphasis button — a
+                // surface-tinted background with a primary-coloured label —
+                // which is why this read as washed out next to the rest of
+                // the screen. This is the screen's single most important
+                // action, so it states its own weight instead of relying on
+                // a tonal default. Same approach `more_screen.dart` already
+                // uses for its own coloured action.
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(52),
+                  textStyle: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                ),
                 onPressed: canSubmit ? _onConfirmar : null,
                 child: _submitting
                     ? const SizedBox(
                         height: 20,
                         width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Confirmar'),
+                    // Names the action, not the gesture — and names the RIGHT
+                    // one: this screen also serves a regreso, which is the END
+                    // of a cambio, never a new one. Mirrors the AppBar's own
+                    // 'Pedir cambio' / 'Pedir regreso' split.
+                    : Text(isSustitucion ? 'Solicitar Cambio' : 'Solicitar Regreso'),
               ),
             ),
           ),
