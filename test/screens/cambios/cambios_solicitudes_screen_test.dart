@@ -17,6 +17,16 @@ CambiosSolicitud _solicitud({
   CambiosSolicitudEstado estado = CambiosSolicitudEstado.pendiente,
   CambiosDictamen dictamen = const CambiosDictamen(procede: true),
   String? nota,
+  CambiosSolicitudLado sale = const CambiosSolicitudLado(
+    playerId: 777,
+    nombre: 'Campos, Andres',
+    puntaje: 4.5,
+  ),
+  CambiosSolicitudLado entra = const CambiosSolicitudLado(
+    playerId: 200,
+    nombre: 'Grigorjew, Gerardo',
+    puntaje: 4.5,
+  ),
 }) {
   return CambiosSolicitud(
     id: id,
@@ -29,6 +39,8 @@ CambiosSolicitud _solicitud({
     resueltaAt: null,
     nota: nota,
     dictamen: dictamen,
+    sale: sale,
+    entra: entra,
   );
 }
 
@@ -80,6 +92,109 @@ void main() {
       expect(find.byKey(const Key('solicitudes_list')), findsOneWidget);
       expect(find.byKey(const Key('solicitud_card_1')), findsOneWidget);
       expect(find.text('Aprobada'), findsOneWidget);
+    });
+
+    testWidgets('renders Sale and Entra with name and puntaje in brackets', (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(
+            id: 1,
+            sale: const CambiosSolicitudLado(playerId: 777, nombre: 'Campos, Andres', puntaje: 4.5),
+            entra: const CambiosSolicitudLado(playerId: 200, nombre: 'Grigorjew, Gerardo', puntaje: 4.5),
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(find.text('Sale: '), findsOneWidget);
+      expect(find.text('Campos, Andres'), findsOneWidget);
+      expect(find.text('Entra: '), findsOneWidget);
+      expect(find.text('Grigorjew, Gerardo'), findsOneWidget);
+      expect(find.text('[4.5]'), findsNWidgets(2));
+    });
+
+    testWidgets('a whole-number puntaje renders without a spurious decimal (formatearPuntaje)',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(
+            id: 1,
+            sale: const CambiosSolicitudLado(playerId: 777, nombre: 'Campos, Andres', puntaje: 5.0),
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(find.text('[5]'), findsOneWidget);
+      expect(find.text('[5.0]'), findsNothing);
+    });
+
+    testWidgets('an unresolvable puntaje omits the brackets entirely — never [] or [-]',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(
+            id: 1,
+            sale: const CambiosSolicitudLado(playerId: 777, nombre: 'Campos, Andres', puntaje: null),
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(find.text('Campos, Andres'), findsOneWidget);
+      expect(find.text('[]'), findsNothing);
+      expect(find.text('[-]'), findsNothing);
+      // Exactly one bracket pair rendered (Entra's default 4.5) — Sale's own
+      // unresolved puntaje contributed none.
+      expect(find.textContaining('['), findsOneWidget);
+    });
+
+    testWidgets('a player that was never recorded (predates the backend column) shows '
+        '"Sin registrar", not a blank line', (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(id: 1, sale: CambiosSolicitudLado.noRegistrado),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(find.text('Sale: Sin registrar'), findsOneWidget);
+    });
+
+    testWidgets('no RenderFlex overflow with a long Sale/Entra name at a narrow phone width',
+        (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(
+            id: 1,
+            sale: const CambiosSolicitudLado(
+              playerId: 1,
+              nombre: 'Von Hohenzollern-Sigmaringen, Maximiliano Alejandro',
+              puntaje: 4.5,
+            ),
+            entra: const CambiosSolicitudLado(
+              playerId: 2,
+              nombre: 'Fernandez de Kirchner Alvarez, Bartolome Ignacio',
+              puntaje: 3.0,
+            ),
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(tester.takeException(), isNull);
+      // The puntajes survive whole — the NAMES are what give way (ellipsis).
+      expect(find.text('[4.5]'), findsOneWidget);
+      expect(find.text('[3]'), findsOneWidget);
     });
 
     testWidgets('a rejecting dictamen maps its motivo codes to plain Spanish, never the raw code',
