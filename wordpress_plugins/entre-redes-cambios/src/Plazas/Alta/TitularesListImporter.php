@@ -168,7 +168,7 @@ class TitularesListImporter {
         $this->capitanRepository = $capitanRepository;
         $this->fechaRepository   = $fechaRepository;
         $this->eventLog          = $eventLog;
-        $this->posicionResolver  = $posicionResolver ?? new PosicionResolver();
+        $this->posicionResolver  = $posicionResolver ?? new PosicionResolver( $eventLog );
     }
 
     /**
@@ -179,9 +179,23 @@ class TitularesListImporter {
      * complete report of everything wrong, never a partial one that stopped
      * at the first problem — see `TitularesListPlan`'s own class docblock.
      *
+     * *** A FAILED POSITION RESOLUTION MUST ABORT, NEVER REPORT "NO
+     * GOALKEEPER" FOR EVERY TEAM (0.1.14) *** `PosicionResolver::resolverParaIds()`
+     * now throws rather than silently returning `SIN_POSICION` for every
+     * `$titularIds` — see that class's own docblock. This method does NOT
+     * catch that exception: letting it propagate straight to the CLI caller
+     * (`tools/importar-titulares.php`) is the correct behavior here, because
+     * the alternative — the OLD silent-degradation behavior — would have made
+     * `$arcoCount` read `0` for every single team in the file, producing a
+     * plan whose `errors` falsely claim every team has no goalkeeper. A hard
+     * stop with "could not read sp_position, try again" is honest; a plan
+     * full of misleading per-team errors is not.
+     *
      * @param array<int, array{line:int, team_id:int, equipo:string, titular_player_id:int, puntaje_raw:string, es_capitan:bool}> $rows
      *        `TitularesListParser::parse()`'s own `rows` output.
      * @param array<int, string> $parserErrors Same parser's `errors`.
+     * @throws \RuntimeException When PosicionResolver::resolverParaIds()
+     *         could not resolve the titulares' positions — see above.
      */
     public function planificar( array $rows, array $parserErrors, int $seasonId, int $fechaDesdeId ): TitularesListPlan {
         $errors   = $parserErrors;

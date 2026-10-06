@@ -246,7 +246,7 @@ class CandidatosResolver {
         $this->eventLog         = $eventLog;
         $this->metricasReader   = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
         $this->bloqueoEvaluator = $bloqueoEvaluator ?? new BloqueoReemplazoEvaluator();
-        $this->posicionResolver = $posicionResolver ?? new PosicionResolver();
+        $this->posicionResolver = $posicionResolver ?? new PosicionResolver( $eventLog );
     }
 
     /**
@@ -626,6 +626,19 @@ class CandidatosResolver {
         // would produce short or empty pages the app reads as "no candidates
         // available" — the exact bug the ceiling filter above was fixed for
         // today.
+        // *** A FAILED RESOLUTION MUST ABORT THE WHOLE REQUEST, NEVER ADMIT A
+        // GOALKEEPER INTO A FIELD PLAZA'S LIST (0.1.14) *** PosicionResolver::resolverParaIds()
+        // now throws rather than silently returning SIN_POSICION for every
+        // candidate — see that class's own docblock. This method does NOT
+        // catch it: the old silent-degradation behavior would have made
+        // esPosicionDeArquero() false for every candidate regardless of their
+        // REAL position, which is exactly "could not resolve" misread as
+        // "confirmed, not a goalkeeper" — a read failure silently becoming a
+        // permission, the one thing this whole fix exists to prevent. Letting
+        // this propagate reaches Rest\PlazasController::listarCandidatos()'s
+        // own `catch (\Throwable)`, which logs `rest.plazas_candidatos_fallida`
+        // and answers a loud 500 — never a 200 with a goalkeeper quietly
+        // included.
         $plazaEsDelArquero = (bool) ( $plaza['es_arco'] ?? false );
 
         if ( ! $plazaEsDelArquero ) {

@@ -97,7 +97,7 @@ class CandidatosResolverTest extends TestCase {
     }
 
     protected function tearDown(): void {
-        global $wpdb, $wp_test_position_terms, $wp_test_position_terms_calls;
+        global $wpdb, $wp_test_position_terms, $wp_test_position_terms_calls, $wp_test_position_terms_error;
         $p = $wpdb->prefix;
         $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
@@ -108,6 +108,7 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}postmeta" );
         $wp_test_position_terms       = [];
         $wp_test_position_terms_calls = [];
+        $wp_test_position_terms_error = null;
     }
 
     // -------------------------------------------------------------------------
@@ -1860,6 +1861,47 @@ class CandidatosResolverTest extends TestCase {
 
         $this->assertContains( 800, $ids, 'A goalkeeper candidate must remain available for the goalkeeper\'s own plaza.' );
         $this->assertSame( 1, $resultado['total'] );
+    }
+
+    /**
+     * *** A FAILED POSITION RESOLUTION MUST ABORT, NEVER ADMIT A GOALKEEPER
+     * INTO A FIELD PLAZA (0.1.14) *** Before this fix,
+     * `PosicionResolver::resolverParaIds()` silently resolved EVERY candidate
+     * to `SIN_POSICION` whenever `wp_get_object_terms()` failed — which,
+     * inside `buscarPaginado()`'s goalkeeper-exclusion filter
+     * (`! PosicionResolver::esPosicionDeArquero( ... )`), reads as "confirmed,
+     * not a goalkeeper" for every single candidate, including a REAL
+     * goalkeeper. That is a read failure silently becoming a permission —
+     * this plaza is a FIELD plaza (titular 700 has no seeded position), so a
+     * goalkeeper candidate must never reach its list, and the only way to
+     * guarantee that when positions cannot be resolved at all is to refuse
+     * the whole request rather than guess.
+     */
+    public function test_buscar_paginado_throws_rather_than_silently_admit_a_goalkeeper_when_position_resolution_fails(): void {
+        global $wp_test_position_terms_error;
+
+        $plazaId = $this->plaza(); // titular 700 has no seeded position -> field plaza
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        // Force the CANDIDATE population's position lookup to fail — the
+        // plaza fixture above already resolved its own titular successfully
+        // (openPlaza()'s own PosicionResolver call), so the forced failure
+        // below only affects buscarPaginado()'s own resolverParaIds() call.
+        $wp_test_position_terms_error = new \WP_Error( 'invalid_taxonomy', 'Invalid taxonomy.' );
+
+        $this->expectException( \RuntimeException::class );
+
+        $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
     }
 
     /**

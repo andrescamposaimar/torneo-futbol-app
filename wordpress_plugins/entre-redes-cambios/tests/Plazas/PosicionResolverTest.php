@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Tests\Plazas;
 
+use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Plazas\PosicionResolver;
 use PHPUnit\Framework\TestCase;
 
@@ -21,8 +22,9 @@ use PHPUnit\Framework\TestCase;
 class PosicionResolverTest extends TestCase {
 
     protected function tearDown(): void {
-        global $wp_test_position_terms;
-        $wp_test_position_terms = [];
+        global $wp_test_position_terms, $wp_test_position_terms_error;
+        $wp_test_position_terms       = [];
+        $wp_test_position_terms_error = null;
     }
 
     public function test_a_single_recognized_position_resolves_to_its_name(): void {
@@ -144,6 +146,58 @@ class PosicionResolverTest extends TestCase {
         $resultado = ( new PosicionResolver() )->resolverParaIds( [] );
 
         $this->assertSame( [], $resultado );
+    }
+
+    // -------------------------------------------------------------------------
+    // A FAILED wp_get_object_terms() CALL MUST NEVER READ AS "NOBODY HAS A
+    // POSITION" (0.1.14) — see class docblock for the production incident
+    // this discipline fixes.
+    // -------------------------------------------------------------------------
+
+    /**
+     * *** THE EXACT BUG THIS TEST WOULD HAVE CAUGHT *** Before this fix, a
+     * `WP_Error` return (the shape `wp_get_object_terms()` actually returns
+     * when `sp_position` is not registered yet) fell into the same
+     * `! is_array( $terms )` branch as "no rows at all" and silently resolved
+     * to `self::SIN_POSICION` for every requested id — exactly what let
+     * `Migrations\MigrationRunner::backfillEsArco()` write `es_arco = 0` for
+     * all 330 live plazas in production. This asserts the opposite: the call
+     * throws, and never returns a usable (but wrong) map.
+     */
+    public function test_a_wp_error_from_wp_get_object_terms_throws_rather_than_resolving_to_sin_posicion(): void {
+        global $wp_test_position_terms_error;
+        $wp_test_position_terms_error = new \WP_Error( 'invalid_taxonomy', 'Invalid taxonomy.' );
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessageMatches( '/wp_get_object_terms\(\) failed/' );
+
+        ( new PosicionResolver() )->resolverParaIds( [ 800 ] );
+    }
+
+    /**
+     * The failure must reach the EventLog BEFORE the exception propagates —
+     * same discipline as Support\ChecksReads::assertReadSucceeded() — so an
+     * operator reading `entre_redes_cambios_ultimo_error` (see WpEventLog's
+     * own docblock) can see WHY a request failed, not just that it did.
+     */
+    public function test_a_wp_error_from_wp_get_object_terms_is_recorded_on_the_event_log_before_throwing(): void {
+        global $wp_test_position_terms_error;
+        $wp_test_position_terms_error = new \WP_Error( 'invalid_taxonomy', 'Invalid taxonomy.' );
+
+        $eventLog = new InMemoryEventLog();
+
+        try {
+            ( new PosicionResolver( $eventLog ) )->resolverParaIds( [ 800, 801 ] );
+            $this->fail( 'Expected resolverParaIds() to throw.' );
+        } catch ( \RuntimeException $e ) {
+            // Expected — the EventLog assertion below is the point of this test.
+        }
+
+        $this->assertTrue( $eventLog->has( 'posicion.resolucion_fallida' ) );
+
+        $evento = $eventLog->last();
+        $this->assertSame( 'posicion.resolucion_fallida', $evento['evento'] );
+        $this->assertSame( [ 800, 801 ], $evento['contexto']['player_ids'] );
     }
 
     // -------------------------------------------------------------------------

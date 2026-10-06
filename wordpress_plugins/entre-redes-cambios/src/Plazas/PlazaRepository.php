@@ -180,7 +180,7 @@ class PlazaRepository {
     public function __construct( \wpdb $wpdb, EventLog $eventLog, ?PosicionResolver $posicionResolver = null ) {
         $this->wpdb             = $wpdb;
         $this->eventLog         = $eventLog;
-        $this->posicionResolver = $posicionResolver ?? new PosicionResolver();
+        $this->posicionResolver = $posicionResolver ?? new PosicionResolver( $eventLog );
     }
 
     /**
@@ -927,8 +927,19 @@ class PlazaRepository {
      * prepareSucceedOcupacion()'s own choice to log `'succeedOcupacion'`
      * unconditionally.
      *
+     * *** A FAILED POSITION RESOLUTION MUST ABORT THE WHOLE OPEN, NEVER WRITE
+     * `es_arco = 0` AS A GUESS (0.1.14) *** `$this->posicionResolver->resolverParaIds()`
+     * now throws rather than silently degrading — see that class's own
+     * docblock. This method does NOT catch that exception: letting it
+     * propagate means openPlaza()'s own `try`/`catch` (see that method)
+     * rolls back the transaction before anything is written, so a plaza is
+     * never created with a GUESSED `es_arco`. The caller sees the same
+     * `\RuntimeException` it would see from any other failed write here.
+     *
      * @throws \InvalidArgumentException When $fechaDesdeId does not exist in
      *         cambios_fecha or belongs to a different season.
+     * @throws \RuntimeException When PosicionResolver::resolverParaIds()
+     *         could not resolve the titular's position — see above.
      * @throws PlazaPersistenceException When either insert fails at the wpdb
      *         level.
      */
