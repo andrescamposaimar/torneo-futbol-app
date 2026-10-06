@@ -222,6 +222,7 @@ class CandidatosResolver {
     private EventLog $eventLog;
     private JugadorMetricasReader $metricasReader;
     private BloqueoReemplazoEvaluator $bloqueoEvaluator;
+    private PosicionResolver $posicionResolver;
 
     /**
      * @param EventLog $eventLog MANDATORY, no null-object fallback — same
@@ -237,13 +238,15 @@ class CandidatosResolver {
         PlazaRepository $plazaRepository,
         EventLog $eventLog,
         ?JugadorMetricasReader $metricasReader = null,
-        ?BloqueoReemplazoEvaluator $bloqueoEvaluator = null
+        ?BloqueoReemplazoEvaluator $bloqueoEvaluator = null,
+        ?PosicionResolver $posicionResolver = null
     ) {
         $this->wpdb             = $wpdb;
         $this->plazaRepository  = $plazaRepository;
         $this->eventLog         = $eventLog;
         $this->metricasReader   = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
         $this->bloqueoEvaluator = $bloqueoEvaluator ?? new BloqueoReemplazoEvaluator();
+        $this->posicionResolver = $posicionResolver ?? new PosicionResolver();
     }
 
     /**
@@ -600,6 +603,35 @@ class CandidatosResolver {
             $candidatoIds,
             static fn ( int $playerId ): bool => $techo->allows( $metricas[ $playerId ]->puntaje() )
         ) );
+
+        // A goalkeeper is likewise excluded from the POPULATION itself when
+        // THIS plaza is NOT the goalkeeper's plaza — the hiding-from-the-list
+        // half of Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo's rule (see that
+        // class's own docblock for why this is a convenience, never a
+        // substitute for the dictamen's own enforcement). Same discipline as
+        // the two exclusions just above: unconditional, runs from a position
+        // lookup resolved for the WHOLE remaining population in ONE batched
+        // `PosicionResolver::resolverParaIds()` call (plus the plaza's own
+        // titular, so the "is this the goalkeeper's plaza" check costs no
+        // extra query either) — never one call per candidate, the same
+        // chunking discipline `JugadorMetricasReader::fetchLatestMetaValuesFor()`
+        // already applies to this exact population. Runs BEFORE $total is
+        // computed and BEFORE array_slice() takes a page: a filter that ran
+        // AFTER pagination would produce short or empty pages the app reads
+        // as "no candidates available" — the exact bug the ceiling filter
+        // above was fixed for today.
+        $titularPlayerId    = (int) ( $plaza['titular_player_id'] ?? 0 );
+        $posicionesArquero  = $this->posicionResolver->resolverParaIds(
+            array_values( array_unique( array_merge( $candidatoIds, [ $titularPlayerId ] ) ) )
+        );
+        $plazaEsDelArquero = PosicionResolver::esPosicionDelArqueroTitular( $posicionesArquero[ $titularPlayerId ] );
+
+        if ( ! $plazaEsDelArquero ) {
+            $candidatoIds = array_values( array_filter(
+                $candidatoIds,
+                static fn ( int $playerId ): bool => ! PosicionResolver::esPosicionDeArquero( $posicionesArquero[ $playerId ] )
+            ) );
+        }
 
         // $puntajesFiltro narrows the POPULATION itself one step further —
         // the SAME kind of population narrowing as the unrated/over-ceiling

@@ -28,6 +28,8 @@ String cambiosMotivoMensaje(String codigo) {
       return 'Esta plaza fue cerrada por la comisión y ya no admite cambios.';
     case 'puntaje_excede_techo':
       return 'El puntaje del jugador elegido supera el techo permitido para esta plaza.';
+    case 'arquero_no_ocupa_plaza_de_campo':
+      return 'El jugador elegido es arquero y esta plaza no es la plaza del arquero: un arquero no puede ocupar una plaza de campo.';
     case 'entrante_puntaje_indeterminado':
       return 'No pudimos calcular el puntaje del jugador elegido, así que no se pudo evaluar el pedido.';
     case 'fuera_de_plazo':

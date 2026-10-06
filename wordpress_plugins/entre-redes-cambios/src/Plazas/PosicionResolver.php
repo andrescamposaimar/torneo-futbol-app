@@ -57,6 +57,44 @@ final class PosicionResolver {
      */
     public const SIN_POSICION = 'Sin Posicion';
 
+    /** The position name for term 3 — see self::POS_MAP. */
+    public const POSICION_ARQUERO = 'Arquero';
+
+    /** The position name for term 125 — see self::POS_MAP. */
+    public const POSICION_ARQUERO_SUPLENTE = 'Arquero Sup.';
+
+    /**
+     * Whether $posicionName makes a PLAYER "a goalkeeper" for
+     * `Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo`'s CANDIDATE definition —
+     * true for a titular goalkeeper (term 3, "Arquero") OR a backup
+     * goalkeeper (term 125, "Arquero Sup."). The process owner confirmed
+     * explicitly that a backup goalkeeper is a goalkeeper for that rule.
+     *
+     * *** DELIBERATELY A DIFFERENT SET THAN esPosicionDelArqueroTitular()
+     * BELOW *** These two predicates must never be unified into one — see
+     * that method's own docblock for why.
+     */
+    public static function esPosicionDeArquero( string $posicionName ): bool {
+        return self::POSICION_ARQUERO === $posicionName || self::POSICION_ARQUERO_SUPLENTE === $posicionName;
+    }
+
+    /**
+     * Whether $posicionName makes a PLAZA "the goalkeeper's plaza" for
+     * `Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo`'s PLAZA definition — true
+     * ONLY for a titular goalkeeper (term 3, "Arquero"). Deliberately
+     * excludes term 125 ("Arquero Sup."): there are exactly 30 "Arquero"
+     * titulares in season 2026 (one per team), which is what makes "the
+     * goal" an identifiable, singular plaza per team at all. Including term
+     * 125 here would let up to 13 additional plazas (season 2026) count as
+     * "the goalkeeper's plaza" too, breaking that one-per-team invariant —
+     * a plaza whose titular is "Arquero Sup." must be treated as an
+     * ordinary FIELD plaza by this predicate, even though that SAME player
+     * counts as a goalkeeper under esPosicionDeArquero() above.
+     */
+    public static function esPosicionDelArqueroTitular( string $posicionName ): bool {
+        return self::POSICION_ARQUERO === $posicionName;
+    }
+
     /**
      * @param array<int, int> $playerIds
      * @return array<int, string> player_id => main position name. EVERY id

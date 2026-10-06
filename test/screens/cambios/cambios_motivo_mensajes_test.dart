@@ -52,4 +52,22 @@ void main() {
       expect(message, contains('cambio'));
     });
   });
+
+  group('cambiosMotivoMensaje — arquero_no_ocupa_plaza_de_campo', () {
+    // Backend rule: Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo. This code
+    // only ever fires for a `sustitucion` (a `regreso` never carries an
+    // entrante), so, like PuntajeDentroDelTecho's own code, a tipo-specific
+    // word here is not a bug.
+    const code = 'arquero_no_ocupa_plaza_de_campo';
+
+    test('states the rule factually, without a raw code on screen', () {
+      final message = cambiosMotivoMensaje(code);
+      expect(message, isNot(equals(code)));
+      expect(message, contains('arquero'));
+    });
+
+    test('an unrecognized code still falls back to the generic message, never this one', () {
+      expect(cambiosMotivoMensaje('codigo_inexistente'), isNot(equals(cambiosMotivoMensaje(code))));
+    });
+  });
 }

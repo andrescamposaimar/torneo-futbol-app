@@ -86,6 +86,30 @@ final class DictamenContext {
     private $countResolvedFechasSinceFn;
 
     /**
+     * Whether the entrante counts as "a goalkeeper" — see
+     * Plazas\PosicionResolver::esPosicionDeArquero() for exactly which
+     * `sp_position` terms qualify (term 3 "Arquero" OR term 125 "Arquero
+     * Sup."). `false` for a `regreso` (no entrante at all, same convention
+     * as entrantePuntaje() being null) and `false` when the entrante's
+     * position could not resolve one either.
+     *
+     * *** DELIBERATELY NOT THE SAME DEFINITION AS plazaEsDelArquero() BELOW
+     * *** See Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo's class docblock for
+     * why these two booleans must never be collapsed into one concept.
+     */
+    private bool $entranteEsArquero;
+
+    /**
+     * Whether THIS plaza is "the goalkeeper's plaza" — true only when the
+     * plaza's TITULAR position is term 3 ("Arquero"), per
+     * Plazas\PosicionResolver::esPosicionDelArqueroTitular(). A plaza whose
+     * titular is term 125 ("Arquero Sup.") is a FIELD plaza under this
+     * definition — see that method's own docblock for why the two
+     * goalkeeper predicates are deliberately disjoint sets.
+     */
+    private bool $plazaEsDelArquero;
+
+    /**
      * @param array<string, mixed>                          $plaza As returned by
      *        Plazas\PlazaRepository::findPlaza() — MUST be the plaza named by
      *        `$solicitud->plazaId()`.
@@ -129,6 +153,10 @@ final class DictamenContext {
      *        See this property's own docblock.
      * @param int                                             $padresViablesParaLaPlaza
      *        See this property's own docblock.
+     * @param bool                                            $entranteEsArquero
+     *        See this property's own docblock.
+     * @param bool                                            $plazaEsDelArquero
+     *        See this property's own docblock.
      */
     public function __construct(
         SolicitudDeCambio $solicitud,
@@ -140,7 +168,9 @@ final class DictamenContext {
         array $plazosUtc,
         callable $countResolvedFechasSinceFn,
         bool $entranteEsPadre = false,
-        int $padresViablesParaLaPlaza = 0
+        int $padresViablesParaLaPlaza = 0,
+        bool $entranteEsArquero = false,
+        bool $plazaEsDelArquero = false
     ) {
         $this->solicitud                        = $solicitud;
         $this->plaza                            = $plaza;
@@ -152,6 +182,8 @@ final class DictamenContext {
         $this->countResolvedFechasSinceFn       = $countResolvedFechasSinceFn;
         $this->entranteEsPadre                  = $entranteEsPadre;
         $this->padresViablesParaLaPlaza         = $padresViablesParaLaPlaza;
+        $this->entranteEsArquero                = $entranteEsArquero;
+        $this->plazaEsDelArquero                = $plazaEsDelArquero;
     }
 
     public function solicitud(): SolicitudDeCambio {
@@ -193,6 +225,14 @@ final class DictamenContext {
 
     public function padresViablesParaLaPlaza(): int {
         return $this->padresViablesParaLaPlaza;
+    }
+
+    public function entranteEsArquero(): bool {
+        return $this->entranteEsArquero;
+    }
+
+    public function plazaEsDelArquero(): bool {
+        return $this->plazaEsDelArquero;
     }
 
     /** @return callable(int): int */

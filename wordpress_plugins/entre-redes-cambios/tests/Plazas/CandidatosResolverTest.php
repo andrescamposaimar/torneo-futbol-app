@@ -97,7 +97,7 @@ class CandidatosResolverTest extends TestCase {
     }
 
     protected function tearDown(): void {
-        global $wpdb;
+        global $wpdb, $wp_test_position_terms, $wp_test_position_terms_calls;
         $p = $wpdb->prefix;
         $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
@@ -106,6 +106,8 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
         $wpdb->query( "DELETE FROM {$p}postmeta" );
+        $wp_test_position_terms       = [];
+        $wp_test_position_terms_calls = [];
     }
 
     // -------------------------------------------------------------------------
@@ -1695,5 +1697,145 @@ class CandidatosResolverTest extends TestCase {
         sort( $expected );
         sort( $seen );
         $this->assertSame( $expected, $seen, 'Exactly the 10 under-ceiling ids, none of the 10 over-ceiling ones.' );
+    }
+
+    // -------------------------------------------------------------------------
+    // buscar_paginado() — goalkeepers excluded from a FIELD plaza's population
+    // (Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo's "hiding from the list" half
+    // — see that class's own docblock, and CandidatosResolver::buscarPaginado()'s
+    // own docblock on where this runs and why).
+    // -------------------------------------------------------------------------
+
+    public function test_buscar_paginado_excludes_a_titular_goalkeeper_candidate_from_a_field_plaza(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 800 => [ 3 ] ]; // 800 is a titular goalkeeper (Arquero)
+
+        $plazaId = $this->plaza(); // titular 700 has no seeded position -> SIN_POSICION -> field plaza
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza     = $this->plazaRepository->findPlaza( $plazaId );
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
+
+        $this->assertNotContains( 800, $ids, 'A titular goalkeeper candidate must never reach a field plaza\'s candidate list.' );
+        $this->assertContains( 801, $ids );
+        $this->assertSame( 1, $resultado['total'], 'total must count only the population AFTER excluding the goalkeeper.' );
+    }
+
+    /**
+     * THE candidate definition includes the BACKUP goalkeeper too (term 125,
+     * "Arquero Sup.") — the process owner confirmed explicitly that a backup
+     * goalkeeper is a goalkeeper for this rule.
+     */
+    public function test_buscar_paginado_excludes_a_backup_goalkeeper_candidate_from_a_field_plaza(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 800 => [ 125 ] ]; // 800 is a backup goalkeeper (Arquero Sup.)
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza     = $this->plazaRepository->findPlaza( $plazaId );
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
+
+        $this->assertNotContains( 800, $ids, 'A backup goalkeeper candidate must also never reach a field plaza\'s candidate list.' );
+        $this->assertContains( 801, $ids );
+        $this->assertSame( 1, $resultado['total'] );
+    }
+
+    /**
+     * THE asymmetry, pinned at the candidate-list level too: a goalkeeper
+     * candidate for the plaza that IS the goalkeeper's own plaza (titular
+     * position resolves to "Arquero", term 3) must NOT be excluded.
+     */
+    public function test_buscar_paginado_does_not_exclude_a_goalkeeper_candidate_from_the_goalkeepers_plaza(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [
+            700 => [ 3 ], // the plaza's own titular is the titular goalkeeper
+            800 => [ 3 ], // candidate is also a goalkeeper
+        ];
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza     = $this->plazaRepository->findPlaza( $plazaId );
+        $resultado = $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $ids = array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] );
+
+        $this->assertContains( 800, $ids, 'A goalkeeper candidate must remain available for the goalkeeper\'s own plaza.' );
+        $this->assertSame( 1, $resultado['total'] );
+    }
+
+    /**
+     * *** NEVER ONE QUERY PER CANDIDATE ***
+     * The position lookup for `buscarPaginado()`'s whole population (plus
+     * the plaza's own titular) must run as exactly ONE
+     * `PosicionResolver::resolverParaIds()` call — which this shim's
+     * `wp_get_object_terms()` surfaces as exactly one entry in
+     * `$wp_test_position_terms_calls` — never one call per candidate, the
+     * same batching discipline
+     * `JugadorMetricasReader::fetchLatestMetaValuesFor()` already applies to
+     * this exact population (see that class's own class docblock).
+     */
+    public function test_buscar_paginado_resolves_positions_for_the_population_in_exactly_one_batched_call(): void {
+        global $wp_test_position_terms_calls;
+
+        $plazaId = $this->plaza();
+        $this->seedPlayer( 800, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 801, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 802, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $this->resolver->buscarPaginado(
+            $plaza,
+            null,
+            null,
+            BloqueoReemplazoPolicy::topeTresFechas(),
+            $this->countResolvedFechasSinceFn,
+            1,
+            10
+        );
+
+        $this->assertCount(
+            1,
+            $wp_test_position_terms_calls,
+            'The position lookup for the whole population must run in exactly ONE batched call, never one per candidate.'
+        );
+
+        $idsResueltos = $wp_test_position_terms_calls[0];
+        sort( $idsResueltos );
+        $expected = [ 700, 800, 801, 802 ]; // the plaza's titular (700) plus every candidate
+        sort( $expected );
+        $this->assertSame( $expected, $idsResueltos, 'The one batched call must cover the plaza\'s titular AND every candidate in the population.' );
     }
 }

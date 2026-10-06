@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Dictamen;
 
+use EntreRedes\Cambios\Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteDisponible;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoEsElSaliente;
@@ -72,6 +73,7 @@ final class DictamenEngineFactory {
             new PlazaNoCerrada(),
             new RegresoSoloConMinimoCumplido(),
             new PrioridadDePadresRespetada( $prioridadPadresActiva ),
+            new ArqueroNoOcupaPlazaDeCampo(),
         ];
     }
 }

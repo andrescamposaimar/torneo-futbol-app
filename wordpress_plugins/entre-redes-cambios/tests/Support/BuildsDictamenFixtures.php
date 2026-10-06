@@ -206,6 +206,13 @@ trait BuildsDictamenFixtures {
             // stay unaffected unless a test explicitly overrides these.
             'entranteEsPadre'                 => false,
             'padresViablesParaLaPlaza'        => 0,
+            // Both default false — the favorable baseline every OTHER
+            // rule's test relies on must stay unaffected by
+            // Reglas\ArqueroNoOcupaPlazaDeCampo unless a test explicitly
+            // overrides one or both. See that class's own docblock for why
+            // these are two deliberately distinct booleans, never one.
+            'entranteEsArquero'               => false,
+            'plazaEsDelArquero'                => false,
         ];
 
         $o = array_merge( $defaults, $overrides );
@@ -220,7 +227,9 @@ trait BuildsDictamenFixtures {
             $o['plazosUtc'],
             $o['countResolvedFechasSinceFn'],
             $o['entranteEsPadre'],
-            $o['padresViablesParaLaPlaza']
+            $o['padresViablesParaLaPlaza'],
+            $o['entranteEsArquero'],
+            $o['plazaEsDelArquero']
         );
     }
 }

@@ -145,4 +145,53 @@ class PosicionResolverTest extends TestCase {
 
         $this->assertSame( [], $resultado );
     }
+
+    // -------------------------------------------------------------------------
+    // esPosicionDeArquero() / esPosicionDelArqueroTitular() — the two
+    // deliberately distinct goalkeeper predicates behind
+    // Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo. See PosicionResolver's own
+    // docblocks for each method.
+    // -------------------------------------------------------------------------
+
+    public function test_es_posicion_de_arquero_is_true_for_the_titular_goalkeeper_position(): void {
+        $this->assertTrue( PosicionResolver::esPosicionDeArquero( PosicionResolver::POSICION_ARQUERO ) );
+    }
+
+    /**
+     * THE candidate definition includes the BACKUP goalkeeper too — the
+     * process owner confirmed explicitly that a backup goalkeeper is a
+     * goalkeeper for this rule.
+     */
+    public function test_es_posicion_de_arquero_is_true_for_the_backup_goalkeeper_position(): void {
+        $this->assertTrue( PosicionResolver::esPosicionDeArquero( PosicionResolver::POSICION_ARQUERO_SUPLENTE ) );
+    }
+
+    public function test_es_posicion_de_arquero_is_false_for_a_field_position(): void {
+        $this->assertFalse( PosicionResolver::esPosicionDeArquero( 'Defensor' ) );
+        $this->assertFalse( PosicionResolver::esPosicionDeArquero( PosicionResolver::SIN_POSICION ) );
+    }
+
+    public function test_es_posicion_del_arquero_titular_is_true_only_for_the_titular_goalkeeper_position(): void {
+        $this->assertTrue( PosicionResolver::esPosicionDelArqueroTitular( PosicionResolver::POSICION_ARQUERO ) );
+    }
+
+    /**
+     * *** THE INVARIANT THIS WHOLE RULE DEPENDS ON ***
+     * A plaza whose titular resolves as "Arquero Sup." (term 125) must be
+     * treated as a FIELD plaza by this predicate — NOT as "the goalkeeper's
+     * plaza" — even though that SAME position name makes a CANDIDATE a
+     * goalkeeper under esPosicionDeArquero() above. Unifying the two
+     * predicates would silently create up to 13 extra "goal plazas" in
+     * season 2026, breaking the one-titular-goalkeeper-per-team invariant
+     * that makes "the goal" identifiable at all. See PosicionResolver's own
+     * class docblock for the full reasoning.
+     */
+    public function test_es_posicion_del_arquero_titular_is_false_for_the_backup_goalkeeper_position(): void {
+        $this->assertFalse( PosicionResolver::esPosicionDelArqueroTitular( PosicionResolver::POSICION_ARQUERO_SUPLENTE ) );
+    }
+
+    public function test_es_posicion_del_arquero_titular_is_false_for_a_field_position(): void {
+        $this->assertFalse( PosicionResolver::esPosicionDelArqueroTitular( 'Delantero' ) );
+        $this->assertFalse( PosicionResolver::esPosicionDelArqueroTitular( PosicionResolver::SIN_POSICION ) );
+    }
 }

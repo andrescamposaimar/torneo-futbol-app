@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.11
+Stable tag: 0.1.12
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,11 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.12 =
+* Add: a new dictamen rule, `Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo` (motivo `arquero_no_ocupa_plaza_de_campo`) — a goalkeeper may not take over a plaza that is not the goalkeeper's plaza. "Goalkeeper" (the CANDIDATE definition) means `sp_position` term 3 ("Arquero") OR term 125 ("Arquero Sup." — the process owner confirmed explicitly that a backup goalkeeper counts); "the goalkeeper's plaza" (the PLAZA definition) means the plaza's TITULAR position is term 3 ONLY — there are exactly 30 of those per season, one per team, which is what keeps "the goal" an identifiable, singular plaza. The two definitions are deliberately disjoint and are never unified. The rule is asymmetric on purpose: it only blocks goalkeeper → field plaza, never field player → goalkeeper's plaza (the pending "exención del arco" direction stays legitimate). Registered in `DictamenEngineFactory::reglas()` (now ten rules) — `Solicitudes\SolicitudRepository::publicarLote()` re-runs the full dictamen before applying, so a hand-crafted or stale-client request is still refused here regardless of what the candidate list showed.
+* Change: `Plazas\CandidatosResolver::buscarPaginado()` now also excludes a goalkeeper from a FIELD plaza's candidate population — a convenience mirroring the dictamen rule above (never a substitute for it), applied in the same place and for the same reason as the existing unrated/over-ceiling population filters: after the population's metrics are in hand, before `total` is computed, before `array_slice()` takes a page. The position lookup for the whole population (plus the plaza's own titular) runs in exactly ONE batched `Plazas\PosicionResolver::resolverParaIds()` call, never one per candidate.
+* Add (app): "Mis Solicitudes" now renders a plain-Spanish message for `arquero_no_ocupa_plaza_de_campo` via `cambiosMotivoMensaje()` instead of a raw code.
 
 = 0.1.11 =
 * Add: `cambios_solicitud` gains `saliente_player_id`, captured once at `Solicitudes\SolicitudRepository::crear()` time from the plaza's vigent ocupación — never re-derived later, so an old solicitud keeps naming who actually left even after the plaza's chain has since advanced. `GET /cambios/solicitudes` now returns `sale`/`entra` objects (`{ player_id, nombre, puntaje }`) for every row: for a `sustitucion`, `sale` is this stored saliente and `entra` is the stored `entrante_player_id`; for a `regreso` (whose `entrante_player_id` is always NULL — who returns is never a choice the request makes), `entra` is instead the plaza's permanent `titular_player_id` and `sale` is the same stored saliente — the suplente the titular displaces. Names and puntajes for the whole page are resolved in one batched call each (`get_posts()`/`get_the_title()` cache priming, `Plazas\JugadorMetricasReader::resolveMuchos()`), never one query per row. An unresolvable puntaje stays `null` rather than a fabricated value; a `saliente_player_id` that predates this column (a row created before 0.1.11) degrades its whole `sale` side to `{ player_id: null, nombre: null, puntaje: null }` rather than guessing.
