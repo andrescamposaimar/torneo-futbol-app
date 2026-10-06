@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.13
+Stable tag: 0.1.14
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,12 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.14 =
+* Fix: a production incident left all 30 teams' `cambios_plaza.es_arco` at `0` after the 0.1.13 upgrade. Root cause: `Migrations\MigrationRunner::runIfOutdated()` ran from `Plugin::boot()` on `plugins_loaded` — BEFORE SportsPress registers its `sp_position` taxonomy on `init` (priority 10) — so `wp_get_object_terms()` returned a `WP_Error` for every call the `es_arco` backfill made, and `Plazas\PosicionResolver::resolverParaIds()` silently read that as "nobody has a position". `Plugin::boot()` now defers the migration call to an `init`-priority-11 callback (strictly after SportsPress's own priority 10), so the taxonomy always exists by the time it runs.
+* Fix: `Plazas\PosicionResolver::resolverParaIds()` now throws a `\RuntimeException` (recording `posicion.resolucion_fallida`) instead of silently treating a failed `wp_get_object_terms()` call (a `WP_Error`, or anything else not an array) as "nobody has a position" — the root cause of the incident above. Every caller (`Plazas\PlazaRepository::doOpenPlaza()`, `Plazas\Alta\TitularesListImporter::planificar()`, `Dictamen\DictamenContextAssembler`, `Plazas\CandidatosResolver::buscarPaginado()`) now lets this propagate rather than degrading — a failed read must never become a silent permission (e.g. a goalkeeper candidate quietly admitted into a field plaza's list).
+* Fix: `Migrations\MigrationRunner::backfillEsArco()` now refuses to write `es_arco = 0` as a guess when position resolution fails — it writes NOTHING and returns `false`, and `run()` leaves `cambios_db_version` un-bumped so the backfill retries (and, once the hook-ordering fix above lands, succeeds) on the very next request, instead of recording a half-done upgrade as complete.
+* Fix: `Migrations\MigrationRunner::checkEsArcoInvariant()`'s own `admin_notice` only ever rendered if the ONE request that happened to run a version-upgrade migration was ALSO an admin page load — confirmed in production: all 30 teams sat at `es_arco=0` with no notice ever shown. The check now PERSISTS its verdict (`entre_redes_cambios_arco_invariante_violaciones`, cleared automatically once repaired), and a new `renderEsArcoInvariantNotice()` renders it from a callback `Plugin::boot()` wires unconditionally on every admin request — an operator now sees the notice on their next wp-admin visit, not only in that one arbitrary request. Renamed the recorded event from `arco.invariante_violada` to `arco.invariante_fallida` so it also lands in `entre_redes_cambios_ultimo_error` (readable via phpMyAdmin with no admin UI needed), matching `WpEventLog`'s `fallid`-substring convention. `checkStorageEngine()` has the identical one-shot-notice shape and is NOT changed by this release — a narrower, pre-existing gap left as a documented follow-up.
 
 = 0.1.13 =
 * Add: `cambios_plaza` gains `es_arco TINYINT(1) NOT NULL DEFAULT 0` — "is this the goalkeeper's plaza" is now a STORED fact instead of a derivation re-computed on every read from the titular's `sp_position`. Slice 1 of the "exención del arco" feature (later slices add the grouped request type and its UI). Written once: `Plazas\PlazaRepository::doOpenPlaza()` derives and persists it for every NEW plaza (`PosicionResolver::esPosicionDelArqueroTitular()`, term 3 "Arquero" ONLY — never term 125 "Arquero Sup."), and `Migrations\MigrationRunner::backfillEsArco()` derives it once, idempotently, for the 330 plazas that existed in production before this column did.

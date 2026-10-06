@@ -148,6 +148,15 @@ class PluginAdminWiringTest extends TestCase {
             $GLOBALS['_prode_test_action_registrations']['admin_menu'],
             $GLOBALS['_prode_test_action_callbacks']['admin_init'],
             $GLOBALS['_prode_test_action_registrations']['admin_init'],
+            // 0.1.14: boot() also registers an `init`-priority-11 callback
+            // (the now-deferred migration) and an unconditional
+            // `admin_notices` callback (the persisted es_arco invariant
+            // notice) — reset here for the same "no duplicate registrations
+            // across a second boot() call" reason as every other hook above.
+            $GLOBALS['_prode_test_action_callbacks']['init'],
+            $GLOBALS['_prode_test_action_registrations']['init'],
+            $GLOBALS['_prode_test_action_callbacks']['admin_notices'],
+            $GLOBALS['_prode_test_action_registrations']['admin_notices'],
             $GLOBALS['wp_test_is_admin'],
             $GLOBALS['wp_test_current_user_can']
         );

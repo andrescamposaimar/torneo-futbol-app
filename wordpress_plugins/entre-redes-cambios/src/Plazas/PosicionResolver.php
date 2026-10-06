@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Plazas;
 
+use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Observability\WpEventLog;
+
 /**
  * Resolves each player's "main" `sp_position` NAME, batched across a whole
  * PAGE of player ids in a single `wp_get_object_terms()` call — never one
@@ -33,6 +36,38 @@ namespace EntreRedes\Cambios\Plazas;
  * `wp_get_post_terms()` — is used instead of looping a single-post call per
  * candidate: same taxonomy query, same default ordering, issued ONCE for
  * the whole page instead of once per row.
+ *
+ * *** A FAILED QUERY MUST NEVER READ AS "NOBODY HAS A POSITION" (0.1.14) ***
+ * `wp_get_object_terms()` returns a `WP_Error` — not an array — when the
+ * taxonomy it is asked about does not exist yet, among other failure modes.
+ * Before this fix, `resolverParaIds()` treated anything that was not an
+ * `array` (a `WP_Error` included) as "found nothing" and returned every
+ * requested id mapped to `self::SIN_POSICION` — exactly like a genuine "this
+ * player has no sp_position term". That silent degradation is the root cause
+ * of a real production incident: `Migrations\MigrationRunner::runIfOutdated()`
+ * used to run on `plugins_loaded`, BEFORE SportsPress registers its
+ * `sp_position` taxonomy on `init` (priority 10) — see `Plugin::boot()`'s own
+ * docblock for the fix on that side. With the taxonomy not yet registered,
+ * every single call this class made during the 0.1.13 backfill got a
+ * `WP_Error` back, silently read as "nobody is a goalkeeper", and
+ * `Migrations\MigrationRunner::backfillEsArco()` wrote `es_arco = 0` for
+ * every one of the 330 live plazas — the EXACT broken state that column
+ * exists to prevent.
+ *
+ * `resolverParaIds()` now follows the same "fail loud, never silently
+ * degrade" discipline as `Support\ChecksReads::assertReadSucceeded()`: a
+ * non-array return (`WP_Error` or anything else `wp_get_object_terms()` might
+ * someday return that is not an array) is logged as `posicion.resolucion_fallida`
+ * on this instance's EventLog, then thrown as a `\RuntimeException` — a
+ * caller can no longer mistake "I could not ask" for "the answer is no one".
+ * See each caller's own docblock (`Plazas\PlazaRepository::doOpenPlaza()`,
+ * `Plazas\Alta\TitularesListImporter::planificar()`,
+ * `Dictamen\DictamenContextAssembler::resolverPosicionesArquero()`,
+ * `Plazas\CandidatosResolver::buscarPaginado()`) for what each one does with
+ * that exception — every one of them already lets it propagate rather than
+ * catching it, which is itself the fix: a candidate list that could not
+ * resolve positions must fail the whole request, never silently admit a
+ * goalkeeper into a field plaza.
  */
 final class PosicionResolver {
 
@@ -95,6 +130,27 @@ final class PosicionResolver {
         return self::POSICION_ARQUERO === $posicionName;
     }
 
+    private EventLog $eventLog;
+
+    /**
+     * @param EventLog|null $eventLog Defaults to a plain `WpEventLog`
+     *        instance — overridable in tests so a forced failure can be
+     *        asserted against an `InMemoryEventLog` instead. See class
+     *        docblock, "A FAILED QUERY MUST NEVER READ AS 'NOBODY HAS A
+     *        POSITION'". Every current caller of this class
+     *        (`Plazas\PlazaRepository`, `Plazas\Alta\TitularesListImporter`,
+     *        `Dictamen\DictamenContextAssembler`, `Plazas\CandidatosResolver`,
+     *        `Migrations\MigrationRunner::backfillEsArco()`) already carries
+     *        its own `EventLog` and now threads it through here explicitly,
+     *        so a `posicion.resolucion_fallida` event always lands in the
+     *        SAME log the rest of that caller's own events go to — the
+     *        default below only matters for a call site that does not
+     *        (currently none in production).
+     */
+    public function __construct( ?EventLog $eventLog = null ) {
+        $this->eventLog = $eventLog ?? new WpEventLog();
+    }
+
     /**
      * @param array<int, int> $playerIds
      * @return array<int, string> player_id => main position name. EVERY id
@@ -102,6 +158,10 @@ final class PosicionResolver {
      *         self::SIN_POSICION when unresolved), so a caller can always
      *         safely index into it for every id it asked for, rather than
      *         having to fall back on a missing key itself.
+     * @throws \RuntimeException When `wp_get_object_terms()` fails (returns a
+     *         `WP_Error` or anything else that is not an array) — see class
+     *         docblock, "A FAILED QUERY MUST NEVER READ AS 'NOBODY HAS A
+     *         POSITION'".
      */
     public function resolverParaIds( array $playerIds ): array {
         $resultado = array_fill_keys( $playerIds, self::SIN_POSICION );
@@ -113,7 +173,20 @@ final class PosicionResolver {
         $terms = wp_get_object_terms( $playerIds, 'sp_position', [ 'fields' => 'all_with_object_id' ] );
 
         if ( ! is_array( $terms ) ) {
-            return $resultado;
+            $mensaje = $terms instanceof \WP_Error ? $terms->message : 'wp_get_object_terms() did not return an array.';
+
+            $this->eventLog->record( 'posicion.resolucion_fallida', [
+                'operacion'  => 'resolverParaIds',
+                'player_ids' => $playerIds,
+                'mensaje'    => $mensaje,
+            ] );
+
+            throw new \RuntimeException(
+                'PosicionResolver::resolverParaIds(): wp_get_object_terms() failed to resolve sp_position for '
+                . count( $playerIds ) . " player id(s) ({$mensaje}). Refusing to silently treat this as "
+                . '"nobody has a position" — see class docblock, "A FAILED QUERY MUST NEVER READ AS \'NOBODY '
+                . 'HAS A POSITION\'".'
+            );
         }
 
         // Grouped by object_id, preserving wp_get_object_terms()'s own

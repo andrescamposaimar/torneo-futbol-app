@@ -919,18 +919,35 @@ if ( ! function_exists( 'wp_get_object_terms' ) ) {
      * lookup — read this global directly; tests that do not care simply
      * never look at it. Reset in tearDown() alongside $wp_test_position_terms.
      *
+     * *** FORCING A `WP_Error` RETURN (0.1.14, for PosicionResolver's own
+     * "fail loud" tests) *** Real `wp_get_object_terms()` returns a
+     * `WP_Error` — never an array — when, among other failure modes, the
+     * requested taxonomy is not registered yet (the exact production
+     * incident `Plazas\PosicionResolver`'s own class docblock describes).
+     * Setting the global `$wp_test_position_terms_error` to a `WP_Error`
+     * instance makes this shim return THAT instead of the usual array, on
+     * every call, until the global is reset back to `null` — same opt-in,
+     * data-driven convention as `$wp_test_position_terms` itself. Call
+     * tracking above still runs first, so a test can assert the failing call
+     * was even attempted. Reset to `null` in tearDown() alongside the other
+     * two globals this function reads.
+     *
      * @param array<int, int>|int $object_ids
      * @param string|array<int, string> $taxonomies
      * @param array<string, mixed> $args
-     * @return array<int, \stdClass>
+     * @return array<int, \stdClass>|\WP_Error
      */
-    function wp_get_object_terms( $object_ids, $taxonomies, array $args = [] ): array {
-        global $wp_test_position_terms, $wp_test_position_terms_calls;
+    function wp_get_object_terms( $object_ids, $taxonomies, array $args = [] ) {
+        global $wp_test_position_terms, $wp_test_position_terms_calls, $wp_test_position_terms_error;
 
         $ids = is_array( $object_ids ) ? $object_ids : [ $object_ids ];
         $ids = array_map( 'intval', $ids );
 
         $wp_test_position_terms_calls[] = $ids;
+
+        if ( null !== ( $wp_test_position_terms_error ?? null ) ) {
+            return $wp_test_position_terms_error;
+        }
 
         $rows = [];
 

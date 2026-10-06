@@ -41,10 +41,58 @@ use EntreRedes\Cambios\Plazas\PosicionResolver;
  * EventLog-event-plus-admin_notice discipline as checkStorageEngine() above,
  * for the same reason: a broken invariant here must never be discovered by
  * accident.
+ *
+ * *** THE 0.1.13 PRODUCTION INCIDENT THIS CLASS NOW FIXES (0.1.14) ***
+ * `runIfOutdated()` used to be called from `Plugin::boot()` on
+ * `plugins_loaded` — BEFORE SportsPress registers its `sp_position` taxonomy
+ * on `init` (priority 10). The 0.1.13 backfill therefore ran with
+ * `sp_position` not yet registered, `wp_get_object_terms()` returned a
+ * `WP_Error` for every call, and `Plazas\PosicionResolver::resolverParaIds()`
+ * (at the time) silently read that as "nobody has a position" — writing
+ * `es_arco = 0` for all 330 live plazas, confirmed in production via `SELECT
+ * season_id, team_id, SUM(es_arco) ... HAVING arcos <> 1`, which returned
+ * every team. `Plugin::boot()` now defers the migration call to `init`
+ * priority 11 (see that class's own docblock), and `PosicionResolver` now
+ * throws rather than degrading (see its own docblock) — `backfillEsArco()`
+ * below catches that specific failure and refuses to write anything or bump
+ * the version, so the corrected backfill retries, and succeeds, on the very
+ * next request after this release is deployed.
+ *
+ * *** THE SAME INCIDENT ALSO EXPOSED A SECOND GAP: THE DETECTIVE CHECK ITSELF
+ * NEVER FIRED (0.1.14) *** `checkEsArcoInvariant()` WAS wired (it is called,
+ * unconditionally, at the end of every `run()`) — the gap was not that it
+ * went uncalled, but WHERE its `admin_notice` got registered: from inside
+ * `run()`, which executes at most once per version bump. The one request
+ * that ran the broken 0.1.13 backfill was not an admin page load, so the
+ * `admin_notices` closure it registered was never invoked, and — because the
+ * version was now (wrongly) current — `run()` never executed again to give
+ * it a second chance. Confirmed in production: all 30 teams sat at
+ * `es_arco = 0` with NO admin notice ever shown. `checkEsArcoInvariant()`
+ * now PERSISTS its verdict instead, and `renderEsArcoInvariantNotice()`
+ * renders it from a callback `Plugin::boot()` wires unconditionally on every
+ * admin request — see both methods' own docblocks. `checkStorageEngine()`
+ * above has the IDENTICAL shape (an `admin_notices` closure registered from
+ * inside this same `run()`) and is NOT changed by this release — it is a
+ * narrower, pre-existing, and lower-probability gap (a non-InnoDB table is a
+ * one-time hosting misconfiguration, not something this plugin's own code
+ * can silently reintroduce release over release the way a resolver's own
+ * degradation could), left as a documented follow-up rather than fixed here
+ * to keep this release's diff focused on the incident actually confirmed in
+ * production.
  */
 class MigrationRunner {
 
     private const DB_VERSION_OPTION = 'cambios_db_version';
+
+    /**
+     * Persists `checkEsArcoInvariant()`'s most recent verdict — see that
+     * method's own docblock, "PERSISTED, NOT JUST RECORDED (0.1.14)", for why
+     * this exists instead of (as before) an `admin_notices` closure
+     * registered directly from inside that method. Autoload OFF — same
+     * reasoning as `WpEventLog::OPTION_ULTIMO_ERROR`: read rarely, only by
+     * `renderEsArcoInvariantNotice()`, never on every page load.
+     */
+    private const OPTION_ARCO_INVARIANTE = 'entre_redes_cambios_arco_invariante_violaciones';
 
     /**
      * Every table this plugin creates — see InitialSchema::up() for the
@@ -112,10 +160,33 @@ class MigrationRunner {
             // for every plaza that existed BEFORE this column did — see
             // backfillEsArco()'s own docblock. Runs BEFORE the version option
             // is bumped, same ordering discipline as every other migration
-            // step here: if this ever threw, the stored version must stay
-            // old so a retry on the next request runs it again.
-            self::backfillEsArco( $eventLog );
-            update_option( self::DB_VERSION_OPTION, $current );
+            // step here.
+            //
+            // *** THE VERSION OPTION IS BUMPED ONLY WHEN THE BACKFILL ACTUALLY
+            // COMPLETED (0.1.14) *** `backfillEsArco()` now returns `false`,
+            // instead of throwing, when `PosicionResolver::resolverParaIds()`
+            // could not resolve any titular's position (see that method's own
+            // docblock, "MUST NEVER WRITE es_arco = 0 ON A FAILED
+            // RESOLUTION") — `false` is returned, not an exception allowed to
+            // propagate, specifically so a request that happens to run this
+            // migration does not take down the ENTIRE request (REST route,
+            // admin page, cron run) over a transient "the taxonomy is not
+            // registered yet" condition; the failure is still loud (an
+            // EventLog event — see below), just not fatal to the caller.
+            // `update_option()` below runs ONLY when the backfill reports
+            // success — exactly the same "stored version must stay old so a
+            // retry on the next request runs it again" discipline this
+            // comment already described, now actually enforced instead of
+            // merely stated: before this fix, `backfillEsArco()` always
+            // "succeeded" (it silently wrote `es_arco = 0` for every plaza
+            // whenever position resolution failed), so this line always ran
+            // — recording a half-done upgrade as complete. That silent
+            // success is the exact production incident this release fixes
+            // — see PosicionResolver's own class docblock for the full
+            // chain.
+            if ( self::backfillEsArco( $eventLog ) ) {
+                update_option( self::DB_VERSION_OPTION, $current );
+            }
         }
 
         self::checkStorageEngine( $eventLog );
@@ -160,15 +231,46 @@ class MigrationRunner {
      * writing anything. The actual writes are still one `$wpdb->update()`
      * per plaza (this runs once, ever, for a few hundred rows; the N+1 here
      * is not worth the extra complexity of a bulk `CASE WHEN` statement).
+     *
+     * *** MUST NEVER WRITE `es_arco = 0` ON A FAILED RESOLUTION (0.1.14) ***
+     * This is the exact production incident this release fixes: before this
+     * change, `PosicionResolver::resolverParaIds()` silently returned
+     * `SIN_POSICION` for every id whenever `wp_get_object_terms()` failed
+     * (e.g. the `sp_position` taxonomy not registered yet — see
+     * `Plugin::boot()`'s own docblock for why that used to be possible), and
+     * this method dutifully wrote `es_arco = 0` for all 330 live plazas —
+     * "nobody is a goalkeeper", the exact broken state this column exists to
+     * prevent. `resolverParaIds()` now throws instead of degrading (see its
+     * own docblock) — this method catches ONLY that failure, logs it, and
+     * returns `false` WITHOUT writing a single row, so `run()`'s caller can
+     * refuse to bump `cambios_db_version` (see that method's own docblock)
+     * and retry this same backfill on the next request instead of recording
+     * a half-done upgrade as complete.
+     *
+     * *** WHY THIS CATCHES RATHER THAN LETTING THE EXCEPTION PROPAGATE ***
+     * `run()` executes on every request once the version gate is open (via
+     * `runIfOutdated()`, see `Plugin::boot()`) — an uncaught exception here
+     * would turn a transient "taxonomy not registered yet" condition into a
+     * fatal error for the ENTIRE request (a REST call, an admin page, a cron
+     * run), every single time, until the underlying cause is fixed. Returning
+     * `false` keeps the failure loud (the EventLog event below, which
+     * `WpEventLog` also persists into `entre_redes_cambios_ultimo_error` —
+     * see that class's own docblock, since this event's name contains
+     * `fallid`) without taking down whatever triggered this request.
+     *
+     * @return bool `true` when the backfill ran to completion (including the
+     *         trivial "no plazas at all" case) — `run()` bumps
+     *         `cambios_db_version` only when this returns `true`. `false`
+     *         when position resolution failed and NOTHING was written.
      */
-    private static function backfillEsArco( EventLog $eventLog ): void {
+    private static function backfillEsArco( EventLog $eventLog ): bool {
         global $wpdb;
         $p = $wpdb->prefix;
 
         $rows = $wpdb->get_results( "SELECT id, titular_player_id FROM {$p}cambios_plaza", ARRAY_A );
 
         if ( ! is_array( $rows ) || [] === $rows ) {
-            return;
+            return true;
         }
 
         $titularIds = array_values( array_unique( array_map(
@@ -176,8 +278,22 @@ class MigrationRunner {
             $rows
         ) ) );
 
-        $posicionResolver = new PosicionResolver();
-        $posiciones       = $posicionResolver->resolverParaIds( $titularIds );
+        $posicionResolver = new PosicionResolver( $eventLog );
+
+        try {
+            $posiciones = $posicionResolver->resolverParaIds( $titularIds );
+        } catch ( \RuntimeException $e ) {
+            // $eventLog already received a `posicion.resolucion_fallida` event
+            // from resolverParaIds() itself — this ADDITIONAL event names the
+            // consequence specifically (the backfill itself did not run),
+            // which `posicion.resolucion_fallida` alone does not say.
+            $eventLog->record( 'migracion.es_arco_backfill_fallida', [
+                'motivo'  => 'PosicionResolver::resolverParaIds() fallo — ver posicion.resolucion_fallida para el detalle',
+                'mensaje' => $e->getMessage(),
+            ] );
+
+            return false;
+        }
 
         $actualizadas = 0;
         foreach ( $rows as $row ) {
@@ -196,6 +312,8 @@ class MigrationRunner {
         $eventLog->record( 'plaza.es_arco_backfill', [
             'plazas_actualizadas' => $actualizadas,
         ] );
+
+        return true;
     }
 
     /**
@@ -207,13 +325,13 @@ class MigrationRunner {
      *
      * Same discipline as `checkStorageEngine()` above: a violation must
      * never be discovered by accident months later, so this records an
-     * `EventLog` event AND raises an `admin_notice`, instead of merely
-     * returning a value nothing reads. Also same LIMITATION as
-     * `checkStorageEngine()`: this only runs from `run()`, i.e. on plugin
-     * activation or an actual version upgrade — never on every request — so
-     * a violation introduced BETWEEN two activations (e.g. a manual DB edit,
-     * or a bug in a future slice) stays silent until the next one. Widening
-     * this to run on every request, or wiring it into
+     * `EventLog` event AND persists a verdict an admin_notice can render,
+     * instead of merely returning a value nothing reads. Also same
+     * LIMITATION as `checkStorageEngine()`: this only runs from `run()`,
+     * i.e. on plugin activation or an actual version upgrade — never on
+     * every request — so a violation introduced BETWEEN two activations
+     * (e.g. a manual DB edit, or a bug in a future slice) stays silent until
+     * the next one. Widening this to run on every request, or wiring it into
      * `Plazas\Alta\TitularesListImporter`'s own CLI tool, is a reasonable
      * follow-up this slice deliberately leaves out — `planificar()`'s own
      * "no arquero among titulares" check is the PREVENTIVE half of this
@@ -222,6 +340,42 @@ class MigrationRunner {
      * TOLERANT ON PURPOSE, same reasoning as `checkStorageEngine()`: an empty
      * `cambios_plaza` table (a fresh install) produces zero groups, which is
      * not a violation of anything.
+     *
+     * *** PERSISTED, NOT JUST RECORDED (0.1.14) *** A LIVE incident exposed a
+     * gap in the ORIGINAL design here: this method registered its
+     * `admin_notice` via a plain `add_action( 'admin_notices', $closure )`
+     * call, from INSIDE this method, which itself only ever runs from inside
+     * `run()` — and `run()` executes AT MOST ONCE per version bump
+     * (`runIfOutdated()`'s own version gate immediately returns on every
+     * later request once `cambios_db_version` is current — see that
+     * method's own docblock). Whatever ONE request happened to trigger that
+     * single execution is not necessarily an admin page render — a REST
+     * call, a cron run, or a front-end page view all boot this plugin
+     * (`Plugin::boot()` runs on `plugins_loaded` for every request type) just
+     * as validly, and `do_action( 'admin_notices' )` simply never fires for
+     * any of them. The closure was registered and then never invoked, and
+     * there is no second chance: the version is now current, so this method
+     * never runs again until the NEXT release. Confirmed in production: the
+     * 0.1.13 incident left all 30 teams at `es_arco = 0` with NO admin
+     * notice ever rendered, because the request that ran the (broken)
+     * backfill was not an admin page load. A detective control that can fire
+     * at most once, in one arbitrary request, is not a control.
+     *
+     * The fix: this method now PERSISTS its verdict into
+     * `self::OPTION_ARCO_INVARIANTE` (cleared via `delete_option()` the
+     * moment the invariant holds again — see below) instead of registering
+     * an ephemeral per-request closure, and a SEPARATE method,
+     * `renderEsArcoInvariantNotice()`, renders whatever is currently
+     * persisted. `Plugin::boot()` wires THAT method unconditionally, on
+     * every admin request — never gated on whether THIS request is the one
+     * that happened to run the migration — so an operator sees the notice
+     * the NEXT time they open wp-admin, however many requests later that
+     * is. This is still a STORED verdict, refreshed only when
+     * `checkEsArcoInvariant()` itself runs (migration time, or a future
+     * repair) — deliberately NOT a live `SUM(es_arco)` query against
+     * `cambios_plaza` on every admin page load, which would defeat the
+     * "TOLERANT ON PURPOSE" cost-consciousness this whole class already
+     * applies.
      */
     private static function checkEsArcoInvariant( EventLog $eventLog ): void {
         global $wpdb;
@@ -253,25 +407,64 @@ class MigrationRunner {
         }
 
         if ( empty( $violaciones ) ) {
+            // The invariant holds — or holds AGAIN, after a repair — so any
+            // STALE persisted verdict from a previous run must be cleared;
+            // otherwise renderEsArcoInvariantNotice() would keep showing a
+            // notice for a problem that no longer exists.
+            delete_option( self::OPTION_ARCO_INVARIANTE );
+
             return;
         }
 
-        $eventLog->record( 'arco.invariante_violada', [ 'equipos' => $violaciones ] );
+        // `arco.invariante_fallida` — contains `fallid` ON PURPOSE (renamed
+        // from the pre-0.1.14 `arco.invariante_violada`; see this class's
+        // CHANGELOG entry) so this ALSO lands in
+        // `entre_redes_cambios_ultimo_error` via `WpEventLog`'s own
+        // `str_contains( $evento, 'fallid' )` matching rule (see that
+        // class's own docblock) — the one durable, no-admin-UI-required
+        // place an operator on this shared host (no PHP error log anywhere
+        // under `public_html`) can read a failure from. Before this rename,
+        // this exact event was INVISIBLE to that mechanism — the live
+        // incident this release fixes was found only by querying
+        // `cambios_plaza` directly in phpMyAdmin, never from that option.
+        $eventLog->record( 'arco.invariante_fallida', [ 'equipos' => $violaciones ] );
 
-        add_action( 'admin_notices', static function () use ( $violaciones ): void {
-            $detalle = implode( ', ', array_map(
-                static fn ( array $v ): string => "team_id {$v['team_id']} (temporada {$v['season_id']}): {$v['es_arco_count']} plaza(s) de arquero",
-                $violaciones
-            ) );
+        update_option( self::OPTION_ARCO_INVARIANTE, $violaciones, false );
+    }
 
-            printf(
-                '<div class="notice notice-error"><p>%s</p></div>',
-                esc_html(
-                    'entre-redes-cambios: los siguientes equipos no tienen exactamente una plaza de arquero (es_arco=1): '
-                    . $detalle . '. Cada equipo debe tener EXACTAMENTE una — revisar el titular de las plazas en cambios_plaza.'
-                )
-            );
-        } );
+    /**
+     * Renders the MOST RECENTLY PERSISTED `checkEsArcoInvariant()` verdict as
+     * an `admin_notice` — see that method's own docblock, "PERSISTED, NOT
+     * JUST RECORDED (0.1.14)", for why this is a SEPARATE method rather than
+     * a closure registered from inside `run()`. `Plugin::boot()` wires this
+     * UNCONDITIONALLY on every admin request (`is_admin()`), so an operator
+     * sees the notice the next time they open wp-admin — any later request,
+     * not only the one arbitrary request that happened to run the migration.
+     *
+     * A no-op when nothing is persisted (the common case, and the state once
+     * a violation has been repaired — `checkEsArcoInvariant()` calls
+     * `delete_option()` the next time it runs and finds the invariant
+     * holds).
+     */
+    public static function renderEsArcoInvariantNotice(): void {
+        $violaciones = get_option( self::OPTION_ARCO_INVARIANTE, [] );
+
+        if ( ! is_array( $violaciones ) || [] === $violaciones ) {
+            return;
+        }
+
+        $detalle = implode( ', ', array_map(
+            static fn ( array $v ): string => "team_id {$v['team_id']} (temporada {$v['season_id']}): {$v['es_arco_count']} plaza(s) de arquero",
+            $violaciones
+        ) );
+
+        printf(
+            '<div class="notice notice-error"><p>%s</p></div>',
+            esc_html(
+                'entre-redes-cambios: los siguientes equipos no tienen exactamente una plaza de arquero (es_arco=1): '
+                . $detalle . '. Cada equipo debe tener EXACTAMENTE una — revisar el titular de las plazas en cambios_plaza.'
+            )
+        );
     }
 
     /**

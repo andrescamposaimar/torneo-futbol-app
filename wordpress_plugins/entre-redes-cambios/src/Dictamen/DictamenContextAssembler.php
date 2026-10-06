@@ -169,7 +169,7 @@ final class DictamenContextAssembler {
         $this->metricasReader      = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
         $this->candidatosResolver  = $candidatosResolver ?? new CandidatosResolver( $wpdb, $plazaRepository, $eventLog, $this->metricasReader );
         $this->boundedFechaCounter = new BoundedFechaCounter( $fechaRepository, $eventLog );
-        $this->posicionResolver    = $posicionResolver ?? new PosicionResolver();
+        $this->posicionResolver    = $posicionResolver ?? new PosicionResolver( $eventLog );
     }
 
     /**
@@ -289,10 +289,23 @@ final class DictamenContextAssembler {
      * RESOLUTION", for why these two can no longer share one batched call:
      * the plaza's side is not a position lookup at all anymore.
      *
+     * *** A FAILED ENTRANTE RESOLUTION MUST ABORT THE WHOLE DICTAMEN, NEVER
+     * READ AS "NOT A GOALKEEPER" (0.1.14) *** `PosicionResolver::resolverParaIds()`
+     * now throws rather than silently degrading — see that class's own
+     * docblock. This method does NOT catch it: it propagates out of
+     * `assemble()`, and `Dictamen\DictamenPipeline::evaluate()` already
+     * catches `\Throwable` from `assemble()`, logs `dictamen.fallido`, and
+     * RE-THROWS (see that method's own docblock) — so this reaches an honest
+     * 500, never a dictamen that silently treated an unresolvable entrante as
+     * "definitely not a goalkeeper" and let `Reglas\ArqueroNoOcupaPlazaDeCampo`
+     * wrongly approve a request it should have blocked.
+     *
      * @param array<string, mixed> $plaza MUST carry `es_arco` (as persisted
      *        by `Plazas\PlazaRepository::doOpenPlaza()` / backfilled by
      *        `Migrations\MigrationRunner::backfillEsArco()`).
      * @return array{entranteEsArquero: bool, plazaEsDelArquero: bool}
+     * @throws \RuntimeException When PosicionResolver::resolverParaIds()
+     *         could not resolve the entrante's position — see above.
      */
     private function resolverPosicionesArquero( array $plaza, ?int $entrantePlayerId ): array {
         $plazaEsDelArquero = (bool) ( $plaza['es_arco'] ?? false );

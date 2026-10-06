@@ -23,6 +23,38 @@ namespace EntreRedes\Cambios;
  * request that never hits that surface never pays for constructing
  * TokenVerifier, DictamenPipeline, or any of the repositories these
  * endpoints need.
+ *
+ * *** THE MIGRATION CALL RUNS ON `init` PRIORITY 11, NEVER DIRECTLY FROM
+ * `boot()` (0.1.14) *** `boot()` itself is still called on `plugins_loaded`
+ * (see entre-redes-cambios.php) — only `Migrations\MigrationRunner::runIfOutdated()`
+ * moved, to an `init`-priority-11 callback THIS method registers. This is the
+ * fix for a real production incident: SportsPress registers its `sp_position`
+ * taxonomy on `init` priority 10 (`includes/class-sp-post-types.php`,
+ * `SP_Post_Types::register_taxonomies()`) — strictly AFTER `plugins_loaded`,
+ * which fires before `init` on every WordPress request. Calling the migration
+ * directly from `boot()` therefore ran it BEFORE `sp_position` existed, so
+ * `wp_get_object_terms()` returned a `WP_Error` for every call the 0.1.13
+ * `es_arco` backfill made — silently read, at the time, as "nobody has a
+ * position" (see `Plazas\PosicionResolver`'s own docblock for that half of
+ * the fix) and written as `es_arco = 0` for all 330 live plazas. Priority 11
+ * (strictly after SportsPress's own priority 10 on the SAME `init` hook)
+ * guarantees the taxonomy is registered by the time this callback runs,
+ * regardless of plugin load order (`init` callbacks run in priority order
+ * within the same hook, independent of which plugin's `plugins_loaded`
+ * callback registered them).
+ *
+ * *** EVERYTHING ELSE boot() WIRES WAS VERIFIED UNAFFECTED BY THIS MOVE ***
+ * The `rest_api_init` closure below and the `admin_menu` closure further down
+ * both register on hooks WordPress fires AFTER `init` on every request type
+ * that reaches them (a REST request, wp-admin) — core fires `init`, once,
+ * during its own bootstrap (`wp-settings.php`) for every request type this
+ * plugin runs under, including REST requests, wp-admin, and `wp-cron.php`
+ * (see the cron registration further down in this method for why that last
+ * one matters), and only fires `rest_api_init` / `admin_menu` afterwards.
+ * Neither closure depends on the migration having already run — both build
+ * their own repositories/controllers fresh, independent of schema version —
+ * so moving ONLY the migration call changes nothing about when routes or the
+ * admin menu become available. No other line in `boot()` needed to move.
  */
 final class Plugin {
 
@@ -41,7 +73,15 @@ final class Plugin {
         // Schema upgrades must land on a plain zip replace, not only on a
         // click of "Activate" — see MigrationRunner::runIfOutdated()'s own
         // docblock for the incident this guards against.
-        Migrations\MigrationRunner::runIfOutdated( new Observability\WpEventLog() );
+        //
+        // Deferred to `init` priority 11 — see this class's own docblock,
+        // "THE MIGRATION CALL RUNS ON init PRIORITY 11" — rather than called
+        // directly here on `plugins_loaded`, so SportsPress's `sp_position`
+        // taxonomy (registered on `init` priority 10) always exists by the
+        // time this runs.
+        add_action( 'init', static function (): void {
+            Migrations\MigrationRunner::runIfOutdated( new Observability\WpEventLog() );
+        }, 11 );
 
         add_action( 'rest_api_init', static function (): void {
             global $wpdb;
@@ -149,6 +189,17 @@ final class Plugin {
         // guard as entre-redes-prode's own Plugin::boot(). Built here, and
         // ONLY here, for the same reason as the rest_api_init closure above.
         if ( is_admin() ) {
+            // Renders Migrations\MigrationRunner::checkEsArcoInvariant()'s
+            // most recently PERSISTED verdict, if any — registered
+            // UNCONDITIONALLY here, on every admin request, rather than from
+            // inside that one-time migration run itself. See
+            // renderEsArcoInvariantNotice()'s own docblock for the
+            // production incident this fixes: a notice registered only from
+            // inside `run()` (which executes at most once per version bump)
+            // never rendered at all when that one request was not an admin
+            // page load.
+            add_action( 'admin_notices', [ Migrations\MigrationRunner::class, 'renderEsArcoInvariantNotice' ] );
+
             add_action( 'admin_menu', static function (): void {
                 global $wpdb;
 

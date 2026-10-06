@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Tests;
 
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Migrations\MigrationRunner;
 use EntreRedes\Cambios\Plugin;
 use PHPUnit\Framework\TestCase;
 
@@ -117,6 +118,69 @@ class PluginTest extends TestCase {
         $this->assertSame( 0, $countAfter, 'SolicitudRepository::crear() must never run when authorization fails.' );
     }
 
+    /**
+     * *** THE EXACT BUG THIS TEST WOULD HAVE CAUGHT *** Before this fix,
+     * `boot()` called `Migrations\MigrationRunner::runIfOutdated()` directly,
+     * on `plugins_loaded` — strictly BEFORE SportsPress registers its
+     * `sp_position` taxonomy on `init` (priority 10). This test pins the fix:
+     * `boot()` alone must NOT run the migration; only a later `do_action(
+     * 'init' )` may.
+     */
+    public function test_boot_defers_the_schema_migration_to_init_never_running_it_directly(): void {
+        update_option( 'cambios_db_version', '0.0.1' );
+
+        Plugin::boot();
+
+        $this->assertSame(
+            '0.0.1',
+            get_option( 'cambios_db_version' ),
+            "Plugin::boot() must not run the migration synchronously on plugins_loaded — see MigrationRunner's "
+                . 'own docblock for the sp_position hook-ordering incident this guards against.'
+        );
+
+        do_action( 'init' );
+
+        $this->assertSame(
+            ENTRE_REDES_CAMBIOS_VERSION,
+            get_option( 'cambios_db_version' ),
+            'The migration must run once init fires (after SportsPress registers sp_position at priority 10).'
+        );
+    }
+
+    /**
+     * Pins that the migration's `init` callback is bound at priority 11 —
+     * strictly after SportsPress's own `sp_position` registration at
+     * priority 10 on the SAME hook (see Plugin's own class docblock).
+     */
+    public function test_boot_registers_the_migration_callback_on_init_at_priority_eleven(): void {
+        Plugin::boot();
+
+        $registrations = $GLOBALS['_prode_test_action_registrations']['init'] ?? [];
+
+        $this->assertNotEmpty( $registrations, 'boot() must register a callback on the init hook.' );
+        $this->assertSame( 11, $registrations[0]['priority'] );
+    }
+
+    /**
+     * `renderEsArcoInvariantNotice()` must be wired unconditionally on every
+     * admin request — see MigrationRunner::checkEsArcoInvariant()'s own
+     * docblock for the production incident (a notice that only ever rendered
+     * if the ONE request that ran the migration also happened to be an
+     * admin page load) this wiring fixes.
+     */
+    public function test_boot_wires_the_persisted_es_arco_invariant_notice_unconditionally(): void {
+        $GLOBALS['wp_test_is_admin'] = true;
+
+        Plugin::boot();
+
+        $registered = array_map(
+            static fn ( array $reg ) => $reg['callback'],
+            $GLOBALS['_prode_test_action_registrations']['admin_notices'] ?? []
+        );
+
+        $this->assertContains( [ MigrationRunner::class, 'renderEsArcoInvariantNotice' ], $registered );
+    }
+
     // -------------------------------------------------------------------------
     // Internal helpers
     // -------------------------------------------------------------------------
@@ -172,7 +236,18 @@ class PluginTest extends TestCase {
         unset(
             $GLOBALS['_prode_test_registered_routes'],
             $GLOBALS['_prode_test_action_callbacks']['rest_api_init'],
-            $GLOBALS['_prode_test_action_registrations']['rest_api_init']
+            $GLOBALS['_prode_test_action_registrations']['rest_api_init'],
+            // 0.1.14: boot() also registers an `init`-priority-11 callback
+            // for the (now deferred) migration, and an unconditional
+            // `admin_notices` callback for the persisted es_arco invariant
+            // notice — both reset here for the same reason `rest_api_init`
+            // already was: a second `boot()` call within this same PHPUnit
+            // process must not stack duplicate registrations.
+            $GLOBALS['_prode_test_action_callbacks']['init'],
+            $GLOBALS['_prode_test_action_registrations']['init'],
+            $GLOBALS['_prode_test_action_callbacks']['admin_notices'],
+            $GLOBALS['_prode_test_action_registrations']['admin_notices'],
+            $GLOBALS['wp_test_is_admin']
         );
     }
 }

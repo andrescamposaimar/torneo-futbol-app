@@ -169,7 +169,13 @@ class PlazasController {
      *        class docblock for why this is injectable rather than a direct
      *        `wp_get_object_terms()` call (this plugin's SQLite test shim has
      *        no taxonomy equivalent, same reasoning as `$fotoResolverFn`
-     *        above). Defaults to `(new PosicionResolver())->resolverParaIds()`.
+     *        above). Defaults to `(new PosicionResolver($eventLog))->resolverParaIds()`
+     *        — see `PosicionResolver`'s own class docblock, "A FAILED QUERY
+     *        MUST NEVER READ AS 'NOBODY HAS A POSITION'" (0.1.14): a failed
+     *        resolution now throws rather than silently returning
+     *        `SIN_POSICION` for the whole page, and propagates straight into
+     *        this method's own `catch (\Throwable)` below (a loud 500, never
+     *        a page that quietly hides every candidate's real position).
      */
     public function __construct(
         CapitanAuthorizer $authorizer,
@@ -192,7 +198,7 @@ class PlazasController {
         $this->clockFn             = $clockFn ?? static fn (): int => time();
         $this->listaEsperaResolver = $listaEsperaResolver;
         $this->fotoResolverFn      = $fotoResolverFn ?? static fn ( int $playerId ) => get_the_post_thumbnail_url( $playerId, 'medium' );
-        $this->posicionResolverFn  = $posicionResolverFn ?? static fn ( array $playerIds ): array => ( new PosicionResolver() )->resolverParaIds( $playerIds );
+        $this->posicionResolverFn  = $posicionResolverFn ?? static fn ( array $playerIds ): array => ( new PosicionResolver( $eventLog ) )->resolverParaIds( $playerIds );
     }
 
     public function register_routes(): void {
