@@ -61,7 +61,7 @@ class SolicitudRepositoryReasignacionArqueroTest extends TestCase {
         $this->eventLog        = new InMemoryEventLog();
         $this->plazaRepository = new PlazaRepository( $wpdb, $this->eventLog );
         $this->fechaRepository = new FechaRepository( $wpdb, new InMemoryEventLog() );
-        $this->settings        = new Settings( $wpdb );
+        $this->settings        = new Settings( $wpdb, $this->eventLog );
 
         $this->repo = $this->buildRepo();
 
@@ -288,6 +288,137 @@ class SolicitudRepositoryReasignacionArqueroTest extends TestCase {
         $this->assertContains( 'puntaje_excede_techo', $snapshotOff->motivoCodigos() );
     }
 
+    /**
+     * ISOLATES the mechanism the design actually relies on: exemption OFF
+     * disables the grouped request type because `Reglas\EntranteDisponible`
+     * ALWAYS rejects leg 1 — the field titular structurally occupies his own
+     * field plaza (see that class's own docblock, "SCOPED EXEMPTION") — not
+     * merely because a techo happens to also be exceeded, which is all the
+     * test above pins (222's own techo there, 5.0, deliberately exceeds the
+     * goal plaza's 2.5). Here 222's puntaje is AT the goal plaza's techo
+     * (2.5, admitted by `Puntaje::allows()`'s own "regla del 2,5" floor), so
+     * `puntaje_excede_techo` cannot fire, and only
+     * `entrante_ocupa_otra_plaza_vigente` can explain the rejection.
+     */
+    public function test_titular_dentro_del_techo_del_arco_es_igualmente_rechazado_sin_exencion_por_entrante_disponible(): void {
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArcoId            = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-01-01 00:00:00' );
+
+        $wp_test_position_terms = [];
+        $plazaCampoId           = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-01-01 00:00:00' );
+        $this->seedPuntaje( 222, 2.5 ); // AT the goal plaza's techo, not over it.
+
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $this->seedPuntaje( 333, 2.5 );
+        $instante = $this->instanteEnPlazo( '2026-05-30' );
+
+        $this->putSetting( 'exencion_arco_activa', '0' );
+        $repoSinExencion = $this->buildRepo();
+
+        $id       = $repoSinExencion->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, $plazaArcoId, 222, $plazaCampoId, 333, 5, $instante, 777, '2026-05-27 10:00:00'
+        );
+        $snapshot = DictamenSnapshot::fromJson( (string) $repoSinExencion->findSolicitud( $id )['dictamen_original'] );
+
+        $this->assertFalse( $snapshot->procede() );
+        $this->assertNotContains( 'puntaje_excede_techo', $snapshot->motivoCodigos(), 'Within techo — this must NOT be why the group is rejected.' );
+        $this->assertContains(
+            'entrante_ocupa_otra_plaza_vigente',
+            $snapshot->motivoCodigos(),
+            'The titular structurally occupies his own field plaza — THIS is why exencion OFF rejects movement 1.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // assertPlazasDeReasignacionArquero() — the sole privilege guard (0.1.16)
+    // -------------------------------------------------------------------------
+
+    /**
+     * `SolicitudRepository::assertPlazasDeReasignacionArquero()` is the ONLY
+     * defense against naming a non-goal plaza as the goal leg, a goal plaza
+     * as the field leg, or plazas from another team/season — flagged by its
+     * own author as implemented but UNTESTED, confirmed by a 4R adversarial
+     * review to have zero coverage of any throw path. One test per branch.
+     */
+    public function test_crear_reasignacion_arquero_rechaza_la_misma_plaza_para_ambos_movimientos(): void {
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessageMatches( '/must be different plazas/' );
+
+        $this->repo->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, 999, 222, 999, 333, 5, $this->instanteEnPlazo( '2026-05-30' ), 777, '2026-05-27 10:00:00'
+        );
+    }
+
+    public function test_crear_reasignacion_arquero_rechaza_un_plaza_arco_que_no_es_del_arquero(): void {
+        $plazas = $this->seedPlazasDeReasignacion();
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessageMatches( '/is not the goalkeeper\'s plaza/' );
+
+        // Swapped: plazaCampoId (es_arco=0) passed as the GOAL leg.
+        $this->repo->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, $plazas['plazaCampoId'], 222, $plazas['plazaArcoId'], 333, 5, $this->instanteEnPlazo( '2026-05-30' ), 777, '2026-05-27 10:00:00'
+        );
+    }
+
+    public function test_crear_reasignacion_arquero_rechaza_un_plaza_campo_que_es_del_arquero(): void {
+        global $wp_test_position_terms;
+
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArco1             = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-01-01 00:00:00' );
+
+        $wp_test_position_terms = [ 444 => [ 3 ] ];
+        $plazaArco2             = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 444, Puntaje::fromDecimal( 2.5 ), 1, '2026-01-01 00:00:00' );
+        $wp_test_position_terms = [];
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessageMatches( '/IS the goalkeeper\'s plaza/' );
+
+        // Both plazas are es_arco=1 — movement 2's target must NOT be.
+        $this->repo->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, $plazaArco1, 222, $plazaArco2, 333, 5, $this->instanteEnPlazo( '2026-05-30' ), 777, '2026-05-27 10:00:00'
+        );
+    }
+
+    public function test_crear_reasignacion_arquero_rechaza_plazas_de_distinto_equipo(): void {
+        global $wp_test_position_terms;
+
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArco              = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-01-01 00:00:00' );
+
+        $wp_test_position_terms = [];
+        $otroEquipoId           = self::TEAM_ID + 1;
+        $plazaCampoOtroEquipo   = $this->plazaRepository->openPlaza( self::SEASON_ID, $otroEquipoId, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-01-01 00:00:00' );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessageMatches( '/must belong to team_id ' . self::TEAM_ID . '/' );
+
+        $this->repo->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, $plazaArco, 222, $plazaCampoOtroEquipo, 333, 5, $this->instanteEnPlazo( '2026-05-30' ), 777, '2026-05-27 10:00:00'
+        );
+    }
+
+    public function test_crear_reasignacion_arquero_rechaza_plazas_de_distinta_temporada(): void {
+        global $wp_test_position_terms;
+
+        $otraTemporadaId = self::SEASON_ID + 1;
+        $this->seedFecha( 2, $otraTemporadaId, '2026-05-30' );
+
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArco              = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-01-01 00:00:00' );
+
+        $wp_test_position_terms  = [];
+        $plazaCampoOtraTemporada = $this->plazaRepository->openPlaza( $otraTemporadaId, self::TEAM_ID, 222, Puntaje::fromDecimal( 3.0 ), 2, '2026-01-01 00:00:00' );
+
+        $this->expectException( \InvalidArgumentException::class );
+        $this->expectExceptionMessageMatches( '/must belong to season_id ' . self::SEASON_ID . '/' );
+
+        $this->repo->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, $plazaArco, 222, $plazaCampoOtraTemporada, 333, 5, $this->instanteEnPlazo( '2026-05-30' ), 777, '2026-05-27 10:00:00'
+        );
+    }
+
     // -------------------------------------------------------------------------
     // publicarLote() — atomicity and chain correctness
     // -------------------------------------------------------------------------
@@ -377,6 +508,81 @@ class SolicitudRepositoryReasignacionArqueroTest extends TestCase {
 
         $row = $this->repo->findSolicitud( $id );
         $this->assertSame( EstadoSolicitud::APROBADA, $row['estado'], 'The solicitud must remain aprobada, never half-published.' );
+
+        // See SolicitudRepository::publicarLote()'s catch block: a genuine
+        // mid-transaction write failure must use a 'fallid'-containing
+        // codigo, never the pre-flight 'solicitud.lote_abortado'.
+        $this->assertTrue( $this->eventLog->has( 'solicitud.lote_escritura_fallida' ) );
+    }
+
+    /**
+     * Pins the write ORDER `publicarLote()`'s own docblock calls a safety
+     * property — "Movement-2-first means the titular instead passes through
+     * occupying ZERO plazas for that one intermediate write" (see class
+     * docblock, "GROUPED REQUESTS"). Without this test, reversing the two
+     * inserts leaves every OTHER test in this file green (the committed and
+     * rolled-back END states are order-agnostic) — only recording the
+     * SEQUENCE of plaza_ids passed to cambios_ocupacion actually catches it.
+     */
+    public function test_publicar_lote_inserta_la_ocupacion_de_campo_antes_que_la_de_arco(): void {
+        $plazas = $this->seedPlazasDeReasignacion();
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $this->seedPuntaje( 333, 2.5 );
+        $instante = $this->instanteEnPlazo( '2026-05-30' );
+        $now      = '2026-05-27 10:00:00';
+
+        $id = $this->repo->crearReasignacionArquero(
+            self::SEASON_ID, self::TEAM_ID, $plazas['plazaArcoId'], 222, $plazas['plazaCampoId'], 333, 5, $instante, 777, $now
+        );
+        $this->repo->aprobar( $id, 42, null, $now, 'Proceso Owner Test' );
+
+        global $wpdb;
+        $recordingWpdb      = $this->wpdbThatRecordsOcupacionPlazaIds( $wpdb );
+        $recordingPlazaRepo = new PlazaRepository( $recordingWpdb, $this->eventLog );
+        $repoGrabando       = new SolicitudRepository( $recordingWpdb, $recordingPlazaRepo, $this->repoPipeline(), $this->eventLog );
+
+        $resultado = $repoGrabando->publicarLote( [ $id ], 42, '2026-05-29 00:00:00', 'Proceso Owner Test' );
+
+        $this->assertFalse( $resultado['abortado'] );
+        $this->assertSame(
+            [ $plazas['plazaCampoId'], $plazas['plazaArcoId'] ],
+            $recordingWpdb->plazaIdsInsertados,
+            'Movement 2 (campo) must insert its cambios_ocupacion row BEFORE movement 1 (arco) — see class docblock, "GROUPED REQUESTS".'
+        );
+    }
+
+    /**
+     * A \wpdb subclass that records, in order, the `plaza_id` passed to
+     * every `cambios_ocupacion` insert — used to pin the write ORDER
+     * `publicarLote()`'s class docblock calls a safety property (see
+     * test_publicar_lote_inserta_la_ocupacion_de_campo_antes_que_la_de_arco()).
+     * Every write still passes through to the real implementation; this
+     * only OBSERVES.
+     *
+     * @param \wpdb $real A live wpdb sharing THIS test's SQLite connection.
+     */
+    private function wpdbThatRecordsOcupacionPlazaIds( \wpdb $real ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix ) extends \wpdb {
+            /** @var int[] */
+            public array $plazaIdsInsertados = [];
+
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function insert( string $table, array $data, mixed $format = null ): int|false {
+                if ( str_ends_with( $table, 'cambios_ocupacion' ) ) {
+                    $this->plazaIdsInsertados[] = (int) $data['plaza_id'];
+                }
+
+                return parent::insert( $table, $data, $format );
+            }
+        };
     }
 
     public function test_publicar_lote_refuses_a_grouped_request_that_no_longer_holds(): void {
