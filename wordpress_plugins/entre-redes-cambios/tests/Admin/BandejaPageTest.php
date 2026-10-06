@@ -307,6 +307,67 @@ class BandejaPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // shapeSolicitud() — grouped goalkeeper reassignment (0.1.15)
+    // -------------------------------------------------------------------------
+
+    /**
+     * The tray must show BOTH movements of a grouped request clearly enough
+     * that the process owner can judge the whole move, not half of it — see
+     * BandejaPage's class docblock reference to the committee's tray in the
+     * task brief. `shapeSolicitud()` is the data this test pins;
+     * `renderFilaSolicitud()` only decides how to print it.
+     */
+    public function test_shape_solicitud_expone_ambos_movimientos_de_una_reasignacion_de_arquero(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+
+        global $wp_test_position_terms;
+        $wp_test_position_terms = [ 111 => [ 3 ] ];
+        $plazaArcoId            = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 2.5 ), 1, '2026-03-01 00:00:00' );
+
+        $wp_test_position_terms = [];
+        $plazaCampoId           = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $wp_test_position_terms = [];
+
+        $this->seedPuntaje( 222, 3.0 );
+        $this->seedPuntaje( 333, 2.5 );
+
+        $id = $this->solicitudRepository->crearReasignacionArquero(
+            self::SEASON_ID, 100, $plazaArcoId, 222, $plazaCampoId, 333, 5, $this->instanteEnPlazo(), 777, '2026-05-27 10:00:00'
+        );
+
+        $row = $this->solicitudRepository->findSolicitud( $id );
+
+        $ref = new \ReflectionMethod( BandejaPage::class, 'shapeSolicitud' );
+        $shaped = $ref->invoke( $this->page, $row );
+
+        $this->assertTrue( $shaped['es_grupo'] );
+        $this->assertSame( 111, $shaped['quien_sale_id'], 'Movement 1: the current goalkeeper leaves.' );
+        $this->assertSame( 222, $shaped['quien_entra_id'], 'Movement 1: the field titular enters the goal.' );
+        $this->assertSame( 222, $shaped['quien_sale_campo_id'], 'Movement 2: the SAME titular leaves the field plaza.' );
+        $this->assertSame( 333, $shaped['quien_entra_campo_id'], 'Movement 2: the outside player enters it.' );
+
+        $wp_test_position_terms = [];
+    }
+
+    public function test_shape_solicitud_no_marca_es_grupo_para_una_sustitucion_ordinaria(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 888, 2.5 );
+
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, $this->instanteEnPlazo() );
+        $id        = $this->solicitudRepository->crear( $solicitud, 777, $this->evaluatePipeline( $solicitud ), '2026-05-27 10:00:00' );
+
+        $row    = $this->solicitudRepository->findSolicitud( $id );
+        $ref    = new \ReflectionMethod( BandejaPage::class, 'shapeSolicitud' );
+        $shaped = $ref->invoke( $this->page, $row );
+
+        $this->assertFalse( $shaped['es_grupo'] );
+        $this->assertNull( $shaped['quien_entra_campo_id'] );
+    }
+
+    // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
 

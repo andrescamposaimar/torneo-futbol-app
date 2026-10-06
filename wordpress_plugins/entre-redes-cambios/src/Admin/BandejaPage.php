@@ -286,13 +286,29 @@ class BandejaPage {
                 echo esc_html(
                     sprintf(
                         /* translators: 1: who is leaving, 2: who is entering */
-                        __( 'Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
+                        ( ! empty( $solicitud['es_grupo'] ) )
+                            ? __( 'Arco — Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' )
+                            : __( 'Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
                         (string) ( $solicitud['quien_sale_nombre'] ?? '—' ),
                         (string) ( $solicitud['quien_entra_nombre'] ?? '—' )
                     )
                 );
                 ?>
             </p>
+            <?php if ( ! empty( $solicitud['es_grupo'] ) ) : ?>
+            <p>
+                <?php
+                echo esc_html(
+                    sprintf(
+                        /* translators: 1: who is leaving the field plaza, 2: who is entering it */
+                        __( 'Campo — Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
+                        (string) ( $solicitud['quien_sale_campo_nombre'] ?? '—' ),
+                        (string) ( $solicitud['quien_entra_campo_nombre'] ?? '—' )
+                    )
+                );
+                ?>
+            </p>
+            <?php endif; ?>
             <p>
                 <?php if ( $solicitud['dictamen_procede'] ) : ?>
                     <strong style="color:green;"><?php esc_html_e( 'Dictamen: procede.', 'entre-redes-cambios' ); ?></strong>
@@ -613,26 +629,53 @@ class BandejaPage {
 
         if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
             $quienEntraId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
+        } elseif ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $row['tipo'] ) {
+            // Movement 1 — see class docblock, "GROUPED REQUESTS": the field
+            // titular moving into goal, exactly like a `sustitucion`'s own
+            // `entrante_player_id` branch above.
+            $quienEntraId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
         } else {
             $quienEntraId = null !== $plaza ? (int) $plaza['titular_player_id'] : null;
         }
 
+        // Movement 2 of a `reasignacion_arquero` — the vacated field plaza —
+        // is a SECOND "Sale/Entra" pair the tray must show alongside
+        // movement 1's, so the process owner judges the WHOLE move, not half
+        // of it (see class docblock, "THE EXPLICIT CONFIRMATION GATE" and
+        // `renderFilaSolicitud()` below). `null` for every other tipo, which
+        // has no second movement.
+        $esGrupo           = SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $row['tipo'];
+        $quienSaleCampoId  = null;
+        $quienEntraCampoId = null;
+
+        if ( $esGrupo ) {
+            $plazaCampo        = $this->plazaRepository->findPlaza( (int) $row['plaza_campo_id'] );
+            $vigenteCampo      = null !== $plazaCampo ? $this->plazaRepository->findOcupacionVigente( (int) $plazaCampo['id'] ) : null;
+            $quienSaleCampoId  = null !== $vigenteCampo ? (int) $vigenteCampo['player_id'] : null;
+            $quienEntraCampoId = null !== $row['entrante_campo_player_id'] ? (int) $row['entrante_campo_player_id'] : null;
+        }
+
         return [
-            'id'                  => (int) $row['id'],
-            'team_id'             => (int) $row['team_id'],
-            'team_nombre'         => $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ),
-            'plaza_id'            => (int) $row['plaza_id'],
-            'tipo'                => (string) $row['tipo'],
-            'fecha_id'            => (int) $row['fecha_id'],
-            'quien_sale_id'       => $quienSaleId,
-            'quien_sale_nombre'   => null !== $quienSaleId ? $this->nombrePost( $quienSaleId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
-            'quien_entra_id'      => $quienEntraId,
-            'quien_entra_nombre'  => null !== $quienEntraId ? $this->nombrePost( $quienEntraId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
-            'estado'              => (string) $row['estado'],
-            'solicitada_at'       => (string) $row['solicitada_at'],
-            'dictamen_procede'    => $snapshot->procede(),
-            'dictamen_motivos'    => $snapshot->motivos(),
-            'decisiones'          => $this->solicitudRepository->listDecisiones( (int) $row['id'] ),
+            'id'                       => (int) $row['id'],
+            'team_id'                  => (int) $row['team_id'],
+            'team_nombre'              => $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ),
+            'plaza_id'                 => (int) $row['plaza_id'],
+            'tipo'                     => (string) $row['tipo'],
+            'fecha_id'                 => (int) $row['fecha_id'],
+            'quien_sale_id'            => $quienSaleId,
+            'quien_sale_nombre'        => null !== $quienSaleId ? $this->nombrePost( $quienSaleId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'quien_entra_id'           => $quienEntraId,
+            'quien_entra_nombre'       => null !== $quienEntraId ? $this->nombrePost( $quienEntraId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'es_grupo'                 => $esGrupo,
+            'quien_sale_campo_id'      => $quienSaleCampoId,
+            'quien_sale_campo_nombre'  => null !== $quienSaleCampoId ? $this->nombrePost( $quienSaleCampoId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'quien_entra_campo_id'     => $quienEntraCampoId,
+            'quien_entra_campo_nombre' => null !== $quienEntraCampoId ? $this->nombrePost( $quienEntraCampoId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
+            'estado'                   => (string) $row['estado'],
+            'solicitada_at'            => (string) $row['solicitada_at'],
+            'dictamen_procede'         => $snapshot->procede(),
+            'dictamen_motivos'         => $snapshot->motivos(),
+            'decisiones'               => $this->solicitudRepository->listDecisiones( (int) $row['id'] ),
         ];
     }
 
