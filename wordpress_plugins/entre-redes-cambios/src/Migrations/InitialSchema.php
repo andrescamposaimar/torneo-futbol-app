@@ -74,6 +74,12 @@ class InitialSchema {
         // `sp_team` post id only to OVERRIDE that dynamic lookup (e.g. the
         // slug convention breaks, or a season needs a different team).
         'lista_espera_team_id'       => '0',
+        // ON by default — see Calendario\Settings::exencionArcoActiva()'s own
+        // docblock for why this one, unlike 'prioridad_padres_activa' above,
+        // ships enabled: the process owner asked for a SWITCH to turn an
+        // already-agreed-upon policy OFF when needed, not an opt-in gate for
+        // an unconfirmed preference.
+        'exencion_arco_activa'       => '1',
     ];
 
     /**
@@ -526,6 +532,48 @@ class InitialSchema {
      * see `Rest\SolicitudesController`'s own docblock for how the REST
      * response and the app both degrade this to a visible "not recorded"
      * state instead of fabricating a name.
+     *
+     * *** `reasignacion_arquero` — A GROUPED REQUEST, SNAPSHOTTED EXACTLY LIKE
+     * EVERY OTHER TIPO (0.1.15) ***
+     * A grouped goalkeeper reassignment ("la exención del arco" — see
+     * `Solicitudes\SolicitudRepository`'s class docblock) is ONE row, same as
+     * any other solicitud, carrying BOTH movements. Movement 1 (the goal
+     * plaza) reuses the columns every other tipo already has: `plaza_id` is
+     * the goal plaza, `entrante_player_id` is the field titular moving into
+     * it, `saliente_player_id` is the current goalkeeper — captured exactly
+     * like `crear()` already captures it for a `sustitucion` (see this
+     * docblock's own "`saliente_player_id`" section above). Movement 2 (the
+     * vacated field plaza) needs two NEW columns, both NULL for every other
+     * tipo:
+     *
+     *   - `plaza_campo_id` — the field plaza the titular leaves behind.
+     *     DELIBERATELY SNAPSHOTTED, not re-derived at publish time from
+     *     "whichever plaza this titular currently occupies" — the exact same
+     *     "saliente_player_id lesson" (0.1.11) applies: a value that can
+     *     drift between request time and Friday's lote must be frozen, never
+     *     re-read live.
+     *   - `entrante_campo_player_id` — the outside player filling it.
+     *
+     * There is NO `saliente_campo_player_id` column: the player leaving
+     * `plaza_campo_id` is, by construction of this tipo, the exact same
+     * person as `entrante_player_id` — storing it twice would only create a
+     * second place the two could silently disagree, with no new fact
+     * gained.
+     *
+     * `ocupacion_campo_id` mirrors `ocupacion_id` above for movement 2 — the
+     * `cambios_ocupacion` row `SolicitudRepository::publicarLote()` opened
+     * for the outside player, same "undo a wrongly-published lote without
+     * cross-referencing the EventLog by hand" reasoning as `ocupacion_id`'s
+     * own docblock. `ocupacion_id` itself is reused for movement 1 — no new
+     * column needed there.
+     *
+     * None of this needed a versioned backfill: `cambios_solicitud` was
+     * still EMPTY in production when these columns were added (same
+     * precondition the `saliente_player_id` addition already relied on), and
+     * none of the three new columns, nor widening the `tipo` ENUM, reads
+     * anything from a SportsPress taxonomy — unlike `cambios_plaza.es_arco`'s
+     * 0.1.13 backfill (see `Migrations\MigrationRunner`'s own docblock), this
+     * migration has no `init`-priority ordering to get right.
      */
     private static function sqlCambiosSolicitud( string $p, string $charset ): string {
         return "CREATE TABLE {$p}cambios_solicitud (
@@ -533,9 +581,11 @@ class InitialSchema {
   season_id BIGINT UNSIGNED NOT NULL,
   team_id BIGINT UNSIGNED NOT NULL,
   plaza_id BIGINT UNSIGNED NOT NULL,
-  tipo ENUM('sustitucion','regreso') NOT NULL,
+  tipo ENUM('sustitucion','regreso','reasignacion_arquero') NOT NULL,
   entrante_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
   saliente_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  plaza_campo_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  entrante_campo_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
   fecha_id BIGINT UNSIGNED NOT NULL,
   solicitada_por BIGINT UNSIGNED NOT NULL,
   solicitada_at DATETIME NOT NULL,
@@ -547,6 +597,7 @@ class InitialSchema {
   resuelta_at DATETIME NULL DEFAULT NULL,
   nota TEXT NULL DEFAULT NULL,
   ocupacion_id BIGINT UNSIGNED NULL DEFAULT NULL,
+  ocupacion_campo_id BIGINT UNSIGNED NULL DEFAULT NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
   PRIMARY KEY  (id),

@@ -85,6 +85,23 @@ class Settings {
     }
 
     /**
+     * Whether "la exención del arco" is ON — the goal plaza's techo does not
+     * apply to the field titular moving into it as movement 1 of a grouped
+     * goalkeeper reassignment (see `Dictamen\Reglas\PuntajeDentroDelTecho`
+     * and `Dictamen\Reglas\EntranteDisponible`'s own docblocks, and
+     * `Solicitudes\SolicitudRepository`'s class docblock for the full
+     * business shape). Default: `true` (ON) — see
+     * `Migrations\InitialSchema::SEED_DEFAULTS`, 'exencion_arco_activa'.
+     * Unlike `prioridadPadresActiva()` above, this policy ships ON by
+     * default: the process owner's own request was for a SWITCH to turn it
+     * OFF when needed, not an opt-in gate for a soft preference nobody was
+     * enforcing yet.
+     */
+    public function exencionArcoActiva(): bool {
+        return $this->readBool( 'exencion_arco_activa', (string) InitialSchema::SEED_DEFAULTS['exencion_arco_activa'] );
+    }
+
+    /**
      * The operator-configured `sp_team` post id for THIS season's "lista de
      * espera" pseudo-team, ONLY when explicitly set to a positive value —
      * `null` otherwise (an absent row, or the seeded `'0'`, see
