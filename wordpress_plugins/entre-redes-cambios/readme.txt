@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.17
+Stable tag: 0.1.18
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.18 =
+* Add: `GET /entre-redes/v1/cambios/plazas` now shapes `es_arco` — the STORED `cambios_plaza.es_arco` column (0.1.13), read as a plain fact, never derived from a titular's `sp_position` name (`Rest\PlazasController::listar()` has no `PosicionResolver` dependency at all). Added because the Flutter client was inferring "is this the goal plaza?" from the titular's position name string client-side, for the exact reason this endpoint never exposed the column before: it was overlooked, not deliberate. That client-side inference risked drifting from this same column the moment a `sp_position` term was renamed or re-accented — precisely the class of defect 0.1.13/0.1.14's own backfill and invariant check exist to prevent server-side; the client had reintroduced it one layer up.
 
 = 0.1.17 =
 * Add: `POST /entre-redes/v1/cambios/solicitudes` now accepts `tipo = 'reasignacion_arquero'` on the SAME route as `sustitucion`/`regreso` — `plaza_id` (the goal plaza), `entrante_player_id` (the field titular moving into goal), and a new `entrante_campo_player_id` (the outside player filling the field plaza that titular vacates). The vacated field plaza itself is never a body field: `Rest\SolicitudesController::derivarPlazaCampoId()` derives it from the titular's own vigent occupation, so a client can never disagree with which plaza is actually vacated. `Solicitudes\SolicitudRepository::crearReasignacionArquero()` and `Dictamen\DictamenPipeline::evaluateGrupo()` (0.1.15/0.1.16) were already built; nothing reached them from outside until now.

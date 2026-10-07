@@ -25,6 +25,20 @@ class CambiosPlaza {
   final bool esTitularElOcupante;
   final bool cerrada;
 
+  /// Whether this is the team's ONE goal plaza — the STORED
+  /// `cambios_plaza.es_arco` column (0.1.13), read by `GET /cambios/plazas`
+  /// as a plain fact since 0.1.18 (`Rest\PlazasController::shapePlaza()`).
+  /// Never derived client-side from the titular's position name — see
+  /// `cambios_plantel_screen.dart`'s `_TitularCard` and
+  /// `cambios_arco_titular_picker_screen.dart` for the two places that used
+  /// to do exactly that (a string compare against `'Arquero'`) before this
+  /// field existed, which risked silently drifting from this same column
+  /// the moment a `sp_position` term was renamed.
+  ///
+  /// Missing/malformed JSON degrades to `false`, never to "this is the goal
+  /// plaza" — an absent fact must never read as a confirmed one.
+  final bool esArco;
+
   /// The plaza's own ceiling, as a decimal (e.g. `2.5`) — the SAME constraint
   /// `GET /cambios/plazas/candidatos` already enforces server-side. This
   /// screen only ever DISPLAYS it (e.g. greying out puntaje filter chips
@@ -43,6 +57,7 @@ class CambiosPlaza {
     this.ocupanteNombre,
     required this.esTitularElOcupante,
     required this.cerrada,
+    this.esArco = false,
     this.puntajeTecho = 0,
     this.fechasFaltantesLiberacion,
     this.fechasFaltantesLiberacionIndeterminado = false,
@@ -67,6 +82,7 @@ class CambiosPlaza {
       ocupanteNombre: json['ocupante_nombre'] as String?,
       esTitularElOcupante: json['es_titular_el_ocupante'] == true,
       cerrada: json['cerrada'] == true,
+      esArco: json['es_arco'] == true,
       puntajeTecho: (json['puntaje_techo'] as num?)?.toDouble() ?? 0,
       fechasFaltantesLiberacion: json['fechas_faltantes_liberacion'] as int?,
       fechasFaltantesLiberacionIndeterminado:
@@ -86,6 +102,7 @@ class CambiosPlaza {
           ocupanteNombre == other.ocupanteNombre &&
           esTitularElOcupante == other.esTitularElOcupante &&
           cerrada == other.cerrada &&
+          esArco == other.esArco &&
           puntajeTecho == other.puntajeTecho &&
           fechasFaltantesLiberacion == other.fechasFaltantesLiberacion &&
           fechasFaltantesLiberacionIndeterminado ==
@@ -100,6 +117,7 @@ class CambiosPlaza {
         ocupanteNombre,
         esTitularElOcupante,
         cerrada,
+        esArco,
         puntajeTecho,
         fechasFaltantesLiberacion,
         fechasFaltantesLiberacionIndeterminado,

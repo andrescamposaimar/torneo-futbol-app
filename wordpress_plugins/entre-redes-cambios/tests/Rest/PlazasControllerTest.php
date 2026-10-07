@@ -112,6 +112,82 @@ class PlazasControllerTest extends TestCase {
     }
 
     /**
+     * `es_arco` must reflect the STORED `cambios_plaza.es_arco` column,
+     * never a derivation — see `PlazasController::shapePlaza()`'s own
+     * docblock, "ADDED IN 0.1.13, A STORED FACT, NEVER A DERIVATION".
+     * `listar()` has NO `PosicionResolver` dependency at all (unlike
+     * `listarCandidatos()`), so there is nothing here that could even
+     * attempt to infer this from a `sp_position` name — this test pins
+     * that this method stays that way by asserting the shaped value
+     * follows the column alone, for BOTH a `1` and a `0` row, regardless
+     * of which plaza/titular each belongs to.
+     */
+    public function test_listar_shapes_es_arco_from_the_stored_column(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
+            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6, 'es_arco' => 1 ],
+            [ 'id' => 2, 'titular_player_id' => 888, 'closed_at' => null, 'puntaje_techo' => 6, 'es_arco' => 0 ],
+        ] );
+        $plazaRepository->method( 'listOcupaciones' )->willReturnMap( [
+            [ 1, [
+                [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 777, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+            ] ],
+            [ 2, [
+                [ 'id' => 2, 'plaza_id' => 2, 'player_id' => 888, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+            ] ],
+        ] );
+
+        $fechaRepository = $this->createMock( FechaRepository::class );
+        $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
+        $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 1 );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+        $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $plazas = $response->get_data()['plazas'];
+        $this->assertTrue( $plazas[0]['es_arco'], 'plaza 1 stores es_arco = 1 — must shape to true.' );
+        $this->assertFalse( $plazas[1]['es_arco'], 'plaza 2 stores es_arco = 0 — must shape to false.' );
+    }
+
+    /**
+     * A row that predates this field (no `es_arco` key at all — the exact
+     * shape every OTHER fixture in this file still uses) must degrade to
+     * `false`, never throw and never default to "this is the goal plaza".
+     */
+    public function test_listar_es_arco_defaults_to_false_when_the_column_is_absent_from_the_row(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $plazaRepository = $this->createMock( PlazaRepository::class );
+        $plazaRepository->method( 'listPlazasByEquipo' )->willReturn( [
+            [ 'id' => 1, 'titular_player_id' => 777, 'closed_at' => null, 'puntaje_techo' => 6 ],
+        ] );
+        $plazaRepository->method( 'listOcupaciones' )->willReturn( [
+            [ 'id' => 1, 'plaza_id' => 1, 'player_id' => 777, 'es_genesis' => 1, 'fecha_desde_id' => 1, 'fecha_hasta_id' => null, 'cerrada_por' => null ],
+        ] );
+
+        $fechaRepository = $this->createMock( FechaRepository::class );
+        $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
+        $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 1 );
+
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+
+        $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $this->assertFalse( $response->get_data()['plazas'][0]['es_arco'] );
+    }
+
+    /**
      * FIX 2: `titular_nombre` / `ocupante_nombre` resolve to the real post
      * title when one is set, and fall back to "Jugador #<id>" — never an
      * empty string — when it is not (plaza 2's titular, 888, has no title

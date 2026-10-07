@@ -5,8 +5,10 @@ import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/models/cambios_candidato.dart';
 import 'package:torneo_futbol_app/models/cambios_plaza.dart';
 import 'package:torneo_futbol_app/models/cambios_solicitud.dart';
+import 'package:torneo_futbol_app/models/jugador.dart';
 import 'package:torneo_futbol_app/providers/cambios_providers.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
+import 'package:torneo_futbol_app/screens/cambios/cambios_arco_titular_picker_screen.dart';
 import 'package:torneo_futbol_app/screens/cambios/cambios_plantel_screen.dart';
 import 'package:torneo_futbol_app/screens/cambios/cambios_solicitar_screen.dart';
 import 'package:torneo_futbol_app/screens/cambios/cambios_solicitudes_screen.dart';
@@ -21,28 +23,42 @@ import 'package:torneo_futbol_app/widgets/cambios_jugador_card.dart';
 
 CambiosPlaza _plaza({
   int plazaId = 1,
+  int titularPlayerId = 100,
   String titularNombre = 'Juan Pérez',
   String? ocupanteNombre = 'Pedro Gómez',
   int? ocupantePlayerId = 200,
   bool esTitularElOcupante = false,
   bool cerrada = false,
+  bool esArco = false,
   int? fechasFaltantesLiberacion = 1,
   bool fechasFaltantesLiberacionIndeterminado = false,
 }) {
   return CambiosPlaza(
     plazaId: plazaId,
-    titularPlayerId: 100,
+    titularPlayerId: titularPlayerId,
     titularNombre: titularNombre,
     ocupantePlayerId: ocupantePlayerId,
     ocupanteNombre: ocupanteNombre,
     esTitularElOcupante: esTitularElOcupante,
     cerrada: cerrada,
+    esArco: esArco,
     fechasFaltantesLiberacion: fechasFaltantesLiberacion,
     fechasFaltantesLiberacionIndeterminado: fechasFaltantesLiberacionIndeterminado,
   );
 }
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+Jugador _jugador({required int id, required String posicion, double puntaje = 4.5}) => Jugador(
+      id: id,
+      nombre: 'Jugador $id',
+      posicion: posicion,
+      puntaje: puntaje,
+      equipo: 'Equipo A',
+      escudo: '',
+      temporadas: const [],
+      raw: const {},
+    );
 
 // ---------------------------------------------------------------------------
 // Container test fixtures (FIX 3, carried over from this file's previous
@@ -129,6 +145,38 @@ class _NoopJugadorApiService implements IApiService {
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
+/// Unlike [_NoopJugadorApiService], resolves [arqueroPlayerId] to a real
+/// `Jugador` with `posicion: 'Arquero'` — needed for the ONE container test
+/// that must see "Cambiar por Titular" actually render (it is gated on the
+/// resolved posicion, never visible against an empty roster).
+class _ArqueroRosterApiService implements IApiService {
+  final int arqueroPlayerId;
+  _ArqueroRosterApiService(this.arqueroPlayerId);
+
+  @override
+  Future<Map<String, dynamic>> getJugadoresRaw({
+    int? temporada,
+    int? liga,
+    int? zona,
+    int? equipoId,
+    String? search,
+    int? page,
+    int? perPage,
+  }) async =>
+      {
+        'items': [
+          {
+            'id': arqueroPlayerId,
+            'title': {'rendered': 'Juan Pérez'},
+            'posicion': 'Arquero',
+          },
+        ],
+      };
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
 const _scope = (seasonId: 7, teamId: 1);
 
 /// [CambiosSolicitarScreen] keys its candidatos controller by
@@ -153,11 +201,15 @@ List<Override> _candidatosOverridesFor(int plazaId) {
   }).toList();
 }
 
-Future<void> _pumpContainer(WidgetTester tester, {required List<CambiosPlaza> plazas}) async {
+Future<void> _pumpContainer(
+  WidgetTester tester, {
+  required List<CambiosPlaza> plazas,
+  IApiService? apiService,
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        apiServiceProvider.overrideWithValue(_NoopJugadorApiService()),
+        apiServiceProvider.overrideWithValue(apiService ?? _NoopJugadorApiService()),
         cambiosPlantelControllerProvider(_scope).overrideWith(
           (ref) => _StubPlantelController(CambiosPlantelLoaded(plazas: plazas)),
         ),
@@ -186,6 +238,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -200,6 +253,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.text('Algo salió mal'), findsOneWidget);
@@ -215,6 +269,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.text('Todavía no hay plazas cargadas'), findsOneWidget);
@@ -229,6 +284,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () => tapped = true,
+        onCambiarPorTitular: (_) {},
       )));
 
       await tester.tap(find.byKey(const Key('ver_solicitudes_button')));
@@ -249,6 +305,7 @@ void main() {
         onPedirCambio: (p) => tapped = p,
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.byKey(const Key('plantel_list')), findsOneWidget);
@@ -276,6 +333,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.byKey(const Key('baja_por_cambio_badge_2')), findsOneWidget);
@@ -304,6 +362,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.byKey(const Key('plaza_cerrada_badge_3')), findsOneWidget);
@@ -322,11 +381,229 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.byKey(const Key('plaza_card_1')), findsOneWidget);
       expect(find.byKey(const Key('plaza_card_2')), findsOneWidget);
       expect(find.byKey(const Key('plaza_card_3')), findsOneWidget);
+    });
+  });
+
+  group('CambiosPlantelView — "Cambiar por Titular" (arco plaza only)', () {
+    testWidgets('appears on the arco plaza\'s own card (esArco: true), alongside "Pedir cambio"',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(find.byKey(const Key('pedir_cambio_1')), findsOneWidget);
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsOneWidget);
+    });
+
+    testWidgets('does NOT appear on a field plaza\'s card (esArco: false)', (tester) async {
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: false,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(find.byKey(const Key('pedir_cambio_1')), findsOneWidget);
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsNothing);
+    });
+
+    /// THE test that matters (see this slice's own task brief): a titular
+    /// whose POSITION reads "Arquero" must NOT get the button when the
+    /// plaza's own stored `es_arco` says otherwise — proving there is no
+    /// fallback to a position-name guess anywhere in this card. Before the
+    /// fix that prompted this test, `_TitularCard` derived "is this the
+    /// goal plaza?" from exactly this jugador's `posicion` string; this
+    /// fixture is the ONE combination that string compare would have gotten
+    /// wrong.
+    testWidgets(
+        'does NOT fall back to the titular\'s position name: posicion "Arquero" but '
+        'esArco: false must NOT offer the button', (tester) async {
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: false,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        jugadoresById: {100: _jugador(id: 100, posicion: 'Arquero')},
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsNothing);
+    });
+
+    /// The mirror case — `esArco: true` must offer the button even when the
+    /// titular's OWN position is unresolved (`jugadoresById` empty) or
+    /// reads as something else entirely, because the plaza's own stored
+    /// flag is the only thing this card consults.
+    testWidgets('appears for esArco: true regardless of the titular\'s own resolved position',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        jugadoresById: {100: _jugador(id: 100, posicion: 'Mediocampista')},
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsOneWidget);
+    });
+
+    testWidgets('does NOT appear on a cerrada arco plaza — visibly inert, same as "Pedir cambio"',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+            cerrada: true,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(find.byKey(const Key('pedir_cambio_1')), findsNothing);
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsNothing);
+    });
+
+    testWidgets(
+        'does NOT appear when the arco plaza is occupied by someone else (baja por cambio)',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(plazaId: 1, esArco: true, esTitularElOcupante: false, ocupanteNombre: 'Pedro Gómez'),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsNothing);
+    });
+
+    testWidgets('tapping it fires onCambiarPorTitular with this plaza', (tester) async {
+      CambiosPlaza? tapped;
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (p) => tapped = p,
+      )));
+
+      await tester.tap(find.byKey(const Key('cambiar_por_titular_1')));
+      expect(tapped?.plazaId, 1);
+    });
+
+    testWidgets('narrow width (320px), long names: both titular cards render with no overflow',
+        (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            titularPlayerId: 100,
+            titularNombre: 'Von Hohenzollern-Sigmaringen, Maximiliano Alejandro',
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+          _plaza(
+            plazaId: 2,
+            titularPlayerId: 101,
+            titularNombre: 'Fernández Etcheverrigaray, Juan Bautista',
+            esArco: false,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsOneWidget);
+      expect(find.byKey(const Key('cambiar_por_titular_2')), findsNothing);
     });
   });
 
@@ -341,6 +618,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.text('Cambios activos'), findsNothing);
@@ -364,6 +642,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.text('Cambios activos'), findsOneWidget);
@@ -389,6 +668,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       final button =
@@ -411,6 +691,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       final button =
@@ -437,6 +718,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       final button =
@@ -461,6 +743,7 @@ void main() {
         onPedirCambio: (p) => tapped = p,
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       await tester.tap(find.byKey(const Key('cambiar_este_cambio_2')));
@@ -478,6 +761,7 @@ void main() {
         onPedirCambio: (_) {},
         onPedirRegreso: (_) {},
         onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
       )));
 
       expect(find.byKey(const Key('confirmar_fin_cambio_2')), findsNothing);
@@ -537,6 +821,36 @@ void main() {
       final screen = tester.widget<CambiosSolicitarScreen>(find.byType(CambiosSolicitarScreen));
       expect(screen.tipo, equals(CambiosSolicitudTipo.regreso));
       expect(screen.plaza.plazaId, 2);
+    });
+
+    testWidgets(
+        '"Cambiar por Titular" pushes CambiosArcoTitularPickerScreen with this plaza as '
+        'plazaArco, and the SAME plazas/jugadoresById this screen already resolved',
+        (tester) async {
+      final plazaArco = _plaza(
+        plazaId: 1,
+        titularPlayerId: 100,
+        esArco: true,
+        esTitularElOcupante: true,
+        ocupanteNombre: null,
+        ocupantePlayerId: null,
+      );
+      await _pumpContainer(
+        tester,
+        plazas: [plazaArco],
+        apiService: _ArqueroRosterApiService(100),
+      );
+
+      await tester.tap(find.byKey(const Key('cambiar_por_titular_1')));
+      await tester.pumpAndSettle();
+
+      final screen = tester
+          .widget<CambiosArcoTitularPickerScreen>(find.byType(CambiosArcoTitularPickerScreen));
+      expect(screen.seasonId, equals(7));
+      expect(screen.teamId, equals(1));
+      expect(screen.plazaArco.plazaId, 1);
+      expect(screen.plazas.map((p) => p.plazaId), [1]);
+      expect(screen.jugadoresById[100]?.posicion, 'Arquero');
     });
 
     testWidgets('"Mis pedidos" pushes CambiosSolicitudesScreen for the same season/team',

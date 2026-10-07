@@ -108,6 +108,7 @@ void main() {
                 'ocupante_nombre': 'Pedro Gómez',
                 'es_titular_el_ocupante': false,
                 'cerrada': false,
+                'es_arco': true,
                 'fechas_faltantes_liberacion': 2,
                 'fechas_faltantes_liberacion_indeterminado': false,
               },
@@ -122,6 +123,7 @@ void main() {
       expect(plazas.single.plazaId, 10);
       expect(plazas.single.titularNombre, 'Juan Pérez');
       expect(plazas.single.regresoElegible, isFalse); // 2 fechas faltantes
+      expect(plazas.single.esArco, isTrue);
     });
 
     test('fetchCandidatos() parses the candidatos list, foto_url, and the X-WP-Total header',
@@ -329,6 +331,47 @@ void main() {
 
       expect(sentBody!['tipo'], 'regreso');
       expect(sentBody!.containsKey('entrante_player_id'), isFalse);
+    });
+
+    test('crearReasignacionArquero() POSTs plaza_id=the GOAL plaza, tipo=reasignacion_arquero, '
+        'both entrante ids, and NEVER a vacated-plaza field', () async {
+      final repo = await _repoWithAccessToken();
+      Map<String, dynamic>? sentBody;
+      final service = _makeService(
+        repo,
+        MockClient((request) async {
+          sentBody = json.decode(request.body) as Map<String, dynamic>;
+          return _jsonResponse({
+            'id': 55,
+            'estado': 'pendiente',
+            'dictamen': {'procede': true, 'motivos': []},
+          }, 200);
+        }),
+      );
+
+      final result = await service.crearReasignacionArquero(
+        seasonId: 7,
+        teamId: 1,
+        plazaArcoId: 30,
+        fechaId: 3,
+        entrantePlayerId: 101,
+        entranteCampoPlayerId: 900,
+      );
+
+      expect(sentBody, isNotNull);
+      expect(sentBody!['plaza_id'], 30);
+      expect(sentBody!['tipo'], 'reasignacion_arquero');
+      expect(sentBody!['fecha_id'], 3);
+      expect(sentBody!['entrante_player_id'], 101);
+      expect(sentBody!['entrante_campo_player_id'], 900);
+      // The vacated field plaza is NEVER a body field — the backend derives
+      // it from entrante_player_id's own vigent occupation (see this
+      // method's own docblock).
+      expect(sentBody!.containsKey('plaza_campo_id'), isFalse);
+      expect(sentBody!.keys, hasLength(7));
+      expect(result.id, 55);
+      expect(result.estado, CambiosSolicitudEstado.pendiente);
+      expect(result.dictamen.procede, isTrue);
     });
   });
 

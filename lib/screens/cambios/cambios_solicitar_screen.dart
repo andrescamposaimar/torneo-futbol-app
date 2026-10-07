@@ -96,11 +96,42 @@ import '../../widgets/prode_segmented_toggle.dart';
 /// [CambiosSolicitudTipo.regreso], `sustitucion_abierta` for
 /// [CambiosSolicitudTipo.sustitucion] — and [_VentanaEstadoBanner] shows
 /// that BEFORE the candidate list or the confirm button ever becomes usable.
+/// Carries the SECOND half of a grouped goalkeeper-reassignment request —
+/// present only when [CambiosSolicitarScreen] is reached via "Cambiar por
+/// Titular" (see `cambios_arco_titular_picker_screen.dart`, step 1 of that
+/// flow). [plazaArco] is the GOAL plaza being filled — `POST
+/// /cambios/solicitudes` always sends ITS id as `plaza_id` for a
+/// `reasignacion_arquero` request (see
+/// `CambiosApiService.crearReasignacionArquero()`'s own docblock), never
+/// [CambiosSolicitarScreen.plaza]'s id (the chosen titular's OWN field
+/// plaza, which this screen still uses, UNMODIFIED, to resolve the
+/// candidate list's techo/viability — reaching this screen in grouped mode
+/// means using it exactly as it already works for an ordinary sustitucion
+/// on that field plaza, so the techo, the exclusions and the
+/// goalkeeper-in-a-field-plaza rule all apply automatically and correctly).
+///
+/// The field titular himself needs no separate field here: he is exactly
+/// [CambiosSolicitarScreen.plaza]'s own titular
+/// (`widget.plaza.titularPlayerId`) — the SAME player whose plaza this
+/// screen is already showing candidates for.
+@immutable
+class CambiosGrupoArcoContext {
+  final CambiosPlaza plazaArco;
+
+  const CambiosGrupoArcoContext({required this.plazaArco});
+}
+
 class CambiosSolicitarScreen extends ConsumerStatefulWidget {
   final int seasonId;
   final int teamId;
   final CambiosPlaza plaza;
   final CambiosSolicitudTipo tipo;
+
+  /// Present only for the second half of a grouped goalkeeper-reassignment
+  /// request — see [CambiosGrupoArcoContext]'s own docblock. `null` (the
+  /// default) keeps this screen's existing, ordinary `sustitucion`/`regreso`
+  /// behaviour byte-identical.
+  final CambiosGrupoArcoContext? grupoArco;
 
   /// *** THE HEADER'S PUNTAJE IS ALWAYS THE TITULAR'S OWN ***
   /// [_PlazaHeader] renders [plaza.titularNombre] on the left — the titular
@@ -132,6 +163,7 @@ class CambiosSolicitarScreen extends ConsumerStatefulWidget {
     required this.plaza,
     required this.tipo,
     this.puntaje,
+    this.grupoArco,
   });
 
   @override
@@ -296,16 +328,34 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
     });
 
     try {
-      await ref.read(cambiosApiServiceProvider).crearSolicitud(
-            seasonId: widget.seasonId,
-            teamId: widget.teamId,
-            plazaId: widget.plaza.plazaId,
-            tipo: widget.tipo,
-            fechaId: fechaId,
-            entrantePlayerId: widget.tipo == CambiosSolicitudTipo.sustitucion
-                ? _selectedPlayerId
-                : null,
-          );
+      final grupoArco = widget.grupoArco;
+      if (grupoArco != null) {
+        // *** GROUPED SUBMIT — reasignacion_arquero *** See
+        // CambiosGrupoArcoContext's own docblock: plaza_id is the GOAL
+        // plaza, never widget.plaza (the chosen titular's own field plaza,
+        // used above only to resolve the candidate list). The field titular
+        // moving into goal is widget.plaza's own titular — never a separate
+        // field on this context.
+        await ref.read(cambiosApiServiceProvider).crearReasignacionArquero(
+              seasonId: widget.seasonId,
+              teamId: widget.teamId,
+              plazaArcoId: grupoArco.plazaArco.plazaId,
+              fechaId: fechaId,
+              entrantePlayerId: widget.plaza.titularPlayerId,
+              entranteCampoPlayerId: _selectedPlayerId!,
+            );
+      } else {
+        await ref.read(cambiosApiServiceProvider).crearSolicitud(
+              seasonId: widget.seasonId,
+              teamId: widget.teamId,
+              plazaId: widget.plaza.plazaId,
+              tipo: widget.tipo,
+              fechaId: fechaId,
+              entrantePlayerId: widget.tipo == CambiosSolicitudTipo.sustitucion
+                  ? _selectedPlayerId
+                  : null,
+            );
+      }
 
       if (!mounted) return;
       // Shared Riverpod state refresh — the roster behind this screen
@@ -334,6 +384,8 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
   @override
   Widget build(BuildContext context) {
     final isSustitucion = widget.tipo == CambiosSolicitudTipo.sustitucion;
+    final grupoArco = widget.grupoArco;
+    final esGrupo = grupoArco != null;
     final fechaAsync = ref.watch(cambiosFechaAbiertaProvider(widget.seasonId));
     final fecha = fechaAsync.valueOrNull;
     final fechaId = fecha?.fechaId;
@@ -359,7 +411,7 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
 
     return Scaffold(
       appBar: EntreRedesAppBar(
-        title: isSustitucion ? 'Pedir cambio' : 'Pedir regreso',
+        title: esGrupo ? 'Reasignación de arquero' : (isSustitucion ? 'Pedir cambio' : 'Pedir regreso'),
       ),
       body: Column(
         children: [
@@ -368,6 +420,8 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
             puntaje: widget.puntaje,
             esSustitucion: isSustitucion,
           ),
+          if (esGrupo)
+            _GrupoArcoBanner(plazaArco: grupoArco.plazaArco, titularEntrante: widget.plaza.titularNombre),
           if (fechaAsync.isLoading) const _FechaLoadingBanner(),
           if (!fechaAsync.isLoading && fecha == null) const _FechaGapBanner(),
           if (fecha != null && !ventanaAbierta)
@@ -520,8 +574,13 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
                     // Names the action, not the gesture — and names the RIGHT
                     // one: this screen also serves a regreso, which is the END
                     // of a cambio, never a new one. Mirrors the AppBar's own
-                    // 'Pedir cambio' / 'Pedir regreso' split.
-                    : Text(isSustitucion ? 'Solicitar Cambio' : 'Solicitar Regreso'),
+                    // 'Pedir cambio' / 'Pedir regreso' split. Grouped mode
+                    // names ITS OWN action too — confirming here submits the
+                    // grouped reasignacion_arquero request, never a plain
+                    // sustitucion (see CambiosGrupoArcoContext's docblock).
+                    : Text(esGrupo
+                        ? 'Confirmar Reasignación'
+                        : (isSustitucion ? 'Solicitar Cambio' : 'Solicitar Regreso')),
               ),
             ),
           ),
@@ -886,6 +945,54 @@ class _CandidatosEmptyView extends StatelessWidget {
           'No encontramos candidatos disponibles para esta plaza.',
           textAlign: TextAlign.center,
         ),
+      ),
+    );
+  }
+}
+
+/// Shown ONLY in grouped mode (`widget.grupoArco != null`) — makes explicit
+/// that this candidate step is the SECOND half of a goal reassignment, not
+/// an ordinary "Pedir cambio": [titularEntrante] (named on [_PlazaHeader]
+/// above, leaving THIS field plaza) is about to take over [plazaArco]'s own
+/// goal, vacated by [plazaArco]'s own titular — the candidate chosen below
+/// fills the FIELD plaza [titularEntrante] leaves behind, never the goal
+/// itself. Text wraps (no `maxLines`/`overflow`) rather than being clipped —
+/// this copy is long and this screen has been bitten by narrow-width
+/// overflow before.
+class _GrupoArcoBanner extends StatelessWidget {
+  final CambiosPlaza plazaArco;
+  final String titularEntrante;
+
+  const _GrupoArcoBanner({required this.plazaArco, required this.titularEntrante});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const Key('grupo_arco_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: theme.colorScheme.secondary.withValues(alpha: 0.10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.sports_soccer, size: 18, color: theme.colorScheme.secondary),
+          const SizedBox(width: 8),
+          // Kept deliberately SHORT, not the fuller explanation an earlier
+          // version of this banner carried — at 320px, with two long player
+          // names, that longer copy wrapped to enough lines to push the
+          // candidate list below off the bottom of the screen (a real
+          // RenderFlex overflow this feature's own narrow-width test caught).
+          Expanded(
+            child: Text(
+              'Reasignación de arquero: $titularEntrante pasa al arco por '
+              '${plazaArco.titularNombre}.',
+              style: theme.textTheme.bodySmall,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -343,6 +343,67 @@ class CambiosApiService {
   }
 
   // ---------------------------------------------------------------------------
+  // POST /solicitudes — reasignacion_arquero (grouped)
+  // ---------------------------------------------------------------------------
+
+  /// Creates a GROUPED goalkeeper-reassignment request: [entrantePlayerId]
+  /// (the field titular moving into [plazaArcoId]) and
+  /// [entranteCampoPlayerId] (the outside player filling the field plaza
+  /// that titular vacates) are BOTH required — see
+  /// `Rest\SolicitudesController::crear()`'s own docblock on the backend for
+  /// the exact validation. The vacated field plaza itself is NEVER sent —
+  /// the backend derives it from [entrantePlayerId]'s own vigent occupation
+  /// (`derivarPlazaCampoId()`), so sending one here would be redundant at
+  /// best and silently wrong the moment it drifted from the server's own
+  /// computation.
+  ///
+  /// [plazaArcoId] is the GOAL plaza's id — sent as this request's own
+  /// `plaza_id`, mirroring [crearSolicitud]'s own `plazaId` for an ordinary
+  /// request. Same "every dictamen is a 200" contract as [crearSolicitud] —
+  /// a rejecting dictamen here is still a successful response, never an
+  /// exception.
+  ///
+  /// Kept as its OWN method rather than a new optional branch on
+  /// [crearSolicitud] — that method's signature and body are a regression
+  /// guard for the ordinary `sustitucion`/`regreso` path (its existing test
+  /// suite must keep passing untouched); growing it to also understand
+  /// `reasignacion_arquero` would risk exactly the kind of accidental drift
+  /// this docblock warns against for the vacated-plaza id above.
+  Future<CambiosNuevaSolicitud> crearReasignacionArquero({
+    required int seasonId,
+    required int teamId,
+    required int plazaArcoId,
+    required int fechaId,
+    required int entrantePlayerId,
+    required int entranteCampoPlayerId,
+  }) async {
+    final req = http.Request('POST', Uri.parse('$_baseUrl/solicitudes'))
+      ..headers['Content-Type'] = 'application/json'
+      ..headers['Accept'] = 'application/json'
+      ..body = json.encode({
+        'season_id': seasonId,
+        'team_id': teamId,
+        'plaza_id': plazaArcoId,
+        'tipo': 'reasignacion_arquero',
+        'fecha_id': fechaId,
+        'entrante_player_id': entrantePlayerId,
+        'entrante_campo_player_id': entranteCampoPlayerId,
+      });
+
+    final response = await _prodeApi.request(req).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode != 200) {
+      throw _errorFor(response);
+    }
+
+    try {
+      return CambiosNuevaSolicitud.fromJson(_decodeBody(response));
+    } catch (_) {
+      throw const CambiosMalformedResponseException();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
