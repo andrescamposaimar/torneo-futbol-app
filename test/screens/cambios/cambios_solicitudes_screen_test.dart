@@ -27,6 +27,7 @@ CambiosSolicitud _solicitud({
     nombre: 'Grigorjew, Gerardo',
     puntaje: 4.5,
   ),
+  CambiosSolicitudMovimientos movimientos = const CambiosSolicitudMovimientos(),
 }) {
   return CambiosSolicitud(
     id: id,
@@ -41,6 +42,7 @@ CambiosSolicitud _solicitud({
     dictamen: dictamen,
     sale: sale,
     entra: entra,
+    movimientos: movimientos,
   );
 }
 
@@ -203,6 +205,110 @@ void main() {
       // The puntajes survive whole — the NAMES are what give way (ellipsis).
       expect(find.text('[4.5]'), findsOneWidget);
       expect(find.text('[3]'), findsOneWidget);
+    });
+
+    group('reasignacion_arquero — movimientos (grouped row)', () {
+      const movimientosAgrupados = CambiosSolicitudMovimientos(
+        arco: CambiosSolicitudMovimiento(
+          sale: CambiosSolicitudLado(playerId: 1, nombre: 'Arquero Saliente', puntaje: 3.0),
+          entra: CambiosSolicitudLado(playerId: 2, nombre: 'Titular de Campo', puntaje: 4.5),
+        ),
+        campo: CambiosSolicitudMovimiento(
+          sale: CambiosSolicitudLado(playerId: 2, nombre: 'Titular de Campo', puntaje: 4.5),
+          entra: CambiosSolicitudLado(playerId: 3, nombre: 'Candidato Externo', puntaje: 2.0),
+        ),
+      );
+
+      testWidgets('renders BOTH movements, labelled "Arco" and "Campo", instead of the '
+          'top-level Sale/Entra pair', (tester) async {
+        await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+          state: CambiosSolicitudesLoaded(solicitudes: [
+            _solicitud(
+              id: 1,
+              tipo: CambiosSolicitudTipo.reasignacionArquero,
+              movimientos: movimientosAgrupados,
+            ),
+          ]),
+          onRetry: () {},
+          onRefresh: () async {},
+        )));
+
+        expect(find.byKey(const Key('movimiento_arco_1')), findsOneWidget);
+        expect(find.byKey(const Key('movimiento_campo_1')), findsOneWidget);
+        expect(find.text('Arco'), findsOneWidget);
+        expect(find.text('Campo'), findsOneWidget);
+
+        // Each movement's own Sale/Entra pair — "Titular de Campo" is BOTH
+        // the arco movement's entra AND the campo movement's sale (the same
+        // player, moving through both halves of the request), so it renders
+        // twice on purpose.
+        expect(find.text('Arquero Saliente'), findsOneWidget);
+        expect(find.text('Titular de Campo'), findsNWidgets(2));
+        expect(find.text('Candidato Externo'), findsOneWidget);
+
+        // The ordinary top-level Sale/Entra labels never render for this row.
+        expect(find.text('Sale: Arquero Saliente'), findsNothing);
+      });
+
+      testWidgets('a sustitucion row (movimientos empty) renders EXACTLY as before — the '
+          'regression guard for every other tipo', (tester) async {
+        await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+          state: CambiosSolicitudesLoaded(solicitudes: [
+            _solicitud(id: 1, tipo: CambiosSolicitudTipo.sustitucion),
+          ]),
+          onRetry: () {},
+          onRefresh: () async {},
+        )));
+
+        expect(find.text('Sale: '), findsOneWidget);
+        expect(find.text('Entra: '), findsOneWidget);
+        expect(find.byKey(const Key('movimiento_arco_1')), findsNothing);
+        expect(find.byKey(const Key('movimiento_campo_1')), findsNothing);
+      });
+
+      testWidgets('no RenderFlex overflow at a narrow phone width with long names in both '
+          'movements', (tester) async {
+        tester.view.physicalSize = const Size(320, 640);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+          state: CambiosSolicitudesLoaded(solicitudes: [
+            _solicitud(
+              id: 1,
+              tipo: CambiosSolicitudTipo.reasignacionArquero,
+              movimientos: const CambiosSolicitudMovimientos(
+                arco: CambiosSolicitudMovimiento(
+                  sale: CambiosSolicitudLado(
+                    playerId: 1,
+                    nombre: 'Von Hohenzollern-Sigmaringen, Maximiliano Alejandro',
+                    puntaje: 4.5,
+                  ),
+                  entra: CambiosSolicitudLado(
+                    playerId: 2,
+                    nombre: 'Fernandez de Kirchner Alvarez, Bartolome Ignacio',
+                    puntaje: 3.0,
+                  ),
+                ),
+                campo: CambiosSolicitudMovimiento(
+                  sale: CambiosSolicitudLado(
+                    playerId: 2,
+                    nombre: 'Fernandez de Kirchner Alvarez, Bartolome Ignacio',
+                    puntaje: 3.0,
+                  ),
+                  entra: CambiosSolicitudLado(playerId: 3, nombre: 'Candidato Externo', puntaje: 2.0),
+                ),
+              ),
+            ),
+          ]),
+          onRetry: () {},
+          onRefresh: () async {},
+        )));
+
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const Key('movimiento_arco_1')), findsOneWidget);
+        expect(find.byKey(const Key('movimiento_campo_1')), findsOneWidget);
+      });
     });
 
     testWidgets('a rejecting dictamen maps its motivo codes to plain Spanish, never the raw code',

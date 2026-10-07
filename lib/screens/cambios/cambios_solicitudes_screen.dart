@@ -191,8 +191,21 @@ class _SolicitudCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(solicitud.tipo.label,
-                      style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.bold)),
+                  // Expanded + ellipsis — not an unbounded Text — because
+                  // every tipo label used to be short enough ('Cambio',
+                  // 'Regreso', 'Pedido') that this never mattered. The
+                  // grouped tipo's own label ('Reasignación de arquero') is
+                  // long enough to overflow this row at a narrow width,
+                  // which this feature's own narrow-width test caught.
+                  Expanded(
+                    child: Text(
+                      solicitud.tipo.label,
+                      style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
@@ -222,9 +235,26 @@ class _SolicitudCard extends StatelessWidget {
                   style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                 ),
               const SizedBox(height: 6),
-              _LadoRow(etiqueta: 'Sale', lado: solicitud.sale),
-              const SizedBox(height: 2),
-              _LadoRow(etiqueta: 'Entra', lado: solicitud.entra),
+              if (solicitud.movimientos.isEmpty) ...[
+                _LadoRow(etiqueta: 'Sale', lado: solicitud.sale),
+                const SizedBox(height: 2),
+                _LadoRow(etiqueta: 'Entra', lado: solicitud.entra),
+              ] else ...[
+                if (solicitud.movimientos.arco != null)
+                  _MovimientoSeccion(
+                    key: Key('movimiento_arco_${solicitud.id}'),
+                    titulo: 'Arco',
+                    movimiento: solicitud.movimientos.arco!,
+                  ),
+                if (solicitud.movimientos.campo != null) ...[
+                  const SizedBox(height: 6),
+                  _MovimientoSeccion(
+                    key: Key('movimiento_campo_${solicitud.id}'),
+                    titulo: 'Campo',
+                    movimiento: solicitud.movimientos.campo!,
+                  ),
+                ],
+              ],
               if (solicitud.nota != null && solicitud.nota!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text('Nota de la comisión: ${solicitud.nota}',
@@ -259,6 +289,42 @@ class _SolicitudCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Grouped (reasignacion_arquero) movement section
+// ---------------------------------------------------------------------------
+
+/// One movement heading ("Arco" or "Campo") + its own Sale/Entra pair, for a
+/// grouped (`reasignacion_arquero`) solicitud — see
+/// `CambiosSolicitudMovimientos`'s own docblock for why this replaces the
+/// top-level `_LadoRow` pair for this tipo alone. Mirrors
+/// `Admin\BandejaPage::renderFilaSolicitud()`'s own "Arco —.../Campo —..."
+/// heading on the committee's own tray, so the captain sees the SAME two
+/// movements the committee does.
+class _MovimientoSeccion extends StatelessWidget {
+  final String titulo;
+  final CambiosSolicitudMovimiento movimiento;
+
+  const _MovimientoSeccion({super.key, required this.titulo, required this.movimiento});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          titulo,
+          style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 2),
+        _LadoRow(etiqueta: 'Sale', lado: movimiento.sale),
+        const SizedBox(height: 2),
+        _LadoRow(etiqueta: 'Entra', lado: movimiento.entra),
+      ],
     );
   }
 }
