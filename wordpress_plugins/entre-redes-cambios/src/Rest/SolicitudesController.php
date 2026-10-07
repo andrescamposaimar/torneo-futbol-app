@@ -50,6 +50,43 @@ use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
  * an actual \Throwable (an assembler failure, a persistence failure) is
  * turned into the generic 500 — see HandlesCapitanAuthorization's own
  * docblock.
+ *
+ * *** `reasignacion_arquero` — THE GROUPED REQUEST, EXPOSED ON THE SAME
+ * ROUTE (0.1.17) ***
+ * `crear()` grows a THIRD branch for `tipo = 'reasignacion_arquero'` rather
+ * than a second creation endpoint — `tipo` already decides which fields are
+ * required for `sustitucion` (`entrante_player_id`) vs `regreso` (none), so
+ * a third value is the established shape, not a new one. The body carries
+ * `plaza_id` (the goal plaza), `entrante_player_id` (the field titular
+ * moving into goal), and the ONE field this tipo adds —
+ * `entrante_campo_player_id` (the outside player filling the field plaza
+ * that titular leaves behind). It does NOT carry a `plaza_campo_id`: the
+ * vacated field plaza is DERIVED here, from the titular's own vigent
+ * occupation (see `derivarPlazaCampoId()`'s own docblock) — a client could
+ * otherwise name a field plaza that disagrees with which one the titular
+ * actually occupies, and nothing downstream would catch that disagreement
+ * before `Solicitudes\SolicitudRepository::assertPlazasDeReasignacionArquero()`
+ * either (that guard only checks the plaza it is HANDED belongs to the
+ * right team/season, never that it is the RIGHT plaza for this titular).
+ *
+ * Authorization runs EXACTLY where it already does for `sustitucion` /
+ * `regreso` — before this branch is ever reached, let alone before
+ * `Solicitudes\SolicitudRepository::crearReasignacionArquero()` is called —
+ * see class docblock above, "AUTHORIZATION RUNS FIRST, ALWAYS". This is the
+ * fix for this slice's second blocking prerequisite: `assertPlazasDeReasignacionArquero()`
+ * proves the two plazas agree with the `team_id`/`season_id` it is handed,
+ * but never that those values belong to the CALLER — that proof is
+ * `authorizeCapitan()`'s job alone, and it already runs first for every tipo
+ * this method accepts, including this one.
+ *
+ * `crearReasignacionArquero()` does not hand this controller a `Dictamen`
+ * the way `SolicitudRepository::crear()` does for the other two tipos — it
+ * evaluates `DictamenPipeline::evaluateGrupo()` internally and returns only
+ * the new row's id. The response's `dictamen` is therefore built from a
+ * FRESH read of that same row (`findSolicitud()` + `Dictamen\DictamenSnapshot`
+ * — see `shapeDictamenDesdeSnapshot()`'s own docblock), never from a second,
+ * redundant `evaluateGrupo()` call this controller would have to make and
+ * then discard the repository's own evaluation in favor of.
  */
 class SolicitudesController {
 
@@ -141,17 +178,29 @@ class SolicitudesController {
     /**
      * POST /entre-redes/v1/cambios/solicitudes
      *
-     * Body: { season_id, team_id, plaza_id, tipo: 'sustitucion'|'regreso',
-     *         fecha_id, entrante_player_id? } — entrante_player_id is
-     *         REQUIRED for 'sustitucion' and ignored for 'regreso' (see
+     * Body: { season_id, team_id, plaza_id, tipo:
+     *         'sustitucion'|'regreso'|'reasignacion_arquero', fecha_id,
+     *         entrante_player_id?, entrante_campo_player_id? } —
+     *         entrante_player_id is REQUIRED for 'sustitucion' (the
+     *         entrante) and for 'reasignacion_arquero' (the field titular
+     *         moving into goal), ignored for 'regreso' (see
      *         Dictamen\SolicitudDeCambio's class docblock: who returns is
-     *         never a choice this request makes).
+     *         never a choice this request makes). entrante_campo_player_id
+     *         is REQUIRED for 'reasignacion_arquero' alone (the outside
+     *         player filling the field plaza the titular vacates) and
+     *         ignored otherwise. The vacated field plaza itself is never a
+     *         body field — see class docblock, "`reasignacion_arquero` —
+     *         THE GROUPED REQUEST", and `derivarPlazaCampoId()`.
      *
      * Response 200: { id, estado: 'pendiente', dictamen: { procede, motivos,
      *         fechas_faltantes_liberacion } } — for EVERY dictamen, favorable
      *         or not. A dictamen that does not `procede()` is deliberately
      *         NOT a 4xx — see class docblock: it is a fact the captain needs
-     *         to see, not a failure of the request itself.
+     *         to see, not a failure of the request itself. Unchanged in
+     *         shape for `reasignacion_arquero` — see
+     *         `shapeDictamenDesdeSnapshot()`'s own docblock for how that
+     *         tipo's `dictamen` is assembled from the UNIONED, two-movement
+     *         verdict `DictamenPipeline::evaluateGrupo()` already produced.
      */
     public function crear( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -184,10 +233,11 @@ class SolicitudesController {
             return $this->respuestaNoAutorizada( $e );
         }
 
-        $plazaId          = (int) $request->get_param( 'plaza_id' );
-        $fechaId          = (int) $request->get_param( 'fecha_id' );
-        $tipo             = (string) $request->get_param( 'tipo' );
-        $entrantePlayerId = $request->get_param( 'entrante_player_id' );
+        $plazaId               = (int) $request->get_param( 'plaza_id' );
+        $fechaId               = (int) $request->get_param( 'fecha_id' );
+        $tipo                  = (string) $request->get_param( 'tipo' );
+        $entrantePlayerId      = $request->get_param( 'entrante_player_id' );
+        $entranteCampoPlayerId = $request->get_param( 'entrante_campo_player_id' );
 
         if ( $plazaId <= 0 || $fechaId <= 0 ) {
             return $this->respuestaSolicitudInvalida(
@@ -196,10 +246,14 @@ class SolicitudesController {
             );
         }
 
-        if ( ! in_array( $tipo, [ SolicitudDeCambio::TIPO_SUSTITUCION, SolicitudDeCambio::TIPO_REGRESO ], true ) ) {
+        if ( ! in_array(
+            $tipo,
+            [ SolicitudDeCambio::TIPO_SUSTITUCION, SolicitudDeCambio::TIPO_REGRESO, SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO ],
+            true
+        ) ) {
             return $this->respuestaSolicitudInvalida(
                 'tipo_invalido',
-                "tipo debe ser 'sustitucion' o 'regreso'."
+                "tipo debe ser 'sustitucion', 'regreso' o 'reasignacion_arquero'."
             );
         }
 
@@ -212,23 +266,74 @@ class SolicitudesController {
             );
         }
 
+        if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+            if ( null === $entrantePlayerId || (int) $entrantePlayerId <= 0 ) {
+                return $this->respuestaSolicitudInvalida(
+                    'titular_requerido',
+                    "entrante_player_id (el titular de campo que pasa al arco) es obligatorio para tipo 'reasignacion_arquero'."
+                );
+            }
+
+            if ( null === $entranteCampoPlayerId || (int) $entranteCampoPlayerId <= 0 ) {
+                return $this->respuestaSolicitudInvalida(
+                    'entrante_campo_requerido',
+                    "entrante_campo_player_id es obligatorio para tipo 'reasignacion_arquero'."
+                );
+            }
+        }
+
+        $solicitadaPor = (int) ( $claims['player_id'] ?? 0 );
+
+        // The SAME instant as $ahora above, in the OTHER representation this
+        // row persists — `solicitada_at` (DATETIME, UTC — see README) and
+        // `solicitud_instante_epoch` (Unix epoch) must describe one moment,
+        // never two clock reads three hours apart. `current_time('mysql')`
+        // would have handed out the site's LOCAL civil time here while
+        // `$ahora` stayed UTC-epoch — see class docblock.
+        $ahoraDb = gmdate( 'Y-m-d H:i:s', $ahora );
+
         try {
+            if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+                $titularPlayerId = (int) $entrantePlayerId;
+
+                $plazaCampoId = $this->derivarPlazaCampoId( $seasonId, $teamId, $plazaId, $titularPlayerId );
+
+                $id = $this->solicitudRepository->crearReasignacionArquero(
+                    $seasonId,
+                    $teamId,
+                    $plazaId,
+                    $titularPlayerId,
+                    $plazaCampoId,
+                    (int) $entranteCampoPlayerId,
+                    $fechaId,
+                    $ahora,
+                    $solicitadaPor,
+                    $ahoraDb
+                );
+
+                $row = $this->solicitudRepository->findSolicitud( $id );
+
+                if ( null === $row ) {
+                    throw new \RuntimeException( "SolicitudesController::crear(): solicitud {$id} not found immediately after creation." );
+                }
+
+                $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+
+                return new \WP_REST_Response(
+                    [
+                        'id'       => $id,
+                        'estado'   => EstadoSolicitud::PENDIENTE,
+                        'dictamen' => $this->shapeDictamenDesdeSnapshot( $snapshot ),
+                    ],
+                    200
+                );
+            }
+
             $solicitud = SolicitudDeCambio::TIPO_SUSTITUCION === $tipo
                 ? SolicitudDeCambio::sustitucion( $seasonId, $teamId, $plazaId, (int) $entrantePlayerId, $fechaId, $ahora )
                 : SolicitudDeCambio::regreso( $seasonId, $teamId, $plazaId, $fechaId, $ahora );
 
             $dictamen = $this->dictamenPipeline->evaluate( $solicitud );
-
-            $solicitadaPor = (int) ( $claims['player_id'] ?? 0 );
-
-            // The SAME instant as $ahora above, in the OTHER representation
-            // this row persists — `solicitada_at` (DATETIME, UTC — see
-            // README) and `solicitud_instante_epoch` (Unix epoch) must
-            // describe one moment, never two clock reads three hours apart.
-            // `current_time('mysql')` would have handed out the site's LOCAL
-            // civil time here while `$ahora` stayed UTC-epoch — see class
-            // docblock.
-            $ahoraDb = gmdate( 'Y-m-d H:i:s', $ahora );
 
             $id = $this->solicitudRepository->crear( $solicitud, $solicitadaPor, $dictamen, $ahoraDb );
 
@@ -462,6 +567,108 @@ class SolicitudesController {
             ),
             'fechas_faltantes_liberacion' => $dictamen->fechasFaltantesParaLiberacion(),
         ];
+    }
+
+    /**
+     * Same response shape as shapeDictamen(), but for a `reasignacion_arquero`
+     * creation — see crear()'s own docblock for why this tipo never hands the
+     * controller a live `Dictamen`: `SolicitudRepository::crearReasignacionArquero()`
+     * evaluates `DictamenPipeline::evaluateGrupo()` and persists its result
+     * internally, returning only the new row's id. This method rebuilds the
+     * response from that SAME persisted verdict — `Dictamen\DictamenSnapshot`,
+     * read back from the row's own `dictamen_original` — rather than calling
+     * `evaluateGrupo()` a second time here, which would (a) duplicate work
+     * already done and (b) risk disagreeing with what was actually stored if
+     * anything about the database changed in between the two calls.
+     *
+     * `fechas_faltantes_liberacion` has no `DictamenSnapshot` accessor of its
+     * own (see that class's docblock: it is a plain `{procede, motivos,
+     * evaluado_at}` triple, with no notion of `Dictamen`'s derived
+     * accessors). It is recomputed here with the EXACT SAME algorithm
+     * `Dictamen::fechasFaltantesParaLiberacion()` applies — scan every
+     * motivo for a `fechasFaltantes` key in its `datos` — applied to the
+     * snapshot's own plain-array motivos instead of live `Motivo` objects,
+     * since `DictamenSnapshot::motivos()` already carries that same `datos`
+     * sub-array verbatim (see `Motivo::datos()`'s own docblock).
+     *
+     * @return array{procede: bool, motivos: array<int, array{codigo: string, mensaje: string, datos: array<string, mixed>}>, fechas_faltantes_liberacion: int|null}
+     */
+    private function shapeDictamenDesdeSnapshot( DictamenSnapshot $snapshot ): array {
+        $fechasFaltantes = null;
+
+        foreach ( $snapshot->motivos() as $motivo ) {
+            $datos = $motivo['datos'] ?? [];
+
+            if ( is_array( $datos ) && array_key_exists( 'fechasFaltantes', $datos ) ) {
+                $fechasFaltantes = null === $datos['fechasFaltantes'] ? null : (int) $datos['fechasFaltantes'];
+                break;
+            }
+        }
+
+        return [
+            'procede'                     => $snapshot->procede(),
+            'motivos'                     => $snapshot->motivos(),
+            'fechas_faltantes_liberacion' => $fechasFaltantes,
+        ];
+    }
+
+    /**
+     * Derives the field plaza a `reasignacion_arquero` request's titular
+     * vacates, from the titular's OWN current vigent occupation — never
+     * from a client-supplied `plaza_campo_id` (there is no such body field —
+     * see class docblock, "`reasignacion_arquero` — THE GROUPED REQUEST").
+     *
+     * *** WHY DERIVE RATHER THAN TRUST THE CLIENT ***
+     * `Solicitudes\SolicitudRepository::assertPlazasDeReasignacionArquero()`
+     * only checks that whatever `plaza_campo_id` it is HANDED belongs to the
+     * right `team_id`/`season_id` and is not itself the goal plaza — it has
+     * no way to know whether that plaza is the one THIS titular actually
+     * occupies. A client could therefore name any other field plaza on the
+     * same team and that guard would never notice. Deriving the plaza from
+     * `PlazaRepository::listOcupacionesVigentesDeJugador()` instead makes
+     * the disagreement structurally impossible: there is nothing left for a
+     * client to send that this method could disagree with.
+     *
+     * `$plazaArcoId` is passed as `$excluyendoPlazaId` purely for symmetry
+     * with every other caller of `listOcupacionesVigentesDeJugador()` (see
+     * that method's own docblock) — the titular does not occupy the goal
+     * plaza yet at this point, so it is never actually present in the
+     * result; excluding it costs nothing and documents the intent.
+     *
+     * @throws \RuntimeException When $titularPlayerId does not hold EXACTLY
+     *         ONE vigent field-plaza (`es_arco = 0`) occupation within
+     *         $teamId/$seasonId — e.g. he holds none (already moved, or
+     *         never actually occupied a plaza) or, in principle, more than
+     *         one (should not happen under this domain model, but this
+     *         method refuses to guess which one is "the" vacated plaza
+     *         rather than silently picking the first). Caught generically by
+     *         crear()'s own \Throwable handler — same category of failure as
+     *         `assertPlazasDeReasignacionArquero()`'s own exceptions: a
+     *         structural precondition, never a reglamento objection a Regla
+     *         should report as a Motivo.
+     */
+    private function derivarPlazaCampoId( int $seasonId, int $teamId, int $plazaArcoId, int $titularPlayerId ): int {
+        $vigentes = $this->plazaRepository->listOcupacionesVigentesDeJugador( $seasonId, $titularPlayerId, $plazaArcoId );
+
+        $plazasDeCampoDelEquipo = [];
+
+        foreach ( $vigentes as $ocupacion ) {
+            $plaza = $this->plazaRepository->findPlaza( (int) $ocupacion['plaza_id'] );
+
+            if ( null !== $plaza && (int) $plaza['team_id'] === $teamId && ! (bool) ( $plaza['es_arco'] ?? false ) ) {
+                $plazasDeCampoDelEquipo[] = (int) $ocupacion['plaza_id'];
+            }
+        }
+
+        $plazasDeCampoDelEquipo = array_values( array_unique( $plazasDeCampoDelEquipo ) );
+
+        if ( 1 !== count( $plazasDeCampoDelEquipo ) ) {
+            throw new \RuntimeException(
+                "SolicitudesController::derivarPlazaCampoId(): titular_player_id {$titularPlayerId} does not hold exactly one vigent field plaza in team_id {$teamId}/season_id {$seasonId} (found " . count( $plazasDeCampoDelEquipo ) . ').'
+            );
+        }
+
+        return $plazasDeCampoDelEquipo[0];
     }
 
     /**
