@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.16
+Stable tag: 0.1.17
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,11 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.17 =
+* Add: `POST /entre-redes/v1/cambios/solicitudes` now accepts `tipo = 'reasignacion_arquero'` on the SAME route as `sustitucion`/`regreso` — `plaza_id` (the goal plaza), `entrante_player_id` (the field titular moving into goal), and a new `entrante_campo_player_id` (the outside player filling the field plaza that titular vacates). The vacated field plaza itself is never a body field: `Rest\SolicitudesController::derivarPlazaCampoId()` derives it from the titular's own vigent occupation, so a client can never disagree with which plaza is actually vacated. `Solicitudes\SolicitudRepository::crearReasignacionArquero()` and `Dictamen\DictamenPipeline::evaluateGrupo()` (0.1.15/0.1.16) were already built; nothing reached them from outside until now.
+* Fix: `Rest\SolicitudesController::shapeSolicitudRow()` (feeding `GET /entre-redes/v1/cambios/solicitudes`) derived "who enters" with a two-way `sustitucion ? … : …` branch — a `reasignacion_arquero` row silently fell into the `regreso` arm and reported the GOAL plaza's own permanent titular (ordinarily the regular goalkeeper) as the entrante, same player as `sale`. Dormant while nothing could create that tipo over REST; fixed before this release could make it reachable. The branch is now explicit per tipo and throws on an unrecognized future one instead of silently compiling into whichever arm is last. A grouped row's response now carries `movimientos: { arco: {sale, entra}, campo: {sale, entra} }` (top-level `sale`/`entra` degrade to "not recorded" for this tipo alone, mirroring `Admin\BandejaPage`'s own two-movement rendering) rather than picking one leg and presenting it as the only pair.
+* Fix: confirmed (and pinned with a test) that `authorizeCapitan()` runs BEFORE `crearReasignacionArquero()` for the new tipo, exactly as it already does for `sustitucion`/`regreso` — `Solicitudes\SolicitudRepository::assertPlazasDeReasignacionArquero()` only proves the two plazas agree with the `team_id`/`season_id` it is HANDED, never that those values belong to the caller; that proof is `authorizeCapitan()`'s job alone, and a captain of one team naming another team's plazas is now refused with 403 `no_capitan`, never the structural guard's own exception surfacing as a generic 500.
 
 = 0.1.16 =
 * Fix: `Calendario\Settings::exencionArcoActiva()` now fails CLOSED on a genuine `cambios_settings` read failure (distinguished from an absent row via `$wpdb->last_error`) instead of silently falling back to its seeded ON default — a transient DB hiccup could otherwise read as "the operator left the exemption on" and relax the goal plaza's techo. The failure is recorded as `settings.lectura_fallida` (reaches `entre_redes_cambios_ultimo_error`). Every other `Settings` getter's fallback direction was audited and documented; none needed to change.
