@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'config/tenant_config.dart';
 import 'config/tenant_provider.dart';
-import 'screens/players_screen.dart';
+import 'screens/credencial/credencial_screen.dart';
 import 'screens/standings_screen.dart';
 import 'screens/teams_screen.dart';
 import 'screens/more_screen.dart';
@@ -63,6 +63,19 @@ class _SplashToMainState extends State<SplashToMain> {
   }
 }
 
+/// A single bottom-nav tab: label, icon, and the screen it shows. Building
+/// both the [IndexedStack] children and the [BottomNavigationBarItem] list
+/// from the SAME list of [_NavTab]s (see [_buildTabs]) guarantees their
+/// indices can never drift apart — there is only one place that decides tab
+/// order and gating.
+class _NavTab {
+  final String label;
+  final IconData icon;
+  final Widget screen;
+
+  const _NavTab({required this.label, required this.icon, required this.screen});
+}
+
 class MainNavigation extends ConsumerStatefulWidget {
   const MainNavigation({super.key});
 
@@ -73,7 +86,7 @@ class MainNavigation extends ConsumerStatefulWidget {
 class _MainNavigationState extends ConsumerState<MainNavigation> {
   // Default to 0 (Partidos); adjusted after feature flags are resolved in _initScreens.
   int _selectedIndex = 0;
-  List<Widget>? _screens;
+  List<_NavTab>? _tabs;
   String? _maintenanceMessage;
 
   // Startup-data failure state (e.g. temporadaActualProvider timing out on
@@ -101,14 +114,7 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
       final features = ref.read(tenantConfigProvider).features;
 
       setState(() {
-        _screens = [
-          MatchesScreen(temporadaId: temporada.id),
-          const StandingsScreen(),
-          if (features.newsTab) const NoticiasScreen(),
-          const TeamsScreen(),
-          const PlayersScreen(),
-          const MoreScreen(),
-        ];
+        _tabs = _buildTabs(features, temporada.id);
         _maintenanceMessage = config?.maintenanceMessage;
         _startupError = null;
       });
@@ -251,10 +257,11 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
     final features = ref.watch(tenantConfigProvider).features;
 
     if (_startupError != null) {
-      return _buildStartupErrorScaffold(primary);
+      return _buildStartupErrorScaffold(primary, features);
     }
 
-    if (_screens == null) {
+    final tabs = _tabs;
+    if (tabs == null) {
       return Scaffold(
         backgroundColor: primary,
         body: const Center(child: CircularProgressIndicator(color: Colors.white)),
@@ -281,7 +288,10 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
               ],
             ),
           Expanded(
-            child: IndexedStack(index: _selectedIndex, children: _screens!),
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: [for (final tab in tabs) tab.screen],
+            ),
           ),
         ],
       ),
@@ -292,12 +302,59 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
         backgroundColor: primary,
         selectedItemColor: Colors.white,
         unselectedItemColor: Colors.white70,
-        items: _buildNavItems(features),
+        // Same size selected and unselected: with six tabs, the default
+        // larger selected label truncated "Credencial" on a 390pt iPhone.
+        selectedFontSize: 12,
+        unselectedFontSize: 12,
+        items: [
+          for (var i = 0; i < tabs.length; i++) _buildNavItem(i, tabs[i].icon, tabs[i].label),
+        ],
       ),
     );
   }
 
-  Widget _buildStartupErrorScaffold(Color primary) {
+  /// Single source of truth for bottom-nav tab order and gating. Order:
+  /// Partidos · Tabla · Credencial (if enabled) · Noticias (if enabled)
+  /// · Equipos · Más. "Jugadores" is no longer a standalone tab — it moved
+  /// into "Más" (Gestión Torneo section, unconditional).
+  List<_NavTab> _buildTabs(TenantFeatures features, int temporadaId) {
+    return [
+      _NavTab(
+        label: 'Partidos',
+        icon: Icons.sports_soccer,
+        screen: MatchesScreen(temporadaId: temporadaId),
+      ),
+      const _NavTab(
+        label: 'Tabla',
+        icon: Icons.bar_chart,
+        screen: StandingsScreen(),
+      ),
+      if (features.credencial)
+        const _NavTab(
+          label: 'Credencial',
+          icon: Icons.badge,
+          screen: CredencialScreen(),
+        ),
+      if (features.newsTab)
+        const _NavTab(
+          label: 'Noticias',
+          icon: Icons.newspaper,
+          screen: NoticiasScreen(),
+        ),
+      const _NavTab(
+        label: 'Equipos',
+        icon: Icons.group,
+        screen: TeamsScreen(),
+      ),
+      const _NavTab(
+        label: 'Más',
+        icon: Icons.menu,
+        screen: MoreScreen(),
+      ),
+    ];
+  }
+
+  Widget _buildStartupErrorScaffold(Color primary, TenantFeatures features) {
     return Scaffold(
       backgroundColor: primary,
       body: Center(
@@ -332,23 +389,31 @@ class _MainNavigationState extends ConsumerState<MainNavigation> {
                       )
                     : const Text('Reintentar'),
               ),
+              // "Mi Credencial" works fully offline from its own cache and
+              // does not depend on temporadas/config — it's the one feature
+              // a player can still reach even when the startup data that the
+              // rest of the app needs has failed to load (e.g. a network
+              // that silently drops packets).
+              if (features.credencial) ...[
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CredencialScreen(),
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white),
+                  ),
+                  child: const Text('Mi credencial'),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
-  }
-
-  List<BottomNavigationBarItem> _buildNavItems(TenantFeatures features) {
-    int i = 0;
-    return [
-      _buildNavItem(i++, Icons.sports_soccer, 'Partidos'),
-      _buildNavItem(i++, Icons.bar_chart, 'Posiciones'),
-      if (features.newsTab) _buildNavItem(i++, Icons.newspaper, 'Noticias'),
-      _buildNavItem(i++, Icons.group, 'Equipos'),
-      _buildNavItem(i++, Icons.person, 'Jugadores'),
-      _buildNavItem(i++, Icons.menu, 'Más'),
-    ];
   }
 
   BottomNavigationBarItem _buildNavItem(int index, IconData icon, String label) {

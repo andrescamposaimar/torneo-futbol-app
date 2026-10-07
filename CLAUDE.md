@@ -49,7 +49,9 @@ The app uses a straightforward MVC-like architecture with three layers:
 
 ### Navigation
 
-`main.dart` bootstraps the app: runs weekly cache cleanup on startup, shows a splash screen, then loads `MainNavigation` — a bottom navigation with 5 tabs: Matches, Standings, Teams, Players, More.
+`main.dart` bootstraps the app: runs weekly cache cleanup on startup, shows a splash screen, then loads `MainNavigation` (`lib/app.dart`) — a bottom navigation built from a single tab list: Partidos, Tabla, Credencial (if `features.credencial`), Noticias (if `features.newsTab`), Equipos, Más. Players live in Más → Gestión Torneo. If startup data cannot load (e.g. offline with no cached seasons), the error screen still offers "Mi credencial", which works offline.
+
+Features are toggled per tenant in `lib/config/tenants/*.dart` (`TenantFeatures`): e.g. `prode`, `campeones`, `credencial`, `cambios` (Cambios de jugadores, still off while in development).
 
 ### Service Layer (`lib/services/`)
 
@@ -60,15 +62,15 @@ The app uses a straightforward MVC-like architecture with three layers:
 
 ### Screens (`lib/screens/`)
 
-12 screens, all StatefulWidgets managing their own state via `setState()`. Key screens:
+Most screens are StatefulWidgets managing their own state via `setState()`; the Prode, Cambios and Credencial features use Riverpod. Key screens:
 - `matches_screen.dart` — Played and upcoming matches with filters (date, zone, team); infinite scroll pagination.
 - `match_detail_screen.dart` — Match details, lineups, goalscorers.
 - `standings_screen.dart` — League tables filtered by season/zone.
 - `players_screen.dart` / `player_detail_screen.dart` — Player list with search, player stats and match history.
 - `teams_screen.dart` / `team_detail_screen.dart` — Team list and roster/match history.
-- `listas_screen.dart` — Waiting/reserve player lists (fetched from remote JSON).
 - `scorers_screen.dart` / `imbatibles_screen.dart` — Top scorers and goalkeeper clean-sheet stats.
-- `more_screen.dart` — Settings, regulations link, manual cache clear.
+- `credencial/credencial_screen.dart` — The player's virtual credential (photo, data, rotating verification code); works offline from its own cache. Backend: `wordpress_plugins/entre-redes-credencial`.
+- `more_screen.dart` — Sections: Prode, Estadísticas, Historia, Gestión Torneo (Jugadores; Cambios de jugadores only when `features.cambios` is on), Información, Anuarios, Notificaciones.
 
 ### Theme (`lib/theme.dart`)
 
