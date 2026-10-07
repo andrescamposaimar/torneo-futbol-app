@@ -615,6 +615,128 @@ class SolicitudesControllerTest extends TestCase {
     }
 
     /**
+     * THE test for Prerequisite 1 of the 0.1.17 brief: `shapeSolicitudRow()`
+     * must handle `reasignacion_arquero` EXPLICITLY, never by falling
+     * through an old binary `sustitucion ? … : …` branch that collapsed
+     * every other tipo into the `regreso` arm. Against that old branch, this
+     * row's `entra` would resolve to the GOAL plaza's own PERMANENT titular
+     * (the goalkeeper, self::PLAYER_ID — the plaza's `titular_player_id`
+     * seeded in setUp()) — the SAME player as `sale` — rather than the field
+     * titular actually moving into goal (888), and `movimientos` would not
+     * exist at all. See shapeSolicitudRow()'s own docblock for why
+     * top-level `sale`/`entra` instead degrade to "not recorded" for this
+     * tipo and `movimientos.arco`/`movimientos.campo` carry the real pairs.
+     */
+    public function test_listar_resuelve_movimientos_para_reasignacion_arquero(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [
+            self::PLAYER_ID => 'Arquero, Saliente', // the goalkeeper being replaced
+            888              => 'Titular, De Campo',  // moves from field plaza into goal
+            999              => 'Afuera, Jugador',     // fills the vacated field plaza
+        ];
+
+        $this->seedPuntaje( self::PLAYER_ID, 2.5 );
+        // 888 already seeded with 2.5 in setUp().
+        $this->seedPuntaje( 999, 2.5 );
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [
+            'id'                       => 31,
+            'tipo'                     => 'reasignacion_arquero',
+            'entrante_player_id'       => 888, // movement "arco"'s entrante
+            'saliente_player_id'       => self::PLAYER_ID, // movement "arco"'s sale — the goalkeeper
+            'plaza_campo_id'           => 777,
+            'entrante_campo_player_id' => 999, // movement "campo"'s entrante
+        ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $this->assertSame( 200, $response->get_status() );
+        $solicitud = $response->get_data()['solicitudes'][0];
+
+        // Top-level sale/entra degrade to "not recorded" — never a guessed
+        // single pair for a row that is actually two movements.
+        $this->assertSame( [ 'player_id' => null, 'nombre' => null, 'puntaje' => null ], $solicitud['sale'] );
+        $this->assertSame( [ 'player_id' => null, 'nombre' => null, 'puntaje' => null ], $solicitud['entra'] );
+
+        $this->assertNotNull( $solicitud['movimientos'] );
+        $this->assertSame(
+            [ 'player_id' => self::PLAYER_ID, 'nombre' => 'Arquero, Saliente', 'puntaje' => 2.5 ],
+            $solicitud['movimientos']['arco']['sale']
+        );
+        $this->assertSame(
+            [ 'player_id' => 888, 'nombre' => 'Titular, De Campo', 'puntaje' => 2.5 ],
+            $solicitud['movimientos']['arco']['entra']
+        );
+        // Movement "campo"'s sale is the SAME titular as movement "arco"'s
+        // entra — the one player leaving the field plaza, by construction
+        // of this tipo (see shapeSolicitudRow()'s own docblock).
+        $this->assertSame(
+            [ 'player_id' => 888, 'nombre' => 'Titular, De Campo', 'puntaje' => 2.5 ],
+            $solicitud['movimientos']['campo']['sale']
+        );
+        $this->assertSame(
+            [ 'player_id' => 999, 'nombre' => 'Afuera, Jugador', 'puntaje' => 2.5 ],
+            $solicitud['movimientos']['campo']['entra']
+        );
+
+        $wp_test_post_titles = [];
+    }
+
+    /** `movimientos` must be null for every tipo OTHER than `reasignacion_arquero`. */
+    public function test_listar_movimientos_es_null_para_sustitucion_y_regreso(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [ 'id' => 32, 'tipo' => 'sustitucion' ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $this->assertNull( $response->get_data()['solicitudes'][0]['movimientos'] );
+    }
+
+    /**
+     * An unrecognized FUTURE tipo must fail LOUDLY (a logged 500), never
+     * silently fall into whichever branch happens to compile — see
+     * listar()'s and shapeSolicitudRow()'s own docblocks.
+     */
+    public function test_listar_con_tipo_desconocido_falla_con_500_en_lugar_de_adivinar(): void {
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
+
+        $row = $this->baseRow( [ 'id' => 33, 'tipo' => 'tipo-del-futuro-no-contemplado' ] );
+
+        $repo = $this->createMock( SolicitudRepository::class );
+        $repo->method( 'listByEquipo' )->willReturn( [ $row ] );
+
+        $controller = $this->newController( $authorizer, $repo );
+        $response   = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
+            'season_id' => self::SEASON_ID,
+            'team_id'   => self::TEAM_ID,
+        ] ) );
+
+        $this->assertSame( 500, $response->get_status() );
+        $this->assertSame( 'error_interno', $response->get_data()['code'] );
+        $this->assertTrue( $this->eventLog->has( 'rest.solicitudes_listar_fallida' ) );
+    }
+
+    /**
      * Names and puntajes for a MULTI-ROW list must resolve in ONE batched
      * call per meta_key (`JugadorMetricasReader::resolveMuchos()`), never
      * one query per row/player — asserted here by counting the actual
