@@ -6,8 +6,10 @@ import '../../models/cambios_solicitud.dart';
 import '../../models/jugador.dart';
 import '../../providers/cambios_providers.dart';
 import '../../services/cambios_plantel_controller.dart';
+import '../../utils/cambios_arco_utils.dart';
 import '../../widgets/cambios_jugador_card.dart';
 import '../../widgets/loading_seccion.dart';
+import 'cambios_arco_titular_picker_screen.dart';
 import 'cambios_solicitar_screen.dart';
 import 'cambios_solicitudes_screen.dart';
 
@@ -69,7 +71,9 @@ class CambiosPlantelScreen extends ConsumerWidget {
     final notifier = ref.read(cambiosPlantelControllerProvider(scope).notifier);
 
     final jugadoresById = <int, Jugador>{};
+    var plazas = const <CambiosPlaza>[];
     if (state is CambiosPlantelLoaded) {
+      plazas = state.plazas;
       final rosterAsync = ref.watch(cambiosEquipoRosterProvider(teamId));
 
       // `hasValue` — not `valueOrNull` — is the gate: see this class's own
@@ -142,6 +146,21 @@ class CambiosPlantelScreen extends ConsumerWidget {
           ),
         ),
       ),
+      // "Cambiar por Titular" (Section 1, arco plaza only) — step 1 of the
+      // grouped goalkeeper-reassignment flow. Hands the picker screen the
+      // SAME plazas/jugadoresById this screen already resolved — no new
+      // fetch, see CambiosArcoTitularPickerScreen's own docblock.
+      onCambiarPorTitular: (plazaArco) => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CambiosArcoTitularPickerScreen(
+            seasonId: seasonId,
+            teamId: teamId,
+            plazaArco: plazaArco,
+            plazas: plazas,
+            jugadoresById: jugadoresById,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -164,6 +183,13 @@ class CambiosPlantelView extends StatelessWidget {
   final void Function(CambiosPlaza plaza) onPedirRegreso;
   final VoidCallback onVerSolicitudes;
 
+  /// "Cambiar por Titular" — present ONLY on the arco plaza's own Section 1
+  /// card (see [_TitularCard]'s own docblock for the exact gate). Required
+  /// (not optional) so every caller — this file's own container AND any
+  /// test pumping this view directly — must wire it explicitly, the same
+  /// discipline [onPedirCambio]/[onPedirRegreso] already follow.
+  final void Function(CambiosPlaza plaza) onCambiarPorTitular;
+
   const CambiosPlantelView({
     super.key,
     required this.state,
@@ -173,6 +199,7 @@ class CambiosPlantelView extends StatelessWidget {
     required this.onPedirCambio,
     required this.onPedirRegreso,
     required this.onVerSolicitudes,
+    required this.onCambiarPorTitular,
   });
 
   @override
@@ -184,12 +211,25 @@ class CambiosPlantelView extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Mi Plantel',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold),
+              // Expanded + ellipsis — not an unbounded Text — because this
+              // title sits in the SAME row as the "Mis pedidos" button: at a
+              // narrow width (320px) the two together exceeded the row's own
+              // width (a pre-existing overflow this feature's own
+              // narrow-width test exposed, unrelated to either button's own
+              // content). The button keeps its natural, already-short width;
+              // the title gives way first, same discipline every other
+              // name/puntaje row in this feature already follows (see
+              // `cambios_solicitar_screen.dart`'s own `_PlazaHeader`).
+              Expanded(
+                child: Text(
+                  'Mi Plantel',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
               ),
               TextButton.icon(
                 key: const Key('ver_solicitudes_button'),
@@ -213,6 +253,7 @@ class CambiosPlantelView extends StatelessWidget {
                     onRefresh: onRefresh,
                     onPedirCambio: onPedirCambio,
                     onPedirRegreso: onPedirRegreso,
+                    onCambiarPorTitular: onCambiarPorTitular,
                   ),
           },
         ),
@@ -299,6 +340,7 @@ class _PlantelList extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final void Function(CambiosPlaza plaza) onPedirCambio;
   final void Function(CambiosPlaza plaza) onPedirRegreso;
+  final void Function(CambiosPlaza plaza) onCambiarPorTitular;
 
   const _PlantelList({
     required this.plazas,
@@ -306,6 +348,7 @@ class _PlantelList extends StatelessWidget {
     required this.onRefresh,
     required this.onPedirCambio,
     required this.onPedirRegreso,
+    required this.onCambiarPorTitular,
   });
 
   @override
@@ -329,6 +372,7 @@ class _PlantelList extends StatelessWidget {
               plaza: plaza,
               jugador: jugadoresById[plaza.titularPlayerId],
               onPedirCambio: onPedirCambio,
+              onCambiarPorTitular: onCambiarPorTitular,
             ),
           if (cambiosActivos.isNotEmpty) ...[
             Padding(
@@ -364,21 +408,30 @@ class _PlantelList extends StatelessWidget {
 ///     so offering HIM an action here would be wrong; see [_CambioActivoCard]
 ///     for the occupant's own actions.
 ///   - The titular himself occupies the plaza: renders normally, with
-///     "Pedir cambio" (a sustitucion on this plaza).
+///     "Pedir cambio" (a sustitucion on this plaza) and, ONLY when this is
+///     the goalkeeper's own plaza (`esPosicionArqueroTitular(jugador?.
+///     posicion)` — see that function's own docblock), a second action,
+///     "Cambiar por Titular" — step 1 of the grouped goalkeeper-
+///     reassignment flow ("Cambiar por Titular" never appears on a field
+///     plaza's card).
 class _TitularCard extends StatelessWidget {
   final CambiosPlaza plaza;
   final Jugador? jugador;
   final void Function(CambiosPlaza plaza) onPedirCambio;
+  final void Function(CambiosPlaza plaza) onCambiarPorTitular;
 
   const _TitularCard({
     required this.plaza,
     required this.jugador,
     required this.onPedirCambio,
+    required this.onCambiarPorTitular,
   });
 
   @override
   Widget build(BuildContext context) {
     final bajaPorCambio = !plaza.esTitularElOcupante && plaza.ocupantePlayerId != null;
+    final disponibleParaAccion = !plaza.cerrada && !bajaPorCambio;
+    final esArco = esPosicionArqueroTitular(jugador?.posicion);
 
     return CambiosJugadorCard(
       key: Key('plaza_card_${plaza.plazaId}'),
@@ -396,11 +449,17 @@ class _TitularCard extends StatelessWidget {
           ),
       ],
       actions: [
-        if (!plaza.cerrada && !bajaPorCambio)
+        if (disponibleParaAccion)
           OutlinedButton(
             key: Key('pedir_cambio_${plaza.plazaId}'),
             onPressed: () => onPedirCambio(plaza),
             child: const Text('Pedir cambio'),
+          ),
+        if (disponibleParaAccion && esArco)
+          OutlinedButton(
+            key: Key('cambiar_por_titular_${plaza.plazaId}'),
+            onPressed: () => onCambiarPorTitular(plaza),
+            child: const Text('Cambiar por Titular'),
           ),
       ],
     );
