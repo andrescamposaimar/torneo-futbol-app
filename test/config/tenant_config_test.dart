@@ -23,6 +23,16 @@ void main() {
       expect(features.newsTab, isTrue);
       expect(features.ads, isTrue);
     });
+
+    test('cambios defaults to false', () {
+      const features = TenantFeatures();
+      expect(features.cambios, isFalse);
+    });
+
+    test('cambios can be set to true', () {
+      const features = TenantFeatures(cambios: true);
+      expect(features.cambios, isTrue);
+    });
   });
 
   group('TenantIntegrations', () {
@@ -98,6 +108,14 @@ void main() {
       expect(auth.appleRedirectUri, isNotNull);
       expect(auth.appleRedirectUri, contains('entreredespadres.com.ar'));
     });
+
+    test('has cambios: false (still in development)', () {
+      expect(marianistaTenant.features.cambios, isFalse);
+    });
+
+    test('has solicitudCambioUrl: null (hidden for the launch)', () {
+      expect(marianistaTenant.documents.solicitudCambioUrl, isNull);
+    });
   });
 
   group('facundoTenant', () {
@@ -107,6 +125,10 @@ void main() {
 
     test('has prodeAuth: null', () {
       expect(facundoTenant.integrations.prodeAuth, isNull);
+    });
+
+    test('has cambios: false (still in development)', () {
+      expect(facundoTenant.features.cambios, isFalse);
     });
   });
 

@@ -43,6 +43,14 @@ class TenantFeatures {
   /// player's behalf until the upload UX ships (slice 4).
   final bool credencial;
 
+  /// Whether the "Cambios de jugadores" (player substitution requests)
+  /// feature is enabled for this tenant. Defaults to false — the feature is
+  /// still in development and must stay hidden from the Gestión Torneo
+  /// section until explicitly turned on, independent of [prode] (which only
+  /// gates the shared auth infrastructure "Cambios de jugadores" depends on;
+  /// both flags must be true for the tile to show).
+  final bool cambios;
+
   const TenantFeatures({
     this.waitingLists = false,
     this.newsTab = true,
@@ -50,6 +58,7 @@ class TenantFeatures {
     this.prode = false,
     this.campeones = false,
     this.credencial = false,
+    this.cambios = false,
   });
 }
 
