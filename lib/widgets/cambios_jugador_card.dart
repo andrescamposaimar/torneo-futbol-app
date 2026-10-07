@@ -17,10 +17,10 @@ import '../utils/puntaje_utils.dart';
 ///
 /// This is its OWN widget, not a reuse of `_buildPlayerCard` — that one is
 /// private to `team_detail_screen.dart`, which this change does not touch.
-/// It is now the FOURTH copy of this same card shape (already duplicated
-/// across `team_detail_screen.dart`, `players_screen.dart` and
-/// `listas_screen.dart`); extracting all four into one shared widget is a
-/// separate, behaviour-preserving change left for its own PR.
+/// It is now the THIRD copy of this same card shape (already duplicated
+/// across `team_detail_screen.dart` and `players_screen.dart`); extracting
+/// all three into one shared widget is a separate, behaviour-preserving
+/// change left for its own PR.
 class CambiosJugadorCard extends StatelessWidget {
   /// The player this card represents — used by the caller to look up
   /// [jugador] in whatever map it resolved photos/posiciones/puntajes into.

@@ -1,23 +1,17 @@
-import 'dart:typed_data';
-
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_core_platform_interface/test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
-import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/config/tenant_config.dart';
 import 'package:torneo_futbol_app/config/tenant_provider.dart';
-import 'package:torneo_futbol_app/providers/credencial_providers.dart';
 import 'package:torneo_futbol_app/providers/prode_providers.dart';
 import 'package:torneo_futbol_app/providers/service_providers.dart';
 import 'package:torneo_futbol_app/screens/anuarios_screen.dart';
 import 'package:torneo_futbol_app/screens/campeones_screen.dart';
-import 'package:torneo_futbol_app/screens/credencial/credencial_screen.dart';
 import 'package:torneo_futbol_app/screens/more_screen.dart';
-import 'package:torneo_futbol_app/services/credencial_photo_store.dart';
+import 'package:torneo_futbol_app/screens/players_screen.dart';
 import 'package:torneo_futbol_app/services/i_api_service.dart';
 import 'package:torneo_futbol_app/services/i_cache_service.dart';
 import 'package:torneo_futbol_app/services/notification_service.dart';
@@ -27,26 +21,6 @@ import 'package:torneo_futbol_app/services/prode_auth_repository.dart';
 import 'package:torneo_futbol_app/services/prode_auth_state.dart';
 import 'package:torneo_futbol_app/services/prode_ranking_controller.dart';
 import 'package:torneo_futbol_app/widgets/prode_identity_card.dart';
-
-// ---------------------------------------------------------------------------
-// A CredencialPhotoStore with no real filesystem access — see the same-named
-// class in credencial_screen_test.dart for why real dart:io Directory calls
-// inside testWidgets are avoided in this sandbox.
-// ---------------------------------------------------------------------------
-
-class _FakePhotoStore implements CredencialPhotoStore {
-  @override
-  Future<Uint8List?> read(int photoId) async => null;
-
-  @override
-  Future<void> write(Uint8List bytes, int photoId) async {}
-
-  @override
-  Future<void> deleteAllExcept(int? keepPhotoId) async {}
-
-  @override
-  Future<void> wipe() async {}
-}
 
 // ---------------------------------------------------------------------------
 // Minimal fakes so tapping into CampeonesScreen (pushed from the Historia
@@ -143,6 +117,7 @@ TenantConfig _makeTenant({
   bool prode = true,
   bool campeones = false,
   bool credencial = false,
+  bool cambios = false,
   List<TenantAnuario> anuarios = const [],
   String? solicitudCambioUrl,
   bool waitingLists = false,
@@ -164,6 +139,7 @@ TenantConfig _makeTenant({
         waitingLists: waitingLists,
         campeones: campeones,
         credencial: credencial,
+        cambios: cambios,
       ),
       integrations: const TenantIntegrations(prodeAuth: _kProdeConfig),
       documents: TenantDocuments(
@@ -184,6 +160,7 @@ Future<void> _pump(
   bool prode = true,
   bool campeones = false,
   bool credencial = false,
+  bool cambios = false,
   List<TenantAnuario> anuarios = const [],
   String? solicitudCambioUrl,
   bool waitingLists = false,
@@ -195,6 +172,7 @@ Future<void> _pump(
     prode: prode,
     campeones: campeones,
     credencial: credencial,
+    cambios: cambios,
     anuarios: anuarios,
     solicitudCambioUrl: solicitudCambioUrl,
     waitingLists: waitingLists,
@@ -280,6 +258,12 @@ void main() {
     testWidgets(
         'AC-52c: anuarios non-empty → "Anuarios" tile present and navigates to AnuariosScreen',
         (tester) async {
+      // Tall viewport: Gestión Torneo (always shown now) pushes Anuarios
+      // further down than the default 600pt-tall test surface.
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
       final anuarios = [
         const TenantAnuario(label: 'Anuario 2023', url: 'https://example.com/2023.pdf'),
       ];
@@ -334,11 +318,11 @@ void main() {
       expect(notifPos, greaterThan(goleadoresPos));
     });
 
-    // AC-29 (locked: HIDE): Gestión Torneo card absent when no tiles visible
+    // Gestión Torneo: always shown now — Jugadores is unconditional, and
+    // Lista de Espera / Solicitud de cambio no longer exist or are hidden.
     testWidgets(
-        'AC-29: Gestión Torneo card hidden when zero visible tiles',
+        'Gestión Torneo: card always present, Jugadores tile always shown',
         (tester) async {
-      // solicitudCambioUrl == null AND waitingLists == false → whole card hidden
       await _pump(
         tester,
         solicitudCambioUrl: null,
@@ -346,17 +330,57 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
-      expect(find.text('Gestión Torneo'), findsNothing);
+      expect(find.text('Gestión Torneo'), findsOneWidget);
+      expect(find.text('Jugadores'), findsOneWidget);
+      expect(find.text('Lista de Espera'), findsNothing);
+      expect(find.text('Solicitud de cambio de jugador'), findsNothing);
+      expect(find.text('Cambios de jugadores'), findsNothing);
     });
 
-    // AC-29 inverse: card present when at least one tile is visible
-    testWidgets(
-        'AC-29: Gestión Torneo card present when waitingLists enabled',
+    testWidgets('Gestión Torneo: tapping Jugadores pushes PlayersScreen',
         (tester) async {
-      await _pump(tester, waitingLists: true);
+      await _pump(tester);
 
-      expect(find.text('Gestión Torneo'), findsOneWidget);
-      expect(find.text('Lista de Espera'), findsOneWidget);
+      await tester.tap(find.text('Jugadores'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byType(PlayersScreen), findsOneWidget);
+    });
+
+    // cambios=false → "Cambios de jugadores" stays hidden even with prode on
+    // (the feature is still in development).
+    testWidgets(
+        'Gestión Torneo: cambios=false → "Cambios de jugadores" absent even with prode on',
+        (tester) async {
+      await _pump(tester, prode: true, cambios: false);
+
+      expect(find.text('Jugadores'), findsOneWidget);
+      expect(find.text('Cambios de jugadores'), findsNothing);
+    });
+
+    // cambios=true but prode=false → still hidden (shared auth dependency).
+    testWidgets(
+        'Gestión Torneo: cambios=true, prode=false → "Cambios de jugadores" absent',
+        (tester) async {
+      await _pump(tester, prode: false, cambios: true);
+
+      expect(find.text('Cambios de jugadores'), findsNothing);
+    });
+
+    // cambios=true AND prode=true → Jugadores then Cambios de jugadores, in order.
+    testWidgets(
+        'Gestión Torneo: cambios=true, prode=true → Jugadores then Cambios de jugadores',
+        (tester) async {
+      await _pump(tester, prode: true, cambios: true);
+
+      expect(find.text('Jugadores'), findsOneWidget);
+      expect(find.text('Cambios de jugadores'), findsOneWidget);
+
+      final jugadoresPos = tester.getTopLeft(find.text('Jugadores')).dy;
+      final cambiosPos =
+          tester.getTopLeft(find.text('Cambios de jugadores')).dy;
+      expect(cambiosPos, greaterThan(jugadoresPos));
     });
 
     // AC-06: full section order — each section strictly below the previous
@@ -380,7 +404,7 @@ void main() {
 
       final prode = dyOf('Prode Chami');
       final stats = dyOf('Goleadores');
-      final gestion = dyOf('Lista de Espera');
+      final gestion = dyOf('Jugadores');
       final informacion = dyOf('Reglamento');
       final anuarios = dyOf('Anuarios');
       final notificaciones = dyOf('Avisos del torneo');
@@ -407,63 +431,6 @@ void main() {
 
       expect(find.text('Goleadores'), findsOneWidget);
       expect(find.text('Imbatibles'), findsOneWidget);
-    });
-  });
-
-  group('MoreScreen · Mi Credencial entry point (flag-gated)', () {
-    // The flag stays false in both tenants through slice 3b — the tile must
-    // be fully absent, no crash (mirrors the campeones=false convention).
-    testWidgets('credencial=false → Credencial section and tile absent',
-        (tester) async {
-      await _pump(tester, credencial: false);
-
-      expect(tester.takeException(), isNull);
-      expect(find.text('Credencial'), findsNothing);
-      expect(find.text('Mi Credencial'), findsNothing);
-    });
-
-    testWidgets('credencial=true → Credencial section and tile present',
-        (tester) async {
-      await _pump(tester, credencial: true);
-
-      expect(find.text('Credencial'), findsOneWidget);
-      expect(find.text('Mi Credencial'), findsOneWidget);
-    });
-
-    testWidgets('credencial=true → tapping the tile pushes CredencialScreen',
-        (tester) async {
-      // CredencialScreen.initState() calls open(), which reads the real
-      // credencialRepositoryProvider/credencialPhotoStoreProvider chain —
-      // fake the secure storage platform and avoid real dart:io Directory
-      // access (see _FakePhotoStore's own docblock).
-      FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({});
-      final tenantCfg = _makeTenant(credencial: true);
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            tenantConfigProvider.overrideWithValue(tenantCfg),
-            notificationServiceProvider.overrideWithValue(_FakeNotificationService()),
-            prodeApiServiceProvider.overrideWithValue(_FakeProdeApiService()),
-            prodeAuthControllerProvider.overrideWith(
-              (ref) => _StubAuthController(const ProdeAuthUnauthenticated()),
-            ),
-            prodeRankingControllerProvider.overrideWith((ref) => _StubRankingController()),
-            apiServiceProvider.overrideWithValue(_EmptyCampeonesApiService()),
-            cacheServiceProvider.overrideWithValue(_NoopCacheService()),
-            credencialPhotoStoreProvider.overrideWithValue(_FakePhotoStore()),
-          ],
-          child: const MaterialApp(home: MoreScreen()),
-        ),
-      );
-      await tester.pump();
-
-      await tester.tap(find.text('Mi Credencial'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(find.byType(CredencialScreen), findsOneWidget);
-      expect(tester.takeException(), isNull);
     });
   });
 
@@ -517,7 +484,7 @@ void main() {
 
       final stats = dyOf('Goleadores');
       final historia = dyOf('Copa Chaminade');
-      final gestion = dyOf('Lista de Espera');
+      final gestion = dyOf('Jugadores');
       final notificaciones = dyOf('Avisos del torneo');
 
       expect(historia, greaterThan(stats));

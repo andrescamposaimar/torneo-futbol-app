@@ -30,6 +30,7 @@ const facundoTenant = TenantConfig(
     prode: false,
     campeones: false,
     credencial: false,
+    cambios: false,
   ),
   // appsScriptUrl is null because waitingLists=false for Facundo
   // prodeAuth is null because prode=false for Facundo

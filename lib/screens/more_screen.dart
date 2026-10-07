@@ -13,8 +13,7 @@ import '../widgets/prode_identity_card.dart';
 import 'anuarios_screen.dart';
 import 'cambios/cambios_auth_gate.dart';
 import 'campeones_screen.dart';
-import 'credencial/credencial_screen.dart';
-import 'listas_screen.dart';
+import 'players_screen.dart';
 import 'prode/prode_auth_gate.dart';
 import 'scorers_screen.dart';
 import 'imbatibles_screen.dart';
@@ -185,44 +184,6 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                     ),
                   ),
                 ),
-                // Captain-only: authenticates with the same Prode session
-                // (see CambiosAuthGate's own docblock) — gated on the same
-                // features.prode flag since it depends on that same auth
-                // infrastructure being configured for this tenant.
-                _tile(
-                  context,
-                  'Cambios de jugadores',
-                  Icons.swap_horizontal_circle,
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const CambiosAuthGate(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-          ],
-
-          // 2b. Credencial (feature-flagged; stays off through slice 3b —
-          // flipped tenant-by-tenant only once the plugin is deployed and
-          // manually verified end to end per slice 4).
-          if (features.credencial) ...[
-            _SectionCard(
-              title: 'Credencial',
-              children: [
-                _tile(
-                  context,
-                  'Mi Credencial',
-                  Icons.badge,
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const CredencialScreen(),
-                    ),
-                  ),
-                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -283,11 +244,21 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             const SizedBox(height: 12),
           ],
 
-          // 4. Gestión Torneo (card hidden when no tiles are visible — AC-28, AC-29)
-          if (docs.solicitudCambioUrl != null || features.waitingLists) ...[
+          // 4. Gestión Torneo (always shown — Jugadores is unconditional)
           _SectionCard(
             title: 'Gestión Torneo',
             children: [
+              _tile(
+                context,
+                'Jugadores',
+                Icons.people_alt,
+                () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const PlayersScreen(),
+                  ),
+                ),
+              ),
               if (docs.solicitudCambioUrl != null)
                 _tile(
                   context,
@@ -302,22 +273,24 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                     ),
                   ),
                 ),
-              if (features.waitingLists)
+              // Still in development — hidden until features.cambios ships;
+              // also depends on features.prode for its shared auth
+              // infrastructure (see CambiosAuthGate's own docblock).
+              if (features.prode && features.cambios)
                 _tile(
                   context,
-                  'Lista de Espera',
-                  Icons.people_alt,
+                  'Cambios de jugadores',
+                  Icons.swap_horizontal_circle,
                   () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
-                      builder: (_) => const ListasScreen(),
+                      builder: (_) => const CambiosAuthGate(),
                     ),
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 12),
-          ],
 
           // 5. Información (shown only when at least one URL is present — AC-30)
           if (docs.reglamentoUrl != null || docs.modalidadUrl != null) ...[

@@ -26,6 +26,9 @@ const marianistaTenant = TenantConfig(
     // On without the in-app photo upload flow: the comisión loads the
     // player's photo until the upload UX ships (slice 4).
     credencial: true,
+    // Still in development — must stay hidden from Gestión Torneo until the
+    // feature is ready to ship.
+    cambios: false,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
@@ -52,8 +55,8 @@ const marianistaTenant = TenantConfig(
         'https://entreredespadres.com.ar/wp-content/uploads/2026/REGLAMENTO-CHAMI-2026.pdf',
     modalidadUrl:
         'https://entreredespadres.com.ar/wp-content/uploads/2026/modalidad_torneo_2026.pdf',
-    solicitudCambioUrl:
-        'https://entreredespadres.com.ar/jugadores/solicitud-de-cambios',
+    // solicitudCambioUrl is intentionally unset, so that tile stays hidden:
+    // "Cambios de jugadores" (features.cambios, still off) will replace it.
     anuarios: [
       TenantAnuario(
         label: 'Anuario 2022',
