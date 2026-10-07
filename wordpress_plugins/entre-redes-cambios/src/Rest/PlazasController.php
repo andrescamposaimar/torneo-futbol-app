@@ -232,8 +232,21 @@ class PlazasController {
      *
      * Response 200: { plazas: [ { plaza_id, titular_player_id,
      *         ocupante_player_id, es_titular_el_ocupante, cerrada,
-     *         puntaje_techo, fechas_faltantes_liberacion,
+     *         es_arco, puntaje_techo, fechas_faltantes_liberacion,
      *         fechas_faltantes_liberacion_indeterminado }, ... ] }
+     *
+     * `es_arco` is the STORED `cambios_plaza.es_arco` column (0.1.13), read
+     * as a plain fact — see that column's own docblock on
+     * `Migrations\InitialSchema`, "ADDED IN 0.1.13, A STORED FACT, NEVER A
+     * DERIVATION". This endpoint never re-derives it from the titular's
+     * `sp_position` (this method has no `PosicionResolver` dependency at
+     * all — see `listarCandidatos()` for the one handler that does need
+     * one, for an unrelated reason). Added in 0.1.18 so the Flutter client
+     * could stop inferring "is this the goal plaza?" from a position NAME
+     * string client-side, which would have silently drifted from this same
+     * column the moment a `sp_position` term was renamed — exactly the
+     * class of defect 0.1.13/0.1.14's own backfill+invariant-check existed
+     * to remove server-side.
      *
      * `puntaje_techo` is the plaza's own ceiling, as a decimal (e.g. `2.5`)
      * — added so the captain's "Pedir cambio" screen can DISPLAY the
@@ -722,6 +735,12 @@ class PlazasController {
             'es_titular_el_ocupante'                      => null !== $vigente
                 && (int) $vigente['player_id'] === (int) $plaza['titular_player_id'],
             'cerrada'                                      => null !== $plaza['closed_at'],
+            // The STORED column, never a position-name derivation — see
+            // this method's own docblock, "`es_arco` is the STORED...".
+            // `?? false` only guards a test fixture that predates this
+            // field; every real row from `listPlazasByEquipo()`'s
+            // `SELECT *` already carries it (`NOT NULL DEFAULT 0`).
+            'es_arco'                                      => (bool) ( $plaza['es_arco'] ?? false ),
             'puntaje_techo'                                => Puntaje::fromHalfPoints( (int) $plaza['puntaje_techo'] )->toDecimal(),
             'fechas_faltantes_liberacion'                  => $fechasFaltantes,
             'fechas_faltantes_liberacion_indeterminado'    => $indeterminado,
