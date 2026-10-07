@@ -6,7 +6,6 @@ import '../../models/cambios_solicitud.dart';
 import '../../models/jugador.dart';
 import '../../providers/cambios_providers.dart';
 import '../../services/cambios_plantel_controller.dart';
-import '../../utils/cambios_arco_utils.dart';
 import '../../widgets/cambios_jugador_card.dart';
 import '../../widgets/loading_seccion.dart';
 import 'cambios_arco_titular_picker_screen.dart';
@@ -409,11 +408,12 @@ class _PlantelList extends StatelessWidget {
 ///     for the occupant's own actions.
 ///   - The titular himself occupies the plaza: renders normally, with
 ///     "Pedir cambio" (a sustitucion on this plaza) and, ONLY when this is
-///     the goalkeeper's own plaza (`esPosicionArqueroTitular(jugador?.
-///     posicion)` — see that function's own docblock), a second action,
-///     "Cambiar por Titular" — step 1 of the grouped goalkeeper-
-///     reassignment flow ("Cambiar por Titular" never appears on a field
-///     plaza's card).
+///     the goalkeeper's own plaza (`plaza.esArco` — the STORED
+///     `cambios_plaza.es_arco` column, see that field's own docblock on
+///     [CambiosPlaza]; NEVER a client-side guess from the titular's
+///     position name), a second action, "Cambiar por Titular" — step 1 of
+///     the grouped goalkeeper-reassignment flow ("Cambiar por Titular"
+///     never appears on a field plaza's card).
 class _TitularCard extends StatelessWidget {
   final CambiosPlaza plaza;
   final Jugador? jugador;
@@ -431,7 +431,6 @@ class _TitularCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bajaPorCambio = !plaza.esTitularElOcupante && plaza.ocupantePlayerId != null;
     final disponibleParaAccion = !plaza.cerrada && !bajaPorCambio;
-    final esArco = esPosicionArqueroTitular(jugador?.posicion);
 
     return CambiosJugadorCard(
       key: Key('plaza_card_${plaza.plazaId}'),
@@ -455,7 +454,7 @@ class _TitularCard extends StatelessWidget {
             onPressed: () => onPedirCambio(plaza),
             child: const Text('Pedir cambio'),
           ),
-        if (disponibleParaAccion && esArco)
+        if (disponibleParaAccion && plaza.esArco)
           OutlinedButton(
             key: Key('cambiar_por_titular_${plaza.plazaId}'),
             onPressed: () => onCambiarPorTitular(plaza),

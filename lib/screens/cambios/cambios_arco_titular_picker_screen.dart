@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../models/cambios_plaza.dart';
 import '../../models/cambios_solicitud.dart';
 import '../../models/jugador.dart';
-import '../../utils/cambios_arco_utils.dart';
 import '../../widgets/cambios_jugador_card.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import 'cambios_solicitar_screen.dart';
@@ -21,9 +20,11 @@ import 'cambios_solicitar_screen.dart';
 ///
 /// *** ELIGIBILITY ***
 /// A titular is listed here when his OWN plaza is:
-///   - a FIELD plaza (`!esPosicionArqueroTitular(...)` on his own resolved
-///     position) — this is what excludes the goalkeeper himself, since his
-///     plaza is the one [plazaArco] already names;
+///   - a FIELD plaza (`!p.esArco` — the STORED `cambios_plaza.es_arco`
+///     column, see [CambiosPlaza.esArco]'s own docblock; NEVER a
+///     client-side guess from the titular's position name) — this is what
+///     excludes the goalkeeper himself, since his plaza is the one
+///     [plazaArco] already names;
 ///   - currently occupied by HIMSELF (`esTitularElOcupante`) — a titular
 ///     who is NOT his own plaza's occupant is already out on a cambio
 ///     elsewhere, so he is not "available" to be moved anywhere;
@@ -48,7 +49,7 @@ class CambiosArcoTitularPickerScreen extends StatelessWidget {
   List<CambiosPlaza> get _elegibles => plazas.where((p) {
         if (p.cerrada) return false;
         if (!p.esTitularElOcupante) return false;
-        return !esPosicionArqueroTitular(jugadoresById[p.titularPlayerId]?.posicion);
+        return !p.esArco;
       }).toList(growable: false);
 
   @override

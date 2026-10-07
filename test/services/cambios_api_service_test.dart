@@ -108,6 +108,7 @@ void main() {
                 'ocupante_nombre': 'Pedro Gómez',
                 'es_titular_el_ocupante': false,
                 'cerrada': false,
+                'es_arco': true,
                 'fechas_faltantes_liberacion': 2,
                 'fechas_faltantes_liberacion_indeterminado': false,
               },
@@ -122,6 +123,7 @@ void main() {
       expect(plazas.single.plazaId, 10);
       expect(plazas.single.titularNombre, 'Juan Pérez');
       expect(plazas.single.regresoElegible, isFalse); // 2 fechas faltantes
+      expect(plazas.single.esArco, isTrue);
     });
 
     test('fetchCandidatos() parses the candidatos list, foto_url, and the X-WP-Total header',

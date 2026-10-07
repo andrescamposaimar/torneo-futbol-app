@@ -20,6 +20,7 @@ CambiosPlaza _plaza({
   String titularNombre = 'Titular',
   bool esTitularElOcupante = true,
   bool cerrada = false,
+  bool esArco = false,
   double puntajeTecho = 3.0,
 }) {
   return CambiosPlaza(
@@ -30,6 +31,7 @@ CambiosPlaza _plaza({
     ocupanteNombre: esTitularElOcupante ? titularNombre : 'Otro Jugador',
     esTitularElOcupante: esTitularElOcupante,
     cerrada: cerrada,
+    esArco: esArco,
     puntajeTecho: puntajeTecho,
   );
 }
@@ -105,7 +107,8 @@ Widget _wrapWithProviders(Widget child) {
 }
 
 void main() {
-  final plazaArco = _plaza(plazaId: 1, titularPlayerId: 100, titularNombre: 'El Arquero');
+  final plazaArco =
+      _plaza(plazaId: 1, titularPlayerId: 100, titularNombre: 'El Arquero', esArco: true);
   final plazaCampoA = _plaza(plazaId: 2, titularPlayerId: 101, titularNombre: 'Defensor Uno');
   final plazaCampoB = _plaza(plazaId: 3, titularPlayerId: 102, titularNombre: 'Defensor Dos');
 
@@ -116,7 +119,8 @@ void main() {
       };
 
   group('CambiosArcoTitularPickerScreen — eligibilidad', () {
-    testWidgets('lists the field titulares and excludes the goalkeeper himself', (tester) async {
+    testWidgets('lists the field titulares (esArco: false) and excludes the goalkeeper\'s own '
+        'plaza (esArco: true)', (tester) async {
       await tester.pumpWidget(_wrap(CambiosArcoTitularPickerScreen(
         seasonId: 7,
         teamId: 1,
@@ -128,8 +132,38 @@ void main() {
       expect(find.byKey(const Key('arco_titular_picker_list')), findsOneWidget);
       expect(find.byKey(const Key('arco_titular_card_2')), findsOneWidget);
       expect(find.byKey(const Key('arco_titular_card_3')), findsOneWidget);
-      // The goalkeeper's own plaza (posicion 'Arquero') never appears here.
+      // The goalkeeper's own plaza (esArco: true) never appears here.
       expect(find.byKey(const Key('arco_titular_card_1')), findsNothing);
+    });
+
+    /// THE test that matters (see this slice's own task brief): a plaza
+    /// whose titular's POSITION reads "Arquero" but whose stored `es_arco`
+    /// is `false` must still be OFFERED as an eligible field titular — the
+    /// eligibility filter must consult `plaza.esArco` alone, never fall back
+    /// to a position-name guess for any plaza, including this one.
+    testWidgets(
+        'does NOT fall back to the titular\'s position name: a plaza with posicion '
+        '"Arquero" but esArco: false IS still offered as an eligible field titular',
+        (tester) async {
+      final plazaCampoConPosicionArquero = _plaza(
+        plazaId: 6,
+        titularPlayerId: 105,
+        titularNombre: 'Arquero Suplente De Campo',
+        esArco: false,
+      );
+
+      await tester.pumpWidget(_wrap(CambiosArcoTitularPickerScreen(
+        seasonId: 7,
+        teamId: 1,
+        plazaArco: plazaArco,
+        plazas: [plazaArco, plazaCampoConPosicionArquero],
+        jugadoresById: {
+          ...jugadoresById(),
+          105: _jugador(id: 105, posicion: 'Arquero'),
+        },
+      )));
+
+      expect(find.byKey(const Key('arco_titular_card_6')), findsOneWidget);
     });
 
     testWidgets('excludes a titular who is not currently his own plaza\'s occupant', (tester) async {
