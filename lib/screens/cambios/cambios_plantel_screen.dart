@@ -449,16 +449,16 @@ class _TitularCard extends StatelessWidget {
       ],
       actions: [
         if (disponibleParaAccion)
-          OutlinedButton(
+          CambiosAccionButton(
             key: Key('pedir_cambio_${plaza.plazaId}'),
             onPressed: () => onPedirCambio(plaza),
-            child: const Text('Pedir cambio'),
+            label: 'Pedir cambio',
           ),
         if (disponibleParaAccion && plaza.esArco)
-          OutlinedButton(
+          CambiosAccionButton(
             key: Key('cambiar_por_titular_${plaza.plazaId}'),
             onPressed: () => onCambiarPorTitular(plaza),
-            child: const Text('Cambiar por Titular'),
+            label: 'Cambiar por Titular',
           ),
       ],
     );
@@ -527,10 +527,10 @@ class _CambioActivoCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              OutlinedButton(
+              CambiosAccionButton(
                 key: Key('confirmar_fin_cambio_${plaza.plazaId}'),
                 onPressed: regresoListo ? () => onPedirRegreso(plaza) : null,
-                child: const Text('Confirmar fin del cambio'),
+                label: 'Confirmar fin del cambio',
               ),
               if (motivoNoListo != null)
                 Padding(
@@ -549,10 +549,11 @@ class _CambioActivoCard extends StatelessWidget {
                 ),
             ],
           ),
-          TextButton(
+          CambiosAccionButton(
             key: Key('cambiar_este_cambio_${plaza.plazaId}'),
             onPressed: () => onPedirCambio(plaza),
-            child: const Text('Cambiar este cambio'),
+            label: 'Cambiar este cambio',
+            secundaria: true,
           ),
         ],
       ],
