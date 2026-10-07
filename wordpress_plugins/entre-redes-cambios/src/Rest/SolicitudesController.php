@@ -262,11 +262,13 @@ class SolicitudesController {
      *         entrante_player_id, fecha_id, estado, solicitada_at,
      *         resuelta_at, nota, dictamen: { procede, motivos },
      *         sale: { player_id, nombre, puntaje },
-     *         entra: { player_id, nombre, puntaje } }, ... ] } — every
-     *         solicitud the team has ever made, in ANY estado (see
-     *         SolicitudRepository::listByEquipo()'s own docblock for why
-     *         this is NOT the same subset listPendientes()/listAprobadas()
-     *         expose to the process owner).
+     *         entra: { player_id, nombre, puntaje },
+     *         movimientos: null | { arco: {sale, entra}, campo: {sale,
+     *         entra} } }, ... ] } — every solicitud the team has ever made,
+     *         in ANY estado (see SolicitudRepository::listByEquipo()'s own
+     *         docblock for why this is NOT the same subset
+     *         listPendientes()/listAprobadas() expose to the process
+     *         owner).
      *
      * `dictamen` here is always the ORIGINAL snapshot (`dictamen_original`)
      * — what was true the moment the captain made the request — never
@@ -288,6 +290,16 @@ class SolicitudesController {
      *   never a per-row `findPlaza()` call); `sale` is the SAME stored
      *   `saliente_player_id` as a `sustitucion` — the suplente the titular
      *   would be displacing.
+     * - `reasignacion_arquero`: a SINGLE `sale`/`entra` pair cannot honestly
+     *   represent this tipo — it is TWO movements (see
+     *   `Solicitudes\SolicitudRepository`'s own class docblock, "GROUPED
+     *   REQUESTS") — so `sale`/`entra` both degrade to "not recorded"
+     *   (`shapeLado(null)`) and `movimientos.arco` / `movimientos.campo`
+     *   carry the real pairs instead, each shaped exactly like `sale`/
+     *   `entra` above. `movimientos` is `null` for every other tipo. See
+     *   `shapeSolicitudRow()`'s own docblock for the full reasoning and for
+     *   why an unrecognized FUTURE tipo throws here rather than silently
+     *   falling into one of these three branches.
      *
      * *** BATCHED, NEVER ONE QUERY PER ROW ***
      * Every player id this response needs a name or a puntaje for (every
@@ -352,13 +364,43 @@ class SolicitudesController {
             $playerIds         = [];
 
             foreach ( $rows as $row ) {
-                $id = (int) $row['id'];
+                $id   = (int) $row['id'];
+                $tipo = (string) $row['tipo'];
 
                 $saleId = null !== $row['saliente_player_id'] ? (int) $row['saliente_player_id'] : null;
 
-                $entraId = SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo']
-                    ? ( null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null )
-                    : ( $titularPorPlaza[ (int) $row['plaza_id'] ] ?? null );
+                // *** EXPLICIT PER-TIPO BRANCH, NEVER A TWO-WAY TERNARY ***
+                // An earlier version of this method read
+                // `SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ? … : …`
+                // — a binary branch that silently swallowed EVERY other tipo
+                // into the `regreso` arm. That was dormant while
+                // `reasignacion_arquero` could only ever be created through
+                // tests (nothing reached `SolicitudRepository::crearReasignacionArquero()`
+                // over REST); it stops being dormant the moment `crear()`
+                // above accepts that tipo. The `regreso` arm resolves `entra`
+                // from the PLAZA's permanent titular — for a grouped row that
+                // would report the GOAL plaza's own titular (ordinarily the
+                // regular goalkeeper) as "who enters", which is not even one
+                // of the two players this request actually moves. An unknown
+                // FUTURE tipo now throws here instead of silently compiling
+                // into whichever arm happens to be last — see this method's
+                // own \Throwable catch below, which turns that into a logged
+                // 500 rather than a wrong but successful 200.
+                if ( SolicitudDeCambio::TIPO_SUSTITUCION === $tipo ) {
+                    $entraId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
+                } elseif ( SolicitudDeCambio::TIPO_REGRESO === $tipo ) {
+                    $entraId = $titularPorPlaza[ (int) $row['plaza_id'] ] ?? null;
+                } elseif ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+                    // Movement "arco"'s entrante — the field titular moving
+                    // into goal. See shapeSolicitudRow()'s own docblock for
+                    // how movement "campo" (the SECOND pair this tipo needs)
+                    // is derived from this same value, with no further query.
+                    $entraId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
+                } else {
+                    throw new \RuntimeException(
+                        "Rest\\SolicitudesController::listar(): unknown tipo '{$tipo}' for solicitud #{$id}."
+                    );
+                }
 
                 $salePorSolicitud[ $id ]  = $saleId;
                 $entraPorSolicitud[ $id ] = $entraId;
@@ -368,6 +410,10 @@ class SolicitudesController {
                 }
                 if ( null !== $entraId ) {
                     $playerIds[] = $entraId;
+                }
+
+                if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo && null !== $row['entrante_campo_player_id'] ) {
+                    $playerIds[] = (int) $row['entrante_campo_player_id'];
                 }
             }
 
@@ -429,11 +475,60 @@ class SolicitudesController {
      */
     private function shapeSolicitudRow( array $row, ?int $salePlayerId, ?int $entraPlayerId ): array {
         $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+        $tipo     = (string) $row['tipo'];
+
+        $sale  = $this->shapeLado( $salePlayerId );
+        $entra = $this->shapeLado( $entraPlayerId );
+
+        // *** `movimientos` — THE SECOND PAIR A GROUPED ROW NEEDS ***
+        // A `reasignacion_arquero` row is TWO movements (see
+        // Solicitudes\SolicitudRepository's own class docblock, "GROUPED
+        // REQUESTS"); a single top-level `sale`/`entra` would have to pick
+        // ONE of them and present it as THE pair, silently hiding the other
+        // half of what the captain actually asked for — the exact "absent
+        // data rendered as fact" failure shapeLado()'s own docblock already
+        // guards against for a single missing id, now extended to an entire
+        // missing MOVEMENT. So for this tipo alone, top-level `sale`/`entra`
+        // degrade to "not recorded" (never a guessed pick) and `movimientos`
+        // carries both real pairs, keyed exactly like
+        // Admin\BandejaPage::renderFilaSolicitud()'s own two-line "Arco
+        // —.../Campo —..." rendering, so the captain sees the SAME two
+        // movements the committee's tray already shows them.
+        //
+        // Movement "campo"'s `sale` is ALWAYS `$entra` (movement "arco"'s
+        // OWN entrante) — the same titular leaving the field plaza to take
+        // over goal — never a fresh `findOcupacionVigente()` read. This
+        // mirrors `SolicitudRepository`'s own "no saliente_campo_player_id
+        // column — that player is always entrante_player_id, by
+        // construction of this tipo" and keeps listar()'s "BATCHED, NEVER
+        // ONE QUERY PER ROW" discipline intact for this tipo too — see that
+        // method's own docblock.
+        $movimientos = null;
+
+        if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+            $entranteCampoPlayerId = null !== $row['entrante_campo_player_id'] ? (int) $row['entrante_campo_player_id'] : null;
+
+            $movimientos = [
+                'arco'  => [ 'sale' => $sale, 'entra' => $entra ],
+                'campo' => [ 'sale' => $entra, 'entra' => $this->shapeLado( $entranteCampoPlayerId ) ],
+            ];
+
+            $sale  = $this->shapeLado( null );
+            $entra = $this->shapeLado( null );
+        } elseif ( ! in_array( $tipo, [ SolicitudDeCambio::TIPO_SUSTITUCION, SolicitudDeCambio::TIPO_REGRESO ], true ) ) {
+            // See listar()'s own docblock for why an unrecognized tipo must
+            // fail loudly here too, rather than silently falling through to
+            // the ordinary sale/entra shape computed above for a tipo this
+            // method was never taught about.
+            throw new \RuntimeException(
+                "Rest\\SolicitudesController::shapeSolicitudRow(): unknown tipo '{$tipo}' for solicitud #{$row['id']}."
+            );
+        }
 
         return [
             'id'                 => (int) $row['id'],
             'plaza_id'           => (int) $row['plaza_id'],
-            'tipo'               => (string) $row['tipo'],
+            'tipo'               => $tipo,
             'entrante_player_id' => null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null,
             'fecha_id'           => (int) $row['fecha_id'],
             'estado'             => (string) $row['estado'],
@@ -444,8 +539,9 @@ class SolicitudesController {
                 'procede' => $snapshot->procede(),
                 'motivos' => $snapshot->motivos(),
             ],
-            'sale'               => $this->shapeLado( $salePlayerId ),
-            'entra'              => $this->shapeLado( $entraPlayerId ),
+            'sale'               => $sale,
+            'entra'              => $entra,
+            'movimientos'        => $movimientos,
         ];
     }
 
