@@ -607,6 +607,66 @@ void main() {
     });
   });
 
+  group('CambiosPlantelView — botones de acción', () {
+    testWidgets('the action buttons are compact, not full-height Material pills', (tester) async {
+      // A plain OutlinedButton is 40 tall with generous padding — repeated
+      // eleven times down a roster that reads as heavy, which is what the
+      // process owner reported. 34 is the deliberate target.
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      final alto = tester.getSize(find.byKey(const Key('pedir_cambio_1'))).height;
+      expect(alto, lessThanOrEqualTo(36));
+    });
+
+    testWidgets('the goalkeeper card fits BOTH actions at 320px without overflowing',
+        (tester) async {
+      // "Pedir cambio" + "Cambiar por Titular" is the longest pair this
+      // screen can render; the card lays actions out in a Wrap, so they
+      // stack rather than overflow when they do not fit side by side.
+      tester.view.physicalSize = const Size(320, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_wrap(CambiosPlantelView(
+        state: CambiosPlantelLoaded(plazas: [
+          _plaza(
+            plazaId: 1,
+            esArco: true,
+            esTitularElOcupante: true,
+            ocupanteNombre: null,
+            ocupantePlayerId: null,
+          ),
+        ]),
+        onRetry: () {},
+        onRefresh: () async {},
+        onPedirCambio: (_) {},
+        onPedirRegreso: (_) {},
+        onVerSolicitudes: () {},
+        onCambiarPorTitular: (_) {},
+      )));
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('pedir_cambio_1')), findsOneWidget);
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsOneWidget);
+    });
+  });
+
   group('CambiosPlantelView — Section 2, "Cambios activos"', () {
     testWidgets('absent entirely (no header) when nothing is active', (tester) async {
       await tester.pumpWidget(_wrap(CambiosPlantelView(
@@ -672,7 +732,7 @@ void main() {
       )));
 
       final button =
-          tester.widget<OutlinedButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
+          tester.widget<CambiosAccionButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
       expect(button.onPressed, isNotNull);
       expect(
         find.text('Faltan 0 fecha(s) para que el titular pueda volver.'),
@@ -695,7 +755,7 @@ void main() {
       )));
 
       final button =
-          tester.widget<OutlinedButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
+          tester.widget<CambiosAccionButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
       expect(button.onPressed, isNull);
       expect(
         find.text('Faltan 2 fecha(s) para que el titular pueda volver.'),
@@ -722,7 +782,7 @@ void main() {
       )));
 
       final button =
-          tester.widget<OutlinedButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
+          tester.widget<CambiosAccionButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
       expect(button.onPressed, isNull);
       expect(
         find.text('No pudimos calcular cuántas fechas faltan para que el '

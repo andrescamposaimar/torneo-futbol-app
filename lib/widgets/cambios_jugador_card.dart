@@ -284,6 +284,60 @@ enum CambiosBadgeVariant { neutral, accent }
 /// "Padre" / "Invitado" on a candidate row.
 /// Public (not `_Badge`) so callers in `cambios_plantel_screen.dart` can
 /// attach their own per-plaza [Key] to each instance.
+/// The action buttons that sit under a plaza's card in "Mi Plantel".
+///
+/// A plain `OutlinedButton` is Material 3's 40px-tall pill with generous
+/// padding — fine for a page's primary action, far too heavy repeated eleven
+/// times down a roster, which is what the process owner saw ("los veo feos,
+/// grandes"). This trims the height and the type while keeping the shape
+/// recognisably a button.
+///
+/// [secundaria] drops the outline for the lower-emphasis action on a card
+/// that offers two, so the pair does not read as two equal choices.
+///
+/// The visual box is 34 tall rather than 48, with `shrinkWrap` so the layout
+/// does not silently pad it back out. That is below Material's 48dp target
+/// but comfortably above a mis-tap: these sit in a `Wrap` with 8px between
+/// them and nothing destructive behind either one.
+class CambiosAccionButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final bool secundaria;
+
+  const CambiosAccionButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.secundaria = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    final style = ButtonStyle(
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.disabled) ? Colors.grey.shade500 : primary,
+      ),
+      textStyle: const WidgetStatePropertyAll(
+        TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 14)),
+      minimumSize: const WidgetStatePropertyAll(Size(0, 34)),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+      shape: const WidgetStatePropertyAll(StadiumBorder()),
+      side: WidgetStatePropertyAll(
+        secundaria
+            ? BorderSide.none
+            : BorderSide(color: onPressed == null ? Colors.grey.shade300 : primary.withValues(alpha: 0.5)),
+      ),
+    );
+
+    return TextButton(style: style, onPressed: onPressed, child: Text(label));
+  }
+}
+
 class CambiosBadge extends StatelessWidget {
   final String text;
   final CambiosBadgeVariant variant;
