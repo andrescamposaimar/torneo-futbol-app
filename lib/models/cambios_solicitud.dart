@@ -10,6 +10,15 @@ import 'cambios_dictamen.dart';
 enum CambiosSolicitudTipo {
   sustitucion,
   regreso,
+
+  /// The grouped goalkeeper-reassignment tipo (0.1.17 backend) — created
+  /// through `CambiosApiService.crearReasignacionArquero()` alone, never
+  /// through `crearSolicitud()`'s own `tipo` parameter (see that method's
+  /// own docblock). This value exists in the enum so `GET /solicitudes` rows
+  /// of this tipo parse to something other than [desconocido] — see
+  /// `CambiosSolicitud.movimientos` for how its "Sale"/"Entra" pair is
+  /// rendered differently from the other two tipos.
+  reasignacionArquero,
   desconocido;
 
   static CambiosSolicitudTipo fromWire(String? raw) {
@@ -18,6 +27,8 @@ enum CambiosSolicitudTipo {
         return CambiosSolicitudTipo.sustitucion;
       case 'regreso':
         return CambiosSolicitudTipo.regreso;
+      case 'reasignacion_arquero':
+        return CambiosSolicitudTipo.reasignacionArquero;
       default:
         return CambiosSolicitudTipo.desconocido;
     }
@@ -29,6 +40,8 @@ enum CambiosSolicitudTipo {
         return 'sustitucion';
       case CambiosSolicitudTipo.regreso:
         return 'regreso';
+      case CambiosSolicitudTipo.reasignacionArquero:
+        return 'reasignacion_arquero';
       case CambiosSolicitudTipo.desconocido:
         return 'sustitucion';
     }
@@ -40,6 +53,8 @@ enum CambiosSolicitudTipo {
         return 'Cambio';
       case CambiosSolicitudTipo.regreso:
         return 'Regreso';
+      case CambiosSolicitudTipo.reasignacionArquero:
+        return 'Reasignación de arquero';
       case CambiosSolicitudTipo.desconocido:
         return 'Pedido';
     }
@@ -151,6 +166,93 @@ class CambiosSolicitudLado {
       'CambiosSolicitudLado(playerId: $playerId, nombre: $nombre, puntaje: $puntaje)';
 }
 
+/// One movement ("arco" or "campo") of a `reasignacion_arquero` solicitud —
+/// see `CambiosSolicitudMovimientos`'s own docblock for the pair as a
+/// whole. Shaped exactly like [CambiosSolicitud.sale]/[CambiosSolicitud.entra]
+/// — see `Rest\SolicitudesController::shapeSolicitudRow()`'s own docblock on
+/// the backend, "`movimientos` — THE SECOND PAIR A GROUPED ROW NEEDS".
+@immutable
+class CambiosSolicitudMovimiento {
+  final CambiosSolicitudLado sale;
+  final CambiosSolicitudLado entra;
+
+  const CambiosSolicitudMovimiento({
+    this.sale = CambiosSolicitudLado.noRegistrado,
+    this.entra = CambiosSolicitudLado.noRegistrado,
+  });
+
+  factory CambiosSolicitudMovimiento.fromJson(Object? json) {
+    if (json is! Map) return const CambiosSolicitudMovimiento();
+    final map = json.cast<String, dynamic>();
+    return CambiosSolicitudMovimiento(
+      sale: CambiosSolicitudLado.fromJson(map['sale']),
+      entra: CambiosSolicitudLado.fromJson(map['entra']),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CambiosSolicitudMovimiento &&
+          runtimeType == other.runtimeType &&
+          sale == other.sale &&
+          entra == other.entra;
+
+  @override
+  int get hashCode => Object.hash(sale, entra);
+
+  @override
+  String toString() => 'CambiosSolicitudMovimiento(sale: $sale, entra: $entra)';
+}
+
+/// The `movimientos` object a `reasignacion_arquero` row carries INSTEAD of
+/// a meaningful top-level `sale`/`entra` pair (which degrades to
+/// `noRegistrado` for that tipo — see the backend docblock cited above);
+/// both fields are `null` for every other tipo.
+///
+/// Parsed DEFENSIVELY: a missing/malformed `movimientos`, or either of its
+/// two keys, degrades to `null` for that one movement rather than throwing
+/// — same discipline as every other `fromJson` in this file. [isEmpty]
+/// (both null) is what `cambios_solicitudes_screen.dart`'s own
+/// `_SolicitudCard` uses to decide whether to render the ordinary top-level
+/// `sale`/`entra` pair instead — a partially-degraded payload (exactly ONE
+/// movement present) still renders whichever movement it actually has,
+/// rather than fabricating the missing one or hiding both.
+@immutable
+class CambiosSolicitudMovimientos {
+  final CambiosSolicitudMovimiento? arco;
+  final CambiosSolicitudMovimiento? campo;
+
+  const CambiosSolicitudMovimientos({this.arco, this.campo});
+
+  factory CambiosSolicitudMovimientos.fromJson(Object? json) {
+    if (json is! Map) return const CambiosSolicitudMovimientos();
+    final map = json.cast<String, dynamic>();
+    final rawArco = map['arco'];
+    final rawCampo = map['campo'];
+    return CambiosSolicitudMovimientos(
+      arco: rawArco is Map ? CambiosSolicitudMovimiento.fromJson(rawArco) : null,
+      campo: rawCampo is Map ? CambiosSolicitudMovimiento.fromJson(rawCampo) : null,
+    );
+  }
+
+  bool get isEmpty => arco == null && campo == null;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CambiosSolicitudMovimientos &&
+          runtimeType == other.runtimeType &&
+          arco == other.arco &&
+          campo == other.campo;
+
+  @override
+  int get hashCode => Object.hash(arco, campo);
+
+  @override
+  String toString() => 'CambiosSolicitudMovimientos(arco: $arco, campo: $campo)';
+}
+
 /// A single solicitud, as returned by `GET /cambios/solicitudes`.
 @immutable
 class CambiosSolicitud {
@@ -178,6 +280,10 @@ class CambiosSolicitud {
   /// for a `regreso` (see `CambiosSolicitudLado`'s own docblock).
   final CambiosSolicitudLado entra;
 
+  /// The grouped pair for a `reasignacion_arquero` row — empty (both null)
+  /// for every other tipo. See `CambiosSolicitudMovimientos`'s own docblock.
+  final CambiosSolicitudMovimientos movimientos;
+
   const CambiosSolicitud({
     required this.id,
     required this.plazaId,
@@ -191,6 +297,7 @@ class CambiosSolicitud {
     required this.dictamen,
     this.sale = CambiosSolicitudLado.noRegistrado,
     this.entra = CambiosSolicitudLado.noRegistrado,
+    this.movimientos = const CambiosSolicitudMovimientos(),
   });
 
   factory CambiosSolicitud.fromJson(Map<String, dynamic> json) {
@@ -210,6 +317,7 @@ class CambiosSolicitud {
           : const CambiosDictamen(procede: false),
       sale: CambiosSolicitudLado.fromJson(json['sale']),
       entra: CambiosSolicitudLado.fromJson(json['entra']),
+      movimientos: CambiosSolicitudMovimientos.fromJson(json['movimientos']),
     );
   }
 
@@ -238,7 +346,8 @@ class CambiosSolicitud {
           nota == other.nota &&
           dictamen == other.dictamen &&
           sale == other.sale &&
-          entra == other.entra;
+          entra == other.entra &&
+          movimientos == other.movimientos;
 
   @override
   int get hashCode => Object.hash(
@@ -254,6 +363,7 @@ class CambiosSolicitud {
         dictamen,
         sale,
         entra,
+        movimientos,
       );
 
   @override
