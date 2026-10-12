@@ -111,8 +111,8 @@ class CambiosPlantelScreen extends ConsumerWidget {
       // a sustitucion always means "replace whoever occupies this plaza
       // today", regardless of whether that's the titular himself.
       onPedirCambio: (plaza) => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => CambiosSolicitarScreen(
+        cambiosPedidoFlowRoute(
+          (_) => CambiosSolicitarScreen(
             seasonId: seasonId,
             teamId: teamId,
             plaza: plaza,
@@ -127,8 +127,8 @@ class CambiosPlantelScreen extends ConsumerWidget {
       ),
       // "Confirmar fin del cambio" (Section 2 only) — the regreso request.
       onPedirRegreso: (plaza) => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => CambiosSolicitarScreen(
+        cambiosPedidoFlowRoute(
+          (_) => CambiosSolicitarScreen(
             seasonId: seasonId,
             teamId: teamId,
             plaza: plaza,
@@ -150,8 +150,8 @@ class CambiosPlantelScreen extends ConsumerWidget {
       // SAME plazas/jugadoresById this screen already resolved — no new
       // fetch, see CambiosArcoTitularPickerScreen's own docblock.
       onCambiarPorTitular: (plazaArco) => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => CambiosArcoTitularPickerScreen(
+        cambiosPedidoFlowRoute(
+          (_) => CambiosArcoTitularPickerScreen(
             seasonId: seasonId,
             teamId: teamId,
             plazaArco: plazaArco,

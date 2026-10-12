@@ -247,7 +247,7 @@ void main() {
     testWidgets('error state shows a retry button that fires onRetry', (tester) async {
       var retried = false;
       await tester.pumpWidget(_wrap(CambiosPlantelView(
-        state: const CambiosPlantelError(),
+        state: const CambiosPlantelError(code: 'plantel_500', message: 'test'),
         onRetry: () => retried = true,
         onRefresh: () async {},
         onPedirCambio: (_) {},

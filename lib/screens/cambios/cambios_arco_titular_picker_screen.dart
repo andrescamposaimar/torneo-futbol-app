@@ -70,8 +70,8 @@ class CambiosArcoTitularPickerScreen extends StatelessWidget {
                     plaza: plaza,
                     jugador: jugadoresById[plaza.titularPlayerId],
                     onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => CambiosSolicitarScreen(
+                      cambiosPedidoFlowRoute(
+                        (_) => CambiosSolicitarScreen(
                           seasonId: seasonId,
                           teamId: teamId,
                           plaza: plaza,

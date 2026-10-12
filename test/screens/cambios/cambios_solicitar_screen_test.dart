@@ -11,6 +11,7 @@ import 'package:torneo_futbol_app/models/cambios_plaza.dart';
 import 'package:torneo_futbol_app/models/cambios_solicitud.dart';
 import 'package:torneo_futbol_app/providers/cambios_providers.dart';
 import 'package:torneo_futbol_app/screens/cambios/cambios_solicitar_screen.dart';
+import 'package:torneo_futbol_app/screens/cambios/cambios_solicitudes_screen.dart';
 import 'package:torneo_futbol_app/services/cambios_api_service.dart';
 import 'package:torneo_futbol_app/services/cambios_candidatos_controller.dart';
 import 'package:torneo_futbol_app/services/cambios_plantel_controller.dart';
@@ -562,8 +563,8 @@ void main() {
           ],
           child: MaterialApp(
             home: Navigator(
-              onGenerateRoute: (settings) => MaterialPageRoute(
-                builder: (_) => CambiosSolicitarScreen(
+              onGenerateRoute: (settings) => cambiosPedidoFlowRoute(
+                (_) => CambiosSolicitarScreen(
                   seasonId: 7,
                   teamId: 1,
                   plaza: _plaza,
@@ -587,8 +588,10 @@ void main() {
       expect(fakeService.lastCall!['entrantePlayerId'], 200);
       expect(fakeService.lastCall!['fechaId'], 42);
       expect(plantel.refreshCalls, 1);
-      // The screen itself is gone after popping.
-      expect(find.byType(CambiosSolicitarScreen), findsNothing);
+      // The screen itself is gone — removed from the stack, not merely hidden
+      // under "Mis pedidos" — and the captain lands on "Mis pedidos".
+      expect(find.byType(CambiosSolicitarScreen, skipOffstage: false), findsNothing);
+      expect(find.byType(CambiosSolicitudesScreen), findsOneWidget);
     });
 
     testWidgets('a failed submit shows an inline friendly error and stays on screen', (tester) async {

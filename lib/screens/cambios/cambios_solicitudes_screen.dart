@@ -15,6 +15,9 @@ import 'cambios_motivo_mensajes.dart';
 /// there is one. When a solicitud did not proceed, the dictamen's motivos are
 /// mapped to plain Spanish sentences (see `cambios_motivo_mensajes.dart`) —
 /// never the backend's raw rule codes.
+///
+/// The list is grouped by estado — what is live and awaited on top, what is
+/// closed at the bottom — see [agruparSolicitudes].
 class CambiosSolicitudesScreen extends ConsumerWidget {
   final int seasonId;
   final int teamId;
@@ -32,7 +35,7 @@ class CambiosSolicitudesScreen extends ConsumerWidget {
     final notifier = ref.read(cambiosSolicitudesControllerProvider(scope).notifier);
 
     return Scaffold(
-      appBar: const EntreRedesAppBar(title: 'Mis Solicitudes'),
+      appBar: const EntreRedesAppBar(title: 'Mis pedidos'),
       body: CambiosSolicitudesView(
         state: state,
         onRetry: () => notifier.load(seasonId: seasonId, teamId: teamId),
@@ -63,20 +66,143 @@ class CambiosSolicitudesView extends StatelessWidget {
     return switch (state) {
       CambiosSolicitudesLoading() =>
         const LoadingSeccion(texto: 'Cargando tus pedidos...'),
-      CambiosSolicitudesError() => _ErrorView(onRetry: onRetry),
+      CambiosSolicitudesError(:final code) => _ErrorView(code: code, onRetry: onRetry),
       CambiosSolicitudesLoaded(:final solicitudes) => solicitudes.isEmpty
           ? const _EmptyView()
           : RefreshIndicator(
               onRefresh: onRefresh,
-              child: ListView.builder(
-                key: const Key('solicitudes_list'),
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: solicitudes.length,
-                itemBuilder: (context, i) => _SolicitudCard(solicitud: solicitudes[i]),
-              ),
+              child: _GroupedList(grupos: agruparSolicitudes(solicitudes)),
             ),
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Grouping
+// ---------------------------------------------------------------------------
+
+/// Display order of the estado groups: what is live and awaited first (a
+/// pendiente is waiting on the comisión; an aprobada is waiting on the
+/// publication batch), what is closed last. [CambiosSolicitudEstado.desconocido]
+/// is LAST on purpose: an estado this app version does not know must still be
+/// visible (never dropped), but it must not outrank states the captain can
+/// act on or understand.
+const _ordenEstados = <CambiosSolicitudEstado>[
+  CambiosSolicitudEstado.pendiente,
+  CambiosSolicitudEstado.aprobada,
+  CambiosSolicitudEstado.publicada,
+  CambiosSolicitudEstado.rechazada,
+  CambiosSolicitudEstado.anulada,
+  CambiosSolicitudEstado.desconocido,
+];
+
+/// Section heading for one estado group — the plural of
+/// [CambiosSolicitudEstado.label], the same wording the committee's tray uses
+/// ("Pendientes", "Aprobadas"). The unrecognised bucket reads "Otros".
+String _tituloGrupo(CambiosSolicitudEstado estado) {
+  switch (estado) {
+    case CambiosSolicitudEstado.pendiente:
+      return 'Pendientes';
+    case CambiosSolicitudEstado.aprobada:
+      return 'Aprobadas';
+    case CambiosSolicitudEstado.publicada:
+      return 'Publicadas';
+    case CambiosSolicitudEstado.rechazada:
+      return 'Rechazadas';
+    case CambiosSolicitudEstado.anulada:
+      return 'Anuladas';
+    case CambiosSolicitudEstado.desconocido:
+      // "Desconocidas", not "Otros": every other heading here is a feminine
+      // plural describing the solicitudes, and each card in this group
+      // carries a "Desconocido" chip. Two words for one idea on one screen
+      // make a reader wonder which is which.
+      return 'Desconocidas';
+  }
+}
+
+/// One estado heading and the solicitudes under it, newest first.
+@visibleForTesting
+typedef CambiosSolicitudGrupo = ({
+  CambiosSolicitudEstado estado,
+  List<CambiosSolicitud> solicitudes,
+});
+
+/// Groups [solicitudes] by estado in [_ordenEstados] order, each group sorted
+/// by `solicitadaAt` DESCENDING (most recent first). Empty groups are omitted.
+///
+/// Sorted client-side because one team's solicitudes are a small list, and
+/// the endpoint's own order (`solicitada_at ASC, id ASC`) is oldest-first.
+/// `solicitadaAt` is parsed as UTC, so comparing instants is sound. A
+/// solicitud with no `solicitadaAt` sinks to the bottom of its group; ties
+/// fall back to `id` descending so the order is deterministic (`List.sort`
+/// is not stable).
+@visibleForTesting
+List<CambiosSolicitudGrupo> agruparSolicitudes(List<CambiosSolicitud> solicitudes) {
+  int masReciente(CambiosSolicitud a, CambiosSolicitud b) {
+    final at = a.solicitadaAt;
+    final bt = b.solicitadaAt;
+    if (at != null && bt != null) {
+      final byInstant = bt.compareTo(at);
+      if (byInstant != 0) return byInstant;
+    } else if (at != null) {
+      return -1;
+    } else if (bt != null) {
+      return 1;
+    }
+    return b.id.compareTo(a.id);
+  }
+
+  return [
+    for (final estado in _ordenEstados)
+      if (solicitudes.any((s) => s.estado == estado))
+        (
+          estado: estado,
+          solicitudes: solicitudes.where((s) => s.estado == estado).toList()
+            ..sort(masReciente),
+        ),
+  ];
+}
+
+class _GroupedList extends StatelessWidget {
+  final List<CambiosSolicitudGrupo> grupos;
+  const _GroupedList({required this.grupos});
+
+  @override
+  Widget build(BuildContext context) {
+    // Flattened to one lazily-built list: a heading followed by its cards.
+    final items = <Object>[
+      for (final grupo in grupos) ...[grupo.estado, ...grupo.solicitudes],
+    ];
+    return ListView.builder(
+      key: const Key('solicitudes_list'),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: items.length,
+      itemBuilder: (context, i) {
+        final item = items[i];
+        if (item is CambiosSolicitudEstado) return _GrupoHeader(estado: item);
+        return _SolicitudCard(solicitud: item as CambiosSolicitud);
+      },
+    );
+  }
+}
+
+class _GrupoHeader extends StatelessWidget {
+  final CambiosSolicitudEstado estado;
+  const _GrupoHeader({required this.estado});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: Key('solicitudes_grupo_${estado.name}'),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+      child: Text(
+        _tituloGrupo(estado),
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
+      ),
+    );
   }
 }
 
@@ -85,8 +211,9 @@ class CambiosSolicitudesView extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _ErrorView extends StatelessWidget {
+  final String code;
   final VoidCallback onRetry;
-  const _ErrorView({required this.onRetry});
+  const _ErrorView({required this.code, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +231,15 @@ class _ErrorView extends StatelessWidget {
             const Text(
               'No pudimos cargar tus pedidos. Revisá tu conexión y reintentá '
               'en unos minutos.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            // A short reference the captain can quote to the committee —
+            // plain text, never the raw diagnostic message.
+            Text(
+              'Código: $code',
+              key: const Key('solicitudes_error_code'),
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),

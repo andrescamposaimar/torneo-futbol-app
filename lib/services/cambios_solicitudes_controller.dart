@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/cambios_solicitud.dart';
 import 'cambios_api_service.dart';
+import 'cambios_load_failure.dart';
 
 // ---------------------------------------------------------------------------
 // State
@@ -17,8 +18,25 @@ final class CambiosSolicitudesLoading extends CambiosSolicitudesState {
   const CambiosSolicitudesLoading();
 }
 
+/// A failed load. [code] says WHY (see [describeCambiosLoadFailure]) and is
+/// safe to show as a short reference; [message] is diagnostic only and MUST
+/// NOT be shown raw — the screen keeps its own plain-Spanish copy.
 final class CambiosSolicitudesError extends CambiosSolicitudesState {
-  const CambiosSolicitudesError();
+  final String code;
+  final String message;
+
+  const CambiosSolicitudesError({required this.code, required this.message});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CambiosSolicitudesError && code == other.code && message == other.message;
+
+  @override
+  int get hashCode => Object.hash(runtimeType, code, message);
+
+  @override
+  String toString() => 'CambiosSolicitudesError(code: $code, message: $message)';
 }
 
 final class CambiosSolicitudesLoaded extends CambiosSolicitudesState {
@@ -42,8 +60,9 @@ class CambiosSolicitudesController extends StateNotifier<CambiosSolicitudesState
       final solicitudes =
           await _service.fetchSolicitudes(seasonId: seasonId, teamId: teamId);
       state = CambiosSolicitudesLoaded(solicitudes: solicitudes);
-    } catch (_) {
-      state = const CambiosSolicitudesError();
+    } catch (e) {
+      final failure = describeCambiosLoadFailure('solicitudes', e);
+      state = CambiosSolicitudesError(code: failure.code, message: failure.message);
     }
   }
 
