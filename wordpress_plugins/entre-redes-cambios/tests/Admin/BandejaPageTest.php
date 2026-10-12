@@ -676,6 +676,37 @@ class BandejaPageTest extends TestCase {
         $wp_test_post_titles = [];
     }
 
+    // -------------------------------------------------------------------------
+    // Presentation — "Acción sugerida", not "Dictamen" (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_la_bandeja_dice_accion_sugerida_aprobar_cuando_el_dictamen_procede(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->crearSustitucion( $plazaId, 888 ); // Dictamen::from( [] ) — no motivos, procede.
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( 'Acción sugerida: aprobar.', $html );
+        $this->assertStringNotContainsString( 'Dictamen', $html );
+    }
+
+    public function test_la_bandeja_dice_accion_sugerida_rechazar_cuando_el_dictamen_no_procede(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+
+        // Far outside the plazo: the real pipeline rejects it.
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, strtotime( '2026-01-01 00:00:00' ) );
+        $id        = $this->solicitudRepository->crear( $solicitud, 777, $this->evaluatePipeline( $solicitud ), '2026-05-27 10:00:00' );
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( 'Acción sugerida: rechazar.', $html );
+        $this->assertStringNotContainsString( 'Dictamen', $html );
+        $this->assertStringNotContainsString( 'NO procede', $html );
+    }
+
     /** InitialSchema::up() seeds the `timezone` row, so this UPDATEs it. */
     private function setTimezone( string $timezone ): void {
         global $wpdb;

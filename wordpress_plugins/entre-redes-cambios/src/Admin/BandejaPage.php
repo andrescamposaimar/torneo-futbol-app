@@ -328,10 +328,11 @@ class BandejaPage {
             </p>
             <?php endif; ?>
             <p>
+                <?php // Shown as "Acción sugerida", never "Dictamen": in Spanish the latter reads as a settled ruling and makes Aprobar look like a formality. The domain still calls it a Dictamen. ?>
                 <?php if ( $solicitud['dictamen_procede'] ) : ?>
-                    <strong style="color:green;"><?php esc_html_e( 'Dictamen: procede.', 'entre-redes-cambios' ); ?></strong>
+                    <strong style="color:green;"><?php esc_html_e( 'Acción sugerida: aprobar.', 'entre-redes-cambios' ); ?></strong>
                 <?php else : ?>
-                    <strong style="color:#b32d2e;"><?php esc_html_e( 'Dictamen: NO procede.', 'entre-redes-cambios' ); ?></strong>
+                    <strong style="color:#b32d2e;"><?php esc_html_e( 'Acción sugerida: rechazar.', 'entre-redes-cambios' ); ?></strong>
                     <?php if ( ! empty( $solicitud['es_grupo'] ) ) : ?>
                         <?php foreach ( $this->agruparMotivosPorMovimiento( (array) $solicitud['dictamen_motivos'] ) as $movimiento => $motivosDelMovimiento ) : ?>
                             <?php if ( empty( $motivosDelMovimiento ) ) : ?>
