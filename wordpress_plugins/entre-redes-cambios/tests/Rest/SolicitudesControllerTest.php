@@ -22,6 +22,7 @@ use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Rest\SolicitudesController;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
+use EntreRedes\Cambios\Tests\Support\InMemoryCreationLock;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -372,12 +373,16 @@ class SolicitudesControllerTest extends TestCase {
         $authorizer = $this->createMock( CapitanAuthorizer::class );
         $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => self::PLAYER_ID ] );
 
+        // The plaza must EXIST and belong to the team now (crear() checks that
+        // first and answers 400 `plaza_no_encontrada` otherwise), so the
+        // unexpected failure is injected at the write instead.
+        $plazaInexistente = $this->plazaId;
+
         $repo = $this->createMock( SolicitudRepository::class );
-        $repo->expects( $this->never() )->method( 'crear' );
+        $repo->expects( $this->once() )->method( 'crear' )
+            ->willThrowException( new \RuntimeException( "simulated failure on plaza {$plazaInexistente}" ) );
 
         $controller = $this->newController( $authorizer, $repo );
-
-        $plazaInexistente = 999999;
 
         $response = $controller->crear( $this->requestConToken( 'a-valid-jwt', [
             'season_id'          => self::SEASON_ID,
@@ -773,7 +778,8 @@ class SolicitudesControllerTest extends TestCase {
             $this->eventLog,
             $this->plazaRepository,
             $jugadorMetricasReaderConContador,
-            fn (): int => $this->fixedNow
+            fn (): int => $this->fixedNow,
+            new InMemoryCreationLock()
         );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
@@ -920,7 +926,8 @@ class SolicitudesControllerTest extends TestCase {
             $this->eventLog,
             $this->plazaRepository,
             $this->jugadorMetricasReader,
-            fn (): int => $this->fixedNow
+            fn (): int => $this->fixedNow,
+            new InMemoryCreationLock()
         );
     }
 

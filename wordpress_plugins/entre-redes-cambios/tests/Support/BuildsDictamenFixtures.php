@@ -219,6 +219,12 @@ trait BuildsDictamenFixtures {
             // relies on must stay unaffected unless a test explicitly
             // overrides it.
             'exencionArco'                     => false,
+            // Empty by default — nobody has an open solicitud — so the
+            // favorable baseline every OTHER rule's test relies on stays
+            // unaffected by Reglas\PlazaSinSolicitudAbierta /
+            // Reglas\EntranteSinSolicitudAbierta unless a test overrides it.
+            'plazaSolicitudesAbiertas'         => [],
+            'entranteSolicitudesAbiertas'      => [],
         ];
 
         $o = array_merge( $defaults, $overrides );
@@ -236,7 +242,9 @@ trait BuildsDictamenFixtures {
             $o['padresViablesParaLaPlaza'],
             $o['entranteEsArquero'],
             $o['plazaEsDelArquero'],
-            $o['exencionArco']
+            $o['exencionArco'],
+            $o['plazaSolicitudesAbiertas'],
+            $o['entranteSolicitudesAbiertas']
         );
     }
 }

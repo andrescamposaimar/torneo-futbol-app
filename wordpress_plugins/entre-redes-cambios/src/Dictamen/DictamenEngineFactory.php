@@ -8,8 +8,10 @@ use EntreRedes\Cambios\Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteDisponible;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoEsElSaliente;
+use EntreRedes\Cambios\Dictamen\Reglas\EntranteSinSolicitudAbierta;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaConOcupacionVigente;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaNoCerrada;
+use EntreRedes\Cambios\Dictamen\Reglas\PlazaSinSolicitudAbierta;
 use EntreRedes\Cambios\Dictamen\Reglas\PrioridadDePadresRespetada;
 use EntreRedes\Cambios\Dictamen\Reglas\PuntajeDentroDelTecho;
 use EntreRedes\Cambios\Dictamen\Reglas\RegresoSoloConMinimoCumplido;
@@ -31,7 +33,9 @@ use EntreRedes\Cambios\Dictamen\Reglas\SolicitudEnPlazo;
  * to know the full list. DictamenEngineTest consumes this factory instead of
  * keeping its own copy, so "forgetting a rule" becomes impossible to do
  * silently: the test and every real caller share one list, and adding a rule
- * later (as Reglas\PrioridadDePadresRespetada did — the ninth) is a one-line
+ * later (as Reglas\PrioridadDePadresRespetada did — the ninth — and
+ * Reglas\PlazaSinSolicitudAbierta / Reglas\EntranteSinSolicitudAbierta did
+ * in 0.1.21 — the eleventh and twelfth) is a one-line
  * change here that every consumer picks up automatically.
  */
 final class DictamenEngineFactory {
@@ -74,6 +78,8 @@ final class DictamenEngineFactory {
             new RegresoSoloConMinimoCumplido(),
             new PrioridadDePadresRespetada( $prioridadPadresActiva ),
             new ArqueroNoOcupaPlazaDeCampo(),
+            new PlazaSinSolicitudAbierta(),
+            new EntranteSinSolicitudAbierta(),
         ];
     }
 }

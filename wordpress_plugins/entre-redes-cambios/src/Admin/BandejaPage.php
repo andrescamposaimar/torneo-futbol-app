@@ -64,6 +64,20 @@ use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
  * omit. Missing confirmation is reported the exact same shape a real abort
  * is (`abortado: true`, `confirmado: false`), so `render()` has one code path
  * for both, never two.
+ *
+ * *** ANULAR AN APROBADA ROW — THE WAY OUT OF A BLOCKED FRIDAY (0.1.21) ***
+ * `EstadoSolicitud` always allowed `aprobada` -> `anulada`, but the tray had
+ * no button for it, so a stuck approved row (one whose fresh dictamen no
+ * longer `procede()` aborts the WHOLE lote — see `publicarLote()`) could
+ * only be removed by editing the database by hand, on the day it mattered.
+ * `ejecutarAnular()` is that button's core: it goes through
+ * `SolicitudRepository::anular()`, so the `cambios_decision` row and the
+ * transition check are exactly the ones every other action gets, behind the
+ * same single authorization gate in `handlePost()`. Annulling is
+ * irreversible (`anulada` is terminal), so it carries the same
+ * server-re-checked explicit confirmation as the lote: `confirmar_anulacion=1`.
+ * Its forms are rendered OUTSIDE the publish form — HTML forbids nested
+ * forms, and a nested one would silently submit the lote instead.
  */
 class BandejaPage {
 
@@ -78,6 +92,8 @@ class BandejaPage {
     private const NONCE_RECHAZAR_FIELD  = 'cambios_rechazar_nonce';
     private const NONCE_PUBLICAR        = 'cambios_publicar_lote';
     private const NONCE_PUBLICAR_FIELD  = 'cambios_publicar_lote_nonce';
+    private const NONCE_ANULAR          = 'cambios_anular';
+    private const NONCE_ANULAR_FIELD    = 'cambios_anular_nonce';
 
     private ProcessOwnerAuthorizer $authorizer;
     private SolicitudRepository $solicitudRepository;
@@ -144,6 +160,7 @@ class BandejaPage {
             'aprobar'       => $this->handleAprobar(),
             'rechazar'      => $this->handleRechazar(),
             'publicar_lote' => $this->handlePublicarLote(),
+            'anular'        => $this->handleAnular(),
             default         => null,
         };
     }
@@ -283,6 +300,22 @@ class BandejaPage {
             </p>
             <?php submit_button( __( 'Publicar el lote', 'entre-redes-cambios' ), 'primary', 'submit', false ); ?>
         </form>
+
+        <h3><?php esc_html_e( 'Anular una solicitud aprobada', 'entre-redes-cambios' ); ?></h3>
+        <?php foreach ( $aprobadas as $solicitud ) : ?>
+        <form method="post" action="<?php echo esc_url( $adminUrl ); ?>" style="margin-bottom:8px;">
+            <?php wp_nonce_field( self::NONCE_ANULAR, self::NONCE_ANULAR_FIELD ); ?>
+            <input type="hidden" name="cambios_action" value="anular">
+            <input type="hidden" name="solicitud_id" value="<?php echo esc_attr( (string) $solicitud['id'] ); ?>">
+            <strong>#<?php echo esc_html( (string) $solicitud['id'] ); ?></strong>
+            <input type="text" name="nota" placeholder="<?php echo esc_attr__( 'Nota (opcional)', 'entre-redes-cambios' ); ?>">
+            <label>
+                <input type="checkbox" name="confirmar_anulacion" value="1" required>
+                <?php esc_html_e( 'Confirmo que quiero anular esta solicitud. No se puede deshacer.', 'entre-redes-cambios' ); ?>
+            </label>
+            <?php submit_button( __( 'Anular', 'entre-redes-cambios' ), 'delete', 'submit', false ); ?>
+        </form>
+        <?php endforeach; ?>
         <?php
     }
 
@@ -452,6 +485,33 @@ class BandejaPage {
         exit;
     }
 
+    private function handleAnular(): void {
+        $this->verificarNonceOMorir( self::NONCE_ANULAR, self::NONCE_ANULAR_FIELD );
+
+        $id           = absint( $_POST['solicitud_id'] ?? 0 );
+        $nota         = $this->sanitizeNota( $_POST['nota'] ?? '' );
+        $confirmado   = '1' === (string) ( $_POST['confirmar_anulacion'] ?? '' );
+        $redirectBase = admin_url( 'admin.php?page=' . self::SLUG );
+
+        if ( $id <= 0 ) {
+            $this->guardarNotice( 'error', __( 'ID de solicitud inválido.', 'entre-redes-cambios' ) );
+            wp_safe_redirect( $redirectBase );
+            exit;
+        }
+
+        $resultado = $this->ejecutarAnular( $id, $nota, $confirmado );
+
+        $this->guardarNotice(
+            $resultado['ok'] ? 'success' : 'error',
+            $resultado['ok']
+                ? sprintf( __( 'Solicitud #%d anulada.', 'entre-redes-cambios' ), $id )
+                : sprintf( __( 'No se pudo anular la solicitud #%1$d: %2$s', 'entre-redes-cambios' ), $id, (string) $resultado['error'] )
+        );
+
+        wp_safe_redirect( $redirectBase );
+        exit;
+    }
+
     private function handlePublicarLote(): void {
         $this->verificarNonceOMorir( self::NONCE_PUBLICAR, self::NONCE_PUBLICAR_FIELD );
 
@@ -502,6 +562,35 @@ class BandejaPage {
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'admin.solicitud_decision_fallida', [
                 'operacion'    => 'rechazar',
+                'solicitud_id' => $id,
+                'excepcion'    => get_class( $e ),
+                'mensaje'      => $e->getMessage(),
+            ] );
+
+            return [ 'ok' => false, 'error' => __( 'Ocurrió un error al procesar la solicitud.', 'entre-redes-cambios' ) ];
+        }
+    }
+
+    /**
+     * Annuls a solicitud — see class docblock, "ANULAR AN APROBADA ROW".
+     * Refuses to call `SolicitudRepository::anular()` at all unless
+     * $confirmado is true (irreversible, same server-side re-check as the
+     * lote's confirmation).
+     *
+     * @return array{ok: bool, error: string|null}
+     */
+    private function ejecutarAnular( int $id, ?string $nota, bool $confirmado ): array {
+        if ( ! $confirmado ) {
+            return [ 'ok' => false, 'error' => __( 'Falta la confirmación explícita antes de anular.', 'entre-redes-cambios' ) ];
+        }
+
+        try {
+            $this->solicitudRepository->anular( $id, get_current_user_id(), $nota, $this->ahoraDb(), $this->nombreDecisor() );
+
+            return [ 'ok' => true, 'error' => null ];
+        } catch ( \Throwable $e ) {
+            $this->eventLog->record( 'admin.solicitud_decision_fallida', [
+                'operacion'    => 'anular',
                 'solicitud_id' => $id,
                 'excepcion'    => get_class( $e ),
                 'mensaje'      => $e->getMessage(),

@@ -13,6 +13,7 @@ use EntreRedes\Cambios\Plazas\CandidatosResolver;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\PosicionResolver;
+use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
 
 /**
  * Builds a `DictamenContext` from the real database for a given
@@ -119,6 +120,21 @@ use EntreRedes\Cambios\Plazas\PosicionResolver;
  * there is nothing to read a flag off), so the batched
  * `PosicionResolver::resolverParaIds()` call this assembler still makes now
  * covers AT MOST ONE id (the entrante's), never the plaza's titular's.
+ *
+ * *** OPEN-REQUEST FACTS (0.1.21) — THE SAME FAIL-CLOSED CONTRACT, AND THE
+ * SELF-EXCLUSION THAT MAKES FRIDAY'S RE-EVALUATION POSSIBLE ***
+ * `plazaSolicitudesAbiertas()` and `entranteSolicitudesAbiertas()` are read
+ * through `Solicitudes\SolicitudesAbiertasReader`, whose every method throws
+ * on a wpdb-level failure — an empty list here reads to
+ * `Reglas\PlazaSinSolicitudAbierta` / `Reglas\EntranteSinSolicitudAbierta`
+ * as "free", so a swallowed failure would silently grant a second request.
+ * Both lookups pass `$solicitud->solicitudId()` as the row to EXCLUDE:
+ * `SolicitudRepository::publicarLote()` re-evaluates an `aprobada` request,
+ * which is itself open, and would otherwise be rejected by its own shadow.
+ * A request not yet persisted (`crear()`) has a null id and excludes nothing.
+ * The incoming player of a `regreso` is the plaza's `titular_player_id`
+ * (0.1.21), so a returning titular already committed by ANOTHER open request
+ * is caught too; the lookup is skipped only when there is no incoming player.
  */
 final class DictamenContextAssembler {
 
@@ -132,6 +148,7 @@ final class DictamenContextAssembler {
     private BloqueoReemplazoPolicy $politicaCC5b;
     private BoundedFechaCounter $boundedFechaCounter;
     private PosicionResolver $posicionResolver;
+    private SolicitudesAbiertasReader $solicitudesAbiertas;
 
     /**
      * @param BloqueoReemplazoPolicy|null $politicaCC5b The SAME policy value
@@ -148,6 +165,9 @@ final class DictamenContextAssembler {
      * @param PosicionResolver|null $posicionResolver Defaults to a plain
      *        instance — overridable in tests, same pattern as every other
      *        optional collaborator in this class.
+     * @param SolicitudesAbiertasReader|null $solicitudesAbiertas Defaults to
+     *        a plain instance built from $wpdb/$eventLog — overridable in
+     *        tests, same pattern as every other optional collaborator here.
      */
     public function __construct(
         PlazaRepository $plazaRepository,
@@ -158,7 +178,8 @@ final class DictamenContextAssembler {
         ?BloqueoReemplazoPolicy $politicaCC5b = null,
         ?CandidatosResolver $candidatosResolver = null,
         ?JugadorMetricasReader $metricasReader = null,
-        ?PosicionResolver $posicionResolver = null
+        ?PosicionResolver $posicionResolver = null,
+        ?SolicitudesAbiertasReader $solicitudesAbiertas = null
     ) {
         $this->plazaRepository     = $plazaRepository;
         $this->fechaRepository     = $fechaRepository;
@@ -170,6 +191,7 @@ final class DictamenContextAssembler {
         $this->candidatosResolver  = $candidatosResolver ?? new CandidatosResolver( $wpdb, $plazaRepository, $eventLog, $this->metricasReader );
         $this->boundedFechaCounter = new BoundedFechaCounter( $fechaRepository, $eventLog );
         $this->posicionResolver    = $posicionResolver ?? new PosicionResolver( $eventLog );
+        $this->solicitudesAbiertas = $solicitudesAbiertas ?? new SolicitudesAbiertasReader( $wpdb, $eventLog );
     }
 
     /**
@@ -262,6 +284,29 @@ final class DictamenContextAssembler {
             }
         }
 
+        // See class docblock, "OPEN-REQUEST FACTS" — both reads throw on
+        // failure and both exclude THIS request's own row.
+        $plazaSolicitudesAbiertas = $this->solicitudesAbiertas->listAbiertasPorPlaza(
+            $solicitud->seasonId(),
+            $solicitud->plazaId(),
+            $solicitud->solicitudId()
+        );
+
+        // The INCOMING player for the open-request check: the named entrante
+        // of a sustitucion, or — for a regreso, whose entrante is NULL by
+        // storage — the plaza's permanent titular, who is the one coming
+        // back. Used ONLY for this lookup: puntaje, padre, arquero etc. above
+        // still read the real (null for a regreso) entrante. The request's
+        // own row is excluded by id, so the plaza's own ordinary relationship
+        // to its titular (this very regreso, once stored) never counts as a
+        // competing commitment.
+        $incomingPlayerId = $entrantePlayerId
+            ?? ( $solicitud->isRegreso() ? (int) $plaza['titular_player_id'] : null );
+
+        $entranteSolicitudesAbiertas = null !== $incomingPlayerId
+            ? $this->solicitudesAbiertas->listAbiertasPorEntrante( $solicitud->seasonId(), $incomingPlayerId, $solicitud->solicitudId() )
+            : [];
+
         $plazosUtc = PlazosCalculator::computeUtc(
             (string) $fecha['play_date'],
             $this->settings->plazosOffsets(),
@@ -284,7 +329,9 @@ final class DictamenContextAssembler {
             $padresViablesParaLaPlaza,
             $entranteEsArquero,
             $plazaEsDelArquero,
-            $exencionArco
+            $exencionArco,
+            $plazaSolicitudesAbiertas,
+            $entranteSolicitudesAbiertas
         );
     }
 

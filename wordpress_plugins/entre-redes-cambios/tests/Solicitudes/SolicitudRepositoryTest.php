@@ -15,6 +15,7 @@ use EntreRedes\Cambios\Dictamen\Motivo;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Observability\WpEventLog;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
@@ -453,6 +454,127 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertTrue( $this->eventLog->has( 'solicitud.publicada' ) );
     }
 
+    /**
+     * The whole lifecycle of "open": a pending request holds its plaza, an
+     * approved one still does, and only rejecting/annulling/publishing it
+     * releases the plaza for the next request.
+     */
+    public function test_a_plaza_is_held_by_its_request_until_it_is_rejected_and_then_released(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 888, 2.5 );
+        $this->seedPuntaje( 889, 2.5 );
+
+        $epoch = $this->instanteEnPlazo( '2026-05-30' );
+        $a     = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, $epoch );
+        $b     = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 889, 5, $epoch );
+
+        $idA = $this->repo->crear( $a, 777, $this->pipeline->evaluate( $a ), '2026-05-27 10:00:00' );
+
+        $this->assertNotNull( $this->pipeline->evaluate( $b )->motivo( 'plaza_con_solicitud_abierta' ), 'pendiente holds the plaza.' );
+
+        $this->repo->aprobar( $idA, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+
+        $this->assertNotNull( $this->pipeline->evaluate( $b )->motivo( 'plaza_con_solicitud_abierta' ), 'aprobada still holds the plaza until Friday.' );
+
+        $this->repo->anular( $idA, 42, null, '2026-05-27 12:00:00', 'Proceso Owner Test' );
+
+        $this->assertTrue( $this->pipeline->evaluate( $b )->procede(), 'anulada releases the plaza.' );
+    }
+
+    /**
+     * Requests that were open on the same plaza BEFORE the open-request rules
+     * existed are not migrated. Publishing a lote that contains one must
+     * abort loudly with the new motivo rather than silently applying both.
+     */
+    public function test_publicar_lote_aborts_when_another_open_request_holds_the_same_plaza(): void {
+        $this->seedFecha( 1, self::SEASON_ID, '2026-05-16' );
+        $this->seedFecha( 5, self::SEASON_ID, '2026-05-30' );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 888, 2.5 );
+
+        $epoch     = $this->instanteEnPlazo( '2026-05-30' );
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, $epoch );
+        $id        = $this->repo->crear( $solicitud, 777, $this->pipeline->evaluate( $solicitud ), '2026-05-27 10:00:00' );
+        $this->repo->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+
+        // A pre-existing duplicate, inserted behind the rules' back.
+        global $wpdb;
+        $wpdb->insert(
+            $wpdb->prefix . 'cambios_solicitud',
+            [
+                'season_id' => self::SEASON_ID, 'team_id' => 100, 'plaza_id' => $plazaId, 'tipo' => 'sustitucion',
+                'entrante_player_id' => 999, 'fecha_id' => 5, 'solicitada_por' => 777, 'solicitada_at' => '2026-05-26 10:00:00',
+                'solicitud_instante_epoch' => $epoch, 'dictamen_original' => '{}', 'estado' => 'pendiente',
+                'created_at' => '2026-05-26 10:00:00', 'updated_at' => '2026-05-26 10:00:00',
+            ]
+        );
+
+        $duplicadaId = (int) $wpdb->insert_id;
+
+        $resultado = $this->repo->publicarLote( [ $id ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
+
+        $this->assertTrue( $resultado['abortado'] );
+        $this->assertStringContainsString( 'plaza_con_solicitud_abierta', (string) $resultado['motivo'] );
+        $this->assertStringContainsString( "#{$duplicadaId}", (string) $resultado['motivo'], 'The abort must name the conflicting row.' );
+        $this->assertStringNotContainsString( "solicitud #{$id})", (string) $resultado['motivo'], 'It must not blame the row being published for its own conflict id.' );
+        $this->assertSame( 777, (int) $this->plazaRepository->findOcupacionVigente( $plazaId )['player_id'], 'Nothing may have been applied.' );
+    }
+
+    /**
+     * `solicitud.lote_publicacion_fallida` MUST reach WpEventLog's
+     * `ultimo_error` option (the only trace on a host with no PHP log), and
+     * the routine duplicate refusal must NOT — it would overwrite that single
+     * slot and bury a real failure. Asserted against the REAL WpEventLog.
+     */
+    public function test_an_aborted_lote_is_persisted_and_a_refused_duplicate_never_buries_it(): void {
+        global $wpdb;
+
+        delete_option( 'entre_redes_cambios_ultimo_error' );
+        $realLog = new WpEventLog( static fn(): bool => false );
+        $repo    = new SolicitudRepository( $wpdb, $this->plazaRepository, $this->pipeline, $realLog );
+
+        $repo->publicarLote( [ 999999 ], 42, '2026-05-29 09:00:00', 'Proceso Owner Test' );
+
+        $almacenado = get_option( 'entre_redes_cambios_ultimo_error' );
+        $this->assertIsArray( $almacenado, 'An aborted lote must be persisted.' );
+        $this->assertSame( 'solicitud.lote_publicacion_fallida', $almacenado['evento'] );
+        $this->assertStringContainsString( '999999', $almacenado['mensaje'] );
+
+        // A burst of refused duplicates afterwards must leave it untouched.
+        $dictamen = Dictamen::from( [ new Motivo( 'plaza_con_solicitud_abierta', 'x', [ 'solicitud_id' => 5 ] ) ] );
+
+        for ( $i = 0; $i < 3; $i++ ) {
+            try {
+                $repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 77, 888, 5, 1000 ), 321, $dictamen, '2026-05-27 10:00:00' );
+                $this->fail( 'Expected a refusal.' );
+            } catch ( \EntreRedes\Cambios\Solicitudes\Exception\SolicitudAbiertaException $e ) {
+                // expected
+            }
+        }
+
+        $this->assertSame( $almacenado, get_option( 'entre_redes_cambios_ultimo_error' ), 'A routine refusal must never overwrite the failure slot.' );
+    }
+
+    public function test_the_refusal_event_carries_season_team_plaza_and_code(): void {
+        $dictamen = Dictamen::from( [ new Motivo( 'entrante_con_solicitud_abierta', 'x' ) ] );
+
+        try {
+            $this->repo->crear( SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, 77, 888, 5, 1000 ), 321, $dictamen, '2026-05-27 10:00:00' );
+        } catch ( \EntreRedes\Cambios\Solicitudes\Exception\SolicitudAbiertaException $e ) {
+            // expected
+        }
+
+        $ctx = $this->eventLog->last()['contexto'];
+        $this->assertSame( 'solicitud.creacion_rechazada_duplicado', $this->eventLog->last()['evento'] );
+        $this->assertSame( self::SEASON_ID, $ctx['season_id'] );
+        $this->assertSame( 100, $ctx['team_id'] );
+        $this->assertSame( 77, $ctx['plaza_id'] );
+        $this->assertSame( 321, $ctx['solicitada_por'] );
+        $this->assertSame( 'entrante_con_solicitud_abierta', $ctx['codigo'] );
+    }
+
     public function test_publicar_lote_aplica_regreso(): void {
         $this->seedFecha( 1, self::SEASON_ID, '2026-01-01' );
         $this->seedFecha( 2, self::SEASON_ID, '2026-01-08', 'jugada' );
@@ -535,7 +657,7 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertSame( EstadoSolicitud::APROBADA, $this->repo->findSolicitud( $idA )['estado'] );
         $this->assertSame( EstadoSolicitud::APROBADA, $this->repo->findSolicitud( $idB )['estado'] );
 
-        $this->assertTrue( $this->eventLog->has( 'solicitud.lote_abortado' ) );
+        $this->assertTrue( $this->eventLog->has( 'solicitud.lote_publicacion_fallida' ) );
     }
 
     public function test_publicar_lote_aborta_si_una_solicitud_no_esta_aprobada(): void {
@@ -638,7 +760,7 @@ class SolicitudRepositoryTest extends TestCase {
         // entre_redes_cambios_ultimo_error — this genuine write failure must
         // use a DIFFERENT, 'fallid'-containing codigo instead.
         $this->assertTrue( $this->eventLog->has( 'solicitud.lote_escritura_fallida' ) );
-        $this->assertFalse( $this->eventLog->has( 'solicitud.lote_abortado' ), 'A write failure must not ALSO log the pre-flight abort codigo.' );
+        $this->assertFalse( $this->eventLog->has( 'solicitud.lote_publicacion_fallida' ), 'A write failure must not ALSO log the pre-flight abort codigo.' );
 
         $eventoFallido = null;
         foreach ( $this->eventLog->all() as $evento ) {
@@ -694,7 +816,7 @@ class SolicitudRepositoryTest extends TestCase {
         $this->assertSame( 777, (int) $vigente['player_id'] );
 
         $this->assertSame( EstadoSolicitud::APROBADA, $this->repo->findSolicitud( $id )['estado'] );
-        $this->assertTrue( $this->eventLog->has( 'solicitud.lote_abortado' ) );
+        $this->assertTrue( $this->eventLog->has( 'solicitud.lote_publicacion_fallida' ) );
     }
 
     /**

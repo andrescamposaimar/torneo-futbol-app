@@ -61,6 +61,28 @@ final class EstadoSolicitud {
     private const TODOS = [ self::PENDIENTE, self::APROBADA, self::RECHAZADA, self::PUBLICADA, self::ANULADA ];
 
     /**
+     * THE definition of an OPEN solicitud (0.1.21): one that still holds its
+     * plaza and its entrante(s) — `pendiente` (awaiting the process owner) and
+     * `aprobada` (approved, merely waiting for Friday's lote — see this
+     * class's docblock, "THE GRAPH"). `publicada`, `rechazada` and `anulada`
+     * are the terminal states and release everything they held.
+     *
+     * "Open" and "not terminal" are the same fact, so this list must always
+     * equal the KEYS of `TRANSICIONES` — `EstadoSolicitudTest` pins that
+     * equivalence, so adding a state to one and not the other fails loudly.
+     * `Solicitudes\SolicitudesAbiertasReader` (which feeds both
+     * `Dictamen\Reglas\PlazaSinSolicitudAbierta` and
+     * `Dictamen\Reglas\EntranteSinSolicitudAbierta`, the captain's
+     * `solicitud_abierta` field and the candidate filter) reads THIS one
+     * list, so a future estado can never be "open" for the dictamen and
+     * "closed" for the roster screen. Do not inline `['pendiente',
+     * 'aprobada']` anywhere else.
+     *
+     * @var string[]
+     */
+    private const ABIERTAS = [ self::PENDIENTE, self::APROBADA ];
+
+    /**
      * THE transition graph. Keys are the states a solicitud is currently in;
      * values are every state it may legally move to from there. A state
      * absent as a key (`publicada`, `rechazada`, `anulada`) is terminal —
@@ -83,6 +105,11 @@ final class EstadoSolicitud {
     /** @return string[] Every valid `cambios_solicitud.estado` value. */
     public static function todos(): array {
         return self::TODOS;
+    }
+
+    /** @return string[] Every OPEN estado — see `ABIERTAS`. */
+    public static function abiertas(): array {
+        return self::ABIERTAS;
     }
 
     public static function esValido( string $estado ): bool {

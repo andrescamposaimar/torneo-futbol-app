@@ -51,6 +51,21 @@ namespace EntreRedes\Cambios\Dictamen;
  * `tipo()` reads `reasignacion_arquero`. This constant exists purely so
  * `Solicitudes\SolicitudRepository` has ONE place to read the persisted
  * row-level tipo from, the same as it already does for the other two.
+ *
+ * *** `solicitudId()` — "WHICH PERSISTED ROW IS THIS A RE-EVALUATION OF?" (0.1.21) ***
+ * Null for a brand-new request (`Rest\SolicitudesController::crear()`
+ * evaluates BEFORE any row exists); set via `conSolicitudId()` ONLY by
+ * `Solicitudes\SolicitudRepository` when it rebuilds a request from its
+ * stored row to re-evaluate it at `publicarLote()` time. It exists for ONE
+ * reader: `Dictamen\DictamenContextAssembler`, which must not let a request
+ * collide with ITSELF. `Reglas\PlazaSinSolicitudAbierta` and
+ * `Reglas\EntranteSinSolicitudAbierta` reject anything that already has an
+ * open (`pendiente`/`aprobada`) solicitud, and the row being published IS an
+ * `aprobada` one — without this identity every approved request would fail
+ * its own Friday re-evaluation with "this plaza already has an open request"
+ * and no lote could ever publish. It is a fact ABOUT the request, never a
+ * rule input: no Regla reads it, and `conSolicitudId()` returns a COPY so
+ * this class stays immutable.
  */
 final class SolicitudDeCambio {
 
@@ -65,6 +80,7 @@ final class SolicitudDeCambio {
     private int $fechaId;
     private string $tipo;
     private int $instanteEpoch;
+    private ?int $solicitudId = null;
 
     private function __construct(
         int $seasonId,
@@ -116,6 +132,25 @@ final class SolicitudDeCambio {
         int $instanteEpoch
     ): self {
         return new self( $seasonId, $teamId, $plazaId, null, $fechaId, self::TIPO_REGRESO, $instanteEpoch );
+    }
+
+    /**
+     * A COPY of this request tagged with the id of the persisted
+     * `cambios_solicitud` row it was rebuilt from — see class docblock,
+     * "`solicitudId()`".
+     */
+    public function conSolicitudId( int $solicitudId ): self {
+        $copy              = clone $this;
+        $copy->solicitudId = $solicitudId;
+
+        return $copy;
+    }
+
+    /**
+     * Null until `conSolicitudId()` — i.e. for a request not yet persisted.
+     */
+    public function solicitudId(): ?int {
+        return $this->solicitudId;
     }
 
     public function seasonId(): int {

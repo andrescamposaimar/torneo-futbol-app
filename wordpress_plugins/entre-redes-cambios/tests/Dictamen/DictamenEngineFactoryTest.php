@@ -11,8 +11,10 @@ use EntreRedes\Cambios\Dictamen\Reglas\ArqueroNoOcupaPlazaDeCampo;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteDisponible;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoBloqueado;
 use EntreRedes\Cambios\Dictamen\Reglas\EntranteNoEsElSaliente;
+use EntreRedes\Cambios\Dictamen\Reglas\EntranteSinSolicitudAbierta;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaConOcupacionVigente;
 use EntreRedes\Cambios\Dictamen\Reglas\PlazaNoCerrada;
+use EntreRedes\Cambios\Dictamen\Reglas\PlazaSinSolicitudAbierta;
 use EntreRedes\Cambios\Dictamen\Reglas\PrioridadDePadresRespetada;
 use EntreRedes\Cambios\Dictamen\Reglas\PuntajeDentroDelTecho;
 use EntreRedes\Cambios\Dictamen\Reglas\RegresoSoloConMinimoCumplido;
@@ -21,17 +23,17 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * THE test that protects the ruleset's completeness itself: this is the
- * ONLY place — production or test — allowed to assert "these ten, no
+ * ONLY place — production or test — allowed to assert "these twelve, no
  * more, no fewer" against DictamenEngineFactory. Every other test consumes
  * the factory rather than re-listing the rules, so a future rule dropped
  * from create()/reglas() fails HERE, loudly, instead of nowhere.
  */
 class DictamenEngineFactoryTest extends TestCase {
 
-    public function test_reglas_returns_exactly_the_ten_rules_of_the_reglamento(): void {
+    public function test_reglas_returns_exactly_the_twelve_rules_of_the_reglamento(): void {
         $reglas = DictamenEngineFactory::reglas();
 
-        $this->assertCount( 10, $reglas );
+        $this->assertCount( 12, $reglas );
 
         $clases = array_map( static fn ( object $r ): string => get_class( $r ), $reglas );
 
@@ -47,6 +49,8 @@ class DictamenEngineFactoryTest extends TestCase {
                 RegresoSoloConMinimoCumplido::class,
                 PrioridadDePadresRespetada::class,
                 ArqueroNoOcupaPlazaDeCampo::class,
+                PlazaSinSolicitudAbierta::class,
+                EntranteSinSolicitudAbierta::class,
             ],
             $clases
         );

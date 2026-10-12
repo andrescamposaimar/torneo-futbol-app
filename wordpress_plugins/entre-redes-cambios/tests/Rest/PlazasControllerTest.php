@@ -17,6 +17,7 @@ use EntreRedes\Cambios\Plazas\ListaEsperaResolver;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Rest\PlazasController;
+use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -38,6 +39,19 @@ class PlazasControllerTest extends TestCase {
 
     protected function setUp(): void {
         $this->eventLog = new InMemoryEventLog();
+    }
+
+    /**
+     * A reader that reports NO open solicitud for any plaza — the right
+     * collaborator for every `listar()` test that is about something other
+     * than `solicitud_abierta` (see PlazasControllerSolicitudAbiertaTest for
+     * the ones that are).
+     */
+    private function sinSolicitudesAbiertas(): SolicitudesAbiertasReader {
+        $reader = $this->createMock( SolicitudesAbiertasReader::class );
+        $reader->method( 'abiertaPorPlazaDeEquipo' )->willReturn( [] );
+
+        return $reader;
     }
 
     public function test_listar_happy_path_shapes_every_plaza(): void {
@@ -84,7 +98,7 @@ class PlazasControllerTest extends TestCase {
             }
         );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -144,7 +158,7 @@ class PlazasControllerTest extends TestCase {
         $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
         $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 1 );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -177,7 +191,7 @@ class PlazasControllerTest extends TestCase {
         $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
         $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 1 );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -220,7 +234,7 @@ class PlazasControllerTest extends TestCase {
             $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 23 ) );
             $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 5 );
 
-            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+            $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
             $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
                 'season_id' => self::SEASON_ID,
@@ -265,7 +279,7 @@ class PlazasControllerTest extends TestCase {
 
         $fechaRepository = $this->createMock( FechaRepository::class );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -322,7 +336,7 @@ class PlazasControllerTest extends TestCase {
             }
         );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
@@ -371,7 +385,7 @@ class PlazasControllerTest extends TestCase {
         $fechaRepository->method( 'listBySeason' )->willReturn( self::fechasResueltas( 2 ) );
         $fechaRepository->method( 'countResolvedFechasSince' )->willReturn( 9 );
 
-        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ) );
+        $controller = new PlazasController( $authorizer, $plazaRepository, $fechaRepository, $this->eventLog, $this->createMock( CandidatosResolver::class ), solicitudesAbiertas: $this->sinSolicitudesAbiertas() );
 
         $response = $controller->listar( $this->requestConToken( 'a-valid-jwt', [
             'season_id' => self::SEASON_ID,
