@@ -490,6 +490,47 @@ class BandejaPageTest extends TestCase {
     // Fixtures
     // -------------------------------------------------------------------------
 
+    public function test_la_bandeja_muestra_el_tipo_en_espanol_no_el_enum(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( '(Cambio)', $html );
+        $this->assertStringNotContainsString( 'sustitucion', $html );
+    }
+
+    public function test_cada_tipo_conocido_tiene_etiqueta_en_espanol(): void {
+        $this->assertSame( 'Cambio', $this->invoke( 'etiquetaTipo', [ SolicitudDeCambio::TIPO_SUSTITUCION ] ) );
+        $this->assertSame( 'Regreso', $this->invoke( 'etiquetaTipo', [ SolicitudDeCambio::TIPO_REGRESO ] ) );
+        $this->assertSame( 'Reasignación de arquero', $this->invoke( 'etiquetaTipo', [ SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO ] ) );
+    }
+
+    public function test_un_tipo_desconocido_falla_en_voz_alta_en_vez_de_imprimir_el_valor_crudo(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+
+        $row         = $this->solicitudRepository->findSolicitud( $id );
+        $row['tipo'] = 'tipo_del_futuro';
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "unknown tipo 'tipo_del_futuro'" );
+
+        $this->invoke( 'shapeSolicitud', [ $row ] );
+    }
+
     /** InitialSchema::up() seeds the `timezone` row, so this UPDATEs it. */
     private function setTimezone( string $timezone ): void {
         global $wpdb;

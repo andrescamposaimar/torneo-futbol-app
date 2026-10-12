@@ -278,7 +278,7 @@ class BandejaPage {
                 <strong>#<?php echo esc_html( (string) $solicitud['id'] ); ?></strong>
                 — <?php echo esc_html( (string) $solicitud['team_nombre'] ); ?>
                 — plaza <?php echo esc_html( (string) $solicitud['plaza_id'] ); ?>
-                (<?php echo esc_html( (string) $solicitud['tipo'] ); ?>)
+                (<?php echo esc_html( (string) $solicitud['tipo_label'] ); ?>)
                 — fecha <?php echo esc_html( (string) $solicitud['fecha_id'] ); ?>
             </p>
             <p>
@@ -670,6 +670,10 @@ class BandejaPage {
      * @return array<string, mixed>
      */
     private function shapeSolicitud( array $row ): array {
+        // First, so an unmapped tipo throws before anything below quietly
+        // treats it as a `regreso` (the final `else` arm of the entrante
+        // derivation).
+        $tipoLabel = $this->etiquetaTipo( (string) $row['tipo'] );
         $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
         $plaza    = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
         $vigente  = null !== $plaza ? $this->plazaRepository->findOcupacionVigente( (int) $plaza['id'] ) : null;
@@ -710,6 +714,7 @@ class BandejaPage {
             'team_nombre'              => $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ),
             'plaza_id'                 => (int) $row['plaza_id'],
             'tipo'                     => (string) $row['tipo'],
+            'tipo_label'               => $tipoLabel,
             'fecha_id'                 => (int) $row['fecha_id'],
             'quien_sale_id'            => $quienSaleId,
             'quien_sale_nombre'        => null !== $quienSaleId ? $this->nombrePost( $quienSaleId, __( 'Jugador', 'entre-redes-cambios' ) ) : null,
@@ -726,6 +731,27 @@ class BandejaPage {
             'dictamen_motivos'         => $snapshot->motivos(),
             'decisiones'               => $this->solicitudRepository->listDecisiones( (int) $row['id'] ),
         ];
+    }
+
+    /**
+     * Spanish label for a `cambios_solicitud.tipo`, so the operator never
+     * reads snake_case. Same words the Flutter app uses for the captain
+     * (`CambiosSolicitudTipo.label`). An unmapped tipo throws instead of
+     * printing the raw value — the same discipline as
+     * `Rest\SolicitudesController::shapeSolicitudRow()`: a tipo this screen
+     * was never taught about must not render as if it were understood.
+     *
+     * @throws \RuntimeException On an unrecognized tipo.
+     */
+    private function etiquetaTipo( string $tipo ): string {
+        return match ( $tipo ) {
+            SolicitudDeCambio::TIPO_SUSTITUCION          => __( 'Cambio', 'entre-redes-cambios' ),
+            SolicitudDeCambio::TIPO_REGRESO              => __( 'Regreso', 'entre-redes-cambios' ),
+            SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO => __( 'Reasignación de arquero', 'entre-redes-cambios' ),
+            default => throw new \RuntimeException(
+                "Admin\\BandejaPage::etiquetaTipo(): unknown tipo '{$tipo}'."
+            ),
+        };
     }
 
     private function nombrePost( int $postId, string $fallbackLabel ): string {
