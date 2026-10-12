@@ -8,6 +8,8 @@ use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Dictamen\DictamenSnapshot;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Plazas\JugadorMetricas;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
@@ -67,6 +69,9 @@ class BandejaPage {
 
     public const SLUG = 'cambios-bandeja';
 
+    /** The four player slots a tray row can show — keys of shapeSolicitud()'s `{lado}_id` / `{lado}_nombre`. */
+    private const LADOS = [ 'quien_sale', 'quien_entra', 'quien_sale_campo', 'quien_entra_campo' ];
+
     private const NONCE_APROBAR         = 'cambios_aprobar';
     private const NONCE_APROBAR_FIELD   = 'cambios_aprobar_nonce';
     private const NONCE_RECHAZAR        = 'cambios_rechazar';
@@ -79,6 +84,7 @@ class BandejaPage {
     private PlazaRepository $plazaRepository;
     private Settings $settings;
     private EventLog $eventLog;
+    private JugadorMetricasReader $metricasReader;
 
     /** @var callable(): int */
     private $clockFn;
@@ -96,6 +102,7 @@ class BandejaPage {
         PlazaRepository $plazaRepository,
         Settings $settings,
         EventLog $eventLog,
+        JugadorMetricasReader $metricasReader,
         ?callable $clockFn = null
     ) {
         $this->authorizer          = $authorizer;
@@ -103,6 +110,7 @@ class BandejaPage {
         $this->plazaRepository     = $plazaRepository;
         $this->settings            = $settings;
         $this->eventLog            = $eventLog;
+        $this->metricasReader      = $metricasReader;
         $this->clockFn             = $clockFn ?? static fn (): int => time();
     }
 
@@ -174,6 +182,10 @@ class BandejaPage {
             $this->solicitudRepository->listAprobadas( $seasonId )
         );
 
+        // ONE batched read for the whole page (pendientes + aprobadas
+        // together), never one query per player.
+        [ $pendientes, $aprobadas, $metricasLegibles ] = $this->anotarMetricas( $pendientes, $aprobadas );
+
         $adminUrl = admin_url( 'admin.php?page=' . self::SLUG );
 
         ?>
@@ -183,6 +195,12 @@ class BandejaPage {
             <?php if ( is_array( $notice ) ) : ?>
             <div class="notice notice-<?php echo esc_attr( (string) $notice['tipo'] ); ?> is-dismissible">
                 <p><?php echo esc_html( (string) $notice['mensaje'] ); ?></p>
+            </div>
+            <?php endif; ?>
+
+            <?php if ( ! $metricasLegibles ) : ?>
+            <div class="notice notice-warning">
+                <p><?php esc_html_e( 'No se pudieron leer los puntajes de los jugadores. Los datos que faltan no significan que el jugador no tenga puntaje.', 'entre-redes-cambios' ); ?></p>
             </div>
             <?php endif; ?>
 
@@ -289,8 +307,8 @@ class BandejaPage {
                         ( ! empty( $solicitud['es_grupo'] ) )
                             ? __( 'Arco — Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' )
                             : __( 'Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
-                        (string) ( $solicitud['quien_sale_nombre'] ?? '—' ),
-                        (string) ( $solicitud['quien_entra_nombre'] ?? '—' )
+                        $this->jugadorConDatos( $solicitud, 'quien_sale' ),
+                        $this->jugadorConDatos( $solicitud, 'quien_entra' )
                     )
                 );
                 ?>
@@ -302,8 +320,8 @@ class BandejaPage {
                     sprintf(
                         /* translators: 1: who is leaving the field plaza, 2: who is entering it */
                         __( 'Campo — Sale: %1$s — Entra: %2$s', 'entre-redes-cambios' ),
-                        (string) ( $solicitud['quien_sale_campo_nombre'] ?? '—' ),
-                        (string) ( $solicitud['quien_entra_campo_nombre'] ?? '—' )
+                        $this->jugadorConDatos( $solicitud, 'quien_sale_campo' ),
+                        $this->jugadorConDatos( $solicitud, 'quien_entra_campo' )
                     )
                 );
                 ?>
@@ -752,6 +770,83 @@ class BandejaPage {
                 "Admin\\BandejaPage::etiquetaTipo(): unknown tipo '{$tipo}'."
             ),
         };
+    }
+
+    /**
+     * Adds each player's puntaje to every shaped row — ONE `resolveMuchos()`
+     * call over every player on the page (both lists), which already chunks
+     * at 200 ids, instead of a query per player.
+     *
+     * A failed read must not take the tray down (the operator could no
+     * longer approve anything) but must not read as "nobody has a puntaje"
+     * either: it returns `false` as the third element so render() shows a
+     * visible warning. `JugadorMetricasReader` has already logged the failure.
+     *
+     * @param array<int, array<string, mixed>> $pendientes
+     * @param array<int, array<string, mixed>> $aprobadas
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>, 2: bool}
+     */
+    private function anotarMetricas( array $pendientes, array $aprobadas ): array {
+        $ids = [];
+
+        foreach ( array_merge( $pendientes, $aprobadas ) as $solicitud ) {
+            foreach ( self::LADOS as $lado ) {
+                if ( null !== ( $solicitud[ $lado . '_id' ] ?? null ) ) {
+                    $ids[ (int) $solicitud[ $lado . '_id' ] ] = true;
+                }
+            }
+        }
+
+        $metricas = [];
+        $legibles = true;
+
+        if ( ! empty( $ids ) ) {
+            try {
+                $metricas = $this->metricasReader->resolveMuchos( array_keys( $ids ) );
+            } catch ( \RuntimeException $e ) {
+                $legibles = false;
+            }
+        }
+
+        $anotar = function ( array $solicitud ) use ( $metricas ): array {
+            foreach ( self::LADOS as $lado ) {
+                $id = $solicitud[ $lado . '_id' ] ?? null;
+                $m  = null !== $id ? ( $metricas[ (int) $id ] ?? null ) : null;
+
+                $solicitud[ $lado . '_puntaje' ] = $m instanceof JugadorMetricas && null !== $m->puntaje()
+                    ? (string) $m->puntaje()
+                    : null;
+            }
+
+            return $solicitud;
+        };
+
+        return [
+            array_map( $anotar, $pendientes ),
+            array_map( $anotar, $aprobadas ),
+            $legibles,
+        ];
+    }
+
+    /**
+     * One player as the tray prints them: `Apellido, Nombre (4)`. Whatever
+     * could not be resolved is simply left out — never a guessed value — and
+     * a player with nothing to add prints as the bare name. A missing player
+     * prints `—`, as before.
+     *
+     * @param array<string, mixed> $solicitud As shaped by shapeSolicitud() and annotated by anotarMetricas().
+     */
+    private function jugadorConDatos( array $solicitud, string $lado ): string {
+        $nombre = (string) ( $solicitud[ $lado . '_nombre' ] ?? '—' );
+        $datos  = [];
+
+        $puntaje = $solicitud[ $lado . '_puntaje' ] ?? null;
+
+        if ( null !== $puntaje && '' !== $puntaje ) {
+            $datos[] = (string) $puntaje;
+        }
+
+        return empty( $datos ) ? $nombre : $nombre . ' (' . implode( ' · ', $datos ) . ')';
     }
 
     private function nombrePost( int $postId, string $fallbackLabel ): string {
