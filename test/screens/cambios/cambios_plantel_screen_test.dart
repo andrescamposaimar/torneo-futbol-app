@@ -734,10 +734,7 @@ void main() {
       final button =
           tester.widget<CambiosAccionButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
       expect(button.onPressed, isNotNull);
-      expect(
-        find.text('Faltan 0 fecha(s) para que el titular pueda volver.'),
-        findsNothing,
-      );
+      expect(find.byKey(const Key('motivo_no_listo_2')), findsNothing);
     });
 
     testWidgets('"Confirmar fin del cambio" — N fechas faltantes: disabled, labelled',
@@ -757,10 +754,72 @@ void main() {
       final button =
           tester.widget<CambiosAccionButton>(find.byKey(const Key('confirmar_fin_cambio_2')));
       expect(button.onPressed, isNull);
-      expect(
-        find.text('Faltan 2 fecha(s) para que el titular pueda volver.'),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('motivo_no_listo_2')), findsOneWidget);
+    });
+
+    group('fechas faltantes caption', () {
+      Future<InlineSpan> pumpCaption(WidgetTester tester, int faltan) async {
+        await tester.pumpWidget(_wrap(CambiosPlantelView(
+          state: CambiosPlantelLoaded(plazas: [
+            _plaza(plazaId: 2, fechasFaltantesLiberacion: faltan),
+          ]),
+          onRetry: () {},
+          onRefresh: () async {},
+          onPedirCambio: (_) {},
+          onPedirRegreso: (_) {},
+          onVerSolicitudes: () {},
+          onCambiarPorTitular: (_) {},
+        )));
+        return tester.widget<Text>(find.byKey(const Key('motivo_no_listo_2'))).textSpan!;
+      }
+
+      /// Resolves each leaf's effective style against the Text's own default
+      /// and returns `(text, bold, italic)` per leaf, so a leaf that merely
+      /// inherits (or fails to override) is judged by what it renders as.
+      List<(String, bool, bool)> leaves(InlineSpan root, TextStyle base) {
+        final out = <(String, bool, bool)>[];
+        void walk(InlineSpan span, TextStyle inherited) {
+          final style = span is TextSpan && span.style != null
+              ? inherited.merge(span.style)
+              : inherited;
+          if (span is TextSpan) {
+            if (span.text != null) {
+              out.add((
+                span.text!,
+                style.fontWeight == FontWeight.bold,
+                style.fontStyle == FontStyle.italic,
+              ));
+            }
+            for (final child in span.children ?? const <InlineSpan>[]) {
+              walk(child, style);
+            }
+          }
+        }
+
+        walk(root, base);
+        return out;
+      }
+
+      testWidgets('is normal type with ONLY the count bold', (tester) async {
+        final span = await pumpCaption(tester, 3);
+        final text = tester.widget<Text>(find.byKey(const Key('motivo_no_listo_2')));
+        final base = const TextStyle(fontSize: 11).merge(text.style);
+
+        expect(span.toPlainText(), 'Faltan 3 fechas para que el titular pueda volver.');
+        expect(leaves(span, base), [
+          ('Faltan ', false, false),
+          ('3 fechas', true, false),
+          (' para que el titular pueda volver.', false, false),
+        ]);
+      });
+
+      testWidgets('pluralises: 1 fecha, 2 fechas — never "fecha(s)"', (tester) async {
+        expect((await pumpCaption(tester, 1)).toPlainText(),
+            'Faltan 1 fecha para que el titular pueda volver.');
+        expect((await pumpCaption(tester, 2)).toPlainText(),
+            'Faltan 2 fechas para que el titular pueda volver.');
+        expect(find.textContaining('(s)', findRichText: true), findsNothing);
+      });
     });
 
     testWidgets('"Confirmar fin del cambio" — indeterminado: disabled, honest caption',
@@ -786,7 +845,7 @@ void main() {
       expect(button.onPressed, isNull);
       expect(
         find.text('No pudimos calcular cuántas fechas faltan para que el '
-            'titular pueda volver.'),
+            'titular pueda volver.', findRichText: true),
         findsOneWidget,
       );
     });

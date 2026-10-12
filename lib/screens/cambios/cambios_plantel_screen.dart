@@ -476,6 +476,31 @@ class _TitularCard extends StatelessWidget {
 ///     rejection.
 ///   - "Cambiar este cambio" (a sustitucion on the SAME plaza): legal and
 ///     common, always enabled while the plaza is open.
+/// Why "Confirmar fin del cambio" is disabled, as rich text so only the
+/// count is bold: "Faltan **3 fechas** para que el titular pueda volver."
+/// ("1 fecha" for one). When the count is not known — flagged
+/// indeterminate, or simply absent — says so instead of printing a number.
+@visibleForTesting
+TextSpan motivoRegresoNoListo(CambiosPlaza plaza) {
+  final faltan = plaza.fechasFaltantesLiberacion;
+  if (plaza.fechasFaltantesLiberacionIndeterminado || faltan == null) {
+    return const TextSpan(
+      text: 'No pudimos calcular cuántas fechas faltan para que el '
+          'titular pueda volver.',
+    );
+  }
+  return TextSpan(
+    children: [
+      const TextSpan(text: 'Faltan '),
+      TextSpan(
+        text: faltan == 1 ? '1 fecha' : '$faltan fechas',
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      const TextSpan(text: ' para que el titular pueda volver.'),
+    ],
+  );
+}
+
 class _CambioActivoCard extends StatelessWidget {
   final CambiosPlaza plaza;
   final Jugador? jugador;
@@ -503,13 +528,9 @@ class _CambioActivoCard extends StatelessWidget {
     final regresoListo = plaza.regresoElegible;
     final motivoNoListo = plaza.cerrada
         ? null
-        : plaza.fechasFaltantesLiberacionIndeterminado
-            ? 'No pudimos calcular cuántas fechas faltan para que el '
-                'titular pueda volver.'
-            : regresoListo
-                ? null
-                : 'Faltan ${plaza.fechasFaltantesLiberacion} fecha(s) para '
-                    'que el titular pueda volver.';
+        : regresoListo
+            ? null
+            : motivoRegresoNoListo(plaza);
 
     return CambiosJugadorCard(
       key: Key('activo_card_${plaza.plazaId}'),
@@ -537,12 +558,12 @@ class _CambioActivoCard extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 2),
                   child: SizedBox(
                     width: 220,
-                    child: Text(
+                    child: Text.rich(
+                      key: Key('motivo_no_listo_${plaza.plazaId}'),
                       motivoNoListo,
                       style: TextStyle(
                         fontSize: 11,
                         color: Colors.grey.shade600,
-                        fontStyle: FontStyle.italic,
                       ),
                     ),
                   ),
