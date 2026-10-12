@@ -32,6 +32,7 @@ CambiosPlaza _plaza({
   bool esArco = false,
   int? fechasFaltantesLiberacion = 1,
   bool fechasFaltantesLiberacionIndeterminado = false,
+  CambiosSolicitudAbierta? solicitudAbierta,
 }) {
   return CambiosPlaza(
     plazaId: plazaId,
@@ -44,6 +45,7 @@ CambiosPlaza _plaza({
     esArco: esArco,
     fechasFaltantesLiberacion: fechasFaltantesLiberacion,
     fechasFaltantesLiberacionIndeterminado: fechasFaltantesLiberacionIndeterminado,
+    solicitudAbierta: solicitudAbierta,
   );
 }
 
@@ -985,6 +987,95 @@ void main() {
           tester.widget<CambiosSolicitudesScreen>(find.byType(CambiosSolicitudesScreen));
       expect(screen.seasonId, equals(7));
       expect(screen.teamId, equals(1));
+    });
+  });
+
+  group('CambiosPlantelView — a plaza with a request already open', () {
+    // The process owner's rule: a captain may not queue two changes on one
+    // plaza. The server refuses it (Dictamen\Reglas\PlazaSinSolicitudAbierta);
+    // these cover the courtesy half — the screen must not offer an action it
+    // already knows will be refused.
+
+    const abierta = CambiosSolicitudAbierta(id: 7, estado: 'pendiente');
+
+    Widget plantelCon(List<CambiosPlaza> plazas) => _wrap(CambiosPlantelView(
+          state: CambiosPlantelLoaded(plazas: plazas),
+          onRetry: () {},
+          onRefresh: () async {},
+          onPedirCambio: (_) {},
+          onPedirRegreso: (_) {},
+          onVerSolicitudes: () {},
+          onCambiarPorTitular: (_) {},
+        ));
+
+    testWidgets('titular card: every action is replaced by the legend', (tester) async {
+      await tester.pumpWidget(plantelCon([
+        _plaza(
+          plazaId: 1,
+          esTitularElOcupante: true,
+          ocupanteNombre: null,
+          ocupantePlayerId: null,
+          esArco: true,
+          solicitudAbierta: abierta,
+        ),
+      ]));
+
+      expect(find.byKey(const Key('solicitud_abierta_leyenda_1')), findsOneWidget);
+      expect(find.text('Solicitud de cambio pendiente'), findsOneWidget);
+      // Both doors on this card, not just the obvious one.
+      expect(find.byKey(const Key('pedir_cambio_1')), findsNothing);
+      expect(find.byKey(const Key('cambiar_por_titular_1')), findsNothing);
+    });
+
+    testWidgets('occupant card: both its actions are replaced too', (tester) async {
+      await tester.pumpWidget(plantelCon([
+        _plaza(
+          plazaId: 2,
+          esTitularElOcupante: false,
+          ocupanteNombre: 'Pedro Gómez',
+          fechasFaltantesLiberacion: 0,
+          solicitudAbierta: abierta,
+        ),
+      ]));
+
+      expect(find.byKey(const Key('solicitud_abierta_leyenda_2')), findsWidgets);
+      // "Confirmar fin del cambio" is a `regreso` — it files a request
+      // against this same plaza, so it has to go as well.
+      expect(find.byKey(const Key('confirmar_fin_cambio_2')), findsNothing);
+      expect(find.byKey(const Key('cambiar_este_cambio_2')), findsNothing);
+    });
+
+    testWidgets('an aprobada request reads exactly like a pendiente one', (tester) async {
+      // The process owner's call: the roster card only says the plaza is
+      // taken. The estado itself belongs on "Mis pedidos".
+      await tester.pumpWidget(plantelCon([
+        _plaza(
+          plazaId: 3,
+          esTitularElOcupante: true,
+          ocupanteNombre: null,
+          ocupantePlayerId: null,
+          solicitudAbierta: const CambiosSolicitudAbierta(id: 9, estado: 'aprobada'),
+        ),
+      ]));
+
+      expect(find.text('Solicitud de cambio pendiente'), findsOneWidget);
+      expect(find.byKey(const Key('pedir_cambio_3')), findsNothing);
+    });
+
+    testWidgets('no open request: the actions are still there', (tester) async {
+      await tester.pumpWidget(plantelCon([
+        _plaza(
+          plazaId: 4,
+          esTitularElOcupante: true,
+          ocupanteNombre: null,
+          ocupantePlayerId: null,
+          esArco: true,
+        ),
+      ]));
+
+      expect(find.byKey(const Key('solicitud_abierta_leyenda_4')), findsNothing);
+      expect(find.byKey(const Key('pedir_cambio_4')), findsOneWidget);
+      expect(find.byKey(const Key('cambiar_por_titular_4')), findsOneWidget);
     });
   });
 }
