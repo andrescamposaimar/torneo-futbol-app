@@ -336,7 +336,7 @@ void main() {
         ]);
 
         expect(find.byKey(const Key('solicitud_card_1')), findsOneWidget);
-        expect(find.text('Otros'), findsOneWidget);
+        expect(find.text('Desconocidas'), findsOneWidget);
         expect(top(tester, 'solicitudes_grupo_desconocido'),
             greaterThan(top(tester, 'solicitudes_grupo_anulada')));
         expect(top(tester, 'solicitud_card_1'),
@@ -607,7 +607,7 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('Mis Solicitudes'), findsOneWidget); // app bar title
+      expect(find.text('Mis pedidos'), findsOneWidget); // app bar title
       expect(find.byKey(const Key('solicitud_card_1')), findsOneWidget);
     });
 
