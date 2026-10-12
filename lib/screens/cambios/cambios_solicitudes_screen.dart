@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../models/cambios_solicitud.dart';
 import '../../providers/cambios_providers.dart';
 import '../../services/cambios_solicitudes_controller.dart';
+import '../../utils/date_utils.dart';
 import '../../utils/puntaje_utils.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import '../../widgets/loading_seccion.dart';
@@ -170,7 +170,6 @@ class _SolicitudCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dateFormat = DateFormat('dd/MM/yyyy HH:mm');
     final motivos = solicitud.dictamen.motivos;
 
     return Padding(
@@ -226,12 +225,12 @@ class _SolicitudCard extends StatelessWidget {
               const SizedBox(height: 6),
               if (solicitud.solicitadaAt != null)
                 Text(
-                  'Pedido el ${dateFormat.format(solicitud.solicitadaAt!)}',
+                  'Pedido el ${formatFechaHoraArgentina(solicitud.solicitadaAt!)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                 ),
               if (solicitud.resueltaAt != null)
                 Text(
-                  'Resuelto el ${dateFormat.format(solicitud.resueltaAt!)}',
+                  'Resuelto el ${formatFechaHoraArgentina(solicitud.resueltaAt!)}',
                   style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
                 ),
               const SizedBox(height: 6),

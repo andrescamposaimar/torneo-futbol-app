@@ -440,8 +440,78 @@ class BandejaPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // Presentation — decision history timestamps (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_el_historial_de_decisiones_se_muestra_en_la_hora_del_operador_no_en_utc(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-10-12 16:20:00'
+        );
+        // Stored UTC, exactly as ahoraDb() writes it.
+        $this->solicitudRepository->aprobar( $id, 42, null, '2026-10-12 16:25:52', 'Fernando' );
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( '2026-10-12 13:25:52 — aprobada', $html );
+        $this->assertStringNotContainsString( '16:25:52', $html );
+    }
+
+    public function test_la_hora_del_operador_sale_de_Settings_timezone_no_de_un_offset_fijo(): void {
+        $this->setTimezone( 'Asia/Tokyo' );
+
+        try {
+            $this->assertSame( '2026-10-13 01:25:52', $this->invoke( 'aHoraDelOperador', [ '2026-10-12 16:25:52' ] ) );
+        } finally {
+            $this->setTimezone( 'America/Argentina/Buenos_Aires' );
+        }
+    }
+
+    public function test_una_zona_horaria_invalida_cae_a_UTC_y_lo_dice(): void {
+        $this->setTimezone( 'Not/AZone' );
+
+        try {
+            $this->assertSame( '2026-10-12 16:25:52 UTC', $this->invoke( 'aHoraDelOperador', [ '2026-10-12 16:25:52' ] ) );
+        } finally {
+            $this->setTimezone( 'America/Argentina/Buenos_Aires' );
+        }
+    }
+
+    public function test_un_valor_vacio_o_ilegible_no_se_inventa(): void {
+        $this->assertSame( '', $this->invoke( 'aHoraDelOperador', [ '' ] ) );
+        $this->assertSame( 'no-es-una-fecha', $this->invoke( 'aHoraDelOperador', [ 'no-es-una-fecha' ] ) );
+    }
+
+    // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
+
+    /** InitialSchema::up() seeds the `timezone` row, so this UPDATEs it. */
+    private function setTimezone( string $timezone ): void {
+        global $wpdb;
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE {$wpdb->prefix}cambios_settings SET setting_value = %s WHERE setting_key = 'timezone'",
+                $timezone
+            )
+        );
+    }
+
+    /** Shapes and renders one solicitud's tray row, returning the HTML. */
+    private function renderFilaDe( int $solicitudId ): string {
+        $row    = $this->solicitudRepository->findSolicitud( $solicitudId );
+        $shaped = $this->invoke( 'shapeSolicitud', [ $row ] );
+
+        ob_start();
+        $this->invoke( 'renderFilaSolicitud', [ $shaped, 'http://example.test/admin.php', false ] );
+
+        return (string) ob_get_clean();
+    }
 
     private function seedFecha( int $fechaId ): void {
         global $wpdb;

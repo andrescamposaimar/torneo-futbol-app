@@ -204,4 +204,24 @@ void main() {
       expect(solicitud.movimientos.isEmpty, isTrue);
     });
   });
+
+  group('CambiosSolicitud.fromJson — timestamps', () {
+    test('a zone-less wire datetime is read as a UTC instant, never as device-local time', () {
+      final solicitud = CambiosSolicitud.fromJson({
+        'id': 7,
+        'plaza_id': 1,
+        'tipo': 'sustitucion',
+        'fecha_id': 5,
+        'estado': 'aprobada',
+        'solicitada_at': '2026-10-12 16:20:00',
+        'resuelta_at': '2026-10-12 16:25:52',
+        'dictamen': {'procede': true, 'motivos': []},
+      });
+
+      expect(solicitud.solicitadaAt, DateTime.utc(2026, 10, 12, 16, 20));
+      expect(solicitud.solicitadaAt!.isUtc, isTrue);
+      expect(solicitud.resueltaAt, DateTime.utc(2026, 10, 12, 16, 25, 52));
+      expect(solicitud.resueltaAt!.isUtc, isTrue);
+    });
+  });
 }

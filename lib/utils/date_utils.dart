@@ -103,3 +103,17 @@ String formatDiaYFechaCorta(DateTime instanteUtc) {
   final mm = local.month.toString().padLeft(2, '0');
   return '$dia $dd/$mm';
 }
+
+/// Formats a UTC [instanteUtc] as 'dd/MM/yyyy HH:mm' in Argentina civil time
+/// (e.g. 13:20 for 16:20 UTC). Applies [argentinaUtcOffset] explicitly
+/// instead of `DateTime.toLocal()`, so the rendering is the same on any
+/// device and in any test runner, whatever timezone they happen to be set to.
+///
+/// [instanteUtc] must really be a UTC instant — callers holding a wire value
+/// must parse it as UTC first (see `CambiosSolicitud._parseWireDateTime`).
+String formatFechaHoraArgentina(DateTime instanteUtc) {
+  final local = instanteUtc.toUtc().add(argentinaUtcOffset);
+  String dos(int n) => n.toString().padLeft(2, '0');
+  return '${dos(local.day)}/${dos(local.month)}/${local.year} '
+      '${dos(local.hour)}:${dos(local.minute)}';
+}

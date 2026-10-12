@@ -321,10 +321,24 @@ class CambiosSolicitud {
     );
   }
 
+  /// Parses a wire datetime as a UTC instant. The backend stores these as
+  /// `Y-m-d H:i:s` in UTC with no zone marker (`SolicitudRepository`'s
+  /// `ahoraDb()`); `DateTime.parse` would read that as DEVICE-local time and
+  /// show the UTC clock reading as if it were the user's own.
   static DateTime? _parseWireDateTime(Object? raw) {
     if (raw is! String || raw.isEmpty) return null;
     try {
-      return DateTime.parse(raw.replaceFirst(' ', 'T'));
+      final parsed = DateTime.parse(raw.replaceFirst(' ', 'T'));
+      if (parsed.isUtc) return parsed;
+      return DateTime.utc(
+        parsed.year,
+        parsed.month,
+        parsed.day,
+        parsed.hour,
+        parsed.minute,
+        parsed.second,
+        parsed.millisecond,
+      );
     } on FormatException {
       return null;
     }

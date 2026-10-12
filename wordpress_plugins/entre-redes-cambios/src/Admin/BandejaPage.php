@@ -345,7 +345,7 @@ class BandejaPage {
                     echo esc_html(
                         sprintf(
                             '%s — %s (%s)%s',
-                            (string) ( $decision['decidida_at'] ?? '' ),
+                            $this->aHoraDelOperador( (string) ( $decision['decidida_at'] ?? '' ) ),
                             (string) ( $decision['accion'] ?? '' ),
                             (string) ( $decision['decidida_por_nombre'] ?? '' ),
                             ! empty( $decision['nota'] ) ? ' — ' . (string) $decision['nota'] : ''
@@ -603,6 +603,41 @@ class BandejaPage {
         }
 
         return 'WP user #' . get_current_user_id();
+    }
+
+    /**
+     * Every datetime this plugin stores is UTC (`ahoraDb()` below writes
+     * `gmdate()`); showing the raw column to the operator reads three hours
+     * early in Buenos Aires. Converts a stored UTC `Y-m-d H:i:s` into the
+     * timezone the operator configured (`Settings::timezone()`, never a
+     * hardcoded offset).
+     *
+     * An empty value stays empty and one that does not parse is returned
+     * as-is — a corrupt value is shown, never guessed at. A configured
+     * timezone PHP does not recognise falls back to UTC, and the result is
+     * then LABELLED " UTC" so the operator is never shown a UTC reading that
+     * looks local.
+     */
+    private function aHoraDelOperador( string $utcDb ): string {
+        if ( '' === $utcDb ) {
+            return '';
+        }
+
+        try {
+            $instante = new \DateTimeImmutable( $utcDb, new \DateTimeZone( 'UTC' ) );
+        } catch ( \Exception $e ) {
+            return $utcDb;
+        }
+
+        try {
+            $zona   = new \DateTimeZone( $this->settings->timezone() );
+            $sufijo = '';
+        } catch ( \Exception $e ) {
+            $zona   = new \DateTimeZone( 'UTC' );
+            $sufijo = ' UTC';
+        }
+
+        return $instante->setTimezone( $zona )->format( 'Y-m-d H:i:s' ) . $sufijo;
     }
 
     private function ahoraDb(): string {
