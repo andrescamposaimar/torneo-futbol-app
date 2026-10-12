@@ -246,7 +246,14 @@ final class Plugin {
                     $eventLog
                 );
 
-                $bandejaPage = new Admin\BandejaPage( $authorizer, $solicitudRepository, $plazaRepository, $settings, $eventLog );
+                $bandejaPage = new Admin\BandejaPage(
+                    $authorizer,
+                    $solicitudRepository,
+                    $plazaRepository,
+                    $settings,
+                    $eventLog,
+                    new Plazas\JugadorMetricasReader( $wpdb, $eventLog )
+                );
 
                 ( new Admin\AdminMenu( $bandejaPage ) )->register();
             } );

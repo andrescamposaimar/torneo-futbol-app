@@ -14,6 +14,7 @@ use EntreRedes\Cambios\Dictamen\DictamenPipeline;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
@@ -47,6 +48,7 @@ class BandejaPageTest extends TestCase {
     private InMemoryEventLog $eventLog;
     private SolicitudRepository $solicitudRepository;
     private BandejaPage $page;
+    private Settings $settings;
 
     protected function setUp(): void {
         InitialSchema::up();
@@ -91,8 +93,10 @@ class BandejaPageTest extends TestCase {
             $this->plazaRepository,
             $settings,
             $this->eventLog,
+            new JugadorMetricasReader( $wpdb, $this->eventLog ),
             static fn (): int => strtotime( '2026-05-27 11:00:00' )
         );
+        $this->settings            = $settings;
 
         unset(
             $GLOBALS['wp_test_current_user_can'],
@@ -440,8 +444,333 @@ class BandejaPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // Presentation — decision history timestamps (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_el_historial_de_decisiones_se_muestra_en_la_hora_del_operador_no_en_utc(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-10-12 16:20:00'
+        );
+        // Stored UTC, exactly as ahoraDb() writes it.
+        $this->solicitudRepository->aprobar( $id, 42, null, '2026-10-12 16:25:52', 'Fernando' );
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( '2026-10-12 13:25:52 — aprobada', $html );
+        $this->assertStringNotContainsString( '16:25:52', $html );
+    }
+
+    public function test_la_hora_del_operador_sale_de_Settings_timezone_no_de_un_offset_fijo(): void {
+        $this->setTimezone( 'Asia/Tokyo' );
+
+        try {
+            $this->assertSame( '2026-10-13 01:25:52', $this->invoke( 'aHoraDelOperador', [ '2026-10-12 16:25:52' ] ) );
+        } finally {
+            $this->setTimezone( 'America/Argentina/Buenos_Aires' );
+        }
+    }
+
+    public function test_una_zona_horaria_invalida_cae_a_UTC_y_lo_dice(): void {
+        $this->setTimezone( 'Not/AZone' );
+
+        try {
+            $this->assertSame( '2026-10-12 16:25:52 UTC', $this->invoke( 'aHoraDelOperador', [ '2026-10-12 16:25:52' ] ) );
+        } finally {
+            $this->setTimezone( 'America/Argentina/Buenos_Aires' );
+        }
+    }
+
+    public function test_un_valor_vacio_o_ilegible_no_se_inventa(): void {
+        $this->assertSame( '', $this->invoke( 'aHoraDelOperador', [ '' ] ) );
+        $this->assertSame( 'no-es-una-fecha', $this->invoke( 'aHoraDelOperador', [ 'no-es-una-fecha' ] ) );
+    }
+
+    // -------------------------------------------------------------------------
     // Fixtures
     // -------------------------------------------------------------------------
+
+    public function test_la_bandeja_muestra_el_tipo_en_espanol_no_el_enum(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( '(Cambio)', $html );
+        $this->assertStringNotContainsString( 'sustitucion', $html );
+    }
+
+    public function test_cada_tipo_conocido_tiene_etiqueta_en_espanol(): void {
+        $this->assertSame( 'Cambio', $this->invoke( 'etiquetaTipo', [ SolicitudDeCambio::TIPO_SUSTITUCION ] ) );
+        $this->assertSame( 'Regreso', $this->invoke( 'etiquetaTipo', [ SolicitudDeCambio::TIPO_REGRESO ] ) );
+        $this->assertSame( 'Reasignación de arquero', $this->invoke( 'etiquetaTipo', [ SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO ] ) );
+    }
+
+    public function test_un_tipo_desconocido_falla_en_voz_alta_en_vez_de_imprimir_el_valor_crudo(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+
+        $row         = $this->solicitudRepository->findSolicitud( $id );
+        $row['tipo'] = 'tipo_del_futuro';
+
+        $this->expectException( \RuntimeException::class );
+        $this->expectExceptionMessage( "unknown tipo 'tipo_del_futuro'" );
+
+        $this->invoke( 'shapeSolicitud', [ $row ] );
+    }
+
+    // -------------------------------------------------------------------------
+    // Presentation — puntaje per player (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_la_bandeja_muestra_el_puntaje_de_cada_jugador_y_un_entero_no_lleva_decimal(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 777, 4.0 );
+        $this->seedPuntaje( 888, 2.5 );
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $html = $this->renderPagina();
+
+        // Different puntajes on purpose: "each player shows THEIR OWN" must
+        // be distinguishable from "one value printed twice".
+        $this->assertStringContainsString( 'Sale: Maccagno, Franco (4) — Entra: Campos, Andres (2.5)', $html );
+        $this->assertStringNotContainsString( '(4.0)', $html );
+
+        $wp_test_post_titles = [];
+    }
+
+    public function test_un_jugador_sin_puntaje_resoluble_se_muestra_solo_con_el_nombre(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres', 999 => 'Sin Calificar, Sofia' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        // 777: no sp_metrics row at all. 888: stored zero ("sin calificar").
+        $this->seedPuntaje( 888, 0.0 );
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString( 'Sale: Maccagno, Franco — Entra: Campos, Andres', $html );
+        $this->assertStringNotContainsString( '(0)', $html );
+        $this->assertStringNotContainsString( '()', $html );
+
+        $wp_test_post_titles = [];
+    }
+
+    public function test_los_puntajes_de_toda_la_pagina_se_leen_en_un_solo_lote(): void {
+        global $wpdb, $wp_test_post_titles;
+        $wp_test_post_titles = [];
+
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+        foreach ( [ [ 100, 701, 801 ], [ 101, 702, 802 ], [ 102, 703, 803 ] ] as [ $teamId, $titular, $entrante ] ) {
+            $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, $teamId, $titular, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+            $this->seedPuntaje( $titular, 3.0 );
+            $this->seedPuntaje( $entrante, 2.5 );
+            $this->solicitudRepository->crear(
+                SolicitudDeCambio::sustitucion( self::SEASON_ID, $teamId, $plazaId, $entrante, 5, $this->instanteEnPlazo() ),
+                777,
+                Dictamen::from( [] ),
+                '2026-05-27 10:00:00'
+            );
+        }
+
+        $wpdb->queries = [];
+        $this->renderPagina();
+
+        $lecturasDePuntaje = array_filter( $wpdb->queries, static fn ( string $sql ): bool => str_contains( $sql, "'sp_metrics'" ) );
+        $this->assertCount( 1, $lecturasDePuntaje, 'Six players across three rows must cost ONE sp_metrics read, not one per player.' );
+    }
+
+    public function test_si_falla_la_lectura_de_puntajes_la_bandeja_avisa_y_no_afirma_que_no_hay_puntaje(): void {
+        global $wpdb, $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 777, 4.0 );
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $this->page = new BandejaPage(
+            new ProcessOwnerAuthorizer(),
+            $this->solicitudRepository,
+            $this->plazaRepository,
+            $this->settings,
+            $this->eventLog,
+            new JugadorMetricasReader( $this->wpdbQueFallaEnGetResults( $wpdb ), $this->eventLog ),
+            static fn (): int => strtotime( '2026-05-27 11:00:00' )
+        );
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString( 'No se pudieron leer los puntajes', $html );
+        $this->assertStringContainsString( 'Sale: Maccagno, Franco — Entra: Campos, Andres', $html, 'The row itself must still render, so the operator can act.' );
+
+        $wp_test_post_titles = [];
+    }
+
+    // -------------------------------------------------------------------------
+    // Presentation — carácter per player (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_la_bandeja_muestra_el_caracter_exacto_de_cada_jugador_no_el_binario_padre_invitado(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 777, 4.0 );
+        $this->seedPuntaje( 888, 2.5 );
+        $this->seedCaracter( 777, 'Personal Colegio' );
+        $this->seedCaracter( 888, 'Padre Ex-Alumno' );
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString(
+            'Sale: Maccagno, Franco (4 · Personal Colegio) — Entra: Campos, Andres (2.5 · Padre Ex-Alumno)',
+            $html
+        );
+
+        $wp_test_post_titles = [];
+    }
+
+    public function test_un_caracter_sin_resolver_no_se_imprime_ni_se_inventa(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 777, 4.0 );
+        $this->seedCaracter( 777, '' );      // blank ACF value
+        $this->seedPuntaje( 888, 2.5 );      // no caracter row at all
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString( 'Sale: Maccagno, Franco (4) — Entra: Campos, Andres (2.5)', $html );
+        $this->assertStringNotContainsString( 'Invitado', $html );
+        $this->assertStringNotContainsString( ' · )', $html );
+
+        $wp_test_post_titles = [];
+    }
+
+    // -------------------------------------------------------------------------
+    // Presentation — "Acción sugerida", not "Dictamen" (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_la_bandeja_dice_accion_sugerida_aprobar_cuando_el_dictamen_procede(): void {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->crearSustitucion( $plazaId, 888 ); // Dictamen::from( [] ) — no motivos, procede.
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( 'Acción sugerida: aprobar.', $html );
+        $this->assertStringNotContainsString( 'Dictamen', $html );
+    }
+
+    public function test_la_bandeja_dice_accion_sugerida_rechazar_cuando_el_dictamen_no_procede(): void {
+        $this->seedFecha( 1 );
+        $this->seedFecha( 5 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+
+        // Far outside the plazo: the real pipeline rejects it.
+        $solicitud = SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 5, strtotime( '2026-01-01 00:00:00' ) );
+        $id        = $this->solicitudRepository->crear( $solicitud, 777, $this->evaluatePipeline( $solicitud ), '2026-05-27 10:00:00' );
+
+        $html = $this->renderFilaDe( $id );
+
+        $this->assertStringContainsString( 'Acción sugerida: rechazar.', $html );
+        $this->assertStringNotContainsString( 'Dictamen', $html );
+        $this->assertStringNotContainsString( 'NO procede', $html );
+    }
+
+    /** InitialSchema::up() seeds the `timezone` row, so this UPDATEs it. */
+    private function setTimezone( string $timezone ): void {
+        global $wpdb;
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE {$wpdb->prefix}cambios_settings SET setting_value = %s WHERE setting_key = 'timezone'",
+                $timezone
+            )
+        );
+    }
+
+    private function crearSustitucion( int $plazaId, int $entranteId ): int {
+        return $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, $entranteId, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+    }
+
+    /** Renders the whole tray page as the process owner. */
+    private function renderPagina(): string {
+        $GLOBALS['wp_test_current_user_can'] = [ ProcessOwnerAuthorizer::CAPABILITY => true ];
+
+        ob_start();
+        $this->page->render();
+
+        return (string) ob_get_clean();
+    }
+
+    /** A wpdb whose get_results() fails at the wpdb level for the metrics reads only. */
+    private function wpdbQueFallaEnGetResults( \wpdb $real ): \wpdb {
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $real );
+
+        return new class( $pdo, $real->prefix ) extends \wpdb {
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, 'postmeta' ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+    }
+
+    /** Shapes and renders one solicitud's tray row, returning the HTML. */
+    private function renderFilaDe( int $solicitudId ): string {
+        $row    = $this->solicitudRepository->findSolicitud( $solicitudId );
+        $shaped = $this->invoke( 'shapeSolicitud', [ $row ] );
+
+        ob_start();
+        $this->invoke( 'renderFilaSolicitud', [ $shaped, 'http://example.test/admin.php', false ] );
+
+        return (string) ob_get_clean();
+    }
 
     private function seedFecha( int $fechaId ): void {
         global $wpdb;
@@ -475,6 +804,19 @@ class BandejaPageTest extends TestCase {
                 'post_id'    => $playerId,
                 'meta_key'   => 'sp_metrics',
                 'meta_value' => serialize( [ 'puntaje' => (string) $puntaje ] ),
+            ]
+        );
+    }
+
+    private function seedCaracter( int $playerId, string $caracter ): void {
+        global $wpdb;
+
+        $wpdb->insert(
+            $wpdb->prefix . 'postmeta',
+            [
+                'post_id'    => $playerId,
+                'meta_key'   => 'caracter',
+                'meta_value' => $caracter,
             ]
         );
     }

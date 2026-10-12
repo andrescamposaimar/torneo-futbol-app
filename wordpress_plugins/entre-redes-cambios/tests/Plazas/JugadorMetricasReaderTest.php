@@ -780,4 +780,36 @@ class JugadorMetricasReaderTest extends TestCase {
         $this->assertSame( 2, $failingEventLog->last()['contexto']['player_ids_count'] );
         $this->assertNotNull( $failingEventLog->last()['contexto']['last_error'] ?? null );
     }
+
+    // -------------------------------------------------------------------------
+    // caracter() — the exact ACF value, for display (0.1.19)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @dataProvider realAcfCaracterVocabulary
+     */
+    public function test_caracter_exposes_the_exact_acf_value_without_changing_es_padre( string $caracter, bool $esPadre ): void {
+        $this->putCaracter( 40, $caracter );
+
+        $viaResolve = $this->reader->resolve( 40 );
+        $viaMuchos  = $this->reader->resolveMuchos( [ 40 ] )[40];
+
+        foreach ( [ $viaResolve, $viaMuchos ] as $metricas ) {
+            $this->assertSame( '' === $caracter ? null : $caracter, $metricas->caracter() );
+            $this->assertSame( $esPadre, $metricas->esPadre(), 'esPadre() must keep its own, unchanged classification.' );
+        }
+    }
+
+    public function test_caracter_is_null_when_the_row_is_absent_never_a_guess(): void {
+        $this->assertNull( $this->reader->resolve( 41 )->caracter() );
+        $this->assertNull( $this->reader->resolveMuchos( [ 41 ] )[41]->caracter() );
+    }
+
+    public function test_caracter_is_trimmed_but_otherwise_left_exactly_as_stored(): void {
+        $this->putCaracter( 42, "  Padre Ex-Alumno \n" );
+        $this->putCaracter( 43, "   " );
+
+        $this->assertSame( 'Padre Ex-Alumno', $this->reader->resolve( 42 )->caracter() );
+        $this->assertNull( $this->reader->resolve( 43 )->caracter() );
+    }
 }

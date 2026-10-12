@@ -34,4 +34,21 @@ void main() {
       );
     });
   });
+
+  group('formatFechaHoraArgentina', () {
+    test('renders a UTC instant as Argentina wall-clock time (UTC-3): '
+        '16:20 UTC is 13:20 in Argentina', () {
+      expect(
+        formatFechaHoraArgentina(DateTime.utc(2026, 10, 12, 16, 20)),
+        '12/10/2026 13:20',
+      );
+    });
+
+    test('crossing midnight backwards lands on the PREVIOUS Argentina day', () {
+      expect(
+        formatFechaHoraArgentina(DateTime.utc(2026, 1, 1, 2, 5)),
+        '31/12/2025 23:05',
+      );
+    });
+  });
 }

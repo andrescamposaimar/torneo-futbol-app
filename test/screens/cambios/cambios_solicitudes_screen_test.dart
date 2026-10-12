@@ -36,7 +36,7 @@ CambiosSolicitud _solicitud({
     entrantePlayerId: 200,
     fechaId: 3,
     estado: estado,
-    solicitadaAt: DateTime(2026, 3, 1, 10),
+    solicitadaAt: DateTime.utc(2026, 3, 1, 13),
     resueltaAt: null,
     nota: nota,
     dictamen: dictamen,
@@ -94,6 +94,32 @@ void main() {
       expect(find.byKey(const Key('solicitudes_list')), findsOneWidget);
       expect(find.byKey(const Key('solicitud_card_1')), findsOneWidget);
       expect(find.text('Aprobada'), findsOneWidget);
+    });
+
+    testWidgets('shows Pedido/Resuelto in Argentina time, not the UTC wire reading', (tester) async {
+      // The exact device observation: filed at 13:20 local, the wire carries
+      // 16:20 UTC. The screen must read 13:20, whatever timezone the test
+      // runner or the phone is set to.
+      final solicitud = CambiosSolicitud.fromJson({
+        'id': 1,
+        'plaza_id': 1,
+        'tipo': 'sustitucion',
+        'fecha_id': 3,
+        'estado': 'aprobada',
+        'solicitada_at': '2026-10-12 16:20:00',
+        'resuelta_at': '2026-10-12 16:25:52',
+        'dictamen': {'procede': true, 'motivos': []},
+      });
+
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [solicitud]),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(find.text('Pedido el 12/10/2026 13:20'), findsOneWidget);
+      expect(find.text('Resuelto el 12/10/2026 13:25'), findsOneWidget);
+      expect(find.textContaining('16:2'), findsNothing);
     });
 
     testWidgets('renders Sale and Entra with name and puntaje in brackets', (tester) async {

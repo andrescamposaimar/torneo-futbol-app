@@ -229,7 +229,8 @@ final class JugadorMetricasReader {
 
         return JugadorMetricas::desde(
             $this->extractPuntaje( $rawMetrics, $playerId ),
-            self::esPadreDesdeCaracter( $rawCaracter )
+            self::esPadreDesdeCaracter( $rawCaracter ),
+            $rawCaracter
         );
     }
 
@@ -263,21 +264,23 @@ final class JugadorMetricasReader {
             return [];
         }
 
-        $puntajes = array_fill_keys( $playerIds, null );
-        $esPadres = array_fill_keys( $playerIds, false );
+        $puntajes   = array_fill_keys( $playerIds, null );
+        $esPadres  = array_fill_keys( $playerIds, false );
+        $caracteres = array_fill_keys( $playerIds, null );
 
         foreach ( $this->fetchLatestMetaValuesFor( $playerIds, self::META_KEY_METRICS, 'resolveMuchos' ) as $playerId => $rawMetrics ) {
             $puntajes[ $playerId ] = $this->extractPuntaje( $rawMetrics, $playerId );
         }
 
         foreach ( $this->fetchLatestMetaValuesFor( $playerIds, self::META_KEY_CARACTER, 'resolveMuchos' ) as $playerId => $rawCaracter ) {
-            $esPadres[ $playerId ] = self::esPadreDesdeCaracter( $rawCaracter );
+            $esPadres[ $playerId ]   = self::esPadreDesdeCaracter( $rawCaracter );
+            $caracteres[ $playerId ] = $rawCaracter;
         }
 
         $resultado = [];
 
         foreach ( $playerIds as $playerId ) {
-            $resultado[ $playerId ] = JugadorMetricas::desde( $puntajes[ $playerId ], $esPadres[ $playerId ] );
+            $resultado[ $playerId ] = JugadorMetricas::desde( $puntajes[ $playerId ], $esPadres[ $playerId ], $caracteres[ $playerId ] );
         }
 
         return $resultado;
