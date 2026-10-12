@@ -16,6 +16,20 @@ import '../../widgets/cambios_candidato_card.dart';
 import '../../widgets/entre_redes_app_bar.dart';
 import '../../widgets/loading_seccion.dart';
 import '../../widgets/prode_segmented_toggle.dart';
+import 'cambios_solicitudes_screen.dart';
+
+/// Route name shared by every screen of the "file a request" flow
+/// ([CambiosArcoTitularPickerScreen] and [CambiosSolicitarScreen]), so that
+/// [CambiosSolicitarScreen] can tell, WITHOUT knowing which of the two entry
+/// paths it came through, which routes belong to a flow that just finished.
+const String kCambiosPedidoFlowRouteName = 'cambios/pedido-flow';
+
+/// Builds a route for one screen of the "file a request" flow — see
+/// [kCambiosPedidoFlowRouteName].
+Route<void> cambiosPedidoFlowRoute(WidgetBuilder builder) => MaterialPageRoute<void>(
+      settings: const RouteSettings(name: kCambiosPedidoFlowRouteName),
+      builder: builder,
+    );
 
 /// "Pedir cambio" — for one [plaza], either:
 ///   - [CambiosSolicitudTipo.sustitucion]: a searchable list of viable
@@ -24,10 +38,11 @@ import '../../widgets/prode_segmented_toggle.dart';
 ///     "who returns is never a choice this request makes", see
 ///     `Dictamen\SolicitudDeCambio`'s own docblock).
 ///
-/// On success, pops back to "Mi Plantel" WITHOUT a Navigator result — the
-/// caller refreshes `cambiosPlantelControllerProvider` for this team/season
-/// so the roster reflects the change through shared Riverpod state, exactly
-/// like `_PredictionSheet` never threads a result back through `pop()`.
+/// On success, lands the captain on "Mis pedidos" (see [_onConfirmar]) with
+/// "Mi Plantel" still behind it, WITHOUT a Navigator result — this screen
+/// refreshes `cambiosPlantelControllerProvider` for this team/season so the
+/// roster reflects the change through shared Riverpod state, exactly like
+/// `_PredictionSheet` never threads a result back through `pop()`.
 ///
 /// *** THE TWO CANDIDATE SECTIONS ***
 /// A `sustitucion` candidate step has TWO populations the captain chooses
@@ -365,7 +380,29 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
             (seasonId: widget.seasonId, teamId: widget.teamId),
           ).notifier)
           .refresh(seasonId: widget.seasonId, teamId: widget.teamId);
-      Navigator.of(context).pop();
+      // *** WHY pushAndRemoveUntil, NOT pop()/pushReplacement() ***
+      // The request is filed: the captain must SEE it. A bare pop() left him
+      // on "Mi Plantel" with no feedback, and he filed the same reasignación
+      // twice. The two entry paths leave different stacks behind this
+      // screen — `Plantel > Solicitar` (ordinary) and `Plantel > Picker >
+      // Solicitar` (grouped) — so pushReplacement() would strand the picker
+      // under "Mis pedidos". Instead, drop every route of the flow that just
+      // finished (they all carry [kCambiosPedidoFlowRouteName]) and stop at
+      // the first one that is not — "Mi Plantel" — whichever path was taken.
+      //
+      // "Mis pedidos" is a freshly built route, so its autoDispose
+      // `cambiosSolicitudesControllerProvider` is created anew and its
+      // provider body calls `load()`: the request just filed is fetched, not
+      // served from a stale instance.
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => CambiosSolicitudesScreen(
+            seasonId: widget.seasonId,
+            teamId: widget.teamId,
+          ),
+        ),
+        (route) => route.settings.name != kCambiosPedidoFlowRouteName,
+      );
     } on CambiosApiException {
       if (!mounted) return;
       setState(() {
