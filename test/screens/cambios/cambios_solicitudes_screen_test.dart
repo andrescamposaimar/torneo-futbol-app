@@ -28,6 +28,8 @@ CambiosSolicitud _solicitud({
     puntaje: 4.5,
   ),
   CambiosSolicitudMovimientos movimientos = const CambiosSolicitudMovimientos(),
+  DateTime? solicitadaAt,
+  bool sinSolicitadaAt = false,
 }) {
   return CambiosSolicitud(
     id: id,
@@ -36,7 +38,7 @@ CambiosSolicitud _solicitud({
     entrantePlayerId: 200,
     fechaId: 3,
     estado: estado,
-    solicitadaAt: DateTime.utc(2026, 3, 1, 13),
+    solicitadaAt: sinSolicitadaAt ? null : (solicitadaAt ?? DateTime.utc(2026, 3, 1, 13)),
     resueltaAt: null,
     nota: nota,
     dictamen: dictamen,
@@ -231,6 +233,151 @@ void main() {
       // The puntajes survive whole — the NAMES are what give way (ellipsis).
       expect(find.text('[4.5]'), findsOneWidget);
       expect(find.text('[3]'), findsOneWidget);
+    });
+
+    group('agrupado por estado', () {
+      // Fed in the ENDPOINT's order (oldest first, ids ascending) — the
+      // screen must reorder it, not render it as given.
+      List<CambiosSolicitud> delEndpoint() => [
+            _solicitud(id: 1, estado: CambiosSolicitudEstado.anulada, solicitadaAt: DateTime.utc(2026, 3, 1)),
+            _solicitud(id: 2, estado: CambiosSolicitudEstado.pendiente, solicitadaAt: DateTime.utc(2026, 3, 2)),
+            _solicitud(id: 3, estado: CambiosSolicitudEstado.publicada, solicitadaAt: DateTime.utc(2026, 3, 3)),
+            _solicitud(id: 4, estado: CambiosSolicitudEstado.rechazada, solicitadaAt: DateTime.utc(2026, 3, 4)),
+            _solicitud(id: 5, estado: CambiosSolicitudEstado.aprobada, solicitadaAt: DateTime.utc(2026, 3, 5)),
+            _solicitud(id: 6, estado: CambiosSolicitudEstado.pendiente, solicitadaAt: DateTime.utc(2026, 3, 6)),
+            _solicitud(id: 7, estado: CambiosSolicitudEstado.pendiente, solicitadaAt: DateTime.utc(2026, 3, 7)),
+          ];
+
+      Future<void> pumpList(WidgetTester tester, List<CambiosSolicitud> solicitudes) async {
+        // Tall enough that the lazy list builds every row.
+        tester.view.physicalSize = const Size(400, 4000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+          state: CambiosSolicitudesLoaded(solicitudes: solicitudes),
+          onRetry: () {},
+          onRefresh: () async {},
+        )));
+      }
+
+      double top(WidgetTester tester, String key) => tester.getTopLeft(find.byKey(Key(key))).dy;
+
+      testWidgets('groups appear Pendiente, Aprobada, Publicada, Rechazada, Anulada, each under '
+          'its own Spanish heading', (tester) async {
+        await pumpList(tester, delEndpoint());
+
+        expect(find.text('Pendientes'), findsOneWidget);
+        expect(find.text('Aprobadas'), findsOneWidget);
+        expect(find.text('Publicadas'), findsOneWidget);
+        expect(find.text('Rechazadas'), findsOneWidget);
+        expect(find.text('Anuladas'), findsOneWidget);
+
+        final headings = [
+          top(tester, 'solicitudes_grupo_pendiente'),
+          top(tester, 'solicitudes_grupo_aprobada'),
+          top(tester, 'solicitudes_grupo_publicada'),
+          top(tester, 'solicitudes_grupo_rechazada'),
+          top(tester, 'solicitudes_grupo_anulada'),
+        ];
+        expect(headings, orderedEquals([...headings]..sort()));
+
+        // Each card sits under its OWN group's heading, above the next one.
+        expect(top(tester, 'solicitud_card_2'), greaterThan(headings[0]));
+        expect(top(tester, 'solicitud_card_2'), lessThan(headings[1]));
+        expect(top(tester, 'solicitud_card_5'), greaterThan(headings[1]));
+        expect(top(tester, 'solicitud_card_5'), lessThan(headings[2]));
+        expect(top(tester, 'solicitud_card_3'), greaterThan(headings[2]));
+        expect(top(tester, 'solicitud_card_3'), lessThan(headings[3]));
+        expect(top(tester, 'solicitud_card_4'), greaterThan(headings[3]));
+        expect(top(tester, 'solicitud_card_4'), lessThan(headings[4]));
+        expect(top(tester, 'solicitud_card_1'), greaterThan(headings[4]));
+      });
+
+      testWidgets('inside a group the most recent solicitud comes first', (tester) async {
+        await pumpList(tester, delEndpoint());
+
+        // Pendientes were filed as 2 (oldest), 6, 7 (newest).
+        expect(top(tester, 'solicitud_card_7'), lessThan(top(tester, 'solicitud_card_6')));
+        expect(top(tester, 'solicitud_card_6'), lessThan(top(tester, 'solicitud_card_2')));
+      });
+
+      testWidgets('empty groups render no heading', (tester) async {
+        await pumpList(tester, [
+          _solicitud(id: 1, estado: CambiosSolicitudEstado.publicada),
+        ]);
+
+        expect(find.text('Publicadas'), findsOneWidget);
+        expect(find.text('Pendientes'), findsNothing);
+        expect(find.text('Anuladas'), findsNothing);
+      });
+
+      testWidgets('an unrecognised estado still renders, under "Otros", after every known group',
+          (tester) async {
+        await pumpList(tester, [
+          _solicitud(id: 1, estado: CambiosSolicitudEstado.desconocido),
+          _solicitud(id: 2, estado: CambiosSolicitudEstado.anulada),
+        ]);
+
+        expect(find.byKey(const Key('solicitud_card_1')), findsOneWidget);
+        expect(find.text('Otros'), findsOneWidget);
+        expect(top(tester, 'solicitudes_grupo_desconocido'),
+            greaterThan(top(tester, 'solicitudes_grupo_anulada')));
+        expect(top(tester, 'solicitud_card_1'),
+            greaterThan(top(tester, 'solicitudes_grupo_desconocido')));
+      });
+
+      test('agruparSolicitudes: a solicitud without solicitadaAt sinks to the bottom of its '
+          'group, and equal instants fall back to id descending', () {
+        final grupos = agruparSolicitudes([
+          _solicitud(id: 1, sinSolicitadaAt: true),
+          _solicitud(id: 2, solicitadaAt: DateTime.utc(2026, 3, 1)),
+          _solicitud(id: 3, solicitadaAt: DateTime.utc(2026, 3, 1)),
+        ]);
+
+        expect(grupos, hasLength(1));
+        expect(grupos.single.solicitudes.map((s) => s.id), [3, 2, 1]);
+      });
+
+      testWidgets('no RenderFlex overflow at 320px with long names across every group, '
+          'including the unrecognised one', (tester) async {
+        tester.view.physicalSize = const Size(320, 6000);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        const largo = CambiosSolicitudLado(
+          playerId: 1,
+          nombre: 'Von Hohenzollern-Sigmaringen, Maximiliano Alejandro',
+          puntaje: 4.5,
+        );
+        const largoEntra = CambiosSolicitudLado(
+          playerId: 2,
+          nombre: 'Fernandez de Kirchner Alvarez, Bartolome Ignacio',
+          puntaje: 3.0,
+        );
+        await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+          state: CambiosSolicitudesLoaded(solicitudes: [
+            for (final (i, estado) in CambiosSolicitudEstado.values.indexed)
+              _solicitud(
+                id: i + 1,
+                estado: estado,
+                tipo: CambiosSolicitudTipo.reasignacionArquero,
+                sale: largo,
+                entra: largoEntra,
+                movimientos: const CambiosSolicitudMovimientos(
+                  arco: CambiosSolicitudMovimiento(sale: largo, entra: largoEntra),
+                  campo: CambiosSolicitudMovimiento(sale: largoEntra, entra: largo),
+                ),
+              ),
+          ]),
+          onRetry: () {},
+          onRefresh: () async {},
+        )));
+
+        expect(tester.takeException(), isNull);
+        for (final estado in CambiosSolicitudEstado.values) {
+          expect(find.byKey(Key('solicitudes_grupo_${estado.name}')), findsOneWidget);
+        }
+      });
     });
 
     group('reasignacion_arquero — movimientos (grouped row)', () {
