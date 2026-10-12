@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.18
+Stable tag: 0.1.19
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,14 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.19 =
+* Fix: `Admin\BandejaPage` printed `cambios_decision.decidida_at` raw — it is stored in UTC, so the operator read every decision three hours early. It is now converted with `Calendario\Settings::timezone()` (never a hardcoded offset). An unrecognised configured timezone falls back to UTC and says so (`… UTC`) instead of showing a UTC reading that looks local. The same root cause hit the Flutter app, which is fixed in the app, not here: the wire values are unchanged.
+* Change: the tray shows the Spanish tipo (`Cambio` / `Regreso` / `Reasignación de arquero`) instead of the raw enum. An unmapped future tipo throws, as `Rest\SolicitudesController::shapeSolicitudRow()` already does, rather than printing the raw value.
+* Add: the tray shows each player's puntaje (`Maccagno, Franco (4)`, via `Puntaje::__toString()` so a whole number carries no decimal) and exact ACF carácter (`Padre Alumno`, `Padre Ex-Alumno`, `Invitado`, `Personal Colegio`, …), resolved with ONE `JugadorMetricasReader::resolveMuchos()` call for the whole page. Anything unresolvable prints nothing; a failed read shows a warning instead of reading as "no puntaje".
+* Add: `Plazas\JugadorMetricas::caracter()` / `JugadorMetricas::desde( …, ?string $caracter = null )` expose the raw ACF value for display. `esPadre()` and `JugadorMetricasReader::esPadreDesdeCaracter()` are unchanged; no rule reads `caracter()`.
+* Change: `Admin\BandejaPage`'s constructor takes a `JugadorMetricasReader` (before the optional clock).
+* Change: the tray's `Dictamen: procede.` / `Dictamen: NO procede.` now read `Acción sugerida: aprobar.` / `Acción sugerida: rechazar.` — "Dictamen" reads in Spanish as a settled ruling and invites treating Aprobar as a formality. Display strings only: the `Dictamen` classes, the REST `dictamen` key and `dictamen_original` keep their names.
 
 = 0.1.18 =
 * Add: `GET /entre-redes/v1/cambios/plazas` now shapes `es_arco` — the STORED `cambios_plaza.es_arco` column (0.1.13), read as a plain fact, never derived from a titular's `sp_position` name (`Rest\PlazasController::listar()` has no `PosicionResolver` dependency at all). Added because the Flutter client was inferring "is this the goal plaza?" from the titular's position name string client-side, for the exact reason this endpoint never exposed the column before: it was overlooked, not deliberate. That client-side inference risked drifting from this same column the moment a `sp_position` term was renamed or re-accented — precisely the class of defect 0.1.13/0.1.14's own backfill and invariant check exist to prevent server-side; the client had reintroduced it one layer up.
