@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.19
+Stable tag: 0.1.20
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.20 =
+* Fix: every `/entre-redes/v1/cambios/` REST response now carries `Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private`, `Pragma: no-cache` and `Vary: Authorization` (`Plugin::denyCambiosResponseCaching()`, on `rest_post_dispatch`). The host runs an nginx proxy cache in front of WordPress that stores `/wp-json/` GET responses keyed by URL ALONE — it never consults `Authorization`, and WordPress sent no `Cache-Control` on these routes. Measured TTL ~60s. Two consequences, both now closed: a captain could not see the request he had just filed (the GET after the POST was answered from a copy stored before the row existed, and pull-to-refresh hit the same copy), and — the serious one — a response built for one authenticated caller could be served to another caller of the same URL, including one carrying no credentials. Same defect and same fix already shipped for `/prode/` (2026-09) and `/credencial/`; `/cambios/` was never covered. Public read-only endpoints stay cacheable.
 
 = 0.1.19 =
 * Fix: `Admin\BandejaPage` printed `cambios_decision.decidida_at` raw — it is stored in UTC, so the operator read every decision three hours early. It is now converted with `Calendario\Settings::timezone()` (never a hardcoded offset). An unrecognised configured timezone falls back to UTC and says so (`… UTC`) instead of showing a UTC reading that looks local. The same root cause hit the Flutter app, which is fixed in the app, not here: the wire values are unchanged.
