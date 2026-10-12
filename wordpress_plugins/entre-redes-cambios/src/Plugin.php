@@ -70,6 +70,15 @@ final class Plugin {
         }
         self::$booted = true;
 
+        // Every /entre-redes/v1/cambios/ response is caller-specific: each
+        // one is scoped to ONE captain's season/team and carries that team's
+        // roster, its pending requests and the committee's notes. See
+        // denyCambiosResponseCaching()'s own docblock for the production
+        // incident this defends against. Registered here, on every request,
+        // BEFORE the route closure below, so the routes are protected from
+        // the moment they exist.
+        add_filter( 'rest_post_dispatch', [ self::class, 'denyCambiosResponseCaching' ], 10, 3 );
+
         // Schema upgrades must land on a plain zip replace, not only on a
         // click of "Activate" — see MigrationRunner::runIfOutdated()'s own
         // docblock for the incident this guards against.
@@ -282,5 +291,72 @@ final class Plugin {
             false,
             dirname( plugin_basename( ENTRE_REDES_CAMBIOS_FILE ) ) . '/languages'
         );
+    }
+
+    /**
+     * Mark every /entre-redes/v1/cambios/ REST response as uncacheable.
+     * Copied and adapted from entre-redes-prode's own
+     * Plugin::denyProdeResponseCaching() and entre-redes-credencial's
+     * Plugin::denyCredencialResponseCaching() — the mechanism and the
+     * reasoning are identical in all three, only the route prefix differs.
+     *
+     * *** THE INCIDENT, TWICE *** The host runs an nginx proxy cache in
+     * front of WordPress that stores GET responses to /wp-json/ keyed by URL
+     * ALONE: its `Vary` is `Origin,Accept-Encoding,User-Agent`, it never
+     * consults the `Authorization` header, and WordPress sends no
+     * `Cache-Control` of its own on these routes. Measured TTL is ~60s.
+     * In 2026-09 that served one parent's prode predictions to every other
+     * parent for the length of a TTL. In 2026-10 the same cache made
+     * "Mis pedidos" omit the request the captain had just filed: the POST
+     * created the row, but the GET immediately after was answered from a
+     * copy stored BEFORE that row existed, and pull-to-refresh — a request
+     * to the identical URL — kept hitting the same stored copy.
+     *
+     * That second symptom is the mild one. The severe one is that two
+     * captains of the SAME team share a URL, so without this header one
+     * captain's roster and pending requests can be served to the other, and
+     * a response produced for an authenticated caller can be handed to a
+     * request carrying no credentials at all.
+     *
+     * This nginx DOES honour the origin's `Cache-Control` (verified during
+     * the 2026-09 remediation: the application-level fix alone was enough,
+     * no hosting ticket and no purge), which is why the defence lives here
+     * rather than in a server config this repository does not own.
+     *
+     * Registered on `rest_post_dispatch`. Responses outside the cambios
+     * namespace are returned untouched, so the public read-only endpoints
+     * stay cacheable.
+     *
+     * `Vary: Authorization` is appended rather than replaced: WordPress
+     * already sets `Vary: Origin` for CORS, and WP_HTTP_Response::header()
+     * with $replace = false concatenates instead of overwriting.
+     *
+     * @param \WP_HTTP_Response|mixed $response Result to send to the client.
+     * @param \WP_REST_Server|mixed   $server   Server instance (unused).
+     * @param \WP_REST_Request|mixed  $request  Request used to generate the response.
+     * @return \WP_HTTP_Response|mixed
+     */
+    public static function denyCambiosResponseCaching( $response, $server, $request ) {
+        // Duck-typed on purpose: rest_post_dispatch is documented to pass a
+        // WP_HTTP_Response, but anything carrying header() and get_route()
+        // is enough here, and it keeps the filter testable against a shim
+        // that does not model WordPress's response class hierarchy.
+        if ( ! is_object( $response ) || ! method_exists( $response, 'header' ) ) {
+            return $response;
+        }
+
+        if ( ! is_object( $request ) || ! method_exists( $request, 'get_route' ) ) {
+            return $response;
+        }
+
+        if ( ! str_starts_with( (string) $request->get_route(), '/' . Rest\RestController::API_NAMESPACE . '/' . Rest\RestController::BASE . '/' ) ) {
+            return $response;
+        }
+
+        $response->header( 'Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private' );
+        $response->header( 'Pragma', 'no-cache' );
+        $response->header( 'Vary', 'Authorization', false );
+
+        return $response;
     }
 }
