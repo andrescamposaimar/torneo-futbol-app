@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/cambios_plaza.dart';
 import 'cambios_api_service.dart';
+import 'cambios_load_failure.dart';
 
 // ---------------------------------------------------------------------------
 // State
@@ -20,8 +21,24 @@ final class CambiosPlantelLoading extends CambiosPlantelState {
   const CambiosPlantelLoading();
 }
 
+/// A failed load. [code] says WHY (see [describeCambiosLoadFailure]);
+/// [message] is diagnostic only and MUST NOT be shown raw.
 final class CambiosPlantelError extends CambiosPlantelState {
-  const CambiosPlantelError();
+  final String code;
+  final String message;
+
+  const CambiosPlantelError({required this.code, required this.message});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CambiosPlantelError && code == other.code && message == other.message;
+
+  @override
+  int get hashCode => Object.hash(runtimeType, code, message);
+
+  @override
+  String toString() => 'CambiosPlantelError(code: $code, message: $message)';
 }
 
 final class CambiosPlantelLoaded extends CambiosPlantelState {
@@ -44,8 +61,9 @@ class CambiosPlantelController extends StateNotifier<CambiosPlantelState> {
       final plazas =
           await _service.fetchPlazas(seasonId: seasonId, teamId: teamId);
       state = CambiosPlantelLoaded(plazas: plazas);
-    } catch (_) {
-      state = const CambiosPlantelError();
+    } catch (e) {
+      final failure = describeCambiosLoadFailure('plantel', e);
+      state = CambiosPlantelError(code: failure.code, message: failure.message);
     }
   }
 

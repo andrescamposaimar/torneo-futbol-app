@@ -66,7 +66,7 @@ class CambiosSolicitudesView extends StatelessWidget {
     return switch (state) {
       CambiosSolicitudesLoading() =>
         const LoadingSeccion(texto: 'Cargando tus pedidos...'),
-      CambiosSolicitudesError() => _ErrorView(onRetry: onRetry),
+      CambiosSolicitudesError(:final code) => _ErrorView(code: code, onRetry: onRetry),
       CambiosSolicitudesLoaded(:final solicitudes) => solicitudes.isEmpty
           ? const _EmptyView()
           : RefreshIndicator(
@@ -207,8 +207,9 @@ class _GrupoHeader extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _ErrorView extends StatelessWidget {
+  final String code;
   final VoidCallback onRetry;
-  const _ErrorView({required this.onRetry});
+  const _ErrorView({required this.code, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -226,6 +227,15 @@ class _ErrorView extends StatelessWidget {
             const Text(
               'No pudimos cargar tus pedidos. Revisá tu conexión y reintentá '
               'en unos minutos.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            // A short reference the captain can quote to the committee —
+            // plain text, never the raw diagnostic message.
+            Text(
+              'Código: $code',
+              key: const Key('solicitudes_error_code'),
+              style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey.shade600),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),

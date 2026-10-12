@@ -65,13 +65,30 @@ void main() {
     testWidgets('error state shows a retry button that fires onRetry', (tester) async {
       var retried = false;
       await tester.pumpWidget(_wrap(CambiosSolicitudesView(
-        state: const CambiosSolicitudesError(),
+        state: const CambiosSolicitudesError(code: 'solicitudes_500', message: 'test'),
         onRetry: () => retried = true,
         onRefresh: () async {},
       )));
 
       await tester.tap(find.text('Reintentar'));
       expect(retried, isTrue);
+    });
+
+    testWidgets('error state shows a short reference code, never the raw diagnostic message',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: const CambiosSolicitudesError(
+          code: 'solicitudes_malformed',
+          message: 'CambiosMalformedResponseException',
+        ),
+        onRetry: () {},
+        onRefresh: () async {},
+      )));
+
+      expect(find.text('Código: solicitudes_malformed'), findsOneWidget);
+      expect(find.textContaining('Exception'), findsNothing);
+      // The captain-facing copy stays plain Spanish.
+      expect(find.textContaining('No pudimos cargar tus pedidos'), findsOneWidget);
     });
 
     testWidgets('empty state explains there are no solicitudes yet', (tester) async {
@@ -603,7 +620,7 @@ void main() {
             cambiosSolicitudesControllerProvider((seasonId: 9, teamId: 2)).overrideWith(
               (ref) => _RecordingSolicitudesController(
                 fakeService(),
-                initialState: const CambiosSolicitudesError(),
+                initialState: const CambiosSolicitudesError(code: 'solicitudes_500', message: 'test'),
                 onLoad: (seasonId, teamId) => loadCalls.add((seasonId: seasonId, teamId: teamId)),
                 onRefresh: (_, __) {},
               ),
