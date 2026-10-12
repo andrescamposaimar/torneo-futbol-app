@@ -35,7 +35,7 @@ class CambiosSolicitudesScreen extends ConsumerWidget {
     final notifier = ref.read(cambiosSolicitudesControllerProvider(scope).notifier);
 
     return Scaffold(
-      appBar: const EntreRedesAppBar(title: 'Mis Solicitudes'),
+      appBar: const EntreRedesAppBar(title: 'Mis pedidos'),
       body: CambiosSolicitudesView(
         state: state,
         onRetry: () => notifier.load(seasonId: seasonId, teamId: teamId),
@@ -112,7 +112,11 @@ String _tituloGrupo(CambiosSolicitudEstado estado) {
     case CambiosSolicitudEstado.anulada:
       return 'Anuladas';
     case CambiosSolicitudEstado.desconocido:
-      return 'Otros';
+      // "Desconocidas", not "Otros": every other heading here is a feminine
+      // plural describing the solicitudes, and each card in this group
+      // carries a "Desconocido" chip. Two words for one idea on one screen
+      // make a reader wonder which is which.
+      return 'Desconocidas';
   }
 }
 
