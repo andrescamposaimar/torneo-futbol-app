@@ -23,14 +23,21 @@ final class JugadorMetricas {
 
     private ?Puntaje $puntaje;
     private bool $esPadre;
+    private ?string $caracter;
 
-    private function __construct( ?Puntaje $puntaje, bool $esPadre ) {
-        $this->puntaje = $puntaje;
-        $this->esPadre = $esPadre;
+    private function __construct( ?Puntaje $puntaje, bool $esPadre, ?string $caracter ) {
+        $this->puntaje  = $puntaje;
+        $this->esPadre  = $esPadre;
+        $this->caracter = $caracter;
     }
 
-    public static function desde( ?Puntaje $puntaje, bool $esPadre ): self {
-        return new self( $puntaje, $esPadre );
+    /**
+     * @param string|null $caracter The raw ACF `caracter` value (e.g. `Padre
+     *        Alumno`), for display only. Independent of $esPadre — callers
+     *        that only decide padre/non-padre keep passing two arguments.
+     */
+    public static function desde( ?Puntaje $puntaje, bool $esPadre, ?string $caracter = null ): self {
+        return new self( $puntaje, $esPadre, self::normalizarCaracter( $caracter ) );
     }
 
     /**
@@ -42,7 +49,7 @@ final class JugadorMetricas {
      * for that same outcome, not a third state.
      */
     public static function vacio(): self {
-        return new self( null, false );
+        return new self( null, false, null );
     }
 
     public function puntaje(): ?Puntaje {
@@ -51,5 +58,29 @@ final class JugadorMetricas {
 
     public function esPadre(): bool {
         return $this->esPadre;
+    }
+
+    /**
+     * The player's carácter exactly as the ACF field holds it (`Padre
+     * Alumno`, `Padre Ex-Alumno`, `Invitado`, `Personal Colegio`, …), trimmed
+     * and otherwise untouched — for DISPLAY to the committee, which decides on
+     * the real category, not on the padre/non-padre binary `esPadre()` reduces
+     * it to. Null when the field is absent or blank: never a guessed value.
+     *
+     * Nothing may derive a rule from this string — rules read `esPadre()`,
+     * which has its own, deliberately conservative, classification.
+     */
+    public function caracter(): ?string {
+        return $this->caracter;
+    }
+
+    private static function normalizarCaracter( ?string $caracter ): ?string {
+        if ( null === $caracter ) {
+            return null;
+        }
+
+        $caracter = trim( $caracter );
+
+        return '' === $caracter ? null : $caracter;
     }
 }

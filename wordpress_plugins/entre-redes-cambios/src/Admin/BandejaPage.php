@@ -773,7 +773,7 @@ class BandejaPage {
     }
 
     /**
-     * Adds each player's puntaje to every shaped row — ONE `resolveMuchos()`
+     * Adds each player's puntaje and carácter to every shaped row — ONE `resolveMuchos()`
      * call over every player on the page (both lists), which already chunks
      * at 200 ids, instead of a query per player.
      *
@@ -816,6 +816,10 @@ class BandejaPage {
                 $solicitud[ $lado . '_puntaje' ] = $m instanceof JugadorMetricas && null !== $m->puntaje()
                     ? (string) $m->puntaje()
                     : null;
+
+                // The exact ACF value, not the padre/invitado binary the app
+                // shows captains: the committee decides on the real category.
+                $solicitud[ $lado . '_caracter' ] = $m instanceof JugadorMetricas ? $m->caracter() : null;
             }
 
             return $solicitud;
@@ -829,7 +833,7 @@ class BandejaPage {
     }
 
     /**
-     * One player as the tray prints them: `Apellido, Nombre (4)`. Whatever
+     * One player as the tray prints them: `Apellido, Nombre (4 · Padre Alumno)`. Whatever
      * could not be resolved is simply left out — never a guessed value — and
      * a player with nothing to add prints as the bare name. A missing player
      * prints `—`, as before.
@@ -844,6 +848,12 @@ class BandejaPage {
 
         if ( null !== $puntaje && '' !== $puntaje ) {
             $datos[] = (string) $puntaje;
+        }
+
+        $caracter = $solicitud[ $lado . '_caracter' ] ?? null;
+
+        if ( null !== $caracter && '' !== $caracter ) {
+            $datos[] = (string) $caracter;
         }
 
         return empty( $datos ) ? $nombre : $nombre . ' (' . implode( ' · ', $datos ) . ')';

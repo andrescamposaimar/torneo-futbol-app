@@ -630,6 +630,52 @@ class BandejaPageTest extends TestCase {
         $wp_test_post_titles = [];
     }
 
+    // -------------------------------------------------------------------------
+    // Presentation — carácter per player (0.1.19)
+    // -------------------------------------------------------------------------
+
+    public function test_la_bandeja_muestra_el_caracter_exacto_de_cada_jugador_no_el_binario_padre_invitado(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 777, 4.0 );
+        $this->seedPuntaje( 888, 2.5 );
+        $this->seedCaracter( 777, 'Personal Colegio' );
+        $this->seedCaracter( 888, 'Padre Ex-Alumno' );
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString(
+            'Sale: Maccagno, Franco (4 · Personal Colegio) — Entra: Campos, Andres (2.5 · Padre Ex-Alumno)',
+            $html
+        );
+
+        $wp_test_post_titles = [];
+    }
+
+    public function test_un_caracter_sin_resolver_no_se_imprime_ni_se_inventa(): void {
+        global $wp_test_post_titles;
+        $wp_test_post_titles = [ 777 => 'Maccagno, Franco', 888 => 'Campos, Andres' ];
+
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 4.0 ), 1, '2026-03-01 00:00:00' );
+        $this->seedPuntaje( 777, 4.0 );
+        $this->seedCaracter( 777, '' );      // blank ACF value
+        $this->seedPuntaje( 888, 2.5 );      // no caracter row at all
+        $this->crearSustitucion( $plazaId, 888 );
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString( 'Sale: Maccagno, Franco (4) — Entra: Campos, Andres (2.5)', $html );
+        $this->assertStringNotContainsString( 'Invitado', $html );
+        $this->assertStringNotContainsString( ' · )', $html );
+
+        $wp_test_post_titles = [];
+    }
+
     /** InitialSchema::up() seeds the `timezone` row, so this UPDATEs it. */
     private function setTimezone( string $timezone ): void {
         global $wpdb;
@@ -727,6 +773,19 @@ class BandejaPageTest extends TestCase {
                 'post_id'    => $playerId,
                 'meta_key'   => 'sp_metrics',
                 'meta_value' => serialize( [ 'puntaje' => (string) $puntaje ] ),
+            ]
+        );
+    }
+
+    private function seedCaracter( int $playerId, string $caracter ): void {
+        global $wpdb;
+
+        $wpdb->insert(
+            $wpdb->prefix . 'postmeta',
+            [
+                'post_id'    => $playerId,
+                'meta_key'   => 'caracter',
+                'meta_value' => $caracter,
             ]
         );
     }
