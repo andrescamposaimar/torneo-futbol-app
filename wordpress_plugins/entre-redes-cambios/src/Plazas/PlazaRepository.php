@@ -376,6 +376,174 @@ class PlazaRepository {
     }
 
     /**
+     * Every LIVE substitution in $seasonId, across every team: the vigent
+     * ocupación (`fecha_hasta_id IS NULL`) of every open plaza whose current
+     * occupant is NOT that plaza's titular — in ONE query, joined to the
+     * plaza so the caller gets `team_id`/`titular_player_id`/`es_arco`
+     * without a second lookup.
+     *
+     * *** WHY THIS EXISTS (0.1.22) ***
+     * `listPlazasByEquipo()` is scoped to one team because the captain's
+     * screen is. The process owner's question is the opposite shape — "who
+     * is covering for whom, anywhere, right now, and which of those could
+     * already have gone back?" — and until this method there was no way to
+     * ask it: answering it meant 15 per-team reads through a screen the
+     * process owner does not even use. See `Admin\HistoricoPage`.
+     *
+     * A published cambio does NOT expire on its own: the only paths that
+     * close an ocupación are `succeedOcupacion()` (another substitution),
+     * `closeOcupacionByRegresoTitular()` (the captain asks for the titular
+     * back AND that regreso is approved and published) and `closePlaza()`.
+     * Nothing is time-driven. So the rows this returns are exactly the ones
+     * nobody is watching, which is the whole point of surfacing them.
+     *
+     * `closed_at IS NULL` excludes plazas the season already closed — a
+     * closed plaza's last ocupación is history, not a live substitution.
+     *
+     * Ordered by team then plaza so one team's rows come out adjacent and the
+     * screen needs no re-sorting. It does not GROUP them — the table is flat.
+     *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** An
+     * empty result here reads as "every team is whole, nothing to watch" —
+     * the single most reassuring sentence this screen can say, and the one
+     * it must never say by accident. See class docblock, "READ FAILURES
+     * MUST NEVER READ AS 'NO ROWS'".
+     *
+     * @return array<int, array<string, mixed>> Each row is a
+     *         `cambios_ocupacion` row plus `team_id`, `titular_player_id`
+     *         and `es_arco` from its plaza.
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    public function listOcupacionesVigentesNoTitulares( int $seasonId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT o.*, pl.team_id, pl.titular_player_id, pl.es_arco
+                   FROM {$p}cambios_ocupacion o
+                   INNER JOIN {$p}cambios_plaza pl ON pl.id = o.plaza_id
+                  WHERE pl.season_id = %d
+                    AND pl.closed_at IS NULL
+                    AND o.fecha_hasta_id IS NULL
+                    AND o.player_id <> pl.titular_player_id
+                  ORDER BY pl.team_id ASC, o.plaza_id ASC, o.id ASC",
+                $seasonId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listOcupacionesVigentesNoTitulares', [ 'season_id' => $seasonId ] );
+
+        return $rows;
+    }
+
+    /**
+     * SEVERAL plazas at once, keyed by id — the batched form of
+     * `findPlaza()`, for callers holding a list of plaza ids that would
+     * otherwise issue one query per row. `Admin\HistoricoPage` needs each
+     * resolved solicitud's `titular_player_id` (a `regreso`'s "who enters"
+     * is the plaza's permanent titular, exactly as
+     * `Rest\SolicitudesController::listar()` derives it).
+     *
+     * Unlike `findPlaza()` — whose `null` is a meaningful answer a caller
+     * acts on, and which is therefore deliberately NOT routed through
+     * `assertReadSucceeded()` — this one DOES assert: here a failed read
+     * would silently turn every row's titular into "unknown", which renders
+     * as a missing name rather than as an error.
+     *
+     * @param int[] $plazaIds
+     * @return array<int, array<string, mixed>> plaza id => row. A plaza that
+     *         does not exist is simply absent.
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    public function listPlazasPorIds( array $plazaIds ): array {
+        $ids = array_values( array_unique( array_map( 'intval', $plazaIds ) ) );
+
+        if ( empty( $ids ) ) {
+            return [];
+        }
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare( "SELECT * FROM {$p}cambios_plaza WHERE id IN ({$placeholders})", $ids ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listPlazasPorIds', [ 'plaza_ids' => $ids ] );
+
+        $porId = [];
+
+        foreach ( $rows as $row ) {
+            $porId[ (int) $row['id'] ] = $row;
+        }
+
+        return $porId;
+    }
+
+    /**
+     * The full ocupación chain of SEVERAL plazas at once, keyed by plaza id
+     * — the batched form of `listOcupaciones()`, for callers that already
+     * know every plaza they care about and would otherwise issue one query
+     * per row (`Admin\HistoricoPage` needs each chain to ask
+     * `CadenaResolver` how many fechas are still missing).
+     *
+     * Each chain is ordered exactly like `listOcupaciones()` returns it
+     * (`fecha_desde_id ASC, id ASC`), because `CadenaResolver` reads
+     * position in the chain as meaning — handing it a differently ordered
+     * array would quietly change its answer.
+     *
+     * An empty $plazaIds short-circuits without touching the database: an
+     * `IN ()` with no placeholders is a syntax error, and "no plazas asked
+     * about" has one honest answer that needs no query.
+     *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** Same
+     * reason as `listOcupaciones()`: a missing chain degrades into a wrong
+     * liberation count, not into a visible error.
+     *
+     * @param int[] $plazaIds
+     * @return array<int, array<int, array<string, mixed>>> plaza id => chain.
+     *         A plaza with no ocupaciones is simply absent.
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    public function listOcupacionesDePlazas( array $plazaIds ): array {
+        $ids = array_values( array_unique( array_map( 'intval', $plazaIds ) ) );
+
+        if ( empty( $ids ) ) {
+            return [];
+        }
+
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}cambios_ocupacion
+                  WHERE plaza_id IN ({$placeholders})
+                  ORDER BY plaza_id ASC, fecha_desde_id ASC, id ASC",
+                $ids
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listOcupacionesDePlazas', [ 'plaza_ids' => $ids ] );
+
+        $porPlaza = [];
+
+        foreach ( $rows as $row ) {
+            $porPlaza[ (int) $row['plaza_id'] ][] = $row;
+        }
+
+        return $porPlaza;
+    }
+
+    /**
      * Every VIGENT ocupación (`fecha_hasta_id IS NULL`) $playerId currently
      * holds anywhere in $seasonId, across every plaza — optionally excluding
      * one plaza (typically the plaza a solicitud is being evaluated

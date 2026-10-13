@@ -1385,4 +1385,88 @@ class PlazaRepositoryTest extends TestCase {
         $this->assertSame( $plazaId, $this->eventLog->last()['contexto']['plaza_id'] );
     }
 
+    // -------------------------------------------------------------------------
+    // Season-wide reads added in 0.1.22 for Admin\HistoricoPage
+    // -------------------------------------------------------------------------
+
+    public function test_vigentes_no_titulares_only_returns_plazas_held_by_someone_else(): void {
+        $conTitular = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $sustituida = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $sustituida, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $filas = $this->repo->listOcupacionesVigentesNoTitulares( self::SEASON_ID );
+
+        $this->assertCount( 1, $filas );
+        $this->assertSame( $sustituida, (int) $filas[0]['plaza_id'] );
+        $this->assertSame( 888, (int) $filas[0]['player_id'] );
+        $this->assertSame( 222, (int) $filas[0]['titular_player_id'], 'The join must carry the plaza\'s titular.' );
+        $this->assertSame( 100, (int) $filas[0]['team_id'] );
+        $this->assertNotContains(
+            $conTitular,
+            array_map( static fn ( array $f ): int => (int) $f['plaza_id'], $filas ),
+            'A plaza held by its own titular is not a live substitution.'
+        );
+    }
+
+    public function test_vigentes_no_titulares_ignores_a_closed_plaza(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->assertCount( 1, $this->repo->listOcupacionesVigentesNoTitulares( self::SEASON_ID ) );
+
+        $this->repo->closePlaza( $plazaId, '2026-05-01 10:00:00' );
+
+        $this->assertSame(
+            [],
+            $this->repo->listOcupacionesVigentesNoTitulares( self::SEASON_ID ),
+            'A closed plaza\'s last ocupación is history, not a substitution anyone can still undo.'
+        );
+    }
+
+    public function test_vigentes_no_titulares_is_scoped_to_its_season(): void {
+        $plazaId = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+
+        $this->assertSame( [], $this->repo->listOcupacionesVigentesNoTitulares( self::OTHER_SEASON_ID ) );
+    }
+
+    public function test_ocupaciones_de_plazas_groups_each_chain_in_chain_order(): void {
+        $a = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $b = $this->repo->openPlaza( self::SEASON_ID, 100, 222, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->repo->succeedOcupacion( $a, 888, 4, 'reemplazada', '2026-04-01 10:00:00' );
+        $this->repo->succeedOcupacion( $a, 999, 7, 'reemplazada', '2026-05-01 10:00:00' );
+
+        $porPlaza = $this->repo->listOcupacionesDePlazas( [ $a, $b ] );
+
+        $this->assertCount( 3, $porPlaza[ $a ] );
+        $this->assertCount( 1, $porPlaza[ $b ] );
+        $this->assertSame(
+            [ 111, 888, 999 ],
+            array_map( static fn ( array $o ): int => (int) $o['player_id'], $porPlaza[ $a ] ),
+            'CadenaResolver reads position in the chain as meaning — the order must match listOcupaciones().'
+        );
+        $this->assertSame(
+            array_map( static fn ( array $o ): int => (int) $o['id'], $this->repo->listOcupaciones( $a ) ),
+            array_map( static fn ( array $o ): int => (int) $o['id'], $porPlaza[ $a ] )
+        );
+    }
+
+    public function test_batched_reads_short_circuit_on_an_empty_id_list(): void {
+        // An `IN ()` with no placeholders is a syntax error, so these two
+        // must answer without touching the database at all.
+        $this->assertSame( [], $this->repo->listOcupacionesDePlazas( [] ) );
+        $this->assertSame( [], $this->repo->listPlazasPorIds( [] ) );
+        $this->assertFalse( $this->eventLog->has( 'lectura.fallida' ) );
+    }
+
+    public function test_plazas_por_ids_keys_by_id_and_omits_what_does_not_exist(): void {
+        $a = $this->repo->openPlaza( self::SEASON_ID, 100, 111, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+
+        $porId = $this->repo->listPlazasPorIds( [ $a, 424242 ] );
+
+        $this->assertArrayHasKey( $a, $porId );
+        $this->assertArrayNotHasKey( 424242, $porId );
+        $this->assertSame( 111, (int) $porId[ $a ]['titular_player_id'] );
+    }
+
 }

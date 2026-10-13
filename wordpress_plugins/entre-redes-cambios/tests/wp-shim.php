@@ -758,9 +758,34 @@ if ( ! function_exists( 'esc_attr__' ) ) {
     }
 }
 
+if ( ! function_exists( 'esc_attr_e' ) ) {
+    function esc_attr_e( string $text, string $domain = '' ): void {
+        echo htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
+    }
+}
+
 if ( ! function_exists( '__' ) ) {
     function __( string $text, string $domain = '' ): string {
         return $text;
+    }
+}
+
+if ( ! function_exists( '_n' ) ) {
+    /**
+     * Mirrors WordPress's plural selector for the only rule that matters
+     * here: exactly 1 takes the singular, everything else (0 included, as in
+     * Spanish) takes the plural. Returning the singular unconditionally —
+     * the tempting one-liner — would make a "faltan N fechas" assertion pass
+     * for the wrong reason.
+     */
+    function _n( string $single, string $plural, int $number, string $domain = '' ): string {
+        return 1 === $number ? $single : $plural;
+    }
+}
+
+if ( ! function_exists( 'wp_unslash' ) ) {
+    function wp_unslash( mixed $value ): mixed {
+        return is_string( $value ) ? stripslashes( $value ) : $value;
     }
 }
 
