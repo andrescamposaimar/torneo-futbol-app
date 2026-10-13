@@ -122,6 +122,38 @@ void main() {
       expect(find.byKey(const Key('cambios_team_picker')), findsOneWidget);
     });
 
+    testWidgets(
+        'deshabilitado shows the comisión\'s own words, not an error, and no retry',
+        (tester) async {
+      await _pumpScreen(
+        tester,
+        const CambiosContextDeshabilitado('Esta semana los cambios se piden por mail.'),
+      );
+      await tester.pump();
+
+      expect(find.text('Cambios en pausa'), findsOneWidget);
+      expect(find.text('Esta semana los cambios se piden por mail.'), findsOneWidget);
+
+      // Nothing went wrong, so none of the error affordances may appear —
+      // and a retry button would promise something it cannot deliver.
+      expect(find.text('Algo salió mal'), findsNothing);
+      expect(find.text('Reintentar'), findsNothing);
+      expect(find.byIcon(Icons.error_outline), findsNothing);
+    });
+
+    testWidgets('deshabilitado with no message falls back to its own copy',
+        (tester) async {
+      await _pumpScreen(tester, const CambiosContextDeshabilitado('   '));
+      await tester.pump();
+
+      expect(find.text('Cambios en pausa'), findsOneWidget);
+      expect(
+        find.textContaining('Comisión Directiva'),
+        findsOneWidget,
+        reason: 'A blank card would leave a captain with no idea who to ask.',
+      );
+    });
+
     testWidgets('stale=true shows the syncing banner above the content', (tester) async {
       await tester.pumpWidget(
         ProviderScope(

@@ -594,6 +594,23 @@ if ( ! class_exists( 'WP_Error' ) ) {
             $this->message = $message;
             $this->data    = $data;
         }
+
+        // Core's accessors. The public properties above came first and are
+        // left alone so existing tests keep working, but anything reading a
+        // WP_Error in production uses these — a shim that only exposes the
+        // properties quietly invites tests that assert in a way no real
+        // consumer ever would.
+        public function get_error_code(): string {
+            return $this->code;
+        }
+
+        public function get_error_message(): string {
+            return $this->message;
+        }
+
+        public function get_error_data(): mixed {
+            return $this->data;
+        }
     }
 }
 
@@ -755,6 +772,23 @@ if ( ! function_exists( 'esc_html_e' ) ) {
 if ( ! function_exists( 'esc_attr__' ) ) {
     function esc_attr__( string $text, string $domain = '' ): string {
         return $text;
+    }
+}
+
+if ( ! function_exists( 'sanitize_textarea_field' ) ) {
+    /**
+     * Core strips tags and control characters but KEEPS newlines — the one
+     * difference from sanitize_text_field(), and the reason the operator's
+     * message can be two lines.
+     */
+    function sanitize_textarea_field( string $text ): string {
+        return trim( strip_tags( $text ) );
+    }
+}
+
+if ( ! function_exists( 'esc_textarea' ) ) {
+    function esc_textarea( string $text ): string {
+        return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
     }
 }
 

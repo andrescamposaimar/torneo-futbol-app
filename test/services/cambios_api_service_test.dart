@@ -538,4 +538,69 @@ void main() {
       );
     });
   });
+
+  group('CambiosApiService — the kill switch', () {
+    test('a 503 cambios_deshabilitado carries the comisión\'s message through',
+        () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'code': 'cambios_deshabilitado',
+              'message': 'Hablá con la comisión.',
+              'data': {'status': 503},
+            }, 503)),
+      );
+
+      try {
+        await service.fetchMisEquipos();
+        fail('Expected a CambiosApiException.');
+      } on CambiosApiException catch (e) {
+        expect(e.statusCode, 503);
+        expect(e.code, kCodigoDeshabilitado);
+        expect(e.mensajeDeshabilitado, 'Hablá con la comisión.');
+      }
+    });
+
+    test('NO other error carries a message through — the rule holds', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'code': 'no_capitan',
+              'message': 'Internal detail a captain must never read.',
+            }, 403)),
+      );
+
+      try {
+        await service.fetchMisEquipos();
+        fail('Expected a CambiosApiException.');
+      } on CambiosApiException catch (e) {
+        expect(e.code, 'no_capitan');
+        expect(
+          e.mensajeDeshabilitado,
+          isNull,
+          reason: 'Server text reaches a captain for exactly one code, opted in by name.',
+        );
+      }
+    });
+
+    test('a 503 with no usable message leaves it null, not empty', () async {
+      final repo = await _repoWithAccessToken();
+      final service = _makeService(
+        repo,
+        MockClient((request) async => _jsonResponse({
+              'code': 'cambios_deshabilitado',
+              'message': '   ',
+            }, 503)),
+      );
+
+      try {
+        await service.fetchMisEquipos();
+        fail('Expected a CambiosApiException.');
+      } on CambiosApiException catch (e) {
+        expect(e.mensajeDeshabilitado, isNull, reason: 'So the screen falls back to its own copy.');
+      }
+    });
+  });
 }

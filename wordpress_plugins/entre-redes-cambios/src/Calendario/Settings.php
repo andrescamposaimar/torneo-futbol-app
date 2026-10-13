@@ -149,6 +149,42 @@ class Settings {
         return max( 1, min( 10, $valor ) );
     }
 
+    /**
+     * Whether the CAPTAIN-FACING side of Cambios is open (0.1.23). Default:
+     * `true`. This gates the REST namespace only — `Admin\BandejaPage` and
+     * `Admin\HistoricoPage` keep working, which is the point: the comisión
+     * can stop the inbox for a week and still process what is already in it.
+     *
+     * *** WHY THIS ONE FAILS *OPEN*, UNLIKE exencionArcoActiva() ***
+     * A failed read collapsing to `true` is deliberate here, and it is NOT
+     * the same shape as the techo exemption. "Enabled" is not a relaxation
+     * of any fairness rule: every dictamen rule still runs, and a request
+     * filed during a DB hiccup still needs the comisión's approval like any
+     * other. Failing CLOSED, by contrast, would shut the feature for every
+     * captain over a transient error, inside a window that is open for two
+     * days. The conservative direction here is the one that keeps the
+     * ordinary state, not the one that blocks.
+     */
+    public function cambiosHabilitados(): bool {
+        return $this->readBool( 'cambios_habilitados', (string) InitialSchema::SEED_DEFAULTS['cambios_habilitados'] );
+    }
+
+    /**
+     * What a captain is told when `cambiosHabilitados()` is off — written by
+     * the comisión, shown verbatim in the app. This is CONTENT, not a
+     * diagnostic string: it is the one piece of server text the app renders
+     * as-is, which is why `Admin\ConfiguracionPage` sanitizes and length-caps
+     * it on save and why the app renders it as plain text.
+     *
+     * An empty stored value falls back to the seeded sentence rather than
+     * leaving a captain staring at a blank screen with no explanation.
+     */
+    public function mensajeDeshabilitado(): string {
+        $mensaje = trim( $this->readString( 'mensaje_deshabilitado', (string) InitialSchema::SEED_DEFAULTS['mensaje_deshabilitado'] ) );
+
+        return '' !== $mensaje ? $mensaje : (string) InitialSchema::SEED_DEFAULTS['mensaje_deshabilitado'];
+    }
+
     public function prioridadPadresActiva(): bool {
         return $this->readBool( 'prioridad_padres_activa', (string) InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'] );
     }
