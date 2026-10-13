@@ -235,6 +235,60 @@ class SolicitudesAbiertasReader {
 
         $this->assertReadSucceeded( $rows, 'abiertaPorPlazaDeEquipo', [ 'season_id' => $seasonId, 'team_id' => $teamId ] );
 
+        return $this->indexarPorPlaza( $rows );
+    }
+
+    /**
+     * The same index as `abiertaPorPlazaDeEquipo()`, for the WHOLE season
+     * instead of one team (0.1.22) — what `Admin\HistoricoPage` needs to
+     * tell apart the two very different situations a live substitution can
+     * be in once it is liberable:
+     *
+     *   - the captain has already filed the regreso and it is waiting for
+     *     the process owner or for Friday's lote, or
+     *   - nobody has asked for anything and the substitute simply stays.
+     *
+     * Only the second one needs chasing, and without this method the screen
+     * could not distinguish them — it would nag about rows already sitting
+     * in the very tray next door.
+     *
+     * @return array<int, array{id: int, estado: string}>
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    public function abiertaPorPlazaDeTemporada( int $seasonId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $estados = EstadoSolicitud::abiertas();
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, estado, plaza_id, plaza_campo_id
+                   FROM {$p}cambios_solicitud
+                  WHERE season_id = %d AND estado IN (" . $this->placeholders( $estados ) . ')
+                  ORDER BY id ASC',
+                array_merge( [ $seasonId ], $estados )
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'abiertaPorPlazaDeTemporada', [ 'season_id' => $seasonId ] );
+
+        return $this->indexarPorPlaza( $rows );
+    }
+
+    /**
+     * Indexes raw `{id, estado, plaza_id, plaza_campo_id}` rows by plaza id,
+     * shared by both `abiertaPorPlaza*()` readers so they can never drift on
+     * the two rules that matter: a GROUPED request is indexed under BOTH its
+     * plazas, and when a plaza somehow carries more than one open solicitud
+     * the OLDEST wins (the rows arrive `id ASC`, and the first write to a
+     * key sticks).
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array{id: int, estado: string}>
+     */
+    private function indexarPorPlaza( array $rows ): array {
         $porPlaza = [];
 
         foreach ( $rows as $row ) {

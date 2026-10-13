@@ -498,6 +498,53 @@ class SolicitudRepository {
     }
 
     /**
+     * Every ALREADY-RESOLVED solicitud of $seasonId — `publicada`,
+     * `rechazada`, `anulada` — most recently resolved first. This is the
+     * process owner's histórico (`Admin\HistoricoPage`): the rows that
+     * `listPendientes()` / `listAprobadas()` stop returning the moment a
+     * decision is taken, and which until 0.1.22 no screen could show again.
+     *
+     * The estados come from `EstadoSolicitud::terminales()`, never from an
+     * inlined list, so this query and `esTerminal()` can never disagree
+     * about what "already resolved" means.
+     *
+     * Ordered by `resuelta_at DESC` — the opposite of every other listing
+     * here, deliberately: a tray is a worklist read oldest-first, a histórico
+     * is a log read newest-first. `id DESC` breaks ties, and also orders the
+     * rows that somehow carry a NULL `resuelta_at` (none should: every
+     * transition writes it — see `transicionar()`) deterministically instead
+     * of leaving them to the engine's whim.
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws \RuntimeException When the query fails at the wpdb level —
+     *         same "READ FAILURES MUST NEVER READ AS 'NO ROWS'" discipline as
+     *         listByEstado(): a histórico that silently renders empty would
+     *         read as "nothing was ever decided", which is the one thing this
+     *         screen exists to disprove.
+     */
+    public function listResueltas( int $seasonId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $estados      = EstadoSolicitud::terminales();
+        $placeholders = implode( ', ', array_fill( 0, count( $estados ), '%s' ) );
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$p}cambios_solicitud
+                  WHERE season_id = %d AND estado IN ({$placeholders})
+                  ORDER BY resuelta_at DESC, id DESC",
+                array_merge( [ $seasonId ], $estados )
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listResueltas', [ 'season_id' => $seasonId ] );
+
+        return $rows;
+    }
+
+    /**
      * Flips a `pendiente` (or still-`aprobada`) solicitud to `aprobada` —
      * see class docblock, "APROBAR IS NOT PUBLICAR": this NEVER touches
      * `PlazaRepository`. No ocupación is opened or closed here.

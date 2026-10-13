@@ -109,4 +109,30 @@ class EstadoSolicitudTest extends TestCase {
         $this->assertSame( $noTerminales, $abiertas );
         $this->assertSame( [ 'aprobada', 'pendiente' ], $abiertas );
     }
+
+    /**
+     * `terminales()` and `abiertas()` must PARTITION `todos()` — every state
+     * in exactly one of the two, none in both and none in neither. The
+     * histórico (`Admin\HistoricoPage`) shows one side and the bandeja the
+     * other, so a sixth estado that landed in neither would be invisible on
+     * BOTH screens: decided, stored, and impossible to find.
+     */
+    public function test_terminales_and_abiertas_partition_every_state(): void {
+        $terminales = EstadoSolicitud::terminales();
+        $abiertas   = EstadoSolicitud::abiertas();
+
+        $union = array_merge( $terminales, $abiertas );
+        sort( $union );
+
+        $todos = EstadoSolicitud::todos();
+        sort( $todos );
+
+        $this->assertSame( $todos, $union, 'Every estado must be either terminal or open — never neither.' );
+        $this->assertSame( [], array_intersect( $terminales, $abiertas ), 'No estado may be both terminal and open.' );
+        // Canonicalizing: the ORDER of terminales() is an accident of the
+        // TODOS constant, not a contract. Pinning it with assertSame would
+        // fail on a harmless reordering and teach the next person that the
+        // order means something.
+        $this->assertEqualsCanonicalizing( [ 'rechazada', 'publicada', 'anulada' ], $terminales );
+    }
 }

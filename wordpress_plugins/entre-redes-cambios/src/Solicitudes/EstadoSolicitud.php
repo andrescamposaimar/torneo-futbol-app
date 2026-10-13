@@ -112,6 +112,26 @@ final class EstadoSolicitud {
         return self::ABIERTAS;
     }
 
+    /**
+     * Every TERMINAL estado — `publicada`, `rechazada`, `anulada` — DERIVED
+     * from `TRANSICIONES` rather than listed, so it can never drift from
+     * `esTerminal()` the way a hand-maintained second list would. This is
+     * what `Admin\HistoricoPage` asks for: "everything that already stopped
+     * moving", which is exactly the complement of `abiertas()`.
+     *
+     * `EstadoSolicitudTest` pins both halves of that complement
+     * (`terminales() + abiertas() == todos()`, and no value in both), so
+     * adding a sixth estado to one side and forgetting the other fails
+     * loudly instead of silently hiding rows from the histórico.
+     *
+     * @return string[]
+     */
+    public static function terminales(): array {
+        return array_values(
+            array_filter( self::TODOS, static fn ( string $estado ): bool => self::esTerminal( $estado ) )
+        );
+    }
+
     public static function esValido( string $estado ): bool {
         return in_array( $estado, self::TODOS, true );
     }

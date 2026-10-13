@@ -284,7 +284,17 @@ final class Plugin {
                     new Plazas\JugadorMetricasReader( $wpdb, $eventLog )
                 );
 
-                ( new Admin\AdminMenu( $bandejaPage ) )->register();
+                $historicoPage = new Admin\HistoricoPage(
+                    $authorizer,
+                    $solicitudRepository,
+                    $plazaRepository,
+                    new Solicitudes\SolicitudesAbiertasReader( $wpdb, $eventLog ),
+                    $fechaRepository,
+                    $settings,
+                    $eventLog
+                );
+
+                ( new Admin\AdminMenu( $bandejaPage, $historicoPage ) )->register();
             } );
         }
 
