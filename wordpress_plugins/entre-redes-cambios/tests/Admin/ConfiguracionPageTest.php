@@ -279,6 +279,60 @@ class ConfiguracionPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // The new-request alert
+    // -------------------------------------------------------------------------
+
+    public function test_el_aviso_por_mail_viaja_al_lector(): void {
+        $this->assertFalse( $this->settings->notificacionNuevaSolicitudActiva(), 'OFF by default.' );
+        $this->assertSame( '', $this->settings->notificacionNuevaSolicitudDestino() );
+
+        $resultado = $this->guardar( [
+            'notificacion_nueva_activa'  => '1',
+            'notificacion_nueva_destino' => 'fernando@ejemplo.com',
+        ] );
+
+        $this->assertTrue( $resultado['ok'] );
+        $this->assertTrue( $this->settings->notificacionNuevaSolicitudActiva() );
+        $this->assertSame( 'fernando@ejemplo.com', $this->settings->notificacionNuevaSolicitudDestino() );
+    }
+
+    public function test_prender_el_aviso_sin_direccion_se_rechaza(): void {
+        // An alert with nowhere to go produces silence that looks exactly
+        // like "nobody asked for a change" — the failure it exists to end.
+        $resultado = $this->guardar( [ 'notificacion_nueva_activa' => '1', 'notificacion_nueva_destino' => '  ' ] );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertFalse( $this->settings->notificacionNuevaSolicitudActiva() );
+    }
+
+    public function test_una_direccion_invalida_se_rechaza(): void {
+        foreach ( [ 'no-es-un-mail', 'arroba@', '@dominio.com', 'con espacio@x.com' ] as $valor ) {
+            $resultado = $this->guardar( [
+                'notificacion_nueva_activa'  => '1',
+                'notificacion_nueva_destino' => $valor,
+            ] );
+
+            $this->assertFalse( $resultado['ok'], "'{$valor}' must be refused." );
+            $this->assertSame( '', $this->settings->notificacionNuevaSolicitudDestino(), 'And nothing must have been written.' );
+        }
+    }
+
+    public function test_se_puede_apagar_el_aviso_dejando_la_direccion(): void {
+        $this->guardar( [
+            'notificacion_nueva_activa'  => '1',
+            'notificacion_nueva_destino' => 'fernando@ejemplo.com',
+        ] );
+
+        // Unchecked, address kept: turning the alert off must not force the
+        // operator to retype the address to turn it back on.
+        $resultado = $this->guardar( [ 'notificacion_nueva_destino' => 'fernando@ejemplo.com' ] );
+
+        $this->assertTrue( $resultado['ok'] );
+        $this->assertFalse( $this->settings->notificacionNuevaSolicitudActiva() );
+        $this->assertSame( 'fernando@ejemplo.com', $this->settings->notificacionNuevaSolicitudDestino() );
+    }
+
+    // -------------------------------------------------------------------------
     // The invariant: a refused save writes NOTHING
     // -------------------------------------------------------------------------
 
@@ -500,6 +554,8 @@ class ConfiguracionPageTest extends TestCase {
             'hora_publicacion'          => '00:00:00',
             'minimo_fechas_cambio'      => '3',
             'cambios_habilitados'       => '1',
+            // Mirrors the seed: the alert ships OFF with no address.
+            'notificacion_nueva_destino' => '',
             'mensaje_deshabilitado'     => 'Por el momento no es posible gestionar los cambios de forma online. Por favor contactate con la Comisión Directiva.',
             // Mirrors the SEED exactly — exención ON, prioridad de padres
             // absent (= unchecked) — so `guardar( [] )` is a genuine no-op

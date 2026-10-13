@@ -181,7 +181,13 @@ final class Plugin {
                 $plazaRepository,
                 $jugadorMetricasReader,
                 null,
-                new Solicitudes\Lock\MysqlCreationLock( $wpdb, $eventLog )
+                new Solicitudes\Lock\MysqlCreationLock( $wpdb, $eventLog ),
+                new Notificaciones\SolicitudNotifier(
+                    $settings,
+                    $solicitudRepository,
+                    $plazaRepository,
+                    $eventLog
+                )
             );
 
             // ONE reader shared by the candidate filter and the roster

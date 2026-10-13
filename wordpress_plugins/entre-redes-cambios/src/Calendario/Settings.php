@@ -165,6 +165,29 @@ class Settings {
      * days. The conservative direction here is the one that keeps the
      * ordinary state, not the one that blocks.
      */
+    /**
+     * Whether the process owner is emailed on every new request (0.1.25).
+     * Default: `false`.
+     *
+     * A failed read collapsing to `false` is the right direction here and
+     * the opposite of a fairness question: the worst case is a missing
+     * alert during a DB hiccup — the solicitud is still stored and still in
+     * the tray — whereas resolving a failure to `true` would mail to
+     * whatever `notificacionNuevaSolicitudDestino()` also failed to read.
+     */
+    public function notificacionNuevaSolicitudActiva(): bool {
+        return $this->readBool( 'notificacion_nueva_activa', (string) InitialSchema::SEED_DEFAULTS['notificacion_nueva_activa'] );
+    }
+
+    /**
+     * Where that alert goes. Empty means "not configured" — never a
+     * fallback address: guessing a recipient for operational mail is how a
+     * league's roster changes end up in a stranger's inbox.
+     */
+    public function notificacionNuevaSolicitudDestino(): string {
+        return trim( $this->readString( 'notificacion_nueva_destino', (string) InitialSchema::SEED_DEFAULTS['notificacion_nueva_destino'] ) );
+    }
+
     public function cambiosHabilitados(): bool {
         return $this->readBool( 'cambios_habilitados', (string) InitialSchema::SEED_DEFAULTS['cambios_habilitados'] );
     }
