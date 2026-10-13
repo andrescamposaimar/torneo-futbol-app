@@ -79,6 +79,10 @@ final class Plugin {
         // the moment they exist.
         add_filter( 'rest_post_dispatch', [ self::class, 'denyCambiosResponseCaching' ], 10, 3 );
 
+        // The captain-facing kill switch. BEFORE dispatch, so not one route
+        // callback runs while it is off — see gateCambiosWhenDisabled().
+        add_filter( 'rest_pre_dispatch', [ self::class, 'gateCambiosWhenDisabled' ], 10, 3 );
+
         // Schema upgrades must land on a plain zip replace, not only on a
         // click of "Activate" — see MigrationRunner::runIfOutdated()'s own
         // docblock for the incident this guards against.
@@ -137,6 +141,11 @@ final class Plugin {
             // evaluateGrupo() never has to read Settings itself.
             $exencionArcoActiva = $settings->exencionArcoActiva();
 
+            // The reglamento's "3 fechas", now configurable — read ONCE here
+            // and threaded in, because neither the rules nor
+            // Dictamen\DictamenEngineFactory can reach the database.
+            $minimoFechas = $settings->minimoFechasCambio();
+
             $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                 $plazaRepository,
                 $fechaRepository,
@@ -151,7 +160,8 @@ final class Plugin {
                 $eventLog,
                 $bloqueoReemplazoPolicy,
                 $prioridadPadresActiva,
-                $exencionArcoActiva
+                $exencionArcoActiva,
+                $minimoFechas
             );
 
             $solicitudRepository = new Solicitudes\SolicitudRepository(
@@ -188,7 +198,8 @@ final class Plugin {
                 null,
                 null,
                 null,
-                $solicitudesAbiertasReader
+                $solicitudesAbiertasReader,
+                $minimoFechas
             );
             $listaEsperaResolver = new Plazas\ListaEsperaResolver( $wpdb, $settings, $eventLog );
 
@@ -250,6 +261,7 @@ final class Plugin {
                 $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
                 $prioridadPadresActiva  = $settings->prioridadPadresActiva();
                 $exencionArcoActiva     = $settings->exencionArcoActiva();
+                $minimoFechas           = $settings->minimoFechasCambio();
 
                 $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                     $plazaRepository,
@@ -265,7 +277,8 @@ final class Plugin {
                     $eventLog,
                     $bloqueoReemplazoPolicy,
                     $prioridadPadresActiva,
-                    $exencionArcoActiva
+                    $exencionArcoActiva,
+                    $minimoFechas
                 );
 
                 $solicitudRepository = new Solicitudes\SolicitudRepository(
@@ -395,5 +408,71 @@ final class Plugin {
         $response->header( 'Vary', 'Authorization', false );
 
         return $response;
+    }
+
+    /**
+     * Closes the CAPTAIN-FACING side of Cambios when the comisión turns it
+     * off, answering every `/cambios/` route with 503
+     * `cambios_deshabilitado` and the operator's own sentence.
+     *
+     * *** WHY A FILTER AND NOT A CHECK IN EACH CONTROLLER ***
+     * On `rest_pre_dispatch`, so NOT ONE route callback runs while the
+     * switch is off — a per-controller check is a thing a future route can
+     * forget, and the whole value of a kill switch is that it has no gaps.
+     * The prefix test is the same one `denyCambiosResponseCaching()` uses, so
+     * the two filters can never disagree about what "a Cambios route" is.
+     *
+     * *** WHAT IT DOES NOT TOUCH ***
+     * `Admin\BandejaPage` and `Admin\HistoricoPage` do not go through REST.
+     * That is deliberate: the comisión can stop the inbox and still approve,
+     * publish and audit what is already in it.
+     *
+     * *** 503, NOT 403 ***
+     * This is a temporary, operator-chosen unavailability, not a permission
+     * problem with this captain — and the app must be able to tell the two
+     * apart, since one says "contactate con la comisión" and the other means
+     * "you are not a captain".
+     *
+     * The message is CONTENT written by the comisión for captains, which is
+     * why it travels in the response rather than being hardcoded in the app.
+     * `Admin\ConfiguracionPage` sanitizes and length-caps it on save.
+     *
+     * Reading Settings costs one query on every Cambios request. That is the
+     * price of a switch that cannot be bypassed, and it is the same table
+     * the plazos are already read from on the request path.
+     *
+     * @param mixed                  $result  Dispatch result so far; non-null short-circuits.
+     * @param \WP_REST_Server|mixed  $server  Unused.
+     * @param \WP_REST_Request|mixed $request The incoming request.
+     * @return mixed
+     */
+    public static function gateCambiosWhenDisabled( $result, $server, $request ) {
+        // Something earlier already answered — never override it.
+        if ( null !== $result ) {
+            return $result;
+        }
+
+        if ( ! is_object( $request ) || ! method_exists( $request, 'get_route' ) ) {
+            return $result;
+        }
+
+        if ( ! str_starts_with( (string) $request->get_route(), '/' . Rest\RestController::API_NAMESPACE . '/' . Rest\RestController::BASE . '/' ) ) {
+            return $result;
+        }
+
+        global $wpdb;
+
+        $eventLog = new Observability\WpEventLog();
+        $settings = new Calendario\Settings( $wpdb, $eventLog );
+
+        if ( $settings->cambiosHabilitados() ) {
+            return $result;
+        }
+
+        return new \WP_Error(
+            'cambios_deshabilitado',
+            $settings->mensajeDeshabilitado(),
+            [ 'status' => 503 ]
+        );
     }
 }

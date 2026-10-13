@@ -6,6 +6,9 @@ import 'package:torneo_futbol_app/config/prode_auth_config.dart';
 import 'package:torneo_futbol_app/models/cambios_plaza.dart';
 import 'package:torneo_futbol_app/models/cambios_solicitud.dart';
 import 'package:torneo_futbol_app/services/cambios_api_service.dart';
+import 'package:torneo_futbol_app/models/cambios_mis_equipos.dart';
+import 'package:torneo_futbol_app/services/cambios_context_controller.dart';
+import 'package:torneo_futbol_app/services/cambios_load_failure.dart';
 import 'package:torneo_futbol_app/services/cambios_plantel_controller.dart';
 import 'package:torneo_futbol_app/services/cambios_solicitudes_controller.dart';
 import 'package:torneo_futbol_app/services/prode_api_service.dart';
@@ -42,6 +45,15 @@ class _FailingService extends CambiosApiService {
     required int teamId,
   }) async =>
       throw error;
+
+  @override
+  Future<CambiosMisEquipos> fetchMisEquipos() async => throw error;
+}
+
+Future<CambiosContextState> _contextFailure(Object error) async {
+  final controller = CambiosContextController(_FailingService(error));
+  await controller.load();
+  return controller.state;
 }
 
 Future<CambiosSolicitudesError> _solicitudesFailure(Object error) async {
@@ -93,6 +105,59 @@ void main() {
       };
 
       expect(states, hasLength(3));
+    });
+  });
+
+  group('cambios_deshabilitado — one cause must not look like several problems', () {
+    test('the code is NOT scoped, so every screen reports the same thing', () {
+      const error = CambiosApiException(
+        statusCode: 503,
+        code: kCodigoDeshabilitado,
+        mensajeDeshabilitado: 'Hablá con la comisión.',
+      );
+
+      // Scoping it would turn one cause into `plantel_503` and
+      // `solicitudes_503` — two different-looking problems.
+      expect(describeCambiosLoadFailure('plantel', error).code, kCodigoDeshabilitado);
+      expect(describeCambiosLoadFailure('solicitudes', error).code, kCodigoDeshabilitado);
+      expect(describeCambiosLoadFailure('candidatos', error).code, kCodigoDeshabilitado);
+    });
+
+    test("carries the comisión's words through as the message", () {
+      const error = CambiosApiException(
+        statusCode: 503,
+        code: kCodigoDeshabilitado,
+        mensajeDeshabilitado: 'Hablá con la comisión.',
+      );
+
+      expect(describeCambiosLoadFailure('plantel', error).message, 'Hablá con la comisión.');
+    });
+
+    test('an ordinary 503 is still scoped — only the known code is special', () {
+      const error = CambiosApiException(statusCode: 503, code: 'rest_no_route');
+
+      expect(describeCambiosLoadFailure('plantel', error).code, 'plantel_503');
+    });
+  });
+
+  group('CambiosContextController — the kill switch is resolved at the one door', () {
+    test('a cambios_deshabilitado 503 becomes its own state, never an error', () async {
+      final estado = await _contextFailure(const CambiosApiException(
+        statusCode: 503,
+        code: kCodigoDeshabilitado,
+        mensajeDeshabilitado: 'Hablá con la comisión.',
+      ));
+
+      expect(estado, isA<CambiosContextDeshabilitado>());
+      expect((estado as CambiosContextDeshabilitado).mensaje, 'Hablá con la comisión.');
+    });
+
+    test('every OTHER failure is still a plain error', () async {
+      expect(await _contextFailure(const CambiosApiException(statusCode: 500)),
+          isA<CambiosContextError>());
+      expect(await _contextFailure(const CambiosApiException(statusCode: 503, code: 'rest_no_route')),
+          isA<CambiosContextError>());
+      expect(await _contextFailure(TimeoutException('slow')), isA<CambiosContextError>());
     });
   });
 

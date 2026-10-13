@@ -27,6 +27,27 @@ final class CambiosContextError extends CambiosContextState {
   const CambiosContextError();
 }
 
+/// The comisión closed the captain-facing side of Cambios (HTTP 503
+/// `cambios_deshabilitado`, from `Plugin::gateCambiosWhenDisabled()` on the
+/// backend). NOT an error: nothing went wrong, the feature is deliberately
+/// shut, and the captain gets the comisión's own sentence instead of a retry
+/// button that cannot help.
+///
+/// Resolved HERE, in the context fetch, because that is the single door
+/// every Cambios screen goes through: `CambiosAuthGate` lands on
+/// `CambiosContextScreen`, which loads this before anything else exists. A
+/// captain therefore never reaches a roster that would fail one request at a
+/// time with the same cause.
+///
+/// [mensaje] is the comisión's text, already sanitized and length-capped
+/// where it is saved. It is empty only if the server somehow sent none, in
+/// which case the screen uses its own fallback rather than a blank card.
+final class CambiosContextDeshabilitado extends CambiosContextState {
+  final String mensaje;
+
+  const CambiosContextDeshabilitado(this.mensaje);
+}
+
 /// Authenticated, but the caller's `player_id` currently captains nothing —
 /// a legitimate 200 from the backend (see `CapitanController::listar()`'s
 /// own docblock), never rendered as an error.
@@ -92,6 +113,10 @@ class CambiosContextController extends StateNotifier<CambiosContextState> {
         teams: result.teams,
         selectedTeamId: result.teams.first.teamId,
       );
+    } on CambiosApiException catch (e) {
+      state = e.code == kCodigoDeshabilitado
+          ? CambiosContextDeshabilitado(e.mensajeDeshabilitado ?? '')
+          : const CambiosContextError();
     } catch (_) {
       state = const CambiosContextError();
     }

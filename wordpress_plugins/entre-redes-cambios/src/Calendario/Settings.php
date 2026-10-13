@@ -117,6 +117,74 @@ class Settings {
      * full rule. Default: `false` (OFF) — see
      * Migrations\InitialSchema::SEED_DEFAULTS, 'prioridad_padres_activa'.
      */
+    /**
+     * How many RESOLVED fechas a substitution must play before its plaza may
+     * liberate — the reglamento's "3 fechas", configurable since 0.1.23
+     * because that number is a rule the comisión can change, not a constant
+     * of the domain. Default: 3 (see
+     * `Migrations\InitialSchema::SEED_DEFAULTS`).
+     *
+     * Clamped to 1..10. `0` is REFUSED (clamped up to 1) on purpose: it would
+     * void the rule entirely and let a substitute be returned the same fecha
+     * they arrived, which is precisely the advantage the whole system exists
+     * to prevent — and a `0` is far more likely to be a typo or an empty
+     * field than a decision. Above 10 is a typo too: a season is 23 fechas.
+     *
+     * *** THE FAILURE DIRECTION, STATED PLAINLY ***
+     * A failed read collapses to the seeded 3, like every other plain
+     * configuration getter here. If the comisión had raised it to 5, a
+     * transient DB hiccup would therefore use 3 and could release a
+     * substitute two fechas early — a real, if narrow, permissive window.
+     * It is accepted rather than defended because the alternative (failing
+     * closed to some arbitrary high number) would block every legitimate
+     * regreso during a hiccup, inside a two-day window, and `readStringResult()`
+     * already records `settings.lectura_fallida` durably. If this setting
+     * ever moves off 3 for real, revisit this: the honest fix is an
+     * "indeterminado" path like `Plazas\CadenaResolver`'s, not a different
+     * default.
+     */
+    public function minimoFechasCambio(): int {
+        $valor = $this->readInt( 'minimo_fechas_cambio', (int) InitialSchema::SEED_DEFAULTS['minimo_fechas_cambio'] );
+
+        return max( 1, min( 10, $valor ) );
+    }
+
+    /**
+     * Whether the CAPTAIN-FACING side of Cambios is open (0.1.23). Default:
+     * `true`. This gates the REST namespace only — `Admin\BandejaPage` and
+     * `Admin\HistoricoPage` keep working, which is the point: the comisión
+     * can stop the inbox for a week and still process what is already in it.
+     *
+     * *** WHY THIS ONE FAILS *OPEN*, UNLIKE exencionArcoActiva() ***
+     * A failed read collapsing to `true` is deliberate here, and it is NOT
+     * the same shape as the techo exemption. "Enabled" is not a relaxation
+     * of any fairness rule: every dictamen rule still runs, and a request
+     * filed during a DB hiccup still needs the comisión's approval like any
+     * other. Failing CLOSED, by contrast, would shut the feature for every
+     * captain over a transient error, inside a window that is open for two
+     * days. The conservative direction here is the one that keeps the
+     * ordinary state, not the one that blocks.
+     */
+    public function cambiosHabilitados(): bool {
+        return $this->readBool( 'cambios_habilitados', (string) InitialSchema::SEED_DEFAULTS['cambios_habilitados'] );
+    }
+
+    /**
+     * What a captain is told when `cambiosHabilitados()` is off — written by
+     * the comisión, shown verbatim in the app. This is CONTENT, not a
+     * diagnostic string: it is the one piece of server text the app renders
+     * as-is, which is why `Admin\ConfiguracionPage` sanitizes and length-caps
+     * it on save and why the app renders it as plain text.
+     *
+     * An empty stored value falls back to the seeded sentence rather than
+     * leaving a captain staring at a blank screen with no explanation.
+     */
+    public function mensajeDeshabilitado(): string {
+        $mensaje = trim( $this->readString( 'mensaje_deshabilitado', (string) InitialSchema::SEED_DEFAULTS['mensaje_deshabilitado'] ) );
+
+        return '' !== $mensaje ? $mensaje : (string) InitialSchema::SEED_DEFAULTS['mensaje_deshabilitado'];
+    }
+
     public function prioridadPadresActiva(): bool {
         return $this->readBool( 'prioridad_padres_activa', (string) InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'] );
     }

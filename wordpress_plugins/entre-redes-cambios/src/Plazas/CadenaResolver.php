@@ -73,6 +73,30 @@ final class CadenaResolver {
     private $countResolvedFechasSinceFn;
 
     /**
+     * The reglamento's standing value. Kept as the constructor default so
+     * every existing caller — and every test that does not care about this
+     * policy — behaves exactly as before; the configured value arrives from
+     * `Calendario\Settings::minimoFechasCambio()` at the four places this
+     * class is built.
+     */
+    public const MINIMO_POR_DEFECTO = 3;
+
+    /**
+     * Minimum resolved fechas a substitution must play before its plaza may
+     * liberate. Per-method `$minimo` arguments still win when given, so a
+     * test can pin one number without touching the object.
+     *
+     * *** RECOMPUTED, NEVER FROZEN PER OCUPACIÓN ***
+     * Raising this mid-season re-blocks substitutes that were already
+     * liberable, and lowering it releases several at once — by construction,
+     * because this class derives everything from scratch on every call (see
+     * class docblock, "DERIVED, NEVER STORED"). That is the intended
+     * reading of a reglamento change: it applies to everyone. It is also why
+     * the setting is worth touching between fechas, not on a Thursday.
+     */
+    private int $minimo;
+
+    /**
      * @param callable(int): int $countResolvedFechasSinceFn Given a
      *        `fecha_id`, returns how many RESOLVED fechas (see
      *        Calendario\FechaRepository::countResolvedFechasSince()) have
@@ -80,7 +104,15 @@ final class CadenaResolver {
      *        method with `$seasonId` already bound via closure; in tests, a
      *        stub.
      */
-    public function __construct( callable $countResolvedFechasSinceFn ) {
+    /**
+     * @param int|null $minimo The configured minimum, or null for
+     *        MINIMO_POR_DEFECTO. Nullable rather than defaulted so every
+     *        caller can forward its own `?int` straight through without
+     *        having to repeat the coalesce — which is exactly where a second
+     *        copy of the number would creep back in.
+     */
+    public function __construct( callable $countResolvedFechasSinceFn, ?int $minimo = null ) {
+        $this->minimo = $minimo ?? self::MINIMO_POR_DEFECTO;
         $this->countResolvedFechasSinceFn = $countResolvedFechasSinceFn;
     }
 
@@ -102,7 +134,8 @@ final class CadenaResolver {
      *         its callers), so a broken counter must surface loudly to
      *         whoever calls this directly rather than be silently guessed.
      */
-    public function meetsMinimo( array $ocupacion, int $minimo = 3 ): bool {
+    public function meetsMinimo( array $ocupacion, ?int $minimo = null ): bool {
+        $minimo = $minimo ?? $this->minimo;
         $fechaDesdeId = (int) $ocupacion['fecha_desde_id'];
 
         return $this->countResolvedFechasSince( $fechaDesdeId ) >= $minimo;
@@ -136,7 +169,8 @@ final class CadenaResolver {
      *         external counting failure (see FechaCountUnavailableException
      *         for that distinct, fail-closed-to-`false` case).
      */
-    public function countFechasUntilLiberacion( array $ocupaciones, int $minimo = 3 ): int {
+    public function countFechasUntilLiberacion( array $ocupaciones, ?int $minimo = null ): int {
+        $minimo = $minimo ?? $this->minimo;
         if ( empty( $ocupaciones ) ) {
             throw new \InvalidArgumentException(
                 'CadenaResolver::countFechasUntilLiberacion(): an empty ocupaciones chain is not a valid plaza '
@@ -180,7 +214,8 @@ final class CadenaResolver {
      * @throws \InvalidArgumentException When $ocupaciones is empty — see
      *         countFechasUntilLiberacion().
      */
-    public function isPlazaLiberable( array $ocupaciones, int $minimo = 3 ): bool {
+    public function isPlazaLiberable( array $ocupaciones, ?int $minimo = null ): bool {
+        $minimo = $minimo ?? $this->minimo;
         try {
             return 0 === $this->countFechasUntilLiberacion( $ocupaciones, $minimo );
         } catch ( FechaCountUnavailableException $e ) {
@@ -201,7 +236,8 @@ final class CadenaResolver {
      *        `PlazaRepository::findPlaza()`.
      * @param array<int, array<string, mixed>> $ocupaciones
      */
-    public function canTitularReturn( array $plaza, array $ocupaciones, int $minimo = 3 ): bool {
+    public function canTitularReturn( array $plaza, array $ocupaciones, ?int $minimo = null ): bool {
+        $minimo = $minimo ?? $this->minimo;
         $vigente = $this->vigente( $ocupaciones );
 
         if ( null === $vigente ) {

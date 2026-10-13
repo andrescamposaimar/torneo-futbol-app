@@ -87,6 +87,14 @@ class PlazasController {
     private ?ListaEsperaResolver $listaEsperaResolver;
     private ?SolicitudesAbiertasReader $solicitudesAbiertas;
 
+    /**
+     * The configured liberation minimum (`Calendario\Settings::minimoFechasCambio()`),
+     * or null to keep `Plazas\CadenaResolver::MINIMO_POR_DEFECTO`. This
+     * controller does not read Settings itself — see this class's existing
+     * discipline of receiving resolved policy rather than fetching it.
+     */
+    private ?int $minimoFechas;
+
     /** @var callable(): int */
     private $clockFn;
 
@@ -199,8 +207,10 @@ class PlazasController {
         ?ListaEsperaResolver $listaEsperaResolver = null,
         ?callable $fotoResolverFn = null,
         ?callable $posicionResolverFn = null,
-        ?SolicitudesAbiertasReader $solicitudesAbiertas = null
+        ?SolicitudesAbiertasReader $solicitudesAbiertas = null,
+        ?int $minimoFechas = null
     ) {
+        $this->minimoFechas = $minimoFechas;
         $this->authorizer          = $authorizer;
         $this->plazaRepository     = $plazaRepository;
         $this->fechaRepository     = $fechaRepository;
@@ -363,7 +373,7 @@ class PlazasController {
             $boundedFechaCounter        = new BoundedFechaCounter( $this->fechaRepository, $this->eventLog );
             $countResolvedFechasSinceFn = $boundedFechaCounter->boundedCountResolvedFechasSinceFn( $seasonId );
 
-            $cadenaResolver = new CadenaResolver( $countResolvedFechasSinceFn );
+            $cadenaResolver = new CadenaResolver( $countResolvedFechasSinceFn, $this->minimoFechas );
 
             // Ocupaciones/vigente are resolved ONCE per plaza here, BEFORE
             // any name is looked up, so every player id this response will

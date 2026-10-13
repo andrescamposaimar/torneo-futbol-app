@@ -50,6 +50,13 @@ class ConfiguracionPage {
 
     public const SLUG = 'cambios-configuracion';
 
+    /**
+     * How long the operator's "why it is closed" sentence may be. Long
+     * enough for two sentences and a phone number, short enough that it
+     * cannot become a wall of text inside a phone-sized card.
+     */
+    private const MENSAJE_MAX = 300;
+
     private const NONCE        = 'cambios_guardar_configuracion';
     private const NONCE_FIELD  = 'cambios_configuracion_nonce';
 
@@ -147,6 +154,39 @@ class ConfiguracionPage {
 
         $errores = PlazosValidator::validar( $offsets );
 
+        // Validated HERE rather than inside PlazosValidator: that class is
+        // about the four plazos as a chain, and the mínimo is a different
+        // kind of number that happens to live on the same form. It rides on
+        // the same all-or-nothing save, though — see class docblock.
+        $minimo = $entrada['minimo_fechas'];
+
+        if ( ! is_int( $minimo ) || $minimo < 1 || $minimo > 10 ) {
+            $errores[] = sprintf(
+                /* translators: %s: the submitted value */
+                __( 'El mínimo de fechas tiene que ser un número entero entre 1 y 10 (recibido: "%s").', 'entre-redes-cambios' ),
+                is_scalar( $minimo ) ? (string) $minimo : gettype( $minimo )
+            );
+        }
+
+        // Only enforced when the switch is actually OFF: an empty message
+        // on a feature that is open harms nobody, but closing the feature
+        // with nothing to show would leave captains staring at a blank
+        // screen — the exact thing this switch exists to avoid.
+        if ( ! $entrada['habilitados'] && '' === trim( $entrada['mensaje'] ) ) {
+            $errores[] = __(
+                'Si apagás los cambios tenés que escribir el mensaje que van a ver los capitanes.',
+                'entre-redes-cambios'
+            );
+        }
+
+        if ( mb_strlen( $entrada['mensaje'] ) > self::MENSAJE_MAX ) {
+            $errores[] = sprintf(
+                /* translators: %d: maximum length */
+                __( 'El mensaje no puede pasar de %d caracteres.', 'entre-redes-cambios' ),
+                self::MENSAJE_MAX
+            );
+        }
+
         if ( ! empty( $errores ) ) {
             // NOTHING is written — not even the rows that were individually
             // fine. See class docblock.
@@ -167,6 +207,9 @@ class ConfiguracionPage {
             );
         }
 
+        $valores['minimo_fechas_cambio']   = (string) (int) $entrada['minimo_fechas'];
+        $valores['cambios_habilitados']    = $entrada['habilitados'] ? '1' : '0';
+        $valores['mensaje_deshabilitado']  = $entrada['mensaje'];
         $valores['exencion_arco_activa'] = $entrada['exencion_arco'] ? '1' : '0';
         $valores['prioridad_padres_activa'] = $entrada['prioridad_padres'] ? '1' : '0';
 
@@ -213,10 +256,26 @@ class ConfiguracionPage {
             ];
         }
 
+        $minimoCrudo = $_POST['minimo_fechas_cambio'] ?? '';
+        $minimo      = is_scalar( $minimoCrudo ) ? trim( (string) $minimoCrudo ) : '';
+
         return [
             'offsets'          => $offsets,
+            // Same discipline as `days`: only a string that IS an integer
+            // becomes one, so garbage reaches the validator as garbage and
+            // comes back as a sentence instead of being rounded into
+            // something plausible.
+            'minimo_fechas'    => ( '' !== $minimo && 1 === preg_match( '/^-?[0-9]+$/', $minimo ) ) ? (int) $minimo : $minimo,
             'exencion_arco'    => isset( $_POST['exencion_arco_activa'] ),
             'prioridad_padres' => isset( $_POST['prioridad_padres_activa'] ),
+            'habilitados'      => isset( $_POST['cambios_habilitados'] ),
+            // sanitize_textarea_field keeps newlines and strips tags — this
+            // is the one string this plugin sends to the app to be rendered
+            // as written, so it is cleaned here, at the only door it can
+            // come in through.
+            'mensaje'          => isset( $_POST['mensaje_deshabilitado'] ) && is_scalar( $_POST['mensaje_deshabilitado'] )
+                ? trim( sanitize_textarea_field( wp_unslash( (string) $_POST['mensaje_deshabilitado'] ) ) )
+                : '',
         ];
     }
 
@@ -246,6 +305,59 @@ class ConfiguracionPage {
             <form method="post" action="<?php echo esc_url( admin_url( 'admin.php?page=' . self::SLUG ) ); ?>">
                 <?php wp_nonce_field( self::NONCE, self::NONCE_FIELD ); ?>
                 <input type="hidden" name="cambios_config_action" value="guardar">
+
+                <h2><?php esc_html_e( 'Disponibilidad', 'entre-redes-cambios' ); ?></h2>
+
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><?php esc_html_e( 'Cambios en la app', 'entre-redes-cambios' ); ?></th>
+                            <td>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        name="cambios_habilitados"
+                                        value="1"
+                                        <?php checked( $this->settings->cambiosHabilitados() ); ?>>
+                                    <?php esc_html_e( 'Los capitanes pueden gestionar cambios desde la app', 'entre-redes-cambios' ); ?>
+                                </label>
+                                <p class="description">
+                                    <?php
+                                    esc_html_e(
+                                        'Apagado, la app muestra el mensaje de abajo en lugar del plantel y no se puede pedir '
+                                        . 'nada. La bandeja y el histórico siguen funcionando normalmente: podés frenar la '
+                                        . 'entrada y seguir resolviendo lo que ya está adentro.',
+                                        'entre-redes-cambios'
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="mensaje_deshabilitado"><?php esc_html_e( 'Mensaje para los capitanes', 'entre-redes-cambios' ); ?></label>
+                            </th>
+                            <td>
+                                <textarea
+                                    id="mensaje_deshabilitado"
+                                    name="mensaje_deshabilitado"
+                                    rows="3"
+                                    cols="60"
+                                    maxlength="<?php echo esc_attr( (string) self::MENSAJE_MAX ); ?>"
+                                    class="large-text"><?php echo esc_textarea( $this->settings->mensajeDeshabilitado() ); ?></textarea>
+                                <p class="description">
+                                    <?php
+                                    printf(
+                                        /* translators: %d: maximum length */
+                                        esc_html__( 'Se muestra tal cual en la app. Máximo %d caracteres.', 'entre-redes-cambios' ),
+                                        (int) self::MENSAJE_MAX
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
 
                 <h2><?php esc_html_e( 'Plazos', 'entre-redes-cambios' ); ?></h2>
                 <p class="description">
@@ -297,6 +409,33 @@ class ConfiguracionPage {
 
                 <table class="form-table" role="presentation">
                     <tbody>
+                        <tr>
+                            <th scope="row">
+                                <label for="minimo_fechas_cambio"><?php esc_html_e( 'Mínimo de fechas', 'entre-redes-cambios' ); ?></label>
+                            </th>
+                            <td>
+                                <input
+                                    type="number"
+                                    id="minimo_fechas_cambio"
+                                    name="minimo_fechas_cambio"
+                                    value="<?php echo esc_attr( (string) $this->settings->minimoFechasCambio() ); ?>"
+                                    step="1"
+                                    min="1"
+                                    max="10"
+                                    class="small-text">
+                                <p class="description">
+                                    <?php
+                                    esc_html_e(
+                                        'Cuántas fechas jugadas tiene que cumplir un cambio antes de que el titular pueda volver. '
+                                        . 'El reglamento dice 3 hoy. OJO: no se congela por cambio — se recalcula siempre, así que '
+                                        . 'subirlo vuelve a bloquear suplentes que ya estaban liberados y bajarlo libera varios de '
+                                        . 'golpe. Conviene tocarlo entre fechas, no un jueves.',
+                                        'entre-redes-cambios'
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
                         <tr>
                             <th scope="row"><?php esc_html_e( 'Exención del arco', 'entre-redes-cambios' ); ?></th>
                             <td>

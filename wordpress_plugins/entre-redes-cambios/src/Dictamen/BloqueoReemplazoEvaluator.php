@@ -27,7 +27,19 @@ namespace EntreRedes\Cambios\Dictamen;
  */
 final class BloqueoReemplazoEvaluator {
 
-    /** How many resolved fechas TOPE_TRES_FECHAS caps the block at. */
+    /**
+     * How many resolved fechas TOPE_TRES_FECHAS caps the block at, when the
+     * caller does not say.
+     *
+     * *** THIS IS THE SAME "3 FECHAS" AS THE LIBERATION MINIMUM ***
+     * Both numbers come from one sentence of the reglamento, so a change to
+     * the rule has to move BOTH or the two branches of
+     * `BloqueoReemplazoPolicy` start disagreeing about how long a reemplazo
+     * is held. That is why `isBlocked()` takes `$minimoFechas` and uses it in
+     * BOTH branches — the `hastaLiberacionDePlaza` one through
+     * `Plazas\CadenaResolver`, and the `topeTresFechas` one right here —
+     * instead of this constant quietly being a second, independent copy.
+     */
     private const TOPE_FECHAS = 3;
 
     /**
@@ -39,6 +51,13 @@ final class BloqueoReemplazoEvaluator {
      *        other plaza's full chain, as PlazaRepository::listOcupaciones()
      *        returns it.
      * @param callable(int): int $countResolvedFechasSinceFn Same contract as
+     * @param int|null $minimoFechas Forwarded to CadenaResolver — the
+     *        configured minimum (Calendario\Settings::minimoFechasCambio()),
+     *        or null to keep CadenaResolver::MINIMO_POR_DEFECTO. The block
+     *        this class evaluates is derived from whether the OTHER plaza is
+     *        liberable, so it moves with the same number as every other
+     *        liberation question; a second, independent copy here is exactly
+     *        the drift to avoid.
      *        DictamenContext::countResolvedFechasSinceFn() / CadenaResolver's
      *        constructor parameter.
      */
@@ -46,15 +65,18 @@ final class BloqueoReemplazoEvaluator {
         int $playerId,
         array $ocupacionesDeOtraPlaza,
         BloqueoReemplazoPolicy $politica,
-        callable $countResolvedFechasSinceFn
+        callable $countResolvedFechasSinceFn,
+        ?int $minimoFechas = null
     ): bool {
+        $minimoFechas = $minimoFechas ?? self::TOPE_FECHAS;
+
         if ( $politica->isHastaLiberacionDePlaza() ) {
-            $resolver = new \EntreRedes\Cambios\Plazas\CadenaResolver( $countResolvedFechasSinceFn );
+            $resolver = new \EntreRedes\Cambios\Plazas\CadenaResolver( $countResolvedFechasSinceFn, $minimoFechas );
 
             return in_array( $playerId, $resolver->listExOcupantesBloqueados( $ocupacionesDeOtraPlaza ), true );
         }
 
-        // TOPE_TRES_FECHAS: blocked only for whatever remains of 3 fechas
+        // TOPE_TRES_FECHAS: blocked only for whatever remains of the minimum
         // counted from the moment the entrante LEFT (fecha_hasta_id) that
         // other plaza — independent of that plaza's own liberation.
         $cierreTrunco = $this->truncatedClosureOf( $playerId, $ocupacionesDeOtraPlaza );
@@ -75,7 +97,7 @@ final class BloqueoReemplazoEvaluator {
             return true;
         }
 
-        return $resueltas < self::TOPE_FECHAS;
+        return $resueltas < $minimoFechas;
     }
 
     /**
@@ -90,10 +112,11 @@ final class BloqueoReemplazoEvaluator {
         int $playerId,
         array $plazasConCierreTruncado,
         BloqueoReemplazoPolicy $politica,
-        callable $countResolvedFechasSinceFn
+        callable $countResolvedFechasSinceFn,
+        ?int $minimoFechas = null
     ): bool {
         foreach ( $plazasConCierreTruncado as $ocupacionesDeOtraPlaza ) {
-            if ( $this->isBlocked( $playerId, $ocupacionesDeOtraPlaza, $politica, $countResolvedFechasSinceFn ) ) {
+            if ( $this->isBlocked( $playerId, $ocupacionesDeOtraPlaza, $politica, $countResolvedFechasSinceFn, $minimoFechas ) ) {
                 return true;
             }
         }
