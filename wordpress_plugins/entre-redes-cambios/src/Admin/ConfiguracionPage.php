@@ -397,7 +397,9 @@ class ConfiguracionPage {
                                     value="<?php echo esc_attr( (string) ( $offsets[ $clave ]['time'] ?? '00:00:00' ) ); ?>"
                                     pattern="[0-9]{2}:[0-9]{2}:[0-9]{2}"
                                     placeholder="23:59:59"
-                                    class="small-text">
+                                    size="8"
+                                    <?php // NOT class="small-text": that is ~55px and cuts "23:59:59" off mid-value, so the operator reads "23:5" and cannot tell a stored 23:59:59 from a stored 23:50:00. ?>
+                                    style="width:8em;">
                                 <p class="description"><?php echo esc_html( $meta['ayuda'] ); ?></p>
                             </td>
                         </tr>

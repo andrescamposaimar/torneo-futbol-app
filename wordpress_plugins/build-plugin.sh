@@ -192,6 +192,12 @@ for pattern in "${EXCLUDES[@]}"; do
     zip_excludes+=("$PLUGIN/$pattern")
 done
 zip_excludes+=("*/.DS_Store")
+# PHPUnit drops .phpunit.result.cache wherever it was last run from — the
+# plugin root, and vendor/bin when the binary is invoked directly. Neither is
+# code, but a build artifact must contain what the plugin needs and nothing
+# else; relying on the working tree being clean is exactly how it shipped
+# once. Matched anywhere in the tree, not at a fixed path.
+zip_excludes+=("*/.phpunit.result.cache")
 
 ( cd "$HERE" && zip -r -q "$ZIP" "$PLUGIN" -x "${zip_excludes[@]}" )
 
