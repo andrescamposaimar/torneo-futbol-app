@@ -588,32 +588,29 @@ class HistoricoPageTest extends TestCase {
     public function test_el_menu_registra_la_bandeja_y_el_historico_con_la_misma_capacidad(): void {
         $GLOBALS['_prode_test_registered_admin_menus'] = [];
 
-        ( new AdminMenu( $this->bandejaPageFake(), $this->page ) )->register();
+        ( new AdminMenu( $this->bandejaPageFake(), $this->page, $this->configuracionPageFake() ) )->register();
 
         $slugs = array_map(
             static fn ( array $m ): string => (string) $m['menu_slug'],
             $GLOBALS['_prode_test_registered_admin_menus']
         );
 
-        // THREE registrations: the top-level page plus TWO submenus. Counting
-        // matters — `assertContains( BandejaPage::SLUG )` alone would pass on
-        // the top-level entry even if the Bandeja submenu (the one that
-        // renames the auto-created duplicate from "Cambios" to "Bandeja")
-        // were deleted.
-        $this->assertCount( 3, $GLOBALS['_prode_test_registered_admin_menus'] );
-
+        // This test's own concern is only that the Histórico is REACHABLE as
+        // a named submenu of the tray. The full menu shape — how many
+        // entries, in which order — is pinned once, in ConfiguracionPageTest,
+        // so adding a fourth page later fails in exactly one place.
         $submenus = array_values( array_filter(
             $GLOBALS['_prode_test_registered_admin_menus'],
             static fn ( array $m ): bool => isset( $m['parent_slug'] )
         ) );
 
-        $this->assertCount( 2, $submenus, 'Both pages must be reachable as named submenu entries.' );
-        $this->assertSame( BandejaPage::SLUG, $submenus[0]['menu_slug'], 'The tray stays first, so the menu lands on it.' );
-        $this->assertSame( HistoricoPage::SLUG, $submenus[1]['menu_slug'] );
+        $historico = array_values( array_filter(
+            $submenus,
+            static fn ( array $m ): bool => HistoricoPage::SLUG === $m['menu_slug']
+        ) );
 
-        foreach ( $submenus as $submenu ) {
-            $this->assertSame( BandejaPage::SLUG, $submenu['parent_slug'] );
-        }
+        $this->assertCount( 1, $historico );
+        $this->assertSame( BandejaPage::SLUG, $historico[0]['parent_slug'] );
 
         $this->assertContains( BandejaPage::SLUG, $slugs );
         $this->assertContains( HistoricoPage::SLUG, $slugs );
@@ -765,6 +762,17 @@ class HistoricoPageTest extends TestCase {
             $settings,
             $this->eventLog,
             new \EntreRedes\Cambios\Plazas\JugadorMetricasReader( $wpdb, $this->eventLog )
+        );
+    }
+
+    private function configuracionPageFake(): \EntreRedes\Cambios\Admin\ConfiguracionPage {
+        global $wpdb;
+
+        return new \EntreRedes\Cambios\Admin\ConfiguracionPage(
+            new ProcessOwnerAuthorizer(),
+            new Settings( $wpdb, $this->eventLog ),
+            new \EntreRedes\Cambios\Calendario\SettingsWriter( $wpdb, $this->eventLog ),
+            $this->eventLog
         );
     }
 

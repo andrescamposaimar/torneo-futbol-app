@@ -758,6 +758,35 @@ if ( ! function_exists( 'esc_attr__' ) ) {
     }
 }
 
+if ( ! function_exists( 'checked' ) ) {
+    /**
+     * Mirrors WordPress's loose comparison (`checked( '1', true )` really
+     * does emit the attribute). A strict `===` here would make a settings
+     * form render every box unchecked while production rendered it
+     * correctly — the shim quietly testing a different screen.
+     */
+    function checked( mixed $checked, mixed $current = true, bool $echo = true ): string {
+        // EXACTLY core's __checked_selected_helper(): a string comparison of
+        // the two values, nothing more. An extra "both are truthy" clause
+        // would emit the attribute for pairs core leaves alone (2 vs 1), and
+        // a shim that is more permissive than the real thing proves the
+        // wrong screen.
+        $html = ( (string) $checked === (string) $current ) ? " checked='checked'" : '';
+
+        if ( $echo ) {
+            echo $html;
+        }
+
+        return $html;
+    }
+}
+
+if ( ! function_exists( 'wp_json_encode' ) ) {
+    function wp_json_encode( mixed $data, int $options = 0, int $depth = 512 ): string|false {
+        return json_encode( $data, $options, $depth );
+    }
+}
+
 if ( ! function_exists( 'esc_attr_e' ) ) {
     function esc_attr_e( string $text, string $domain = '' ): void {
         echo htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
