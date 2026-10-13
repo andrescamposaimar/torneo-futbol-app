@@ -92,4 +92,21 @@ class EstadoSolicitudTest extends TestCase {
 
         $this->assertFalse( EstadoSolicitud::esValido( 'no_existe' ) );
     }
+
+    /**
+     * "Open" (holds its plaza and entrante) and "not terminal" are the same
+     * fact — see EstadoSolicitud::ABIERTAS. Adding a state to the graph
+     * without deciding whether it is open (or vice versa) must fail HERE,
+     * not as a silent gap in the open-request rules.
+     */
+    public function test_abiertas_is_exactly_the_set_of_non_terminal_states(): void {
+        $noTerminales = array_values( array_filter( EstadoSolicitud::todos(), static fn ( string $e ): bool => ! EstadoSolicitud::esTerminal( $e ) ) );
+
+        $abiertas = EstadoSolicitud::abiertas();
+        sort( $noTerminales );
+        sort( $abiertas );
+
+        $this->assertSame( $noTerminales, $abiertas );
+        $this->assertSame( [ 'aprobada', 'pendiente' ], $abiertas );
+    }
 }

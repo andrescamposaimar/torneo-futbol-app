@@ -11,6 +11,8 @@ use EntreRedes\Cambios\Plazas\CandidatosResolver;
 use EntreRedes\Cambios\Plazas\CandidatosSeccion;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
+use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
+use EntreRedes\Cambios\Tests\Support\SeedsSolicitudes;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -32,6 +34,7 @@ use PHPUnit\Framework\TestCase;
  * real row.
  */
 class CandidatosResolverTest extends TestCase {
+    use SeedsSolicitudes;
 
     private const SEASON_ID = 359;
     private const OTHER_SEASON_ID = 360;
@@ -52,6 +55,7 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
+        $wpdb->query( "DELETE FROM {$p}cambios_solicitud" );
 
         // Schema owned by wp-shim.php's wp_test_create_posts_table() — see
         // its docblock for why.
@@ -102,6 +106,7 @@ class CandidatosResolverTest extends TestCase {
         $wpdb->query( "DELETE FROM {$p}cambios_ocupacion" );
         $wpdb->query( "DELETE FROM {$p}cambios_plaza" );
         $wpdb->query( "DELETE FROM {$p}cambios_fecha" );
+        $wpdb->query( "DELETE FROM {$p}cambios_solicitud" );
         $wpdb->query( "DELETE FROM {$p}posts" );
         $wpdb->query( "DELETE FROM {$p}term_relationships" );
         $wpdb->query( "DELETE FROM {$p}term_taxonomy" );
@@ -1584,6 +1589,156 @@ class CandidatosResolverTest extends TestCase {
     // -------------------------------------------------------------------------
     // buscarPaginado() — the techo is a population filter, not a per-page verdict
     // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
+    // buscarPaginado() — players committed to an OPEN solicitud (0.1.21)
+    // -------------------------------------------------------------------------
+
+    /**
+     * THE assertion that proves the filter runs on the POPULATION: the two
+     * committed players carry the HIGHEST puntaje, so they sort FIRST and —
+     * were the filter applied after the page slice — would occupy page 1 and
+     * be stripped from it, leaving a short page while `total` still counted
+     * them. Both `total` and a FULL page 1 are asserted for that reason.
+     */
+    public function test_buscar_paginado_excludes_players_named_by_an_open_request_before_total_and_before_the_slice(): void {
+        $plazaId = $this->plaza( 9 ); // techo 4,5
+
+        $this->seedPlayer( 2000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4,5' ] ); // committed
+        $this->seedPlayer( 2001, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '4,5' ] ); // committed
+        $this->seedPlayer( 3000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 3001, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2,5' ] );
+        $this->seedPlayer( 3002, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '2' ] );
+
+        $this->seedSolicitud( [ 'plaza_id' => 9001, 'entrante_player_id' => 2000, 'estado' => 'pendiente' ] );
+        $this->seedSolicitud( [ 'plaza_id' => 9002, 'entrante_player_id' => 2001, 'estado' => 'aprobada' ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $pagina1 = $this->resolver->buscarPaginado( $plaza, null, null, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn, 1, 2 );
+
+        $this->assertSame( 3, $pagina1['total'], 'total must not count the two committed players.' );
+        $this->assertSame(
+            [ 3000, 3001 ],
+            array_map( static fn ( $c ) => $c->playerId(), $pagina1['candidatos'] ),
+            'Page 1 must be FULL of free candidates, never emptied by a post-slice filter.'
+        );
+
+        $pagina2 = $this->resolver->buscarPaginado( $plaza, null, null, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn, 2, 2 );
+
+        $this->assertSame( [ 3002 ], array_map( static fn ( $c ) => $c->playerId(), $pagina2['candidatos'] ) );
+    }
+
+    public function test_buscar_paginado_excludes_the_outside_filler_of_a_grouped_request_and_players_committed_by_another_team(): void {
+        $plazaId = $this->plaza( 9 );
+
+        $this->seedPlayer( 2000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] ); // entrante_campo_player_id
+        $this->seedPlayer( 2001, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] ); // entrante_player_id of a grouped request
+        $this->seedPlayer( 2002, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] ); // committed by ANOTHER team
+        $this->seedPlayer( 3000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        $this->seedSolicitud( [
+            'tipo'                     => 'reasignacion_arquero',
+            'plaza_id'                 => 9001,
+            'plaza_campo_id'           => 9002,
+            'entrante_player_id'       => 2001,
+            'entrante_campo_player_id' => 2000,
+        ] );
+        $this->seedSolicitud( [ 'team_id' => 200, 'plaza_id' => 9003, 'entrante_player_id' => 2002 ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado( $plaza, null, null, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn, 1, 10 );
+
+        $this->assertSame( 1, $resultado['total'] );
+        $this->assertSame( [ 3000 ], array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ) );
+    }
+
+    public function test_buscar_paginado_excludes_the_returning_titular_of_an_open_regreso(): void {
+        $plazaId = $this->plaza( 9 );
+        $this->seedPlayer( 2000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedPlayer( 3000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+
+        // 2000 is the permanent titular of ANOTHER plaza whose regreso is open.
+        $otraPlaza = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 2000, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 10:00:00' );
+        $this->seedSolicitud( [ 'plaza_id' => $otraPlaza, 'tipo' => 'regreso', 'entrante_player_id' => null ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado( $plaza, null, null, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn, 1, 10 );
+
+        $this->assertSame( 1, $resultado['total'] );
+        $this->assertSame( [ 3000 ], array_map( static fn ( $c ) => $c->playerId(), $resultado['candidatos'] ) );
+    }
+
+    /** @dataProvider estadosCerradosDeSolicitud */
+    public function test_buscar_paginado_keeps_a_player_whose_only_request_is_closed( string $estado ): void {
+        $plazaId = $this->plaza( 9 );
+        $this->seedPlayer( 2000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedSolicitud( [ 'plaza_id' => 9001, 'entrante_player_id' => 2000, 'estado' => $estado ] );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $resultado = $this->resolver->buscarPaginado( $plaza, null, null, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn, 1, 10 );
+
+        $this->assertSame( 1, $resultado['total'] );
+        $this->assertSame( 2000, $resultado['candidatos'][0]->playerId() );
+    }
+
+    /** @return array<string, array{string}> */
+    public static function estadosCerradosDeSolicitud(): array {
+        return [ 'publicada' => [ 'publicada' ], 'rechazada' => [ 'rechazada' ], 'anulada' => [ 'anulada' ] ];
+    }
+
+    /**
+     * A failed read of the open requests must abort the listing: an empty
+     * result would read as "nobody is committed" and re-offer every player
+     * the dictamen is about to reject.
+     */
+    public function test_buscar_paginado_throws_when_the_open_request_read_fails_instead_of_listing_everyone(): void {
+        global $wpdb;
+
+        $plazaId = $this->plaza( 9 );
+        $this->seedPlayer( 2000, self::SEASON_ID, [ 'caracter' => 'Invitado', 'puntaje' => '3' ] );
+        $this->seedSolicitud( [ 'plaza_id' => 9001, 'entrante_player_id' => 2000 ] );
+
+        $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+        $pdo = $ref->getValue( $wpdb );
+
+        $failingWpdb = new class( $pdo, $wpdb->prefix ) extends \wpdb {
+            public function __construct( \PDO $pdo, string $prefix ) {
+                $ref = new \ReflectionProperty( \wpdb::class, 'pdo' );
+                $ref->setValue( $this, $pdo );
+                $this->prefix = $prefix;
+            }
+
+            public function get_results( string $sql, string $output = OBJECT ): array {
+                if ( str_contains( $sql, 'cambios_solicitud' ) ) {
+                    $this->last_error = 'simulated get_results failure for test';
+
+                    return [];
+                }
+
+                return parent::get_results( $sql, $output );
+            }
+        };
+
+        $resolver = new CandidatosResolver(
+            $wpdb,
+            $this->plazaRepository,
+            $this->eventLog,
+            null,
+            null,
+            null,
+            new SolicitudesAbiertasReader( $failingWpdb, $this->eventLog )
+        );
+
+        $plaza = $this->plazaRepository->findPlaza( $plazaId );
+
+        $this->expectException( \RuntimeException::class );
+
+        $resolver->buscarPaginado( $plaza, null, null, BloqueoReemplazoPolicy::topeTresFechas(), $this->countResolvedFechasSinceFn, 1, 10 );
+    }
 
     /**
      * THE EXACT production regression this slice's task brief describes:

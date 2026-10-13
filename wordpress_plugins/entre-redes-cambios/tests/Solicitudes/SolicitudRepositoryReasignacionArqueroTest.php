@@ -276,6 +276,11 @@ class SolicitudRepositoryReasignacionArqueroTest extends TestCase {
         $snapshotOn = DictamenSnapshot::fromJson( (string) $this->repo->findSolicitud( $idOn )['dictamen_original'] );
         $this->assertTrue( $snapshotOn->procede(), 'With the exemption ON, a titular (5.0) over the goal plaza\'s techo (2.5) must still procede.' );
 
+        // The second request targets the SAME two plazas and players, so the
+        // first must be closed or it would (correctly) be refused as a
+        // duplicate — see Solicitudes\Exception\SolicitudAbiertaException.
+        $this->repo->anular( $idOn, 42, null, '2026-05-27 10:30:00', 'Proceso Owner Test' );
+
         // --- Exemption OFF ---
         $this->putSetting( 'exencion_arco_activa', '0' );
         $repoSinExencion = $this->buildRepo();

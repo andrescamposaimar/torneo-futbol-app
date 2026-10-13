@@ -297,6 +297,102 @@ class BandejaPageTest extends TestCase {
         $this->assertStringContainsString( $resultado['motivo'], $mensaje );
     }
 
+    // -------------------------------------------------------------------------
+    // Anular — the way out of a blocked Friday (0.1.21).
+    // -------------------------------------------------------------------------
+
+    private function aprobadaId(): int {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $id      = $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+        $this->solicitudRepository->aprobar( $id, 42, null, '2026-05-27 11:00:00', 'Proceso Owner Test' );
+
+        return $id;
+    }
+
+    public function test_ejecutarAnular_anula_una_aprobada_y_escribe_la_decision(): void {
+        $id = $this->aprobadaId();
+        $GLOBALS['wp_test_current_user_display_name'] = 'Ana Pérez';
+
+        $resultado = $this->invoke( 'ejecutarAnular', [ $id, 'duplicada', true ] );
+
+        $this->assertTrue( $resultado['ok'] );
+        $this->assertSame( EstadoSolicitud::ANULADA, $this->solicitudRepository->findSolicitud( $id )['estado'] );
+
+        $decisiones = $this->solicitudRepository->listDecisiones( $id );
+        $this->assertSame( [ EstadoSolicitud::APROBADA, EstadoSolicitud::ANULADA ], array_column( $decisiones, 'accion' ) );
+        $this->assertSame( 'Ana Pérez', $decisiones[1]['decidida_por_nombre'] );
+    }
+
+    public function test_ejecutarAnular_sin_confirmacion_no_toca_nada(): void {
+        $id = $this->aprobadaId();
+
+        $resultado = $this->invoke( 'ejecutarAnular', [ $id, null, false ] );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertSame( EstadoSolicitud::APROBADA, $this->solicitudRepository->findSolicitud( $id )['estado'] );
+        $this->assertCount( 1, $this->solicitudRepository->listDecisiones( $id ) );
+    }
+
+    public function test_ejecutarAnular_sobre_una_publicada_falla_sin_cambiar_nada(): void {
+        global $wpdb;
+
+        $id = $this->aprobadaId();
+        $wpdb->query( "UPDATE {$wpdb->prefix}cambios_solicitud SET estado = 'publicada' WHERE id = " . (int) $id );
+
+        $resultado = $this->invoke( 'ejecutarAnular', [ $id, null, true ] );
+
+        $this->assertFalse( $resultado['ok'], 'publicada is terminal: it must never be annulled.' );
+        $this->assertSame( EstadoSolicitud::PUBLICADA, $this->solicitudRepository->findSolicitud( $id )['estado'] );
+    }
+
+    public function test_handlePost_enruta_anular_y_exige_el_nonce(): void {
+        $GLOBALS['wp_test_current_user_can']    = [ ProcessOwnerAuthorizer::CAPABILITY => true ];
+        $GLOBALS['wp_test_check_admin_referer'] = false;
+        $_POST = [ 'cambios_action' => 'anular', 'solicitud_id' => '1', 'confirmar_anulacion' => '1' ];
+
+        $this->expectException( \RuntimeException::class );
+
+        $this->page->handlePost();
+    }
+
+    public function test_handlePost_anular_sin_capacidad_se_rechaza(): void {
+        $id = $this->aprobadaId();
+        $GLOBALS['wp_test_current_user_can'] = false;
+        $_POST = [ 'cambios_action' => 'anular', 'solicitud_id' => (string) $id, 'confirmar_anulacion' => '1' ];
+
+        try {
+            $this->page->handlePost();
+            $this->fail( 'Expected a rejection.' );
+        } catch ( \RuntimeException $e ) {
+            // wp_die() throws in this shim.
+        }
+
+        $this->assertSame( EstadoSolicitud::APROBADA, $this->solicitudRepository->findSolicitud( $id )['estado'] );
+    }
+
+    /**
+     * The Anular form must exist for an aprobada row, carry a REQUIRED
+     * confirmation, and live OUTSIDE the publish form (nested forms are
+     * invalid HTML and would submit the lote instead).
+     */
+    public function test_la_bandeja_ofrece_anular_en_las_aprobadas_con_confirmacion_y_fuera_del_form_del_lote(): void {
+        $this->aprobadaId();
+
+        $html = $this->renderPagina();
+
+        $this->assertStringContainsString( 'value="anular"', $html );
+        $this->assertStringContainsString( 'name="confirmar_anulacion" value="1" required', $html );
+
+        $finLote = strpos( $html, '</form>', strpos( $html, 'value="publicar_lote"' ) );
+        $this->assertGreaterThan( $finLote, strpos( $html, 'value="anular"' ), 'The anular form must come after the publish form closes.' );
+    }
+
     public function test_culpritMensaje_es_null_cuando_el_lote_no_aborto(): void {
         $resultado = [
             'publicadas'    => [ 1 ],

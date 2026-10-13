@@ -14,7 +14,12 @@ use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Dictamen\Reglas\EntranteSinSolicitudAbierta;
+use EntreRedes\Cambios\Dictamen\Reglas\PlazaSinSolicitudAbierta;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
+use EntreRedes\Cambios\Solicitudes\Exception\CreationLockUnavailableException;
+use EntreRedes\Cambios\Solicitudes\Exception\SolicitudAbiertaException;
+use EntreRedes\Cambios\Solicitudes\Lock\CreationLock;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
 /**
@@ -50,6 +55,19 @@ use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
  * an actual \Throwable (an assembler failure, a persistence failure) is
  * turned into the generic 500 — see HandlesCapitanAuthorization's own
  * docblock.
+ *
+ * *** THE ONE EXCEPTION: A DUPLICATE IS REFUSED, NOT STORED (0.1.21) ***
+ * A dictamen carrying `plaza_con_solicitud_abierta` or
+ * `entrante_con_solicitud_abierta` makes `crear()` answer HTTP 409 and
+ * persist NOTHING (`SolicitudRepository` throws `SolicitudAbiertaException`
+ * before its first insert — for the grouped tipo too, on either leg). Every
+ * OTHER motivo keeps the behavior above: still stored, still a 200. Do not
+ * "tidy" this into refusing any failing dictamen: the other ten rules are
+ * judgements the process owner may overrule; a duplicate is a state the
+ * system must not represent (a stored one holds its plaza and player, and
+ * one failing row aborts the WHOLE Friday lote). The REST `code` is the
+ * motivo's own codigo so the client can tell "wait, retrying never helps"
+ * from a generic failure; the message names no other team's request.
  *
  * *** `reasignacion_arquero` — THE GROUPED REQUEST, EXPOSED ON THE SAME
  * ROUTE (0.1.17) ***
@@ -98,6 +116,7 @@ class SolicitudesController {
     private EventLog $eventLog;
     private PlazaRepository $plazaRepository;
     private JugadorMetricasReader $jugadorMetricasReader;
+    private ?CreationLock $creationLock;
 
     /** @var callable(): int */
     private $clockFn;
@@ -130,6 +149,12 @@ class SolicitudesController {
      *        again has to be computed relative to whatever day the suite
      *        actually runs (see SolicitudesControllerTest's class docblock
      *        for the flakiness that discipline replaces).
+     * @param CreationLock|null $creationLock Serializes the open-request
+     *        check against the insert (0.1.21, see `CreationLock`). Nullable
+     *        ONLY so a controller used purely for `listar()` need not carry
+     *        one; `crear()` against an instance wired without it FAILS
+     *        LOUDLY (a logged 500) instead of silently creating without
+     *        serialization. `Plugin::boot()` always wires a real one.
      */
     public function __construct(
         CapitanAuthorizer $authorizer,
@@ -138,8 +163,10 @@ class SolicitudesController {
         EventLog $eventLog,
         PlazaRepository $plazaRepository,
         JugadorMetricasReader $jugadorMetricasReader,
-        ?callable $clockFn = null
+        ?callable $clockFn = null,
+        ?CreationLock $creationLock = null
     ) {
+        $this->creationLock          = $creationLock;
         $this->authorizer            = $authorizer;
         $this->solicitudRepository   = $solicitudRepository;
         $this->dictamenPipeline      = $dictamenPipeline;
@@ -193,14 +220,31 @@ class SolicitudesController {
      *         THE GROUPED REQUEST", and `derivarPlazaCampoId()`.
      *
      * Response 200: { id, estado: 'pendiente', dictamen: { procede, motivos,
-     *         fechas_faltantes_liberacion } } — for EVERY dictamen, favorable
-     *         or not. A dictamen that does not `procede()` is deliberately
-     *         NOT a 4xx — see class docblock: it is a fact the captain needs
-     *         to see, not a failure of the request itself. Unchanged in
+     *         fechas_faltantes_liberacion } } — for every dictamen that
+     *         does not carry one of the two REFUSING codes below, favorable
+     *         or not. A dictamen that does not `procede()` for any OTHER
+     *         reason is deliberately NOT a 4xx — see class docblock: it is a
+     *         judgement the process owner may overrule, a fact the captain
+     *         needs to see, not a failure of the request itself. Unchanged in
      *         shape for `reasignacion_arquero` — see
      *         `shapeDictamenDesdeSnapshot()`'s own docblock for how that
      *         tipo's `dictamen` is assembled from the UNIONED, two-movement
      *         verdict `DictamenPipeline::evaluateGrupo()` already produced.
+     *
+     * Response 409 (0.1.21): { code, message, data: { status: 409 } } with
+     *         `code` = `plaza_con_solicitud_abierta` (the plaza already has
+     *         a `pendiente`/`aprobada` request — for a grouped request,
+     *         either of its two plazas) or `entrante_con_solicitud_abierta`
+     *         (the named player is already the incoming player of an open
+     *         request anywhere in the season). NOTHING is persisted.
+     *         Retrying never helps until the other request is resolved, so
+     *         a client must treat these codes as terminal, not as a
+     *         transient failure. The message names nobody else's request.
+     *
+     * Response 400 `plaza_no_encontrada`: `plaza_id` does not exist or is
+     *         not a plaza of the authorised `team_id`/`season_id` — checked
+     *         first, for every tipo, so the 409 above can never be used to
+     *         probe another team's plazas. Nothing is persisted.
      */
     public function crear( \WP_REST_Request $request ): \WP_REST_Response {
         $seasonId = (int) $request->get_param( 'season_id' );
@@ -293,58 +337,120 @@ class SolicitudesController {
         $ahoraDb = gmdate( 'Y-m-d H:i:s', $ahora );
 
         try {
-            if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
-                $titularPlayerId = (int) $entrantePlayerId;
+            // THE PLAZA MUST BELONG TO THE AUTHORISED TEAM AND SEASON, FOR
+            // EVERY TIPO (and, for `reasignacion_arquero`, this is the goal
+            // plaza — the derived field plaza is checked by
+            // derivarPlazaCampoId()). The captain was authorised for the
+            // `team_id` in the body, never for whatever `plaza_id` rides
+            // along: without this, a captain could name ANOTHER team's plaza
+            // and (a) read whether it has an open request off the 409 vs 200
+            // — an oracle — and (b) store a `pendiente` row that holds it,
+            // locking its real owner out with a 409 he cannot even see.
+            // Same check, same answer, as PlazasController::listarCandidatos():
+            // "does not exist" and "is not yours" are deliberately
+            // indistinguishable, and it runs BEFORE the dictamen so the
+            // open-request rules never get to answer about a foreign plaza.
+            $plazaSolicitada = $this->plazaRepository->findPlaza( $plazaId );
 
-                $plazaCampoId = $this->derivarPlazaCampoId( $seasonId, $teamId, $plazaId, $titularPlayerId );
-
-                $id = $this->solicitudRepository->crearReasignacionArquero(
-                    $seasonId,
-                    $teamId,
-                    $plazaId,
-                    $titularPlayerId,
-                    $plazaCampoId,
-                    (int) $entranteCampoPlayerId,
-                    $fechaId,
-                    $ahora,
-                    $solicitadaPor,
-                    $ahoraDb
+            if ( null === $plazaSolicitada
+                || (int) $plazaSolicitada['season_id'] !== $seasonId
+                || (int) $plazaSolicitada['team_id'] !== $teamId
+            ) {
+                return $this->respuestaSolicitudInvalida(
+                    'plaza_no_encontrada',
+                    'La plaza indicada no existe o no pertenece a este equipo y temporada.'
                 );
+            }
 
-                $row = $this->solicitudRepository->findSolicitud( $id );
+            if ( null === $this->creationLock ) {
+                throw new \LogicException(
+                    'SolicitudesController::crear(): wired without a CreationLock — refusing to create a solicitud '
+                    . 'without serializing the open-request check against the insert.'
+                );
+            }
 
-                if ( null === $row ) {
-                    throw new \RuntimeException( "SolicitudesController::crear(): solicitud {$id} not found immediately after creation." );
+            // THE WHOLE evaluation + insert runs inside ONE per-season
+            // critical section — see Solicitudes\Lock\CreationLock for the
+            // race this closes. Everything above (authorization, input and
+            // plaza-ownership validation) needs no lock and runs outside it,
+            // so an invalid request never waits for one. The lock is
+            // released on every exit path of the closure, a refusal
+            // (SolicitudAbiertaException) and any other exception included;
+            // if it cannot be acquired in time the closure never runs and
+            // CreationLockUnavailableException is answered below as a 503.
+            return $this->creationLock->run( $seasonId, function () use (
+                $tipo, $seasonId, $teamId, $plazaId, $entrantePlayerId, $entranteCampoPlayerId, $fechaId, $ahora, $solicitadaPor, $ahoraDb
+            ): \WP_REST_Response {
+                if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+                    $titularPlayerId = (int) $entrantePlayerId;
+
+                    $plazaCampoId = $this->derivarPlazaCampoId( $seasonId, $teamId, $plazaId, $titularPlayerId );
+
+                    $id = $this->solicitudRepository->crearReasignacionArquero(
+                        $seasonId,
+                        $teamId,
+                        $plazaId,
+                        $titularPlayerId,
+                        $plazaCampoId,
+                        (int) $entranteCampoPlayerId,
+                        $fechaId,
+                        $ahora,
+                        $solicitadaPor,
+                        $ahoraDb
+                    );
+
+                    $row = $this->solicitudRepository->findSolicitud( $id );
+
+                    if ( null === $row ) {
+                        throw new \RuntimeException( "SolicitudesController::crear(): solicitud {$id} not found immediately after creation." );
+                    }
+
+                    $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+
+                    return new \WP_REST_Response(
+                        [
+                            'id'       => $id,
+                            'estado'   => EstadoSolicitud::PENDIENTE,
+                            'dictamen' => $this->shapeDictamenDesdeSnapshot( $snapshot ),
+                        ],
+                        200
+                    );
                 }
 
-                $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+                $solicitud = SolicitudDeCambio::TIPO_SUSTITUCION === $tipo
+                    ? SolicitudDeCambio::sustitucion( $seasonId, $teamId, $plazaId, (int) $entrantePlayerId, $fechaId, $ahora )
+                    : SolicitudDeCambio::regreso( $seasonId, $teamId, $plazaId, $fechaId, $ahora );
+
+                $dictamen = $this->dictamenPipeline->evaluate( $solicitud );
+
+                $id = $this->solicitudRepository->crear( $solicitud, $solicitadaPor, $dictamen, $ahoraDb );
 
                 return new \WP_REST_Response(
                     [
                         'id'       => $id,
                         'estado'   => EstadoSolicitud::PENDIENTE,
-                        'dictamen' => $this->shapeDictamenDesdeSnapshot( $snapshot ),
+                        'dictamen' => $this->shapeDictamen( $dictamen ),
                     ],
                     200
                 );
-            }
+            } );
+        } catch ( CreationLockUnavailableException $e ) {
+            // Retryable, unlike the 409 below: another creation held the
+            // lock for the whole bounded wait. Nothing was evaluated or
+            // stored.
+            $this->eventLog->record( 'rest.solicitud_crear_candado_fallido', [
+                'season_id' => $seasonId,
+                'team_id'   => $teamId,
+                'plaza_id'  => $plazaId,
+                'mensaje'   => $e->getMessage(),
+            ] );
 
-            $solicitud = SolicitudDeCambio::TIPO_SUSTITUCION === $tipo
-                ? SolicitudDeCambio::sustitucion( $seasonId, $teamId, $plazaId, (int) $entrantePlayerId, $fechaId, $ahora )
-                : SolicitudDeCambio::regreso( $seasonId, $teamId, $plazaId, $fechaId, $ahora );
-
-            $dictamen = $this->dictamenPipeline->evaluate( $solicitud );
-
-            $id = $this->solicitudRepository->crear( $solicitud, $solicitadaPor, $dictamen, $ahoraDb );
-
-            return new \WP_REST_Response(
-                [
-                    'id'       => $id,
-                    'estado'   => EstadoSolicitud::PENDIENTE,
-                    'dictamen' => $this->shapeDictamen( $dictamen ),
-                ],
-                200
-            );
+            return $this->respuestaCreacionOcupada();
+        } catch ( SolicitudAbiertaException $e ) {
+            // Not a failure of the system — a refusal. Persisted nothing
+            // (see class docblock); retrying will never help, hence a 409
+            // with a stable code, not the generic 500 below.
+            return $this->respuestaSolicitudAbierta( $e );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'rest.solicitud_crear_fallida', [
                 'season_id' => $seasonId,
@@ -834,5 +940,51 @@ class SolicitudesController {
         $titulo = trim( (string) get_the_title( $playerId ) );
 
         return '' !== $titulo ? $titulo : 'Jugador #' . $playerId;
+    }
+
+    /**
+     * HTTP 409 for a refused duplicate — same envelope as every other
+     * refusal here (`code`, `message`, `data.status`). `code` is the
+     * motivo's codigo (`plaza_con_solicitud_abierta` /
+     * `entrante_con_solicitud_abierta`). The messages deliberately say
+     * nothing about WHOSE request holds the plaza or the player: the
+     * entrante's may belong to another team.
+     */
+    private function respuestaSolicitudAbierta( SolicitudAbiertaException $e ): \WP_REST_Response {
+        // A `match` with a throwing default, never a two-way ternary: a third
+        // refusing code added later must fail loudly here instead of silently
+        // inheriting the entrante copy (see listar()'s "EXPLICIT PER-TIPO
+        // BRANCH, NEVER A TWO-WAY TERNARY" for the incident that taught this).
+        $message = match ( $e->codigo() ) {
+            PlazaSinSolicitudAbierta::CODE    => 'Ya hay una solicitud abierta para esa plaza. Tenés que esperar a que se resuelva antes de pedir otro cambio.',
+            EntranteSinSolicitudAbierta::CODE => 'Ese jugador ya figura en una solicitud abierta de esta temporada. No se puede pedir de nuevo hasta que se resuelva.',
+            default                           => throw new \LogicException( "No REST message for refusal code '{$e->codigo()}'." ),
+        };
+
+        return new \WP_REST_Response(
+            [
+                'code'    => $e->codigo(),
+                'message' => $message,
+                'data'    => [ 'status' => 409 ],
+            ],
+            409
+        );
+    }
+
+    /**
+     * HTTP 503 for a creation that could not take the per-season lock in
+     * time. Unlike every 409 above it IS retryable, so it carries the same
+     * "probá de nuevo en unos minutos" register as the generic error and a
+     * distinct `code` the client can key a retry on.
+     */
+    private function respuestaCreacionOcupada(): \WP_REST_Response {
+        return new \WP_REST_Response(
+            [
+                'code'    => 'creacion_ocupada',
+                'message' => 'El sistema está procesando otra solicitud. Probá de nuevo en unos minutos.',
+                'data'    => [ 'status' => 503 ],
+            ],
+            503
+        );
     }
 }

@@ -10,6 +10,7 @@ use EntreRedes\Cambios\Dictamen\DictamenSnapshot;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Solicitudes\Exception\SolicitudAbiertaException;
 use EntreRedes\Cambios\Solicitudes\Exception\SolicitudPersistenceException;
 use EntreRedes\Cambios\Support\OpensTransactions;
 
@@ -181,10 +182,26 @@ class SolicitudRepository {
      * `PlazaRepository::openPlaza()` has run, but this method does not
      * assume it) stores `NULL`, never a guess.
      *
+     * *** ...EXCEPT A DUPLICATE (0.1.21) *** The one exception to "stored
+     * whatever the dictamen says": a dictamen carrying
+     * `plaza_con_solicitud_abierta` or `entrante_con_solicitud_abierta` is
+     * REFUSED before any write — see `SolicitudAbiertaException` for why
+     * those two, and only those, are not the process owner's to overrule.
+     *
+     * @throws SolicitudAbiertaException When $dictamen carries either
+     *         open-request motivo; nothing was written.
      * @throws SolicitudPersistenceException When the insert fails at the
      *         wpdb level.
      */
     public function crear( SolicitudDeCambio $solicitud, int $solicitadaPor, Dictamen $dictamen, string $now ): int {
+        $this->refuseIfDuplicate( $dictamen, [
+            'season_id'      => $solicitud->seasonId(),
+            'team_id'        => $solicitud->teamId(),
+            'plaza_id'       => $solicitud->plazaId(),
+            'tipo'           => $solicitud->tipo(),
+            'solicitada_por' => $solicitadaPor,
+        ] );
+
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
@@ -294,6 +311,8 @@ class SolicitudRepository {
      *         violation).
      * @throws SolicitudPersistenceException When the insert fails at the
      *         wpdb level.
+     * @throws SolicitudAbiertaException When either leg carries an
+     *         open-request motivo; nothing was written (0.1.21).
      */
     public function crearReasignacionArquero(
         int $seasonId,
@@ -313,6 +332,20 @@ class SolicitudRepository {
         $legCampo = SolicitudDeCambio::sustitucion( $seasonId, $teamId, $plazaCampoId, $entranteCampoPlayerId, $fechaId, $instanteEpoch );
 
         $dictamen = $this->dictamenPipeline->evaluateGrupo( $legArco, $legCampo );
+
+        // Evaluation already runs BEFORE any write here (once, on the happy
+        // path too), so the refusal needs no reordering: it must simply sit
+        // between the evaluation and the first insert. Either leg's motivo
+        // is enough — `evaluateGrupo()` unions both.
+        $this->refuseIfDuplicate( $dictamen, [
+            'season_id'      => $seasonId,
+            'team_id'        => $teamId,
+            'plaza_id'       => $plazaArcoId,
+            'plaza_campo_id' => $plazaCampoId,
+            'tipo'           => SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO,
+            'solicitada_por' => $solicitadaPor,
+        ] );
+
         $snapshot = DictamenSnapshot::fromDictamen( $dictamen, $now );
 
         $vigenteArco      = $this->plazaRepository->findOcupacionVigente( $plazaArcoId );
@@ -655,7 +688,16 @@ class SolicitudRepository {
             }
 
             if ( ! $dictamenFresco->procede() ) {
-                $motivos = implode( ', ', array_map( static fn ( $m ) => $m->codigo(), $dictamenFresco->motivos() ) );
+                // A motivo may carry the id of the OTHER solicitud it
+                // collides with (the open-request rules do) — surfaced next
+                // to its code so the operator can act on that row directly
+                // instead of unticking rows one at a time to find it.
+                $motivos = implode( ', ', array_map(
+                    static fn ( $m ) => isset( $m->datos()['solicitud_id'] )
+                        ? $m->codigo() . ' (en conflicto con la solicitud #' . (int) $m->datos()['solicitud_id'] . ')'
+                        : $m->codigo(),
+                    $dictamenFresco->motivos()
+                ) );
 
                 return $this->abortarLote(
                     $ids,
@@ -759,7 +801,7 @@ class SolicitudRepository {
             $this->rollbackTransaction( __FUNCTION__, $e, [ 'ids' => $ids ] );
 
             // `solicitud.lote_escritura_fallida` — deliberately NOT the same
-            // event as abortarLote()'s `solicitud.lote_abortado` (used for
+            // event as abortarLote()'s `solicitud.lote_publicacion_fallida` (used for
             // ordinary pre-flight rejections, before any write has run: a
             // stale solicitud, a corrupt dictamen_original, a season
             // mismatch). THIS is a genuine wpdb-level write failure mid-
@@ -997,6 +1039,43 @@ class SolicitudRepository {
     }
 
     /**
+     * Refuses (throws, writes nothing) when $dictamen carries an open-request
+     * motivo — see `SolicitudAbiertaException` for the reasoning.
+     *
+     * Logged as `solicitud.creacion_rechazada_duplicado` with the season,
+     * team, plaza (both, for a grouped request), tipo, requester and the
+     * refusing code, so anyone reading the live log can tie it to a captain's
+     * "it won't let me" complaint.
+     *
+     * *** DELIBERATELY NOT IN THE `fallid` NAMESPACE — DO NOT "FIX" THIS ***
+     * `Observability\WpEventLog` persists only events whose code contains
+     * `fallid` into the single `entre_redes_cambios_ultimo_error` option — the
+     * one slot reserved for things that WENT WRONG, on a host with no PHP log.
+     * A refused duplicate is the system working correctly: a routine,
+     * expected outcome that can happen many times a day. Named `*_fallida` it
+     * would overwrite that slot on every refusal and bury a genuine failure —
+     * above all `solicitud.lote_publicacion_fallida`, the rare, operational
+     * Friday abort that IS worth keeping. (This was briefly the other way
+     * round in 0.1.21 and was reverted for exactly that reason.)
+     *
+     * @param array<string, mixed> $contexto Identifiers of the refused request.
+     * @throws SolicitudAbiertaException
+     */
+    private function refuseIfDuplicate( Dictamen $dictamen, array $contexto ): void {
+        $refusal = SolicitudAbiertaException::desdeDictamen( $dictamen );
+
+        if ( null === $refusal ) {
+            return;
+        }
+
+        $this->eventLog->record( 'solicitud.creacion_rechazada_duplicado', array_merge( $contexto, [
+            'codigo' => $refusal->codigo(),
+        ] ) );
+
+        throw $refusal;
+    }
+
+    /**
      * Rebuilds the `Dictamen\SolicitudDeCambio` a stored row originally
      * came from, so `publicarLote()` can hand it back to `DictamenPipeline`.
      * Uses `solicitud_instante_epoch`, NEVER a value derived from
@@ -1007,7 +1086,7 @@ class SolicitudRepository {
      */
     private function reconstruirSolicitud( array $row ): SolicitudDeCambio {
         if ( SolicitudDeCambio::TIPO_SUSTITUCION === $row['tipo'] ) {
-            return SolicitudDeCambio::sustitucion(
+            $solicitud = SolicitudDeCambio::sustitucion(
                 (int) $row['season_id'],
                 (int) $row['team_id'],
                 (int) $row['plaza_id'],
@@ -1015,15 +1094,20 @@ class SolicitudRepository {
                 (int) $row['fecha_id'],
                 (int) $row['solicitud_instante_epoch']
             );
+        } else {
+            $solicitud = SolicitudDeCambio::regreso(
+                (int) $row['season_id'],
+                (int) $row['team_id'],
+                (int) $row['plaza_id'],
+                (int) $row['fecha_id'],
+                (int) $row['solicitud_instante_epoch']
+            );
         }
 
-        return SolicitudDeCambio::regreso(
-            (int) $row['season_id'],
-            (int) $row['team_id'],
-            (int) $row['plaza_id'],
-            (int) $row['fecha_id'],
-            (int) $row['solicitud_instante_epoch']
-        );
+        // See `SolicitudDeCambio`'s class docblock, "`solicitudId()`": the
+        // re-evaluation must know which stored row it is, or the open-request
+        // rules would find THIS very (approved) row and reject it.
+        return $solicitud->conSolicitudId( (int) $row['id'] );
     }
 
     /**
@@ -1056,7 +1140,13 @@ class SolicitudRepository {
             (int) $row['solicitud_instante_epoch']
         );
 
-        return [ $legArco, $legCampo ];
+        // Both legs carry the ONE row id — see `reconstruirSolicitud()` and
+        // `SolicitudDeCambio`'s class docblock, "`solicitudId()`". Each leg
+        // is evaluated against its OWN plaza and entrante, but both must
+        // exclude this same row from "already open".
+        $solicitudId = (int) $row['id'];
+
+        return [ $legArco->conSolicitudId( $solicitudId ), $legCampo->conSolicitudId( $solicitudId ) ];
     }
 
     /**
@@ -1146,9 +1236,17 @@ class SolicitudRepository {
      * @return array{publicadas: int[], no_publicadas: int[], abortado: bool, motivo: string, divergencias: int[], culprit_id: int|null}
      */
     private function abortarLote( array $ids, string $motivo, ?int $culpritId = null ): array {
-        $this->eventLog->record( 'solicitud.lote_abortado', [
+        // The code contains `fallid` ON PURPOSE (unlike the routine
+        // duplicate refusal — see refuseIfDuplicate()): Observability\WpEventLog
+        // persists ONLY events whose code does, into the
+        // `entre_redes_cambios_ultimo_error` option — and this host has no
+        // PHP error log, so an aborted Friday lote under the old name
+        // (`solicitud.lote_abortado`) left no trace anywhere. `mensaje` is
+        // the key that option reads its text from.
+        $this->eventLog->record( 'solicitud.lote_publicacion_fallida', [
             'ids'        => $ids,
             'motivo'     => $motivo,
+            'mensaje'    => $motivo,
             'culprit_id' => $culpritId,
         ] );
 

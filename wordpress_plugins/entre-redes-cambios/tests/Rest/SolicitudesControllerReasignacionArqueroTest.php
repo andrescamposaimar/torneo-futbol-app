@@ -18,6 +18,7 @@ use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Rest\SolicitudesController;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
+use EntreRedes\Cambios\Tests\Support\InMemoryCreationLock;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -203,7 +204,8 @@ class SolicitudesControllerReasignacionArqueroTest extends TestCase {
             $this->eventLog,
             $this->plazaRepository,
             $this->jugadorMetricasReader,
-            fn (): int => $this->fixedNow
+            fn (): int => $this->fixedNow,
+            new InMemoryCreationLock()
         );
 
         $response = $controller->crear( $this->requestConToken( 'a-valid-jwt', [
@@ -341,7 +343,8 @@ class SolicitudesControllerReasignacionArqueroTest extends TestCase {
             $this->eventLog,
             $this->plazaRepository,
             $this->jugadorMetricasReader,
-            fn (): int => $this->fixedNow
+            fn (): int => $this->fixedNow,
+            new InMemoryCreationLock()
         );
 
         $response = $controller->crear( $this->requestConToken( 'a-valid-jwt', [
@@ -370,7 +373,8 @@ class SolicitudesControllerReasignacionArqueroTest extends TestCase {
             $this->eventLog,
             $this->plazaRepository,
             $this->jugadorMetricasReader,
-            fn (): int => $this->fixedNow
+            fn (): int => $this->fixedNow,
+            new InMemoryCreationLock()
         );
     }
 

@@ -136,6 +136,33 @@ final class DictamenContext {
     private bool $exencionArco;
 
     /**
+     * The OPEN (`pendiente`/`aprobada`) solicitudes — other than the one being
+     * evaluated, see `SolicitudDeCambio::solicitudId()` — that already target
+     * THIS context's plaza, in either plaza column. For a grouped
+     * `reasignacion_arquero` each leg is its own context with its own plaza,
+     * so each leg carries ITS plaza's list; nothing here knows about pairs.
+     *
+     * As with `$entranteOcupacionesEnOtrasPlazas`, the shape is the contract:
+     * `Reglas\PlazaSinSolicitudAbierta` reads an empty array as "free", so
+     * whoever fills this (see `DictamenContextAssembler`) must throw rather
+     * than return [] on a query failure.
+     *
+     * @var array<int, array{id: int, estado: string}>
+     */
+    private array $plazaSolicitudesAbiertas;
+
+    /**
+     * The OPEN solicitudes — other than the one being evaluated — that name
+     * THIS context's entrante as an incoming player in either entrante
+     * column, across the WHOLE season and every team. Always `[]` for a
+     * `regreso` (no entrante). Same fail-closed filling contract as
+     * `$plazaSolicitudesAbiertas`, read by `Reglas\EntranteSinSolicitudAbierta`.
+     *
+     * @var array<int, array{id: int, estado: string}>
+     */
+    private array $entranteSolicitudesAbiertas;
+
+    /**
      * @param array<string, mixed>                          $plaza As returned by
      *        Plazas\PlazaRepository::findPlaza() — MUST be the plaza named by
      *        `$solicitud->plazaId()`.
@@ -189,6 +216,13 @@ final class DictamenContext {
      *        exactly today's behavior with no change; only
      *        `Dictamen\DictamenContextAssembler::assemble()`'s caller for
      *        movement 1 of a grouped reassignment ever passes `true`.
+     * @param array<int, array{id: int, estado: string}> $plazaSolicitudesAbiertas
+     *        See this property's own docblock. Defaults `[]` ONLY so the many
+     *        existing rule-level fixtures keep building a context without
+     *        caring about this rule; the assembler always passes the real
+     *        lookup and never relies on this default.
+     * @param array<int, array{id: int, estado: string}> $entranteSolicitudesAbiertas
+     *        See this property's own docblock — same default, same caveat.
      */
     public function __construct(
         SolicitudDeCambio $solicitud,
@@ -203,7 +237,9 @@ final class DictamenContext {
         int $padresViablesParaLaPlaza = 0,
         bool $entranteEsArquero = false,
         bool $plazaEsDelArquero = false,
-        bool $exencionArco = false
+        bool $exencionArco = false,
+        array $plazaSolicitudesAbiertas = [],
+        array $entranteSolicitudesAbiertas = []
     ) {
         $this->solicitud                        = $solicitud;
         $this->plaza                            = $plaza;
@@ -218,6 +254,8 @@ final class DictamenContext {
         $this->entranteEsArquero                = $entranteEsArquero;
         $this->plazaEsDelArquero                = $plazaEsDelArquero;
         $this->exencionArco                     = $exencionArco;
+        $this->plazaSolicitudesAbiertas         = $plazaSolicitudesAbiertas;
+        $this->entranteSolicitudesAbiertas      = $entranteSolicitudesAbiertas;
     }
 
     public function solicitud(): SolicitudDeCambio {
@@ -271,6 +309,16 @@ final class DictamenContext {
 
     public function exencionArco(): bool {
         return $this->exencionArco;
+    }
+
+    /** @return array<int, array{id: int, estado: string}> */
+    public function plazaSolicitudesAbiertas(): array {
+        return $this->plazaSolicitudesAbiertas;
+    }
+
+    /** @return array<int, array{id: int, estado: string}> */
+    public function entranteSolicitudesAbiertas(): array {
+        return $this->entranteSolicitudesAbiertas;
     }
 
     /** @return callable(int): int */

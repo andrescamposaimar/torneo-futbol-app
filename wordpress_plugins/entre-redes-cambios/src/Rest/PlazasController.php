@@ -19,6 +19,7 @@ use EntreRedes\Cambios\Plazas\ListaEsperaResolver;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\PosicionResolver;
 use EntreRedes\Cambios\Plazas\Puntaje;
+use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
 
 /**
  * REST controller for the CAPTAIN-facing plantel status endpoint:
@@ -84,6 +85,7 @@ class PlazasController {
     private CandidatosResolver $candidatosResolver;
     private BloqueoReemplazoPolicy $politicaCC5b;
     private ?ListaEsperaResolver $listaEsperaResolver;
+    private ?SolicitudesAbiertasReader $solicitudesAbiertas;
 
     /** @var callable(): int */
     private $clockFn;
@@ -176,6 +178,15 @@ class PlazasController {
      *        `SIN_POSICION` for the whole page, and propagates straight into
      *        this method's own `catch (\Throwable)` below (a loud 500, never
      *        a page that quietly hides every candidate's real position).
+     * @param SolicitudesAbiertasReader|null $solicitudesAbiertas Resolves
+     *        each plaza's `solicitud_abierta` for `listar()` — see that
+     *        method's docblock. Nullable ONLY so the many constructions that
+     *        predate 0.1.21 (and only exercise `listarCandidatos()`) keep
+     *        compiling; `listar()` called against an instance wired without
+     *        one FAILS LOUDLY (a logged 500) rather than answering
+     *        `solicitud_abierta: null` for every plaza — that would be the
+     *        screen telling a captain "no open request" because nobody asked.
+     *        `Plugin::boot()` always wires a real one.
      */
     public function __construct(
         CapitanAuthorizer $authorizer,
@@ -187,7 +198,8 @@ class PlazasController {
         ?callable $clockFn = null,
         ?ListaEsperaResolver $listaEsperaResolver = null,
         ?callable $fotoResolverFn = null,
-        ?callable $posicionResolverFn = null
+        ?callable $posicionResolverFn = null,
+        ?SolicitudesAbiertasReader $solicitudesAbiertas = null
     ) {
         $this->authorizer          = $authorizer;
         $this->plazaRepository     = $plazaRepository;
@@ -197,6 +209,7 @@ class PlazasController {
         $this->politicaCC5b        = $politicaCC5b ?? BloqueoReemplazoPolicy::topeTresFechas();
         $this->clockFn             = $clockFn ?? static fn (): int => time();
         $this->listaEsperaResolver = $listaEsperaResolver;
+        $this->solicitudesAbiertas = $solicitudesAbiertas;
         $this->fotoResolverFn      = $fotoResolverFn ?? static fn ( int $playerId ) => get_the_post_thumbnail_url( $playerId, 'medium' );
         $this->posicionResolverFn  = $posicionResolverFn ?? static fn ( array $playerIds ): array => ( new PosicionResolver( $eventLog ) )->resolverParaIds( $playerIds );
     }
@@ -233,7 +246,26 @@ class PlazasController {
      * Response 200: { plazas: [ { plaza_id, titular_player_id,
      *         ocupante_player_id, es_titular_el_ocupante, cerrada,
      *         es_arco, puntaje_techo, fechas_faltantes_liberacion,
-     *         fechas_faltantes_liberacion_indeterminado }, ... ] }
+     *         fechas_faltantes_liberacion_indeterminado,
+     *         solicitud_abierta }, ... ] }
+     *
+     * `solicitud_abierta` (0.1.21) is `null` or `{ id: int, estado: string }`:
+     * the plaza's OPEN solicitud (`pendiente` or `aprobada`), so the app can
+     * hide "Pedir cambio" and show a legend instead. It is a convenience for
+     * the screen; the gate is `Dictamen\Reglas\PlazaSinSolicitudAbierta`,
+     * which refuses a second request regardless of what any client shows. A
+     * grouped goalkeeper reassignment marks BOTH of its plazas.
+     *
+     * BATCHED, NEVER ONE QUERY PER ROW: the open solicitud of the WHOLE team
+     * is resolved in ONE query before any plaza is shaped
+     * (`SolicitudesAbiertasReader::abiertaPorPlazaDeEquipo()`), then looked up
+     * by plaza id in memory — a team has eleven plazas and this screen opens
+     * on every captain's home, so a per-plaza lookup would add eleven round
+     * trips to the hottest read in the plugin. And it fails closed like the
+     * roster reads below: a failed query is a logged 500 for the whole
+     * response, never `null` ("no open request") for every plaza — a captain
+     * shown a button the engine will then refuse is the mild outcome; a
+     * silently empty map is a screen that lies about the roster.
      *
      * `es_arco` is the STORED `cambios_plaza.es_arco` column (0.1.13), read
      * as a plain fact — see that column's own docblock on
@@ -298,6 +330,17 @@ class PlazasController {
         try {
             $plazas = $this->plazaRepository->listPlazasByEquipo( $seasonId, $teamId );
 
+            if ( null === $this->solicitudesAbiertas ) {
+                throw new \LogicException(
+                    'PlazasController::listar(): wired without a SolicitudesAbiertasReader — refusing to answer '
+                    . '"no open request" for every plaza.'
+                );
+            }
+
+            // ONE query for the whole team — see this method's docblock,
+            // "BATCHED, NEVER ONE QUERY PER ROW". Throws on a failed read.
+            $abiertasPorPlaza = $this->solicitudesAbiertas->abiertaPorPlazaDeEquipo( $seasonId, $teamId );
+
             // Bound to THIS season — see Plazas\CadenaResolver's class
             // docblock for why the callable is injected rather than read
             // from a global clock — and routed through
@@ -355,7 +398,8 @@ class PlazasController {
                     $plaza,
                     $cadenaResolver,
                     $ocupacionesPorPlaza[ (int) $plaza['id'] ],
-                    $vigentePorPlaza[ (int) $plaza['id'] ]
+                    $vigentePorPlaza[ (int) $plaza['id'] ],
+                    $abiertasPorPlaza[ (int) $plaza['id'] ] ?? null
                 ),
                 $plazas
             );
@@ -719,9 +763,12 @@ class PlazasController {
      *        runs (see listar()).
      * @param array<string, mixed>|null $vigente The vigent ocupación within
      *        $ocupaciones, or null — also resolved by the caller.
+     * @param array{id: int, estado: string}|null $solicitudAbierta This
+     *        plaza's open solicitud, looked up by the caller from the ONE
+     *        team-wide query — passed through untouched.
      * @return array<string, mixed>
      */
-    private function shapePlaza( array $plaza, CadenaResolver $cadenaResolver, array $ocupaciones, ?array $vigente ): array {
+    private function shapePlaza( array $plaza, CadenaResolver $cadenaResolver, array $ocupaciones, ?array $vigente, ?array $solicitudAbierta ): array {
         $plazaId = (int) $plaza['id'];
 
         [ $fechasFaltantes, $indeterminado ] = $this->resolveFechasFaltantes( $plazaId, $ocupaciones, $cadenaResolver );
@@ -744,6 +791,10 @@ class PlazasController {
             'puntaje_techo'                                => Puntaje::fromHalfPoints( (int) $plaza['puntaje_techo'] )->toDecimal(),
             'fechas_faltantes_liberacion'                  => $fechasFaltantes,
             'fechas_faltantes_liberacion_indeterminado'    => $indeterminado,
+            // Resolved for the whole team in ONE query by listar() — never
+            // looked up here. `null` means "no open solicitud", which is
+            // only trustworthy because that query throws on failure.
+            'solicitud_abierta'                            => $solicitudAbierta,
         ];
     }
 

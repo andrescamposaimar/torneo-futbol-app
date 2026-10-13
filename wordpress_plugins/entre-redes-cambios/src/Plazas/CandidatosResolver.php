@@ -7,6 +7,7 @@ namespace EntreRedes\Cambios\Plazas;
 use EntreRedes\Cambios\Dictamen\BloqueoReemplazoEvaluator;
 use EntreRedes\Cambios\Dictamen\BloqueoReemplazoPolicy;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
 use EntreRedes\Cambios\Support\ChecksReads;
 
 /**
@@ -223,8 +224,14 @@ class CandidatosResolver {
     private JugadorMetricasReader $metricasReader;
     private BloqueoReemplazoEvaluator $bloqueoEvaluator;
     private PosicionResolver $posicionResolver;
+    private SolicitudesAbiertasReader $solicitudesAbiertas;
 
     /**
+     * @param SolicitudesAbiertasReader|null $solicitudesAbiertas Defaults to
+     *        a plain instance built from $wpdb/$eventLog — overridable in
+     *        tests, same pattern as `$metricasReader`. Only
+     *        `buscarPaginado()` reads it; see that method's docblock, step
+     *        1b.
      * @param EventLog $eventLog MANDATORY, no null-object fallback — same
      *        discipline as every other class in this plugin that reads
      *        directly against `$wpdb` (PlazaRepository, FechaRepository,
@@ -239,7 +246,8 @@ class CandidatosResolver {
         EventLog $eventLog,
         ?JugadorMetricasReader $metricasReader = null,
         ?BloqueoReemplazoEvaluator $bloqueoEvaluator = null,
-        ?PosicionResolver $posicionResolver = null
+        ?PosicionResolver $posicionResolver = null,
+        ?SolicitudesAbiertasReader $solicitudesAbiertas = null
     ) {
         $this->wpdb             = $wpdb;
         $this->plazaRepository  = $plazaRepository;
@@ -247,6 +255,8 @@ class CandidatosResolver {
         $this->metricasReader   = $metricasReader ?? new JugadorMetricasReader( $wpdb, $eventLog );
         $this->bloqueoEvaluator = $bloqueoEvaluator ?? new BloqueoReemplazoEvaluator();
         $this->posicionResolver = $posicionResolver ?? new PosicionResolver( $eventLog );
+
+        $this->solicitudesAbiertas = $solicitudesAbiertas ?? new SolicitudesAbiertasReader( $wpdb, $eventLog );
     }
 
     /**
@@ -408,6 +418,24 @@ class CandidatosResolver {
      *   1. Resolve the population's ids (one query) and their metrics (one
      *      batched query) — same cost as `paraPlaza()`/`paraSeccion()`,
      *      regardless of how many pages exist.
+     *   1b. Exclude every player already named as an incoming player of an
+     *      OPEN solicitud (`pendiente`/`aprobada`, either entrante column,
+     *      ANY team of the season) from the POPULATION itself — see
+     *      `Dictamen\Reglas\EntranteSinSolicitudAbierta`, which is the gate
+     *      this hides the rejected names of (a convenience, never a
+     *      substitute for that rule). ONE query for the whole season
+     *      (`SolicitudesAbiertasReader::listPlayerIdsComprometidos()`), run
+     *      right after the incumbent is removed and BEFORE the metrics read,
+     *      so a committed player costs nothing downstream and — the point —
+     *      is gone before `$total` is counted and before `array_slice()`
+     *      takes a page. This is the "filter first, count second, slice
+     *      third" discipline of steps 2/2b: a filter applied AFTER the slice
+     *      would strip names out of an already-cut page, return it short or
+     *      EMPTY while `total` still promised more, and the app would read
+     *      that as "no candidates". Like the plaza and the viability checks
+     *      it fails closed: the reader throws on a failed query rather than
+     *      returning [] (which would read as "nobody is committed" and show
+     *      every player), and this method lets that propagate.
      *   2. Exclude every candidate with no resolvable puntaje from the
      *      POPULATION itself — see class docblock, "AN UNRESOLVABLE PUNTAJE
      *      IS NOT A CANDIDATE AT ALL — IN buscarPaginado() ONLY". This runs
@@ -567,6 +595,20 @@ class CandidatosResolver {
         $candidatoIds = array_values( array_filter(
             $playerIds,
             static fn ( int $playerId ): bool => $playerId !== $ocupanteActualId
+        ) );
+
+        // A player already named in an OPEN solicitud anywhere in the season
+        // is not a candidate at all — excluded from the POPULATION itself,
+        // BEFORE the metrics read, before $total and before array_slice();
+        // see this method's docblock, step 1b, for why the ordering is the
+        // whole point (the "filter first, count second, slice third" past
+        // production bug). The reader throws on a failed query: an empty
+        // list here must only ever mean "nobody is committed".
+        $comprometidos = array_flip( $this->solicitudesAbiertas->listPlayerIdsComprometidos( $seasonId ) );
+
+        $candidatoIds = array_values( array_filter(
+            $candidatoIds,
+            static fn ( int $playerId ): bool => ! isset( $comprometidos[ $playerId ] )
         ) );
 
         $metricas = $this->metricasReader->resolveMuchos( $candidatoIds );

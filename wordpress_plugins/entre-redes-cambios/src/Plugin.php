@@ -169,10 +169,27 @@ final class Plugin {
                 $dictamenPipeline,
                 $eventLog,
                 $plazaRepository,
-                $jugadorMetricasReader
+                $jugadorMetricasReader,
+                null,
+                new Solicitudes\Lock\MysqlCreationLock( $wpdb, $eventLog )
             );
 
-            $candidatosResolver = new Plazas\CandidatosResolver( $wpdb, $plazaRepository, $eventLog );
+            // ONE reader shared by the candidate filter and the roster
+            // endpoint (and, built from the same $wpdb inside
+            // DictamenContextAssembler, the dictamen itself) — "open
+            // solicitud" must mean the same thing to all three; see
+            // Solicitudes\SolicitudesAbiertasReader's own docblock.
+            $solicitudesAbiertasReader = new Solicitudes\SolicitudesAbiertasReader( $wpdb, $eventLog );
+
+            $candidatosResolver = new Plazas\CandidatosResolver(
+                $wpdb,
+                $plazaRepository,
+                $eventLog,
+                null,
+                null,
+                null,
+                $solicitudesAbiertasReader
+            );
             $listaEsperaResolver = new Plazas\ListaEsperaResolver( $wpdb, $settings, $eventLog );
 
             $plazasController = new Rest\PlazasController(
@@ -183,7 +200,10 @@ final class Plugin {
                 $candidatosResolver,
                 $bloqueoReemplazoPolicy,
                 null,
-                $listaEsperaResolver
+                $listaEsperaResolver,
+                null,
+                null,
+                $solicitudesAbiertasReader
             );
 
             $capitanController = new Rest\CapitanController(

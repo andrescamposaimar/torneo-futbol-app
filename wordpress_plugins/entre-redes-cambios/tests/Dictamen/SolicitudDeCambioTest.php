@@ -31,4 +31,16 @@ class SolicitudDeCambioTest extends TestCase {
         $this->assertSame( SolicitudDeCambio::TIPO_REGRESO, $solicitud->tipo() );
         $this->assertNull( $solicitud->entrantePlayerId() );
     }
+
+    public function test_solicitud_id_is_null_until_tagged_and_conSolicitudId_returns_a_copy(): void {
+        $original = SolicitudDeCambio::sustitucion( 1, 10, 100, 888, 5, 1000 );
+        $tagged   = $original->conSolicitudId( 42 );
+
+        $this->assertNull( $original->solicitudId(), 'The original is immutable.' );
+        $this->assertSame( 42, $tagged->solicitudId() );
+        $this->assertNotSame( $original, $tagged );
+        $this->assertSame( 888, $tagged->entrantePlayerId() );
+        $this->assertSame( 100, $tagged->plazaId() );
+        $this->assertSame( SolicitudDeCambio::TIPO_SUSTITUCION, $tagged->tipo() );
+    }
 }
