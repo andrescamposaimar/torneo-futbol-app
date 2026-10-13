@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.23
+Stable tag: 0.1.24
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.24 =
+* Fix: the hora fields on the Configuración screen were `small-text` (~55px), which cut "23:59:59" off mid-value. The operator read "23:5" and could not tell a stored `23:59:59` from a stored `23:50:00` — the value was always correct, only unreadable.
+* Build: `build-plugin.sh` now excludes `.phpunit.result.cache` anywhere in the tree. PHPUnit writes it wherever it was last run from (the plugin root, and `vendor/bin` when the binary is invoked directly), and 0.1.23 shipped one. It is not code and carries nothing sensitive, but an artifact should contain what the plugin needs and nothing else, and relying on the working tree being clean is exactly how it got in.
 
 = 0.1.23 =
 * Feature: `Admin\ConfiguracionPage` — a third screen under "Cambios" (slug `cambios-configuracion`, same `gestionar_cambios` capability) that makes the policy rows of `cambios_settings` editable without a database client. The four plazo offsets (apertura de solicitudes, cierre de regresos, cierre de cambios, publicación), the exención del arco and the prioridad de padres. ZERO behaviour change: every row it writes was already read by `Calendario\Settings` and already honoured by the ruleset — until now the only way to change one was a hand-written UPDATE.
