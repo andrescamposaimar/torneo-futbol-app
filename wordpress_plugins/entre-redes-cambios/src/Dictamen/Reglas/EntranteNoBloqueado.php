@@ -43,10 +43,23 @@ final class EntranteNoBloqueado implements Regla {
 
     private BloqueoReemplazoPolicy $politica;
     private BloqueoReemplazoEvaluator $evaluador;
+    private ?int $minimoFechas;
 
-    public function __construct( ?BloqueoReemplazoPolicy $politica = null, ?BloqueoReemplazoEvaluator $evaluador = null ) {
-        $this->politica  = $politica ?? BloqueoReemplazoPolicy::topeTresFechas();
-        $this->evaluador = $evaluador ?? new BloqueoReemplazoEvaluator();
+    /**
+     * @param int|null $minimoFechas The configured minimum
+     *        (`Calendario\Settings::minimoFechasCambio()`), forwarded to the
+     *        evaluator; null keeps the reglamento's standing 3. This rule has
+     *        no database access, so the value is resolved once where the
+     *        engine is built — see `Dictamen\DictamenEngineFactory::reglas()`.
+     */
+    public function __construct(
+        ?BloqueoReemplazoPolicy $politica = null,
+        ?BloqueoReemplazoEvaluator $evaluador = null,
+        ?int $minimoFechas = null
+    ) {
+        $this->politica     = $politica ?? BloqueoReemplazoPolicy::topeTresFechas();
+        $this->evaluador    = $evaluador ?? new BloqueoReemplazoEvaluator();
+        $this->minimoFechas = $minimoFechas;
     }
 
     public function evaluate( DictamenContext $ctx ): ?Motivo {
@@ -60,7 +73,8 @@ final class EntranteNoBloqueado implements Regla {
             $entrantePlayerId,
             $ctx->entrantePlazasConCierreTruncado(),
             $this->politica,
-            $ctx->countResolvedFechasSinceFn()
+            $ctx->countResolvedFechasSinceFn(),
+            $this->minimoFechas
         ) ) {
             return new Motivo(
                 self::CODE,

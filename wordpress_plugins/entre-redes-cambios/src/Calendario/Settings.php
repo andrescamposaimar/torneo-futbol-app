@@ -117,6 +117,38 @@ class Settings {
      * full rule. Default: `false` (OFF) — see
      * Migrations\InitialSchema::SEED_DEFAULTS, 'prioridad_padres_activa'.
      */
+    /**
+     * How many RESOLVED fechas a substitution must play before its plaza may
+     * liberate — the reglamento's "3 fechas", configurable since 0.1.23
+     * because that number is a rule the comisión can change, not a constant
+     * of the domain. Default: 3 (see
+     * `Migrations\InitialSchema::SEED_DEFAULTS`).
+     *
+     * Clamped to 1..10. `0` is REFUSED (clamped up to 1) on purpose: it would
+     * void the rule entirely and let a substitute be returned the same fecha
+     * they arrived, which is precisely the advantage the whole system exists
+     * to prevent — and a `0` is far more likely to be a typo or an empty
+     * field than a decision. Above 10 is a typo too: a season is 23 fechas.
+     *
+     * *** THE FAILURE DIRECTION, STATED PLAINLY ***
+     * A failed read collapses to the seeded 3, like every other plain
+     * configuration getter here. If the comisión had raised it to 5, a
+     * transient DB hiccup would therefore use 3 and could release a
+     * substitute two fechas early — a real, if narrow, permissive window.
+     * It is accepted rather than defended because the alternative (failing
+     * closed to some arbitrary high number) would block every legitimate
+     * regreso during a hiccup, inside a two-day window, and `readStringResult()`
+     * already records `settings.lectura_fallida` durably. If this setting
+     * ever moves off 3 for real, revisit this: the honest fix is an
+     * "indeterminado" path like `Plazas\CadenaResolver`'s, not a different
+     * default.
+     */
+    public function minimoFechasCambio(): int {
+        $valor = $this->readInt( 'minimo_fechas_cambio', (int) InitialSchema::SEED_DEFAULTS['minimo_fechas_cambio'] );
+
+        return max( 1, min( 10, $valor ) );
+    }
+
     public function prioridadPadresActiva(): bool {
         return $this->readBool( 'prioridad_padres_activa', (string) InitialSchema::SEED_DEFAULTS['prioridad_padres_activa'] );
     }

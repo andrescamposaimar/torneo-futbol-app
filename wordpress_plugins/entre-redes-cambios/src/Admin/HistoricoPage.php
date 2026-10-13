@@ -260,7 +260,8 @@ class HistoricoPage {
 
         $cadenaResolver = new CadenaResolver(
             ( new BoundedFechaCounter( $this->fechaRepository, $this->eventLog ) )
-                ->boundedCountResolvedFechasSinceFn( $seasonId )
+                ->boundedCountResolvedFechasSinceFn( $seasonId ),
+            $this->settings->minimoFechasCambio()
         );
 
         $filas          = [];

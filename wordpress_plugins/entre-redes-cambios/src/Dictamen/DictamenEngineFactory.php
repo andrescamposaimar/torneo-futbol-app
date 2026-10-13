@@ -57,8 +57,12 @@ final class DictamenEngineFactory {
      *        must read the real setting and pass it here explicitly — this
      *        factory has zero DB access and cannot read Settings itself.
      */
-    public static function create( ?BloqueoReemplazoPolicy $politicaCC5b = null, bool $prioridadPadresActiva = false ): DictamenEngine {
-        return new DictamenEngine( self::reglas( $politicaCC5b, $prioridadPadresActiva ) );
+    public static function create(
+        ?BloqueoReemplazoPolicy $politicaCC5b = null,
+        bool $prioridadPadresActiva = false,
+        ?int $minimoFechas = null
+    ): DictamenEngine {
+        return new DictamenEngine( self::reglas( $politicaCC5b, $prioridadPadresActiva, $minimoFechas ) );
     }
 
     /**
@@ -66,16 +70,20 @@ final class DictamenEngineFactory {
      *         order — see DictamenEngine's class docblock, "NEVER
      *         SHORT-CIRCUITS".
      */
-    public static function reglas( ?BloqueoReemplazoPolicy $politicaCC5b = null, bool $prioridadPadresActiva = false ): array {
+    public static function reglas(
+        ?BloqueoReemplazoPolicy $politicaCC5b = null,
+        bool $prioridadPadresActiva = false,
+        ?int $minimoFechas = null
+    ): array {
         return [
             new PuntajeDentroDelTecho(),
-            new EntranteNoBloqueado( $politicaCC5b ),
+            new EntranteNoBloqueado( $politicaCC5b, null, $minimoFechas ),
             new EntranteDisponible(),
             new EntranteNoEsElSaliente(),
             new SolicitudEnPlazo(),
             new PlazaConOcupacionVigente(),
             new PlazaNoCerrada(),
-            new RegresoSoloConMinimoCumplido(),
+            new RegresoSoloConMinimoCumplido( $minimoFechas ),
             new PrioridadDePadresRespetada( $prioridadPadresActiva ),
             new ArqueroNoOcupaPlazaDeCampo(),
             new PlazaSinSolicitudAbierta(),

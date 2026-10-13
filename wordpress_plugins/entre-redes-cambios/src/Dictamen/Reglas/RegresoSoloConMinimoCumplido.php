@@ -31,6 +31,17 @@ final class RegresoSoloConMinimoCumplido implements Regla {
 
     private const CODE = 'regreso_antes_del_minimo';
 
+    /**
+     * The configured minimum (`Calendario\Settings::minimoFechasCambio()`),
+     * or null to keep `Plazas\CadenaResolver::MINIMO_POR_DEFECTO`. Resolved
+     * once where the engine is built, because a rule has no database access.
+     */
+    private ?int $minimoFechas;
+
+    public function __construct( ?int $minimoFechas = null ) {
+        $this->minimoFechas = $minimoFechas;
+    }
+
     public function evaluate( DictamenContext $ctx ): ?Motivo {
         if ( ! $ctx->solicitud()->isRegreso() ) {
             return null;
@@ -52,7 +63,7 @@ final class RegresoSoloConMinimoCumplido implements Regla {
             return null;
         }
 
-        $resolver = new CadenaResolver( $ctx->countResolvedFechasSinceFn() );
+        $resolver = new CadenaResolver( $ctx->countResolvedFechasSinceFn(), $this->minimoFechas );
 
         if ( $resolver->canTitularReturn( $ctx->plaza(), $ctx->ocupaciones() ) ) {
             return null;

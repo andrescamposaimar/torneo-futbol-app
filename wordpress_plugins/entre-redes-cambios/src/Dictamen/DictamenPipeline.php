@@ -71,6 +71,16 @@ final class DictamenPipeline {
     private bool $exencionArcoActiva;
 
     /**
+     * The configured minimum of resolved fechas a substitution must play
+     * before the plaza may liberate — `Calendario\Settings::minimoFechasCambio()`,
+     * read ONCE where this object is built because the factory and the rules
+     * have no database access. `null` keeps each rule's own default (3, the
+     * reglamento's standing value), which is what every test that does not
+     * care about this policy relies on.
+     */
+    private ?int $minimoFechas;
+
+    /**
      * @param BloqueoReemplazoPolicy|null $politicaCC5b Forwarded verbatim to
      *        `DictamenEngineFactory::create()` — see that method's docblock
      *        for CC5b, the still-unconfirmed policy. Null keeps
@@ -98,8 +108,10 @@ final class DictamenPipeline {
         EventLog $eventLog,
         ?BloqueoReemplazoPolicy $politicaCC5b = null,
         bool $prioridadPadresActiva = false,
-        bool $exencionArcoActiva = true
+        bool $exencionArcoActiva = true,
+        ?int $minimoFechas = null
     ) {
+        $this->minimoFechas = $minimoFechas;
         $this->assembler             = $assembler;
         $this->eventLog              = $eventLog;
         $this->politicaCC5b          = $politicaCC5b;
@@ -116,7 +128,7 @@ final class DictamenPipeline {
         try {
             $ctx = $this->assembler->assemble( $solicitud );
 
-            return DictamenEngineFactory::create( $this->politicaCC5b, $this->prioridadPadresActiva )->evaluate( $ctx );
+            return DictamenEngineFactory::create( $this->politicaCC5b, $this->prioridadPadresActiva, $this->minimoFechas )->evaluate( $ctx );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'dictamen.fallido', [
                 'season_id' => $solicitud->seasonId(),
@@ -154,7 +166,7 @@ final class DictamenPipeline {
             $ctxArco  = $this->assembler->assemble( $legArco, $this->exencionArcoActiva );
             $ctxCampo = $this->assembler->assemble( $legCampo, false );
 
-            $engine = DictamenEngineFactory::create( $this->politicaCC5b, $this->prioridadPadresActiva );
+            $engine = DictamenEngineFactory::create( $this->politicaCC5b, $this->prioridadPadresActiva, $this->minimoFechas );
 
             $dictamenArco  = $engine->evaluate( $ctxArco );
             $dictamenCampo = $engine->evaluate( $ctxCampo );

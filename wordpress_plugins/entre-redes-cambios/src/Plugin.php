@@ -137,6 +137,11 @@ final class Plugin {
             // evaluateGrupo() never has to read Settings itself.
             $exencionArcoActiva = $settings->exencionArcoActiva();
 
+            // The reglamento's "3 fechas", now configurable — read ONCE here
+            // and threaded in, because neither the rules nor
+            // Dictamen\DictamenEngineFactory can reach the database.
+            $minimoFechas = $settings->minimoFechasCambio();
+
             $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                 $plazaRepository,
                 $fechaRepository,
@@ -151,7 +156,8 @@ final class Plugin {
                 $eventLog,
                 $bloqueoReemplazoPolicy,
                 $prioridadPadresActiva,
-                $exencionArcoActiva
+                $exencionArcoActiva,
+                $minimoFechas
             );
 
             $solicitudRepository = new Solicitudes\SolicitudRepository(
@@ -188,7 +194,8 @@ final class Plugin {
                 null,
                 null,
                 null,
-                $solicitudesAbiertasReader
+                $solicitudesAbiertasReader,
+                $minimoFechas
             );
             $listaEsperaResolver = new Plazas\ListaEsperaResolver( $wpdb, $settings, $eventLog );
 
@@ -250,6 +257,7 @@ final class Plugin {
                 $bloqueoReemplazoPolicy = Dictamen\BloqueoReemplazoPolicy::topeTresFechas();
                 $prioridadPadresActiva  = $settings->prioridadPadresActiva();
                 $exencionArcoActiva     = $settings->exencionArcoActiva();
+                $minimoFechas           = $settings->minimoFechasCambio();
 
                 $dictamenContextAssembler = new Dictamen\DictamenContextAssembler(
                     $plazaRepository,
@@ -265,7 +273,8 @@ final class Plugin {
                     $eventLog,
                     $bloqueoReemplazoPolicy,
                     $prioridadPadresActiva,
-                    $exencionArcoActiva
+                    $exencionArcoActiva,
+                    $minimoFechas
                 );
 
                 $solicitudRepository = new Solicitudes\SolicitudRepository(

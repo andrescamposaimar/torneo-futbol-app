@@ -63,6 +63,12 @@ class InitialSchema {
         // it into an actual gate; it must never silently become active on its
         // own just because the setting row is unseeded.
         'prioridad_padres_activa'    => '0',
+        // The reglamento's "3 fechas" — configurable since 0.1.23, because
+        // the comisión can change the rule. Read through
+        // Calendario\Settings::minimoFechasCambio(), which clamps it to
+        // 1..10: a `0` would void the rule and let a substitute be returned
+        // the same fecha they arrived.
+        'minimo_fechas_cambio'       => '3',
         // `0` means "not configured" — NEVER a real `sp_team` post id, see
         // Calendario\Settings::listaEsperaTeamIdOverride()'s own docblock.
         // Unlike every other default above, this one is NOT the production

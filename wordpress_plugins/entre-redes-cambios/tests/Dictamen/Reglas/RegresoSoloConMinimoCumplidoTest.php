@@ -51,6 +51,33 @@ class RegresoSoloConMinimoCumplidoTest extends TestCase {
         $this->assertNull( ( new RegresoSoloConMinimoCumplido() )->evaluate( $ctx ) );
     }
 
+    // -------------------------------------------------------------------------
+    // The CONFIGURED minimum (0.1.23) — the number is a rule the comisión can
+    // change, so the same chain must be judged differently when it moves.
+    // -------------------------------------------------------------------------
+
+    public function test_a_configured_minimum_of_5_refuses_a_chain_that_3_would_accept(): void {
+        $ctx = $this->ctxFavorableRegreso( [ 'countResolvedFechasSinceFn' => static fn ( int $fechaId ): int => 3 ] );
+
+        // The very same context the default accepts.
+        $this->assertNull( ( new RegresoSoloConMinimoCumplido() )->evaluate( $ctx ) );
+
+        $motivo = ( new RegresoSoloConMinimoCumplido( 5 ) )->evaluate( $ctx );
+
+        $this->assertNotNull( $motivo, 'With the minimum raised to 5, three resolved fechas are not enough.' );
+        $this->assertSame( 2, $motivo->datos()['fechasFaltantes'] ?? null, 'And it must say how many are missing under the NEW number.' );
+    }
+
+    public function test_a_configured_minimum_of_1_accepts_a_chain_that_3_would_refuse(): void {
+        $ctx = $this->ctxFavorableRegreso( [ 'countResolvedFechasSinceFn' => static fn ( int $fechaId ): int => 1 ] );
+
+        $this->assertNotNull( ( new RegresoSoloConMinimoCumplido() )->evaluate( $ctx ), 'The default refuses one fecha.' );
+        $this->assertNull(
+            ( new RegresoSoloConMinimoCumplido( 1 ) )->evaluate( $ctx ),
+            'Lowered to 1, the same chain is liberable.'
+        );
+    }
+
     public function test_is_a_noop_when_the_titular_already_occupies_the_plaza(): void {
         $ctx = $this->ctxFavorableRegreso(
             [
