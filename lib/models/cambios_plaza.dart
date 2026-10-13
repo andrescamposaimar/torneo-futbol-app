@@ -49,6 +49,22 @@ class CambiosPlaza {
   final int? fechasFaltantesLiberacion;
   final bool fechasFaltantesLiberacionIndeterminado;
 
+  /// The request already standing against this plaza, or null if there is
+  /// none — see [CambiosSolicitudAbierta]. Every action that would file a
+  /// NEW request for this plaza is replaced by a legend while this is set,
+  /// so a captain cannot queue two changes on one slot.
+  ///
+  /// *** THIS FIELD IS A COURTESY, NOT THE GUARD ***
+  /// Unlike [esArco], a missing or malformed value here degrades to "no open
+  /// request", which shows the buttons again. That is deliberate and it is
+  /// only safe because the server refuses the request anyway
+  /// (`Dictamen\Reglas\PlazaSinSolicitudAbierta`): the worst case is a
+  /// captain who taps and is told no, never a second request that slips
+  /// through. Hiding a button has never been a rule — if this field is ever
+  /// the ONLY thing standing between a captain and a double booking, the
+  /// rule has been deleted and that is the bug to fix.
+  final CambiosSolicitudAbierta? solicitudAbierta;
+
   const CambiosPlaza({
     required this.plazaId,
     required this.titularPlayerId,
@@ -61,6 +77,7 @@ class CambiosPlaza {
     this.puntajeTecho = 0,
     this.fechasFaltantesLiberacion,
     this.fechasFaltantesLiberacionIndeterminado = false,
+    this.solicitudAbierta,
   });
 
   /// Whether this plaza is open for a "pedir regreso" action: someone other
@@ -87,6 +104,7 @@ class CambiosPlaza {
       fechasFaltantesLiberacion: json['fechas_faltantes_liberacion'] as int?,
       fechasFaltantesLiberacionIndeterminado:
           json['fechas_faltantes_liberacion_indeterminado'] == true,
+      solicitudAbierta: CambiosSolicitudAbierta.fromJson(json['solicitud_abierta']),
     );
   }
 
@@ -106,7 +124,8 @@ class CambiosPlaza {
           puntajeTecho == other.puntajeTecho &&
           fechasFaltantesLiberacion == other.fechasFaltantesLiberacion &&
           fechasFaltantesLiberacionIndeterminado ==
-              other.fechasFaltantesLiberacionIndeterminado;
+              other.fechasFaltantesLiberacionIndeterminado &&
+          solicitudAbierta == other.solicitudAbierta;
 
   @override
   int get hashCode => Object.hash(
@@ -121,10 +140,53 @@ class CambiosPlaza {
         puntajeTecho,
         fechasFaltantesLiberacion,
         fechasFaltantesLiberacionIndeterminado,
+        solicitudAbierta,
       );
 
   @override
   String toString() =>
       'CambiosPlaza(plazaId: $plazaId, titular: $titularNombre, '
       'ocupante: $ocupanteNombre, cerrada: $cerrada)';
+}
+
+/// One still-open request standing against a plaza, as `GET /cambios/plazas`
+/// reports it in `solicitud_abierta`. "Open" means the backend's own
+/// definition — `pendiente` OR `aprobada` — because an approved request is
+/// merely waiting for the publication batch: the plaza is already spoken for.
+///
+/// [estado] is carried for diagnostics and for whoever needs the distinction
+/// later; the roster screen deliberately does NOT branch on it. The process
+/// owner's call: a captain looking at his roster only needs to know the plaza
+/// is taken, and the exact estado belongs on "Mis pedidos", which is where he
+/// goes to follow it.
+@immutable
+class CambiosSolicitudAbierta {
+  final int id;
+  final String estado;
+
+  const CambiosSolicitudAbierta({required this.id, required this.estado});
+
+  static CambiosSolicitudAbierta? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final id = json['id'];
+    if (id is! int || id <= 0) return null;
+    return CambiosSolicitudAbierta(
+      id: id,
+      estado: (json['estado'] as String?) ?? '',
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CambiosSolicitudAbierta &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          estado == other.estado;
+
+  @override
+  int get hashCode => Object.hash(runtimeType, id, estado);
+
+  @override
+  String toString() => 'CambiosSolicitudAbierta(id: $id, estado: $estado)';
 }

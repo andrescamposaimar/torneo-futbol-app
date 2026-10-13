@@ -403,18 +403,45 @@ class _CambiosSolicitarScreenState extends ConsumerState<CambiosSolicitarScreen>
         ),
         (route) => route.settings.name != kCambiosPedidoFlowRouteName,
       );
-    } on CambiosApiException {
+    } on CambiosApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = 'No se pudo enviar el pedido. Probá de nuevo en unos minutos.';
+        _error = _mensajeDeError(e.code);
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = 'No se pudo enviar el pedido. Probá de nuevo en unos minutos.';
+        _error = _mensajeDeError(null);
       });
+    }
+  }
+
+  /// Copy for a failed submit.
+  ///
+  /// *** "PROBÁ DE NUEVO" IS A PROMISE, AND IT HAS TO BE TRUE ***
+  /// The generic message tells the captain to retry in a few minutes. That is
+  /// right for a timeout or a 500 and WRONG for the two refusals below: those
+  /// are a 409 and the retry fails identically forever. Telling someone to
+  /// retry something that cannot succeed sends him to file the same request
+  /// five times and then report the app as broken.
+  ///
+  /// Neither message names the other team, the other captain or the other
+  /// request — a captain learning that a rival just moved for a player is
+  /// exactly the leak `Dictamen\Reglas\EntranteSinSolicitudAbierta`'s own
+  /// motivo is careful to avoid. The codes mirror that rule's and
+  /// `PlazaSinSolicitudAbierta`'s `CODE` constants.
+  static String _mensajeDeError(String? code) {
+    switch (code) {
+      case 'plaza_con_solicitud_abierta':
+        return 'Esta plaza ya tiene un pedido de cambio abierto. '
+            'Esperá a que la comisión lo resuelva.';
+      case 'entrante_con_solicitud_abierta':
+        return 'Ese jugador ya tiene un pedido de cambio abierto. '
+            'Elegí otro candidato.';
+      default:
+        return 'No se pudo enviar el pedido. Probá de nuevo en unos minutos.';
     }
   }
 

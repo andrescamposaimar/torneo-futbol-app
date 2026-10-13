@@ -447,20 +447,25 @@ class _TitularCard extends StatelessWidget {
             text: 'Baja por cambio',
           ),
       ],
-      actions: [
-        if (disponibleParaAccion)
-          CambiosAccionButton(
-            key: Key('pedir_cambio_${plaza.plazaId}'),
-            onPressed: () => onPedirCambio(plaza),
-            label: 'Pedir cambio',
-          ),
-        if (disponibleParaAccion && plaza.esArco)
-          CambiosAccionButton(
-            key: Key('cambiar_por_titular_${plaza.plazaId}'),
-            onPressed: () => onCambiarPorTitular(plaza),
-            label: 'Cambiar por Titular',
-          ),
-      ],
+      // An open request takes the WHOLE list, never one button at a time —
+      // see _SolicitudAbiertaLeyenda. Anything added to the else-branch is
+      // covered by that; anything added outside it is not.
+      actions: plaza.solicitudAbierta != null
+          ? [_SolicitudAbiertaLeyenda(plazaId: plaza.plazaId)]
+          : [
+              if (disponibleParaAccion)
+                CambiosAccionButton(
+                  key: Key('pedir_cambio_${plaza.plazaId}'),
+                  onPressed: () => onPedirCambio(plaza),
+                  label: 'Pedir cambio',
+                ),
+              if (disponibleParaAccion && plaza.esArco)
+                CambiosAccionButton(
+                  key: Key('cambiar_por_titular_${plaza.plazaId}'),
+                  onPressed: () => onCambiarPorTitular(plaza),
+                  label: 'Cambiar por Titular',
+                ),
+            ],
     );
   }
 }
@@ -542,42 +547,102 @@ class _CambioActivoCard extends StatelessWidget {
         if (plaza.cerrada)
           CambiosBadge(key: Key('activo_cerrada_badge_${plaza.plazaId}'), text: 'Cerrada'),
       ],
-      actions: [
-        if (!plaza.cerrada) ...[
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CambiosAccionButton(
-                key: Key('confirmar_fin_cambio_${plaza.plazaId}'),
-                onPressed: regresoListo ? () => onPedirRegreso(plaza) : null,
-                label: 'Confirmar fin del cambio',
-              ),
-              if (motivoNoListo != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: SizedBox(
-                    width: 220,
-                    child: Text.rich(
-                      key: Key('motivo_no_listo_${plaza.plazaId}'),
-                      motivoNoListo,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey.shade600,
-                      ),
+      // Same wholesale replacement as _TitularCard — see
+      // _SolicitudAbiertaLeyenda.
+      actions: plaza.solicitudAbierta != null
+          ? [_SolicitudAbiertaLeyenda(plazaId: plaza.plazaId)]
+          : [
+              if (!plaza.cerrada) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CambiosAccionButton(
+                      key: Key('confirmar_fin_cambio_${plaza.plazaId}'),
+                      onPressed: regresoListo ? () => onPedirRegreso(plaza) : null,
+                      label: 'Confirmar fin del cambio',
                     ),
-                  ),
+                    if (motivoNoListo != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: SizedBox(
+                          width: 220,
+                          child: Text.rich(
+                            key: Key('motivo_no_listo_${plaza.plazaId}'),
+                            motivoNoListo,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
+                CambiosAccionButton(
+                  key: Key('cambiar_este_cambio_${plaza.plazaId}'),
+                  onPressed: () => onPedirCambio(plaza),
+                  label: 'Cambiar este cambio',
+                  secundaria: true,
+                ),
+              ],
             ],
-          ),
-          CambiosAccionButton(
-            key: Key('cambiar_este_cambio_${plaza.plazaId}'),
-            onPressed: () => onPedirCambio(plaza),
-            label: 'Cambiar este cambio',
-            secundaria: true,
+    );
+  }
+}
+
+/// Replaces EVERY action that would file a new request for a plaza that
+/// already has one open.
+///
+/// *** WHY IT REPLACES THE WHOLE LIST, NOT JUST "Pedir cambio" ***
+/// Four buttons across the two cards open a request against the same plaza:
+/// "Pedir cambio" and "Cambiar por Titular" on the titular card,
+/// "Confirmar fin del cambio" (a `regreso`) and "Cambiar este cambio" on the
+/// occupant card. Hiding only the first would leave the captain a side door
+/// into the identical double booking, which is the whole point of the guard.
+/// So both cards swap their ENTIRE `actions` list for this widget rather
+/// than threading the condition through each button: a fifth action added
+/// inside either else-branch is then covered without anyone remembering to
+/// cover it. One added OUTSIDE those branches is not — that is the case to
+/// watch for.
+///
+/// *** THIS IS A COURTESY, NOT THE GUARD ***
+/// The server refuses the duplicate anyway (409, see
+/// `Dictamen\Reglas\PlazaSinSolicitudAbierta`). This widget only spares the
+/// captain a tap that was always going to be refused — see
+/// [CambiosPlaza.solicitudAbierta] for why a missing field showing the
+/// buttons again is safe.
+///
+/// The wording does NOT distinguish `pendiente` from `aprobada`: the process
+/// owner's call is that a roster card only has to say the plaza is taken,
+/// and the estado belongs on "Mis pedidos", where the captain follows it.
+class _SolicitudAbiertaLeyenda extends StatelessWidget {
+  final int plazaId;
+
+  const _SolicitudAbiertaLeyenda({required this.plazaId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: Key('solicitud_abierta_leyenda_$plazaId'),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.hourglass_top, size: 14, color: Colors.grey.shade600),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              'Solicitud de cambio pendiente',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade700,
+              ),
+            ),
           ),
         ],
-      ],
+      ),
     );
   }
 }

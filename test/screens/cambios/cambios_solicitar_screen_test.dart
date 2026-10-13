@@ -100,9 +100,17 @@ class _StubPlantelController extends CambiosPlantelController {
 /// (and records the call) or throws, per test.
 class _FakeSubmitService extends CambiosApiService {
   bool shouldFail;
+
+  /// What [shouldFail] throws. Defaults to the generic 500 so every existing
+  /// test keeps the behaviour it was written against; the refusal tests pass
+  /// a 409 with its own code.
+  CambiosApiException failWith;
   Map<String, Object?>? lastCall;
 
-  _FakeSubmitService({this.shouldFail = false})
+  _FakeSubmitService({
+    this.shouldFail = false,
+    this.failWith = const CambiosApiException(statusCode: 500, code: 'error_interno'),
+  })
       : super(
           baseUrl: 'https://nowhere.test/cambios',
           prodeApi: ProdeApiService(
@@ -133,7 +141,7 @@ class _FakeSubmitService extends CambiosApiService {
       'entrantePlayerId': entrantePlayerId,
     };
     if (shouldFail) {
-      throw const CambiosApiException(statusCode: 500, code: 'error_interno');
+      throw failWith;
     }
     return const CambiosNuevaSolicitud(
       id: 1,
@@ -1176,6 +1184,85 @@ void main() {
       expect(find.byKey(const Key('ventana_cerrada_banner')), findsNothing);
       expect(
         find.text('Los regresos se habilitan a partir del domingo 11/10.'),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('CambiosSolicitarScreen — un pedido rechazado por duplicado', () {
+    // The server refuses these two with a 409 and never stores a row. The
+    // screen has to say so in words that match: "probá de nuevo" would be a
+    // lie, because the retry fails identically forever.
+
+    Future<void> pumpYConfirmar(WidgetTester tester, _FakeSubmitService service) async {
+      await _pumpScreen(
+        tester,
+        tipo: CambiosSolicitudTipo.sustitucion,
+        listaEsperaState: const CambiosCandidatosLoaded(
+          candidatos: [
+            CambiosCandidato(
+                playerId: 200, nombre: 'Pedro Gómez', esPadre: false, puntaje: 2.5, viable: true),
+          ],
+          query: '',
+        ),
+        apiService: service,
+      );
+
+      await tester.tap(find.byKey(const Key('candidato_200')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('confirmar_solicitud_button')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a plaza that already has an open request says so, and never says "retry"',
+        (tester) async {
+      await pumpYConfirmar(
+        tester,
+        _FakeSubmitService(
+          shouldFail: true,
+          failWith: const CambiosApiException(
+              statusCode: 409, code: 'plaza_con_solicitud_abierta'),
+        ),
+      );
+
+      expect(
+        find.text('Esta plaza ya tiene un pedido de cambio abierto. '
+            'Esperá a que la comisión lo resuelva.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Probá de nuevo'), findsNothing);
+      expect(find.byType(CambiosSolicitarScreen), findsOneWidget);
+    });
+
+    testWidgets('a candidate already committed elsewhere says so WITHOUT naming the other team',
+        (tester) async {
+      await pumpYConfirmar(
+        tester,
+        _FakeSubmitService(
+          shouldFail: true,
+          failWith: const CambiosApiException(
+              statusCode: 409, code: 'entrante_con_solicitud_abierta'),
+        ),
+      );
+
+      expect(
+        find.text('Ese jugador ya tiene un pedido de cambio abierto. Elegí otro candidato.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Probá de nuevo'), findsNothing);
+    });
+
+    testWidgets('any other failure keeps the generic retry copy', (tester) async {
+      await pumpYConfirmar(
+        tester,
+        _FakeSubmitService(
+          shouldFail: true,
+          failWith: const CambiosApiException(statusCode: 503, code: 'no_disponible'),
+        ),
+      );
+
+      expect(
+        find.text('No se pudo enviar el pedido. Probá de nuevo en unos minutos.'),
         findsOneWidget,
       );
     });
