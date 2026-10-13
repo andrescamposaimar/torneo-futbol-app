@@ -318,6 +318,44 @@ void main() {
       expect(notifPos, greaterThan(goleadoresPos));
     });
 
+    // Gestión Torneo sits directly under Prode and above Estadísticas: the
+    // sections a captain ACTS on come first, the read-only ones follow. The
+    // assertion is on rendered y positions, so moving the block back below
+    // Estadísticas (or below Historia) fails this test.
+    testWidgets(
+        'Gestión Torneo renders directly under Prode and above Estadísticas',
+        (tester) async {
+      // Tall viewport so the lazy ListView builds every section
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await _pump(tester, campeones: true);
+
+      final prodePos = tester.getTopLeft(find.text('Prode Chami')).dy;
+      final gestionPos = tester.getTopLeft(find.text('Gestión Torneo')).dy;
+      final estadisticasPos = tester.getTopLeft(find.text('Estadísticas')).dy;
+      final historiaPos = tester.getTopLeft(find.text('Historia')).dy;
+
+      expect(gestionPos, greaterThan(prodePos));
+      expect(gestionPos, lessThan(estadisticasPos));
+      expect(gestionPos, lessThan(historiaPos));
+    });
+
+    // With prode off there is no Prode card at all, so Gestión Torneo becomes
+    // the first section — still above Estadísticas.
+    testWidgets(
+        'Gestión Torneo stays above Estadísticas when prode is off',
+        (tester) async {
+      await _pump(tester, prode: false);
+
+      expect(find.text('Prode Chami'), findsNothing);
+      expect(
+        tester.getTopLeft(find.text('Gestión Torneo')).dy,
+        lessThan(tester.getTopLeft(find.text('Estadísticas')).dy),
+      );
+    });
+
     // Gestión Torneo: always shown now — Jugadores is unconditional, and
     // Lista de Espera / Solicitud de cambio no longer exist or are hidden.
     testWidgets(
@@ -409,9 +447,9 @@ void main() {
       final anuarios = dyOf('Anuarios');
       final notificaciones = dyOf('Avisos del torneo');
 
-      expect(stats, greaterThan(prode));
-      expect(gestion, greaterThan(stats));
-      expect(informacion, greaterThan(gestion));
+      expect(gestion, greaterThan(prode));
+      expect(stats, greaterThan(gestion));
+      expect(informacion, greaterThan(stats));
       expect(anuarios, greaterThan(informacion));
       expect(notificaciones, greaterThan(anuarios));
     });
@@ -460,6 +498,13 @@ void main() {
     testWidgets(
         'campeones=true → tapping the tile pushes CampeonesScreen',
         (tester) async {
+      // Tall viewport: Historia now sits below Gestión Torneo, so on the
+      // default 600px surface the tile would be off-screen and the tap would
+      // miss.
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
       await _pump(tester, campeones: true);
 
       await tester.tap(find.text('Copa Chaminade'));
@@ -469,8 +514,8 @@ void main() {
       expect(find.byType(CampeonesScreen), findsOneWidget);
     });
 
-    // Placement: after Estadísticas, before Gestión Torneo — Notificaciones
-    // must still be last (existing AC-36/AC-37 convention).
+    // Placement: after Gestión Torneo and Estadísticas — Notificaciones must
+    // still be last (existing AC-36/AC-37 convention).
     testWidgets(
         'campeones=true → Historia renders after Estadísticas and before '
         'Notificaciones', (tester) async {
@@ -487,8 +532,8 @@ void main() {
       final gestion = dyOf('Jugadores');
       final notificaciones = dyOf('Avisos del torneo');
 
+      expect(stats, greaterThan(gestion));
       expect(historia, greaterThan(stats));
-      expect(gestion, greaterThan(historia));
       expect(notificaciones, greaterThan(historia));
     });
   });

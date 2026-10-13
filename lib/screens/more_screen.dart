@@ -189,62 +189,10 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             const SizedBox(height: 12),
           ],
 
-          // 3. Estadísticas (always shown)
-          _SectionCard(
-            title: 'Estadísticas',
-            children: [
-              _tile(
-                context,
-                'Goleadores',
-                Icons.sports_soccer,
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => const ScorersScreen(),
-                  ),
-                ),
-              ),
-              _tile(
-                context,
-                'Imbatibles',
-                Icons.sports_handball,
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => const ImbatiblesScreen(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-
-          // 3b. Historia (Copa Chaminade) — gated on the tenant flag exactly
-          // like the Prode section above. APP-4: for a tenant with the flag
-          // on, this entry is always visible regardless of whether any year
-          // has loaded yet — that is a data-state concern the empty state
-          // (APP-6) inside CampeonesScreen handles, not this gate.
-          if (features.campeones) ...[
-            _SectionCard(
-              title: 'Historia',
-              children: [
-                _tile(
-                  context,
-                  'Copa Chaminade',
-                  Icons.emoji_events,
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => const CampeonesScreen(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-          ],
-
-          // 4. Gestión Torneo (always shown — Jugadores is unconditional)
+          // 3. Gestión Torneo (always shown — Jugadores is unconditional).
+          // Sits directly under Prode, above Estadísticas: the two sections a
+          // captain acts on live together at the top, and the read-only
+          // sections (Estadísticas, Historia, Información) follow.
           _SectionCard(
             title: 'Gestión Torneo',
             children: [
@@ -291,6 +239,61 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             ],
           ),
           const SizedBox(height: 12),
+
+          // 4. Estadísticas (always shown)
+          _SectionCard(
+            title: 'Estadísticas',
+            children: [
+              _tile(
+                context,
+                'Goleadores',
+                Icons.sports_soccer,
+                () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ScorersScreen(),
+                  ),
+                ),
+              ),
+              _tile(
+                context,
+                'Imbatibles',
+                Icons.sports_handball,
+                () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ImbatiblesScreen(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // 4b. Historia (Copa Chaminade) — gated on the tenant flag exactly
+          // like the Prode section above. APP-4: for a tenant with the flag
+          // on, this entry is always visible regardless of whether any year
+          // has loaded yet — that is a data-state concern the empty state
+          // (APP-6) inside CampeonesScreen handles, not this gate.
+          if (features.campeones) ...[
+            _SectionCard(
+              title: 'Historia',
+              children: [
+                _tile(
+                  context,
+                  'Copa Chaminade',
+                  Icons.emoji_events,
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CampeonesScreen(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // 5. Información (shown only when at least one URL is present — AC-30)
           if (docs.reglamentoUrl != null || docs.modalidadUrl != null) ...[
