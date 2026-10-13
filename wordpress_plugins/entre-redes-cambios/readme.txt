@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.22
+Stable tag: 0.1.23
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,11 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.23 =
+* Feature: `Admin\ConfiguracionPage` — a third screen under "Cambios" (slug `cambios-configuracion`, same `gestionar_cambios` capability) that makes the policy rows of `cambios_settings` editable without a database client. The four plazo offsets (apertura de solicitudes, cierre de regresos, cierre de cambios, publicación), the exención del arco and the prioridad de padres. ZERO behaviour change: every row it writes was already read by `Calendario\Settings` and already honoured by the ruleset — until now the only way to change one was a hand-written UPDATE.
+* Reliability: `Calendario\PlazosValidator` refuses a plazo set whose offsets are out of chronological order. `PlazosCalculator::isWithinSolicitudWindow()` is `now >= apertura && now <= cierre`, and nothing checked that the first was earlier than the second — swapping two numbers produced a window that NEVER opens, with no exception, no event and no message, indistinguishable from "the feature is broken". It also refuses non-integer days, days outside -90..0, a malformed `HH:MM:SS`, and a well-formed but impossible time such as `25:00:00` (which `DateTimeImmutable` would silently roll into the next day). Every problem in the set is reported at once, and a refused save writes NOTHING — not even the rows that were individually fine, because a half-applied calendar is worse than the old one when the operator believes they changed it.
+* Internal: `Calendario\SettingsWriter`, the one writer of `cambios_settings`, kept separate from `Settings` so that class stays the pure reader its docblock promises (its value is a per-setting audit of which direction is safe when a read FAILS). Every write records `settings.modificado` with the old and new value; a row whose value did not change is skipped, so the audit trail means "somebody changed this" rather than "somebody pressed Guardar". A failed write records `settings.escritura_fallida`. The upsert is UPDATE-or-INSERT rather than `ON DUPLICATE KEY UPDATE`: the SQLite test shim does not rewrite that MySQL-only syntax, so every test would have exercised the failure branch while production exercised the happy one.
 
 = 0.1.22 =
 * Feature: `Admin\HistoricoPage` — a second admin screen under "Cambios" (slug `cambios-historico`, same `gestionar_cambios` capability, read-only: no POST handler and no nonce because it writes nothing). The menu now has two named entries, "Bandeja" and "Histórico"; the tray stays the landing page and its behaviour is unchanged.

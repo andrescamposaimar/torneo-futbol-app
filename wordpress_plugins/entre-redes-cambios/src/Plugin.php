@@ -294,7 +294,14 @@ final class Plugin {
                     $eventLog
                 );
 
-                ( new Admin\AdminMenu( $bandejaPage, $historicoPage ) )->register();
+                $configuracionPage = new Admin\ConfiguracionPage(
+                    $authorizer,
+                    $settings,
+                    new Calendario\SettingsWriter( $wpdb, $eventLog ),
+                    $eventLog
+                );
+
+                ( new Admin\AdminMenu( $bandejaPage, $historicoPage, $configuracionPage ) )->register();
             } );
         }
 

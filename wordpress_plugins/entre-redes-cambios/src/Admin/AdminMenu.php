@@ -11,13 +11,16 @@ namespace EntreRedes\Cambios\Admin;
  * `ProcessOwnerAuthorizer::CAPABILITY` (`gestionar_cambios`), never
  * `manage_options` — see that class's own docblock for why.
  *
- * *** TWO PAGES SINCE 0.1.22 ***
+ * *** THREE PAGES SINCE 0.1.23 ***
  * `BandejaPage` is the worklist — what still needs deciding — and stays the
  * landing page, so the default destination never changes for whoever already
  * uses it. `HistoricoPage` is the read-only record: live substitutions and
  * every already-resolved solicitud. They are separate screens on purpose: the
  * tray is where the process owner ACTS, and padding it with rows that need no
  * action is the fastest way to make an action list stop being read.
+ * `ConfiguracionPage` is the policy rows of `cambios_settings` made editable
+ * — rare, deliberate changes that have no business sharing a screen with
+ * Friday's worklist.
  *
  * WordPress auto-creates a first submenu entry duplicating the top-level page
  * and labels it with the MENU title. Registering `BandejaPage::SLUG` again as
@@ -29,7 +32,8 @@ final class AdminMenu {
 
     public function __construct(
         private BandejaPage $bandejaPage,
-        private HistoricoPage $historicoPage
+        private HistoricoPage $historicoPage,
+        private ConfiguracionPage $configuracionPage
     ) {
     }
 
@@ -37,8 +41,9 @@ final class AdminMenu {
      * Called on the `admin_menu` hook. Registers both pages and the
      * `admin_init` POST handler — same "register the handler right next to
      * the menu that leads to it" discipline as entre-redes-prode's
-     * Admin\AdminMenu::register(). Only `BandejaPage` has one:
-     * `HistoricoPage` writes nothing (see its class docblock).
+     * Admin\AdminMenu::register(). `BandejaPage` and `ConfiguracionPage`
+     * each register one; `HistoricoPage` writes nothing (see its class
+     * docblock) and therefore has none.
      */
     public function register(): void {
         add_menu_page(
@@ -68,6 +73,16 @@ final class AdminMenu {
             [ $this->historicoPage, 'render' ]
         );
 
+        add_submenu_page(
+            BandejaPage::SLUG,
+            __( 'Configuración de cambios', 'entre-redes-cambios' ),
+            __( 'Configuración', 'entre-redes-cambios' ),
+            ProcessOwnerAuthorizer::CAPABILITY,
+            ConfiguracionPage::SLUG,
+            [ $this->configuracionPage, 'render' ]
+        );
+
         add_action( 'admin_init', [ $this->bandejaPage, 'handlePost' ] );
+        add_action( 'admin_init', [ $this->configuracionPage, 'handlePost' ] );
     }
 }
