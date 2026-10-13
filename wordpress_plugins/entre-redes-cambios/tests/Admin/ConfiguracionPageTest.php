@@ -222,6 +222,63 @@ class ConfiguracionPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // The captain-facing kill switch
+    // -------------------------------------------------------------------------
+
+    public function test_el_interruptor_de_la_app_viaja_al_lector(): void {
+        $this->assertTrue( $this->settings->cambiosHabilitados(), 'Open by default.' );
+
+        $this->guardar( [ 'mensaje_deshabilitado' => 'Hablá con la comisión.' ], [ 'cambios_habilitados' ] );
+
+        $this->assertFalse( $this->settings->cambiosHabilitados() );
+        $this->assertSame( 'Hablá con la comisión.', $this->settings->mensajeDeshabilitado() );
+
+        $this->guardar( [] );
+        $this->assertTrue( $this->settings->cambiosHabilitados() );
+    }
+
+    public function test_apagar_sin_mensaje_se_rechaza(): void {
+        // Closing the feature with nothing to show would leave captains
+        // staring at a blank screen — the exact thing the switch exists to
+        // avoid.
+        $resultado = $this->guardar( [ 'mensaje_deshabilitado' => '   ' ], [ 'cambios_habilitados' ] );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertTrue( $this->settings->cambiosHabilitados(), 'And nothing must have been written.' );
+    }
+
+    public function test_un_mensaje_vacio_con_los_cambios_prendidos_es_valido(): void {
+        $resultado = $this->guardar( [ 'mensaje_deshabilitado' => '' ] );
+
+        $this->assertTrue( $resultado['ok'], 'An empty message harms nobody while the feature is open.' );
+    }
+
+    public function test_un_mensaje_demasiado_largo_se_rechaza(): void {
+        $resultado = $this->guardar( [ 'mensaje_deshabilitado' => str_repeat( 'a', 301 ) ] );
+
+        $this->assertFalse( $resultado['ok'] );
+    }
+
+    public function test_el_mensaje_se_limpia_de_etiquetas(): void {
+        $this->guardar( [ 'mensaje_deshabilitado' => 'Hablá con <b>la comisión</b>.' ] );
+
+        $this->assertSame(
+            'Hablá con la comisión.',
+            $this->settings->mensajeDeshabilitado(),
+            'This is the one string the app renders as written, so it is cleaned at the only door it comes in through.'
+        );
+    }
+
+    public function test_un_mensaje_guardado_vacio_cae_al_sembrado(): void {
+        // Belt and braces: even if a row somehow ends up empty, a captain
+        // must not face a blank screen with no explanation.
+        global $wpdb;
+        $wpdb->query( "UPDATE {$wpdb->prefix}cambios_settings SET setting_value = '' WHERE setting_key = 'mensaje_deshabilitado'" );
+
+        $this->assertStringContainsString( 'Comisión Directiva', $this->settings->mensajeDeshabilitado() );
+    }
+
+    // -------------------------------------------------------------------------
     // The invariant: a refused save writes NOTHING
     // -------------------------------------------------------------------------
 
@@ -332,15 +389,28 @@ class ConfiguracionPageTest extends TestCase {
         $this->assertStringContainsString( 'Guardar configuración', $html );
     }
 
-    public function test_el_checkbox_refleja_el_estado_guardado(): void {
-        // Seeded ON -> rendered checked.
-        $this->assertStringContainsString( "checked='checked'", $this->renderPagina() );
+    public function test_cada_checkbox_refleja_su_propio_estado_guardado(): void {
+        $html = $this->renderPagina();
+
+        $this->assertTrue( $this->estaTildado( $html, 'exencion_arco_activa' ), 'Seeded ON.' );
+        $this->assertTrue( $this->estaTildado( $html, 'cambios_habilitados' ), 'Seeded ON.' );
+        $this->assertFalse( $this->estaTildado( $html, 'prioridad_padres_activa' ), 'Seeded OFF.' );
 
         $this->guardar( [], [ 'exencion_arco_activa' ] );
 
-        // Both switches are now OFF (prioridad was never on), so no box is
-        // checked.
-        $this->assertStringNotContainsString( "checked='checked'", $this->renderPagina() );
+        $html = $this->renderPagina();
+
+        // Only the one that was turned off changes — asserted per field, not
+        // by counting attributes, so adding a fourth switch later does not
+        // silently invalidate this.
+        $this->assertFalse( $this->estaTildado( $html, 'exencion_arco_activa' ) );
+        $this->assertTrue( $this->estaTildado( $html, 'cambios_habilitados' ) );
+    }
+
+    public function test_el_mensaje_guardado_se_muestra_en_el_textarea(): void {
+        $this->guardar( [ 'mensaje_deshabilitado' => 'Escribile a la comisión.' ] );
+
+        $this->assertStringContainsString( 'Escribile a la comisión.', $this->renderPagina() );
     }
 
     public function test_el_render_lista_todos_los_errores_del_rechazo(): void {
@@ -429,6 +499,8 @@ class ConfiguracionPageTest extends TestCase {
             'dias_publicacion'          => '-1',
             'hora_publicacion'          => '00:00:00',
             'minimo_fechas_cambio'      => '3',
+            'cambios_habilitados'       => '1',
+            'mensaje_deshabilitado'     => 'Por el momento no es posible gestionar los cambios de forma online. Por favor contactate con la Comisión Directiva.',
             // Mirrors the SEED exactly — exención ON, prioridad de padres
             // absent (= unchecked) — so `guardar( [] )` is a genuine no-op
             // and a test asserting "nothing changed" cannot pass by accident.
@@ -440,6 +512,14 @@ class ConfiguracionPageTest extends TestCase {
         }
 
         return array_merge( $form, $overrides );
+    }
+
+    /** Whether the checkbox named $nombre carries WordPress's checked attribute. */
+    private function estaTildado( string $html, string $nombre ): bool {
+        return 1 === preg_match(
+            '/name="' . preg_quote( $nombre, '/' ) . '"\s+value="1"\s+checked=\'checked\'/',
+            $html
+        );
     }
 
     private function renderPagina(): string {

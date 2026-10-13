@@ -43,6 +43,8 @@ class CambiosContextScreen extends ConsumerWidget {
             CambiosContextLoading() =>
               const LoadingSeccion(texto: 'Buscando tus equipos...'),
             CambiosContextError() => _ErrorView(onRetry: notifier.refresh),
+            CambiosContextDeshabilitado(:final mensaje) =>
+              _DeshabilitadoView(mensaje: mensaje),
             CambiosContextNotCaptain() => const _NotCaptainView(),
             CambiosContextReady(
               :final seasonId,
@@ -108,6 +110,46 @@ class _ErrorView extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             ElevatedButton(onPressed: onRetry, child: const Text('Reintentar')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The comisión closed the captain-facing side. Deliberately NOT styled as
+/// an error and deliberately WITHOUT a retry button: nothing went wrong and
+/// retrying cannot help — the only useful next step is the one the message
+/// names.
+class _DeshabilitadoView extends StatelessWidget {
+  /// The comisión's own text, already sanitized server-side. Rendered as
+  /// plain text, never as markup.
+  final String mensaje;
+
+  const _DeshabilitadoView({required this.mensaje});
+
+  /// Used only if the server somehow sent no message at all — a blank card
+  /// would leave a captain with no idea what happened or who to ask.
+  static const String _fallback =
+      'Por el momento no es posible gestionar los cambios de forma online. '
+      'Por favor contactate con la Comisión Directiva.';
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final texto = mensaje.trim().isEmpty ? _fallback : mensaje.trim();
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.pause_circle_outline, size: 64, color: theme.colorScheme.primary),
+            const SizedBox(height: 16),
+            Text('Cambios en pausa', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            Text(texto, textAlign: TextAlign.center),
           ],
         ),
       ),

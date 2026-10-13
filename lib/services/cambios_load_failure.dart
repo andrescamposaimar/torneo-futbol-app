@@ -17,6 +17,15 @@ typedef CambiosLoadFailure = ({String code, String message});
 ///     `<scope>_error`; the runtime type is kept in [message].
 CambiosLoadFailure describeCambiosLoadFailure(String scope, Object error) {
   if (error is CambiosApiException) {
+    // The one error that is NOT scope-specific: the comisión closed the
+    // whole captain-facing side, so every scope must report the same stable
+    // code and let the screen say the same thing. Scoping it would make
+    // `plantel_503` and `solicitudes_503` two different-looking problems
+    // with one cause.
+    if (error.code == kCodigoDeshabilitado) {
+      return (code: kCodigoDeshabilitado, message: error.mensajeDeshabilitado ?? '');
+    }
+
     return (code: '${scope}_${error.statusCode}', message: error.toString());
   }
   if (error is CambiosMalformedResponseException) {

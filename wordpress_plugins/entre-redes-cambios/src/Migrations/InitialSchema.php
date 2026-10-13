@@ -69,6 +69,14 @@ class InitialSchema {
         // 1..10: a `0` would void the rule and let a substitute be returned
         // the same fecha they arrived.
         'minimo_fechas_cambio'       => '3',
+        // The captain-facing kill switch (0.1.23). ON by default: the
+        // feature is normally open, and this exists so the comisión can
+        // close it for a week without a release. It gates the REST side
+        // ONLY — the bandeja and the histórico keep working, which is the
+        // whole point of being able to stop the inbox while still
+        // processing what is already in it.
+        'cambios_habilitados'        => '1',
+        'mensaje_deshabilitado'      => 'Por el momento no es posible gestionar los cambios de forma online. Por favor contactate con la Comisión Directiva.',
         // `0` means "not configured" — NEVER a real `sp_team` post id, see
         // Calendario\Settings::listaEsperaTeamIdOverride()'s own docblock.
         // Unlike every other default above, this one is NOT the production

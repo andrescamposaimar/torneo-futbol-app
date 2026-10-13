@@ -31,11 +31,32 @@ class CambiosApiException implements Exception {
   final int statusCode;
   final String code;
 
-  const CambiosApiException({required this.statusCode, this.code = 'unknown'});
+  /// The ONE piece of server text this app renders verbatim, and only for
+  /// [kCodigoDeshabilitado]: the sentence the comisión wrote for captains
+  /// when they closed the feature (`Calendario\Settings::mensajeDeshabilitado()`
+  /// on the backend, sanitized and length-capped where it is saved).
+  ///
+  /// It is CONTENT, not diagnostics — which is exactly why it is a separate
+  /// field instead of reusing [toString] or the raw `message`: the rule that
+  /// a server `message` must never reach a captain stays intact, and this
+  /// one value is opted IN to, by code, rather than leaking by default.
+  /// Null for every other error.
+  final String? mensajeDeshabilitado;
+
+  const CambiosApiException({
+    required this.statusCode,
+    this.code = 'unknown',
+    this.mensajeDeshabilitado,
+  });
 
   @override
   String toString() => 'CambiosApiException($statusCode, $code)';
 }
+
+/// The backend's code for "the comisión closed the captain-facing side"
+/// (HTTP 503, `Plugin::gateCambiosWhenDisabled()`). Deliberately NOT a 403:
+/// that one means "you are not a captain", and the two need different words.
+const String kCodigoDeshabilitado = 'cambios_deshabilitado';
 
 /// Thrown when a 200 response body could not be parsed into the expected
 /// shape (missing/malformed required fields at the envelope level).
@@ -408,10 +429,28 @@ class CambiosApiService {
   // ---------------------------------------------------------------------------
 
   CambiosApiException _errorFor(http.Response response) {
+    final body = _decodeBody(response);
+    final code = _extractErrorCode(body);
+
     return CambiosApiException(
       statusCode: response.statusCode,
-      code: _extractErrorCode(_decodeBody(response)),
+      code: code,
+      // Carried ONLY for this code — see the field's own docblock. A
+      // `message` on any other error stays where it is: in the log.
+      mensajeDeshabilitado: code == kCodigoDeshabilitado ? _extractMensaje(body) : null,
     );
+  }
+
+  /// The operator's sentence, or null when the body does not carry a usable
+  /// one. Null rather than an empty string so the screen can fall back to
+  /// its own copy instead of showing a blank card.
+  String? _extractMensaje(Map<String, dynamic> body) {
+    final mensaje = body['message'];
+    if (mensaje is! String) return null;
+
+    final limpio = mensaje.trim();
+
+    return limpio.isEmpty ? null : limpio;
   }
 
   Map<String, dynamic> _decodeBody(http.Response response) {
