@@ -42,6 +42,57 @@ class EntranteNoBloqueadoTest extends TestCase {
         $this->assertSame( 'entrante_bloqueado_por_cierre_truncado', $motivo->codigo() );
     }
 
+    /**
+     * THE SAME "3 fechas" as the liberation minimum, and the half of this
+     * that is easy to miss: the `topeTresFechas` branch had its OWN constant,
+     * so a reglamento change could move the liberation minimum and leave the
+     * block capped at 3 — the two branches of BloqueoReemplazoPolicy then
+     * disagreeing about how long a reemplazo is held.
+     */
+    public function test_a_configured_minimum_moves_the_cap_of_the_tope_branch(): void {
+        $otraPlaza = [
+            $this->ocupacion( [ 'plaza_id' => 2, 'player_id' => 500, 'fecha_desde_id' => 1, 'fecha_hasta_id' => 5, 'cerrada_por' => 'reemplazada' ] ),
+            $this->ocupacion( [ 'plaza_id' => 2, 'id' => 2, 'player_id' => 888, 'es_genesis' => 0, 'fecha_desde_id' => 5, 'fecha_hasta_id' => 7, 'cerrada_por' => 'trunca' ] ),
+            $this->ocupacion( [ 'plaza_id' => 2, 'id' => 3, 'player_id' => 999, 'es_genesis' => 0, 'fecha_desde_id' => 7, 'fecha_hasta_id' => null ] ),
+        ];
+
+        // Exactly 3 resolved fechas since departure: unblocked under the
+        // reglamento's standing number.
+        $ctx = $this->ctxFavorableSustitucion(
+            [
+                'entrantePlazasConCierreTruncado' => [ $otraPlaza ],
+                'countResolvedFechasSinceFn'       => static fn ( int $fechaId ): int => 7 === $fechaId ? 3 : 10,
+            ]
+        );
+
+        $this->assertNull( ( new EntranteNoBloqueado() )->evaluate( $ctx ) );
+
+        // Raised to 5, the very same chain is still blocked.
+        $motivo = ( new EntranteNoBloqueado( null, null, 5 ) )->evaluate( $ctx );
+
+        $this->assertNotNull( $motivo, 'The cap must follow the configured minimum, not a constant of its own.' );
+        $this->assertSame( 'entrante_bloqueado_por_cierre_truncado', $motivo->codigo() );
+    }
+
+    public function test_a_lowered_minimum_unblocks_the_tope_branch_earlier(): void {
+        $otraPlaza = [
+            $this->ocupacion( [ 'plaza_id' => 2, 'player_id' => 500, 'fecha_desde_id' => 1, 'fecha_hasta_id' => 5, 'cerrada_por' => 'reemplazada' ] ),
+            $this->ocupacion( [ 'plaza_id' => 2, 'id' => 2, 'player_id' => 888, 'es_genesis' => 0, 'fecha_desde_id' => 5, 'fecha_hasta_id' => 7, 'cerrada_por' => 'trunca' ] ),
+            $this->ocupacion( [ 'plaza_id' => 2, 'id' => 3, 'player_id' => 999, 'es_genesis' => 0, 'fecha_desde_id' => 7, 'fecha_hasta_id' => null ] ),
+        ];
+
+        // One resolved fecha: blocked under 3, free under 1.
+        $ctx = $this->ctxFavorableSustitucion(
+            [
+                'entrantePlazasConCierreTruncado' => [ $otraPlaza ],
+                'countResolvedFechasSinceFn'       => static fn ( int $fechaId ): int => 7 === $fechaId ? 1 : 10,
+            ]
+        );
+
+        $this->assertNotNull( ( new EntranteNoBloqueado() )->evaluate( $ctx ) );
+        $this->assertNull( ( new EntranteNoBloqueado( null, null, 1 ) )->evaluate( $ctx ) );
+    }
+
     public function test_default_policy_unblocks_at_3_resolved_fechas_since_departure(): void {
         $otraPlaza = [
             $this->ocupacion( [ 'plaza_id' => 2, 'player_id' => 500, 'fecha_desde_id' => 1, 'fecha_hasta_id' => 5, 'cerrada_por' => 'reemplazada' ] ),

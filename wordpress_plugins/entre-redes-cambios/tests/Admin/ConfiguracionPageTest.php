@@ -175,6 +175,53 @@ class ConfiguracionPageTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // The configurable mínimo
+    // -------------------------------------------------------------------------
+
+    public function test_el_minimo_de_fechas_viaja_al_lector(): void {
+        $this->assertSame( 3, $this->settings->minimoFechasCambio(), 'The reglamento\'s standing value.' );
+
+        $resultado = $this->guardar( [ 'minimo_fechas_cambio' => '5' ] );
+
+        $this->assertTrue( $resultado['ok'] );
+        $this->assertSame( 5, $this->settings->minimoFechasCambio() );
+    }
+
+    public function test_el_minimo_puede_bajar_a_uno(): void {
+        $this->guardar( [ 'minimo_fechas_cambio' => '1' ] );
+
+        $this->assertSame( 1, $this->settings->minimoFechasCambio() );
+    }
+
+    public function test_un_minimo_fuera_de_rango_se_rechaza(): void {
+        // 0 would void the rule entirely — a substitute returnable the same
+        // fecha they arrived — and is far likelier to be a typo than a
+        // decision.
+        foreach ( [ '0', '-1', '11', 'tres', '' ] as $valor ) {
+            $resultado = $this->guardar( [ 'minimo_fechas_cambio' => $valor ] );
+
+            $this->assertFalse( $resultado['ok'], "minimo='{$valor}' must be refused." );
+            $this->assertSame( 3, $this->settings->minimoFechasCambio(), 'And nothing must have been written.' );
+        }
+    }
+
+    public function test_un_minimo_invalido_no_deja_pasar_a_los_plazos(): void {
+        $antes = $this->settings->aperturaSolicitudesOffset();
+
+        $resultado = $this->guardar( [
+            'dias_apertura_solicitudes' => '-9',   // perfectly fine
+            'minimo_fechas_cambio'      => '0',    // refused
+        ] );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertSame(
+            $antes,
+            $this->settings->aperturaSolicitudesOffset(),
+            'The mínimo rides on the same all-or-nothing save as the plazos.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // The invariant: a refused save writes NOTHING
     // -------------------------------------------------------------------------
 
@@ -381,6 +428,7 @@ class ConfiguracionPageTest extends TestCase {
             'hora_cierre_solicitudes'   => '23:59:59',
             'dias_publicacion'          => '-1',
             'hora_publicacion'          => '00:00:00',
+            'minimo_fechas_cambio'      => '3',
             // Mirrors the SEED exactly — exención ON, prioridad de padres
             // absent (= unchecked) — so `guardar( [] )` is a genuine no-op
             // and a test asserting "nothing changed" cannot pass by accident.

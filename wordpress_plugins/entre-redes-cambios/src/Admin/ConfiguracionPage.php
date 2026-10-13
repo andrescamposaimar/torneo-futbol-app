@@ -147,6 +147,20 @@ class ConfiguracionPage {
 
         $errores = PlazosValidator::validar( $offsets );
 
+        // Validated HERE rather than inside PlazosValidator: that class is
+        // about the four plazos as a chain, and the mínimo is a different
+        // kind of number that happens to live on the same form. It rides on
+        // the same all-or-nothing save, though — see class docblock.
+        $minimo = $entrada['minimo_fechas'];
+
+        if ( ! is_int( $minimo ) || $minimo < 1 || $minimo > 10 ) {
+            $errores[] = sprintf(
+                /* translators: %s: the submitted value */
+                __( 'El mínimo de fechas tiene que ser un número entero entre 1 y 10 (recibido: "%s").', 'entre-redes-cambios' ),
+                is_scalar( $minimo ) ? (string) $minimo : gettype( $minimo )
+            );
+        }
+
         if ( ! empty( $errores ) ) {
             // NOTHING is written — not even the rows that were individually
             // fine. See class docblock.
@@ -167,6 +181,7 @@ class ConfiguracionPage {
             );
         }
 
+        $valores['minimo_fechas_cambio'] = (string) (int) $entrada['minimo_fechas'];
         $valores['exencion_arco_activa'] = $entrada['exencion_arco'] ? '1' : '0';
         $valores['prioridad_padres_activa'] = $entrada['prioridad_padres'] ? '1' : '0';
 
@@ -213,8 +228,16 @@ class ConfiguracionPage {
             ];
         }
 
+        $minimoCrudo = $_POST['minimo_fechas_cambio'] ?? '';
+        $minimo      = is_scalar( $minimoCrudo ) ? trim( (string) $minimoCrudo ) : '';
+
         return [
             'offsets'          => $offsets,
+            // Same discipline as `days`: only a string that IS an integer
+            // becomes one, so garbage reaches the validator as garbage and
+            // comes back as a sentence instead of being rounded into
+            // something plausible.
+            'minimo_fechas'    => ( '' !== $minimo && 1 === preg_match( '/^-?[0-9]+$/', $minimo ) ) ? (int) $minimo : $minimo,
             'exencion_arco'    => isset( $_POST['exencion_arco_activa'] ),
             'prioridad_padres' => isset( $_POST['prioridad_padres_activa'] ),
         ];
@@ -297,6 +320,33 @@ class ConfiguracionPage {
 
                 <table class="form-table" role="presentation">
                     <tbody>
+                        <tr>
+                            <th scope="row">
+                                <label for="minimo_fechas_cambio"><?php esc_html_e( 'Mínimo de fechas', 'entre-redes-cambios' ); ?></label>
+                            </th>
+                            <td>
+                                <input
+                                    type="number"
+                                    id="minimo_fechas_cambio"
+                                    name="minimo_fechas_cambio"
+                                    value="<?php echo esc_attr( (string) $this->settings->minimoFechasCambio() ); ?>"
+                                    step="1"
+                                    min="1"
+                                    max="10"
+                                    class="small-text">
+                                <p class="description">
+                                    <?php
+                                    esc_html_e(
+                                        'Cuántas fechas jugadas tiene que cumplir un cambio antes de que el titular pueda volver. '
+                                        . 'El reglamento dice 3 hoy. OJO: no se congela por cambio — se recalcula siempre, así que '
+                                        . 'subirlo vuelve a bloquear suplentes que ya estaban liberados y bajarlo libera varios de '
+                                        . 'golpe. Conviene tocarlo entre fechas, no un jueves.',
+                                        'entre-redes-cambios'
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
                         <tr>
                             <th scope="row"><?php esc_html_e( 'Exención del arco', 'entre-redes-cambios' ); ?></th>
                             <td>
