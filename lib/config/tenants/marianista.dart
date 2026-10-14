@@ -28,7 +28,7 @@ const marianistaTenant = TenantConfig(
     credencial: true,
     // Still in development — must stay hidden from Gestión Torneo until the
     // feature is ready to ship.
-    cambios: true,
+    cambios: false,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
