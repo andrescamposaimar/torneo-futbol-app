@@ -677,6 +677,53 @@ class SolicitudNotifierTest extends TestCase {
         );
     }
 
+    public function test_el_mail_de_cancelacion_confirma_y_dice_que_la_plaza_quedo_libre(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->solicitudRepository->anular( $id, 222, null, '2026-05-28 10:00:00', 'Capitán Capitan Suarez' );
+        $this->notifier()->notificarCancelada( $id );
+
+        $this->assertSame( 'Cambios: Cancelamos tu pedido por Titular Perez', $this->enviados[0]['asunto'] );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringContainsString( 'Cancelaste tu pedido.', $cuerpo );
+
+        // The useful half. An open request holds its plaza, so "you can ask
+        // again" is the whole reason he cancelled.
+        $this->assertStringContainsString( 'La plaza quedó libre', $cuerpo );
+    }
+
+    /**
+     * `anulada` is reached by two different roads and they need opposite
+     * words. Routing both through notificarDecision() would tell a captain
+     * "cancelaste tu pedido" about something the comisión did TO him.
+     */
+    public function test_la_cancelacion_no_viaja_por_notificarDecision(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarDecision( $id, EstadoSolicitud::ANULADA );
+
+        $this->assertSame(
+            [],
+            $this->enviados,
+            'An annulment the comisión performed must not be announced as the captain cancelling.'
+        );
+    }
+
+    public function test_apagado_no_confirma_la_cancelacion(): void {
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCancelada( $id );
+
+        $this->assertSame( [], $this->enviados );
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------

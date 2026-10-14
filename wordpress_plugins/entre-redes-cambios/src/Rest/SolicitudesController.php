@@ -321,6 +321,12 @@ class SolicitudesController {
                 $this->nombreDelCapitan( (int) ( $claims['player_id'] ?? 0 ) )
             );
 
+            // After the transition is committed, and it never throws: the
+            // withdrawal happened whatever the mail does.
+            if ( null !== $this->notifier ) {
+                $this->notifier->notificarCancelada( $id );
+            }
+
             return new \WP_REST_Response(
                 [ 'id' => $id, 'estado' => EstadoSolicitud::ANULADA ],
                 200

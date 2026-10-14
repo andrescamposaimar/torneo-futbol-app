@@ -61,6 +61,15 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     private PlazaRepository $plazaRepository;
     private FechaRepository $fechaRepository;
     private ?CapitanEmailResolver $capitanEmails;
+
+    /**
+     * The two captain-facing moments that are NOT a `cambios_solicitud.estado`.
+     * Kept as constants beside the estados they travel with so nobody has to
+     * guess whether 'recibida' is a state of the request (it is not — the
+     * request is `pendiente`; 'recibida' is what the mail is ABOUT).
+     */
+    private const MOMENTO_RECIBIDA  = 'recibida';
+    private const MOMENTO_CANCELADA = 'cancelada';
     private JugadorMetricasReader $metricasReader;
     private EventLog $eventLog;
 
@@ -166,7 +175,18 @@ final class SolicitudNotifier implements NotificaSolicitudes {
      * request is stored and his action succeeded.
      */
     public function notificarCreadaAlCapitan( int $solicitudId ): void {
-        $this->notificarAlCapitan( $solicitudId, 'recibida' );
+        $this->notificarAlCapitan( $solicitudId, self::MOMENTO_RECIBIDA );
+    }
+
+    /**
+     * Confirms to the CAPTAIN that his own withdrawal went through — and,
+     * more usefully, that the plaza is free again.
+     *
+     * See `NotificaSolicitudes` for why this is its own method and not an
+     * `anulada` branch of `notificarDecision()`.
+     */
+    public function notificarCancelada( int $solicitudId ): void {
+        $this->notificarAlCapitan( $solicitudId, self::MOMENTO_CANCELADA );
     }
 
     /**
@@ -350,9 +370,13 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         $que = $this->quePidio( $row );
 
         $plantillas = [
-            'recibida'                 => [
+            self::MOMENTO_RECIBIDA     => [
                 __( 'Cambios: Recibimos tu pedido por %s', 'entre-redes-cambios' ),
                 __( 'Cambios: Recibimos tu pedido', 'entre-redes-cambios' ),
+            ],
+            self::MOMENTO_CANCELADA    => [
+                __( 'Cambios: Cancelamos tu pedido por %s', 'entre-redes-cambios' ),
+                __( 'Cambios: Cancelamos tu pedido', 'entre-redes-cambios' ),
             ],
             EstadoSolicitud::APROBADA  => [
                 __( 'Cambios: Aprobaron tu pedido por %s', 'entre-redes-cambios' ),
@@ -456,6 +480,10 @@ final class SolicitudNotifier implements NotificaSolicitudes {
             return esc_html__( 'La comisión rechazó tu pedido.', 'entre-redes-cambios' );
         }
 
+        if ( self::MOMENTO_CANCELADA === $momento ) {
+            return esc_html__( 'Cancelaste tu pedido.', 'entre-redes-cambios' );
+        }
+
         return esc_html__( 'Recibimos tu pedido.', 'entre-redes-cambios' );
     }
 
@@ -487,7 +515,20 @@ final class SolicitudNotifier implements NotificaSolicitudes {
             );
         }
 
-        if ( 'recibida' === $momento ) {
+        if ( self::MOMENTO_CANCELADA === $momento ) {
+            // The useful half: not that the mail arrived, but that he can
+            // ask again. An open request holds its plaza, so "the plaza is
+            // free" is the whole reason he cancelled.
+            $html .= sprintf(
+                '<p style="margin:0 0 16px;">%s</p>',
+                esc_html__(
+                    'La plaza quedó libre: ya podés pedir otro cambio para esa posición.',
+                    'entre-redes-cambios'
+                )
+            );
+        }
+
+        if ( self::MOMENTO_RECIBIDA === $momento ) {
             $html .= sprintf(
                 '<p style="margin:0 0 16px;">%s</p>',
                 esc_html__(

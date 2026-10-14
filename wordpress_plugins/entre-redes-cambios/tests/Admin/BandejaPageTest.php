@@ -196,6 +196,9 @@ class BandejaPageTest extends TestCase {
             public function notificarDecision( int $solicitudId, string $estado ): void {
                 $this->registro[] = [ $solicitudId, $estado ];
             }
+
+            public function notificarCancelada( int $solicitudId ): void {
+            }
         };
 
         return new BandejaPage(
