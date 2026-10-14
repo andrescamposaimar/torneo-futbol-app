@@ -56,6 +56,7 @@ class CambiosResponseCachingTest extends TestCase {
     public function test_every_cambios_route_is_covered(): void {
         $routes = [
             '/entre-redes/v1/cambios/solicitudes',
+            '/entre-redes/v1/cambios/solicitudes/12/cancelar',
             '/entre-redes/v1/cambios/plazas',
             '/entre-redes/v1/cambios/plazas/candidatos',
             '/entre-redes/v1/cambios/fecha-abierta',

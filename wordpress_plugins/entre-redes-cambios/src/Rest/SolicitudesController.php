@@ -207,6 +207,155 @@ class SolicitudesController {
                 'permission_callback' => '__return_true',
             ]
         );
+
+        register_rest_route(
+            RestController::API_NAMESPACE,
+            '/' . RestController::BASE . '/solicitudes/(?P<id>\\d+)/cancelar',
+            [
+                'methods'             => \WP_REST_Server::CREATABLE,
+                'callback'            => [ $this, 'cancelar' ],
+                'permission_callback' => '__return_true',
+            ]
+        );
+    }
+
+    /**
+     * `POST /cambios/solicitudes/{id}/cancelar` — the captain withdraws his
+     * OWN still-undecided request.
+     *
+     * *** WHY THIS EXISTS ***
+     * Since 0.1.21 an open request LOCKS its plaza and its incoming player.
+     * A captain who picked the wrong name was then stuck: he could not file
+     * the right request until somebody else resolved the wrong one, and his
+     * only way out was to write to the comisión — exactly the back-and-forth
+     * outside the system that this whole feature replaced. With a window
+     * that closes on a Thursday night, a typo could cost him the fecha.
+     *
+     * *** ONLY `pendiente`, AND ONLY HIS OWN ***
+     * An `aprobada` is NOT cancellable here. The comisión already acted on
+     * it, and undoing their decision is theirs to do — the tray has its own
+     * button for that (`Admin\BandejaPage`, "Anular una solicitud
+     * aprobada"). A captain cancelling an approval would also silently
+     * change what Friday's lote contains.
+     *
+     * Ownership is checked against the AUTHORISED season/team, never against
+     * what the request body claims, so this endpoint can never cancel — or
+     * probe the existence of — another team's solicitud: an id that is not
+     * theirs answers exactly like an id that does not exist.
+     *
+     * Response 200: { id, estado: "anulada" }
+     * Response 404 `solicitud_no_encontrada`: no such solicitud for this
+     *         team/season. Deliberately the same answer for "not yours".
+     * Response 409 `solicitud_ya_resuelta`: it is no longer `pendiente`.
+     *         The captain's screen is simply out of date — the comisión
+     *         decided while he was looking at it.
+     */
+    public function cancelar( \WP_REST_Request $request ): \WP_REST_Response {
+        $seasonId = (int) $request->get_param( 'season_id' );
+        $teamId   = (int) $request->get_param( 'team_id' );
+        $id       = (int) $request->get_param( 'id' );
+
+        if ( $seasonId <= 0 || $teamId <= 0 || $id <= 0 ) {
+            return $this->respuestaSolicitudInvalida(
+                'campos_invalidos',
+                'season_id, team_id e id son obligatorios y deben ser mayores a 0.'
+            );
+        }
+
+        $ahora = ( $this->clockFn )();
+
+        try {
+            $claims = $this->authorizeCapitan( $this->authorizer, $request, $seasonId, $teamId, $ahora );
+        } catch ( AuthorizationDeniedException $e ) {
+            $this->eventLog->record( 'rest.autorizacion_denegada', [
+                'endpoint'  => 'POST /cambios/solicitudes/{id}/cancelar',
+                'season_id' => $seasonId,
+                'team_id'   => $teamId,
+                'excepcion' => get_class( $e ),
+            ] );
+
+            return $this->respuestaNoAutorizada( $e );
+        }
+
+        try {
+            $row = $this->solicitudRepository->findSolicitud( $id );
+
+            // One answer for "does not exist" and "is not yours": telling
+            // them apart would make this endpoint a probe for other teams'
+            // request ids.
+            if ( null === $row
+                || (int) $row['season_id'] !== $seasonId
+                || (int) $row['team_id'] !== $teamId
+            ) {
+                return new \WP_REST_Response(
+                    [
+                        'code'    => 'solicitud_no_encontrada',
+                        'message' => 'No encontramos ese pedido.',
+                        'data'    => [ 'status' => 404 ],
+                    ],
+                    404
+                );
+            }
+
+            if ( EstadoSolicitud::PENDIENTE !== (string) $row['estado'] ) {
+                return new \WP_REST_Response(
+                    [
+                        'code'    => 'solicitud_ya_resuelta',
+                        'message' => 'Ese pedido ya fue resuelto por la comisión.',
+                        'data'    => [ 'status' => 409 ],
+                    ],
+                    409
+                );
+            }
+
+            $this->solicitudRepository->anular(
+                $id,
+                // The captain's PLAYER id, not a WP user id — unlike every
+                // other writer of this column. Nothing reads it for logic
+                // (it is write-only audit), and `decidida_por_nombre` below
+                // is what a human actually reads, so it says plainly that a
+                // captain did this and not the comisión.
+                (int) ( $claims['player_id'] ?? 0 ),
+                null,
+                gmdate( 'Y-m-d H:i:s', $ahora ),
+                $this->nombreDelCapitan( (int) ( $claims['player_id'] ?? 0 ) )
+            );
+
+            return new \WP_REST_Response(
+                [ 'id' => $id, 'estado' => EstadoSolicitud::ANULADA ],
+                200
+            );
+        } catch ( \Throwable $e ) {
+            $this->eventLog->record( 'rest.solicitud_cancelar_fallida', [
+                'solicitud_id' => $id,
+                'season_id'    => $seasonId,
+                'team_id'      => $teamId,
+                'excepcion'    => get_class( $e ),
+                'mensaje'      => $e->getMessage(),
+            ] );
+
+            return new \WP_REST_Response(
+                [
+                    'code'    => 'error_interno',
+                    'message' => 'No pudimos cancelar el pedido.',
+                    'data'    => [ 'status' => 500 ],
+                ],
+                500
+            );
+        }
+    }
+
+    /**
+     * What the audit trail will say forever. Prefixed so nobody reading the
+     * histórico later mistakes a captain's withdrawal for a decision the
+     * comisión took.
+     */
+    private function nombreDelCapitan( int $playerId ): string {
+        $nombre = $playerId > 0 ? trim( (string) get_the_title( $playerId ) ) : '';
+
+        return '' !== $nombre
+            ? sprintf( 'Capitán %s', $nombre )
+            : 'Capitán';
     }
 
     // -------------------------------------------------------------------------

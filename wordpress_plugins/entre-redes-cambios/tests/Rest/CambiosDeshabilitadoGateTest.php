@@ -89,6 +89,7 @@ class CambiosDeshabilitadoGateTest extends TestCase {
 
         $rutas = [
             '/entre-redes/v1/cambios/solicitudes',
+            '/entre-redes/v1/cambios/solicitudes/12/cancelar',
             '/entre-redes/v1/cambios/plazas',
             '/entre-redes/v1/cambios/plazas/candidatos',
             '/entre-redes/v1/cambios/fecha-abierta',

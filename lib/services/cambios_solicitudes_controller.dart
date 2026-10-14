@@ -68,4 +68,45 @@ class CambiosSolicitudesController extends StateNotifier<CambiosSolicitudesState
 
   Future<void> refresh({required int seasonId, required int teamId}) =>
       load(seasonId: seasonId, teamId: teamId);
+
+  /// Withdraws a still-pending request and reloads the list.
+  ///
+  /// Returns null on success, or a short Spanish sentence to show the
+  /// captain. It deliberately does NOT move the state to
+  /// [CambiosSolicitudesError] on failure: the list on screen is still
+  /// correct, and blanking it into a full-screen error over a failed
+  /// cancellation would lose everything else he was looking at.
+  ///
+  /// It ALWAYS reloads, success or not. A `solicitud_ya_resuelta` means the
+  /// comisión decided while he had the screen open, so the most useful
+  /// response is to show him what they decided — the message alone would
+  /// leave a stale "Pendiente" card sitting under it.
+  Future<String?> cancelar({
+    required int seasonId,
+    required int teamId,
+    required int solicitudId,
+  }) async {
+    String? error;
+
+    try {
+      await _service.cancelarSolicitud(
+        seasonId: seasonId,
+        teamId: teamId,
+        solicitudId: solicitudId,
+      );
+    } on CambiosApiException catch (e) {
+      error = switch (e.code) {
+        'solicitud_ya_resuelta' =>
+          'La comisión ya resolvió ese pedido mientras tenías la pantalla abierta.',
+        'solicitud_no_encontrada' => 'No encontramos ese pedido.',
+        _ => 'No pudimos cancelar el pedido. Probá de nuevo en unos minutos.',
+      };
+    } catch (_) {
+      error = 'No pudimos cancelar el pedido. Revisá tu conexión.';
+    }
+
+    await load(seasonId: seasonId, teamId: teamId);
+
+    return error;
+  }
 }

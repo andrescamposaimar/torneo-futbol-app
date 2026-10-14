@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.31
+Stable tag: 0.1.32
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,12 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.32 =
+* Feature: a captain can withdraw his own still-undecided request — `POST /cambios/solicitudes/{id}/cancelar`, and a "Cancelar pedido" button on Mis pedidos, shown only while the request is `pendiente`. Since 0.1.21 an open request LOCKS its plaza and its incoming player, so a captain who picked the wrong name was stuck: he could not file the right one until somebody else resolved the wrong one, and his only way out was to write to the comisión — the back-and-forth outside the system that this whole feature replaced. With a window that closes on a Thursday night, a typo could cost him the fecha.
+* An `aprobada` is NOT cancellable by the captain (409 `solicitud_ya_resuelta`). The comisión already acted on it, undoing their decision is theirs to do — the tray has its own button — and a captain cancelling an approval would silently change what Friday's lote contains.
+* Ownership is checked against the AUTHORISED season/team, never against what the body claims, and a solicitud belonging to another team answers EXACTLY like one that does not exist (404 `solicitud_no_encontrada`): telling them apart would make the endpoint a probe for other teams' request ids.
+* The audit trail names the captain with a "Capitán " prefix (`cambios_decision.decidida_por_nombre`), so nobody reading the histórico later mistakes a withdrawal for a decision the comisión took. `resuelta_por` holds the captain's PLAYER id here, unlike every other writer of that column — it is write-only audit that nothing reads for logic, and the name is what a human actually reads.
 
 = 0.1.31 =
 * Feature: the CAPTAIN is emailed about his own request — a receipt when he files it, and the decision when the comisión approves or rejects it. Its own switch on the Configuración screen, separate from the comisión's: one may be wanted without the other. There is no address to configure; it is resolved per captain from the Google or Apple account they sign in with (`Notificaciones\CapitanEmailResolver`: `solicitada_por` -> `prode_associations.player_id` -> `prode_users.email`). Deleted associations and deleted users are excluded — an account somebody removed is not a way to reach them — and when a player holds more than one, the most recently used login wins, because that is the inbox they are actually reading. No address means no mail, logged, never a guess.

@@ -668,6 +668,107 @@ void main() {
       expect(refreshCalls, equals([(seasonId: 9, teamId: 2)]));
     });
   });
+
+  group('CambiosSolicitudesView — cancelar un pedido', () {
+    testWidgets('a pendiente shows the button; nothing else does', (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(id: 1, estado: CambiosSolicitudEstado.pendiente),
+          _solicitud(id: 2, estado: CambiosSolicitudEstado.aprobada),
+          _solicitud(id: 3, estado: CambiosSolicitudEstado.rechazada),
+        ]),
+        onRetry: _noop,
+        onRefresh: _noopAsync,
+        onCancelar: (_) async => null,
+      )));
+
+      expect(find.byKey(const Key('cancelar_solicitud_1')), findsOneWidget);
+
+      // An approved request is the comisión's to undo; the rest are closed.
+      expect(find.byKey(const Key('cancelar_solicitud_2')), findsNothing);
+      expect(find.byKey(const Key('cancelar_solicitud_3')), findsNothing);
+    });
+
+    testWidgets('without onCancelar there is no button at all', (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(id: 1, estado: CambiosSolicitudEstado.pendiente),
+        ]),
+        onRetry: _noop,
+        onRefresh: _noopAsync,
+      )));
+
+      expect(find.byKey(const Key('cancelar_solicitud_1')), findsNothing);
+    });
+
+    testWidgets('saying No cancels nothing', (tester) async {
+      var llamadas = 0;
+
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(id: 1, estado: CambiosSolicitudEstado.pendiente),
+        ]),
+        onRetry: _noop,
+        onRefresh: _noopAsync,
+        onCancelar: (_) async {
+          llamadas++;
+          return null;
+        },
+      )));
+
+      await tester.tap(find.byKey(const Key('cancelar_solicitud_1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('No'));
+      await tester.pumpAndSettle();
+
+      expect(llamadas, 0, reason: 'Cancelling is irreversible; the dialog must mean something.');
+    });
+
+    testWidgets('confirming fires onCancelar with that id and reports back',
+        (tester) async {
+      final ids = <int>[];
+
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(id: 7, estado: CambiosSolicitudEstado.pendiente),
+        ]),
+        onRetry: _noop,
+        onRefresh: _noopAsync,
+        onCancelar: (id) async {
+          ids.add(id);
+          return null;
+        },
+      )));
+
+      await tester.tap(find.byKey(const Key('cancelar_solicitud_7')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirmar_cancelar')));
+      await tester.pumpAndSettle();
+
+      expect(ids, [7]);
+      expect(find.text('Cancelamos tu pedido.'), findsOneWidget);
+    });
+
+    testWidgets('a failure shows what went wrong, not a success message',
+        (tester) async {
+      await tester.pumpWidget(_wrap(CambiosSolicitudesView(
+        state: CambiosSolicitudesLoaded(solicitudes: [
+          _solicitud(id: 1, estado: CambiosSolicitudEstado.pendiente),
+        ]),
+        onRetry: _noop,
+        onRefresh: _noopAsync,
+        onCancelar: (_) async => 'La comisión ya resolvió ese pedido.',
+      )));
+
+      await tester.tap(find.byKey(const Key('cancelar_solicitud_1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirmar_cancelar')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('La comisión ya resolvió ese pedido.'), findsOneWidget);
+      expect(find.text('Cancelamos tu pedido.'), findsNothing);
+    });
+  });
 }
 
 /// Seeded with a fixed initial state and no-op load/refresh, mirroring the
