@@ -298,7 +298,7 @@ final class SolicitudNotifier implements NotificaSolicitudes {
                 '<p style="margin:0 0 16px;color:#646970;">%s</p>',
                 esc_html( sprintf(
                     /* translators: %s: the captain who filed the request */
-                    __( 'Pedido por %s', 'entre-redes-cambios' ),
+                    __( 'Pedido por %s (Capitán)', 'entre-redes-cambios' ),
                     $capitan
                 ) )
             );

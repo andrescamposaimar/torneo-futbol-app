@@ -221,7 +221,10 @@ class SolicitudNotifierTest extends TestCase {
 
         $this->notifier()->notificarCreada( $id );
 
-        $this->assertStringContainsString( 'Pedido por Capitan Suarez', $this->enviados[0]['cuerpo'] );
+        // The role in parentheses, so the name is not mistaken for another
+        // player in the movement — which is exactly what it looks like when
+        // the captain happens to be one of them.
+        $this->assertStringContainsString( 'Pedido por Capitan Suarez (Capitán)', $this->enviados[0]['cuerpo'] );
     }
 
     public function test_sin_capitan_resoluble_la_linea_no_aparece(): void {
