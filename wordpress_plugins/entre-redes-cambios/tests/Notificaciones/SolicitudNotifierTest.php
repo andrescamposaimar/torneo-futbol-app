@@ -307,18 +307,23 @@ class SolicitudNotifierTest extends TestCase {
         $this->assertCount( 1, $this->enviados );
     }
 
-    public function test_el_asunto_nombra_al_equipo_y_al_jugador_pedido(): void {
+    public function test_el_asunto_nombra_al_equipo_y_al_jugador_que_SALE(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
         $this->notifier()->notificarCreada( $id );
 
-        // assertSame on the whole string, not contains: with `contains` the
-        // previous format would pass too, since it also carried the team.
+        // The one being taken out (777), NOT the one coming in (888): that
+        // is the plaza the process owner is being asked about, and the name
+        // he already has in his head.
+        //
+        // assertSame on the whole string, not contains: `contains` would
+        // pass on a subject that also happened to carry the team.
         $this->assertSame(
-            'Cambios: Nueva solicitud de SUIZA por Suplente Gomez',
+            'Cambios: Nueva solicitud de SUIZA por Titular Perez',
             $this->enviados[0]['asunto']
         );
+        $this->assertStringNotContainsString( 'Suplente Gomez', $this->enviados[0]['asunto'] );
     }
 
     /**
@@ -351,7 +356,7 @@ class SolicitudNotifierTest extends TestCase {
      * A `regreso` has no entrante: the plaza's own titular is who comes
      * back, and he is what the request is about.
      */
-    public function test_en_un_regreso_el_asunto_nombra_al_titular_que_vuelve(): void {
+    public function test_un_regreso_tiene_su_propio_asunto_y_explica_quien_se_libera(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
         foreach ( [ 1, 2, 3, 4 ] as $fechaId ) {
             $this->seedFecha( $fechaId );
@@ -370,8 +375,24 @@ class SolicitudNotifierTest extends TestCase {
         $this->notifier()->notificarCreada( $id );
 
         $this->assertSame(
-            'Cambios: Nueva solicitud de SUIZA por Titular Perez',
-            $this->enviados[0]['asunto']
+            'Cambios: Confirmación de Regreso de Titular Perez',
+            $this->enviados[0]['asunto'],
+            'A regreso is not a request for a new player — it confirms one the team already has.'
+        );
+        $this->assertStringNotContainsString( 'Nueva solicitud', $this->enviados[0]['asunto'] );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringContainsString(
+            'El capitán pide el regreso de Titular Perez a su plaza.',
+            $cuerpo,
+            'The table alone does not say which direction a regreso runs.'
+        );
+        $this->assertStringContainsString( 'Se libera', $cuerpo );
+        $this->assertStringContainsString(
+            'Suplente Gomez',
+            $cuerpo,
+            'The suplente giving the plaza back is who the process owner needs to know frees up.'
         );
     }
 
@@ -424,10 +445,14 @@ class SolicitudNotifierTest extends TestCase {
 
         // The arco leg moves a player the team ALREADY has; the only one
         // joining from outside is the field entrante, so he is the ask.
+        // The GOALKEEPER stepping out of the arco (777), which is the whole
+        // subject of the move — not the field titular who replaces him, and
+        // not the external player joining underneath (999).
         $this->assertSame(
-            'Cambios: Nueva solicitud de SUIZA por Otro Lopez',
+            'Cambios: Nueva solicitud de SUIZA por Titular Perez',
             $this->enviados[0]['asunto']
         );
+        $this->assertStringNotContainsString( 'Otro Lopez', $this->enviados[0]['asunto'] );
 
         $cuerpo = $this->enviados[0]['cuerpo'];
         $this->assertStringContainsString( 'Arco — sale', $cuerpo );
