@@ -217,6 +217,29 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         );
     }
 
+    /**
+     * Who filed the request. `solicitada_por` holds the captain's PLAYER id
+     * — `$claims['player_id']` from the token, see
+     * `Rest\SolicitudesController::crear()` — not a WP user id, so it
+     * resolves through the same `get_the_title()` path as every other name
+     * on this mail. Resolving it as a WP user would have printed nothing.
+     *
+     * Null when the column holds 0, which only happens if the token carried
+     * no player id: the line is then dropped rather than printing
+     * "Jugador #0". The captain may well also be one of the players named
+     * below — that is ordinary and still worth stating, because the question
+     * "who asked for this" is not answered anywhere else on the mail.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function capitan( array $row ): ?string {
+        $playerId = (int) $row['solicitada_por'];
+
+        return $playerId > 0
+            ? $this->nombrePost( $playerId, __( 'Jugador', 'entre-redes-cambios' ) )
+            : null;
+    }
+
     /** @param array<string, mixed> $row */
     private function titularDeLaPlaza( array $row ): ?string {
         $plaza = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
@@ -264,9 +287,22 @@ final class SolicitudNotifier implements NotificaSolicitudes {
             esc_html( $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ) )
         );
         $html .= sprintf(
-            '<p style="margin:0 0 16px;color:#646970;">%s</p>',
+            '<p style="margin:0 0 2px;color:#646970;">%s</p>',
             esc_html( $this->contexto( $row, $tipo ) )
         );
+
+        $capitan = $this->capitan( $row );
+
+        if ( null !== $capitan ) {
+            $html .= sprintf(
+                '<p style="margin:0 0 16px;color:#646970;">%s</p>',
+                esc_html( sprintf(
+                    /* translators: %s: the captain who filed the request */
+                    __( 'Pedido por %s', 'entre-redes-cambios' ),
+                    $capitan
+                ) )
+            );
+        }
 
         $explicacion = $this->explicacion( $row, $tipo );
 
