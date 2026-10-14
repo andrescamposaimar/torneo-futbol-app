@@ -166,6 +166,9 @@ class SolicitudesControllerNotificaTest extends TestCase {
 
             public function notificarDecision( int $solicitudId, string $estado ): void {
             }
+
+            public function notificarCancelada( int $solicitudId ): void {
+            }
         };
     }
 

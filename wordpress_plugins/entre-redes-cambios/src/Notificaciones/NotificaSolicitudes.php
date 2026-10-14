@@ -35,4 +35,16 @@ interface NotificaSolicitudes {
      * one.
      */
     public function notificarDecision( int $solicitudId, string $estado ): void;
+
+    /**
+     * Confirm to the CAPTAIN that HIS OWN withdrawal went through.
+     *
+     * Deliberately NOT a `notificarDecision( $id, 'anulada' )`: a request
+     * reaches `anulada` by two different roads — the captain withdrawing it,
+     * and the comisión annulling an approved one from the tray — and those
+     * need opposite words. Routing both through one estado would tell a
+     * captain "cancelaste tu pedido" about something the comisión did to
+     * him. MUST NOT throw.
+     */
+    public function notificarCancelada( int $solicitudId ): void;
 }

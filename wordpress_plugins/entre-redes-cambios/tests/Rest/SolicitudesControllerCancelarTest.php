@@ -246,6 +246,92 @@ class SolicitudesControllerCancelarTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // The confirmation mail is actually WIRED here
+    //
+    // SolicitudNotifierTest proves the mail. This proves the cable: without
+    // it, deleting the call from cancelar() breaks nothing.
+    // -------------------------------------------------------------------------
+
+    public function test_cancelar_le_confirma_al_capitan(): void {
+        $avisados = [];
+        $this->controller = $this->controllerConNotificador( $avisados );
+
+        $id = $this->crearPendiente();
+
+        $this->assertSame( 200, $this->cancelar( $id )->get_status() );
+        $this->assertSame( [ $id ], $avisados );
+    }
+
+    /** A refusal is not a cancellation, so nothing may be confirmed. */
+    public function test_un_rechazo_del_endpoint_no_confirma_nada(): void {
+        $avisados = [];
+        $this->controller = $this->controllerConNotificador( $avisados );
+
+        $id = $this->crearPendiente();
+        $this->solicitudRepository->aprobar( $id, 1, null, '2026-05-20 12:00:00', 'La comision' );
+
+        $this->assertSame( 409, $this->cancelar( $id )->get_status() );
+        $this->assertSame( [], $avisados );
+
+        $this->cancelar( 424242 );
+        $this->assertSame( [], $avisados );
+    }
+
+    /** @param array<int, int> $avisados */
+    private function controllerConNotificador( array &$avisados ): SolicitudesController {
+        global $wpdb;
+
+        $notifier = new class( $avisados ) implements \EntreRedes\Cambios\Notificaciones\NotificaSolicitudes {
+            /** @var array<int, int> */
+            private array $registro;
+
+            /** @param array<int, int> $avisados */
+            public function __construct( array &$avisados ) {
+                $this->registro = &$avisados;
+            }
+
+            public function notificarCreada( int $solicitudId ): void {
+            }
+
+            public function notificarCreadaAlCapitan( int $solicitudId ): void {
+            }
+
+            public function notificarDecision( int $solicitudId, string $estado ): void {
+            }
+
+            public function notificarCancelada( int $solicitudId ): void {
+                $this->registro[] = $solicitudId;
+            }
+        };
+
+        $authorizer = $this->createMock( CapitanAuthorizer::class );
+        $authorizer->method( 'authorize' )->willReturn( [ 'player_id' => 777 ] );
+
+        $pipeline = new DictamenPipeline(
+            new DictamenContextAssembler(
+                $this->plazaRepository,
+                new FechaRepository( $wpdb, new InMemoryEventLog() ),
+                new Settings( $wpdb, $this->eventLog ),
+                $wpdb,
+                $this->eventLog
+            ),
+            $this->eventLog
+        );
+
+        return new SolicitudesController(
+            $authorizer,
+            $this->solicitudRepository,
+            $pipeline,
+            $this->eventLog,
+            $this->plazaRepository,
+            new JugadorMetricasReader( $wpdb, $this->eventLog ),
+            fn (): int => $this->fixedNow,
+            new InMemoryCreationLock(),
+            $notifier
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.32
+Stable tag: 0.1.33
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.33 =
+* Feature: cancelling a request confirms it to the captain by mail — "Cambios: Cancelamos tu pedido por X" — and says the half that actually matters: the plaza is free again, which is the whole reason he cancelled. Same switch as the other captain mails.
+* It is its OWN method (`notificarCancelada()`), not an `anulada` branch of `notificarDecision()`, which still ignores that estado. A request reaches `anulada` by two different roads — the captain withdrawing it, and the comisión annulling an approved one from the tray — and they need opposite words. Routing both through one estado would tell a captain "cancelaste tu pedido" about something the comisión did to him.
 
 = 0.1.32 =
 * Feature: a captain can withdraw his own still-undecided request — `POST /cambios/solicitudes/{id}/cancelar`, and a "Cancelar pedido" button on Mis pedidos, shown only while the request is `pendiente`. Since 0.1.21 an open request LOCKS its plaza and its incoming player, so a captain who picked the wrong name was stuck: he could not file the right one until somebody else resolved the wrong one, and his only way out was to write to the comisión — the back-and-forth outside the system that this whole feature replaced. With a window that closes on a Thursday night, a typo could cost him the fecha.
