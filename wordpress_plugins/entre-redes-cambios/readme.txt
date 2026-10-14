@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.28
+Stable tag: 0.1.29
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,11 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.29 =
+* Change: the alert's subject names the player BEING TAKEN OUT, plus the team — "Cambios: Nueva solicitud de SUIZA por Campos, Andres". Two requests from one team on one day would otherwise share a subject and have to be opened to be told apart, which is what dropping the solicitud id in 0.1.28 cost. The player leaving is what the process owner reads these by: it is the plaza he is being asked about. For a `reasignacion_arquero` the same rule names the goalkeeper stepping out of the arco — the move's whole subject — not the field titular replacing him nor the external player joining underneath. One column serves all of them: `saliente_player_id`, the plaza's vigent occupant frozen at request time.
+* Change: a `regreso` gets its own subject — "Cambios: Confirmación de Regreso de Campos, Andres" — because it is not a request for a new player but a captain confirming that one he already has is coming back. Its body now says so in a sentence ("El capitán pide el regreso de X a su plaza.") and labels the rows "Vuelve" and "Se libera": the table alone showed a titular and a suplente with no hint of which direction the request ran. The suplente who gives the plaza back is `saliente_player_id`, and there is only ever one — a chain's earlier occupants were already replaced when they left.
+* Team and player fall off the subject rather than printing a placeholder when nobody is resolvable: a shorter subject beats "por sin registrar".
 
 = 0.1.28 =
 * Change: the alert's subject is now "Cambios: Nueva solicitud de {equipo}" — the team is what the reader scans for in a list of subjects. It no longer carries the solicitud id; a row is identified in the tray by team and players, which the body spells out.

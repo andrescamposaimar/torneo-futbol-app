@@ -157,19 +157,73 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     }
 
     /**
-     * The team is what the reader scans for, so it is what the subject
-     * carries. It deliberately does NOT carry the solicitud id: the process
-     * owner asked for this wording, and a row is identified in the tray by
-     * team and players, which the body spells out.
+     * Two shapes, because a regreso is not a request for a new player — it
+     * is a captain confirming that one he already has is coming back:
+     *
+     *   Cambios: Nueva solicitud de SUIZA por Campos, Andres
+     *   Cambios: Confirmación de Regreso de Campos, Andres
+     *
+     * *** THE PLAYER NAMED IS THE ONE LEAVING, NOT THE ONE ARRIVING ***
+     * The process owner reads these by WHO IS BEING TAKEN OUT: that is the
+     * plaza he is being asked about, and the name he already has in his
+     * head. For a `reasignacion_arquero` the same rule names the goalkeeper
+     * stepping out of the arco, which is the move's whole subject — not the
+     * field titular who replaces him, and not the external player joining
+     * underneath.
+     *
+     * `saliente_player_id` is that player for all three tipos: it is the
+     * plaza's vigent occupant frozen AT REQUEST TIME (see
+     * `Migrations\InitialSchema`'s docblock on the column), which is the
+     * goalkeeper for the arco leg and the suplente for a regreso.
+     *
+     * A regreso names the TITULAR instead, since he is what is being
+     * confirmed. Team and player fall off rather than printing a
+     * placeholder when nobody is resolvable — a shorter subject beats
+     * "por sin registrar".
      *
      * @param array<string, mixed> $row
      */
     private function asunto( array $row ): string {
+        $tipo = (string) $row['tipo'];
+
+        if ( SolicitudDeCambio::TIPO_REGRESO === $tipo ) {
+            $titular = $this->titularDeLaPlaza( $row );
+
+            return null === $titular
+                ? __( 'Cambios: Confirmación de Regreso', 'entre-redes-cambios' )
+                : sprintf(
+                    /* translators: %s: the titular coming back */
+                    __( 'Cambios: Confirmación de Regreso de %s', 'entre-redes-cambios' ),
+                    $titular
+                );
+        }
+
+        $equipo = $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) );
+        $sale   = null !== $row['saliente_player_id'] ? (int) $row['saliente_player_id'] : null;
+
+        if ( null === $sale ) {
+            return sprintf(
+                /* translators: %s: team name */
+                __( 'Cambios: Nueva solicitud de %s', 'entre-redes-cambios' ),
+                $equipo
+            );
+        }
+
         return sprintf(
-            /* translators: %s: team name */
-            __( 'Cambios: Nueva solicitud de %s', 'entre-redes-cambios' ),
-            $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) )
+            /* translators: 1: team name, 2: the player being taken out */
+            __( 'Cambios: Nueva solicitud de %1$s por %2$s', 'entre-redes-cambios' ),
+            $equipo,
+            $this->nombrePost( $sale, __( 'Jugador', 'entre-redes-cambios' ) )
         );
+    }
+
+    /** @param array<string, mixed> $row */
+    private function titularDeLaPlaza( array $row ): ?string {
+        $plaza = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
+
+        return null === $plaza
+            ? null
+            : $this->nombrePost( (int) $plaza['titular_player_id'], __( 'Jugador', 'entre-redes-cambios' ) );
     }
 
     /**
@@ -214,6 +268,12 @@ final class SolicitudNotifier implements NotificaSolicitudes {
             esc_html( $this->contexto( $row, $tipo ) )
         );
 
+        $explicacion = $this->explicacion( $row, $tipo );
+
+        if ( '' !== $explicacion ) {
+            $html .= sprintf( '<p style="margin:0 0 16px;">%s</p>', esc_html( $explicacion ) );
+        }
+
         $html .= '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px;">';
 
         foreach ( $filas as $fila ) {
@@ -241,6 +301,35 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         $html .= '</div>';
 
         return $html;
+    }
+
+    /**
+     * One sentence saying what is being asked, for the tipo where the table
+     * alone does not say it.
+     *
+     * A `sustitucion` and a `reasignacion_arquero` are self-evident from
+     * their rows: somebody leaves, somebody enters. A REGRESO is not — the
+     * table shows a titular and a suplente with no hint of which direction
+     * the request runs, and "regreso" in the heading is a word, not an
+     * explanation. So that one says it plainly, and then the row below
+     * names the suplente who gives the plaza back.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function explicacion( array $row, string $tipo ): string {
+        if ( SolicitudDeCambio::TIPO_REGRESO !== $tipo ) {
+            return '';
+        }
+
+        $titular = $this->titularDeLaPlaza( $row );
+
+        return null === $titular
+            ? __( 'El capitán pide el regreso del titular de esta plaza.', 'entre-redes-cambios' )
+            : sprintf(
+                /* translators: %s: the titular coming back */
+                __( 'El capitán pide el regreso de %s a su plaza.', 'entre-redes-cambios' ),
+                $titular
+            );
     }
 
     /**
@@ -303,12 +392,17 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         if ( SolicitudDeCambio::TIPO_REGRESO === $tipo ) {
             $plaza = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
 
+            // `saliente_player_id` on a regreso is the SUPLENTE holding the
+            // plaza (see Migrations\InitialSchema on that column), so he is
+            // exactly who stops occupying it — the one the process owner
+            // needs to know frees up. There is only ever one: a chain's
+            // earlier occupants were already replaced when they left.
             return [
-                [ 'etiqueta' => __( 'Sale', 'entre-redes-cambios' ), 'player_id' => $sale ],
                 [
-                    'etiqueta'  => __( 'Vuelve el titular', 'entre-redes-cambios' ),
+                    'etiqueta'  => __( 'Vuelve', 'entre-redes-cambios' ),
                     'player_id' => null !== $plaza ? (int) $plaza['titular_player_id'] : null,
                 ],
+                [ 'etiqueta' => __( 'Se libera', 'entre-redes-cambios' ), 'player_id' => $sale ],
             ];
         }
 

@@ -307,14 +307,93 @@ class SolicitudNotifierTest extends TestCase {
         $this->assertCount( 1, $this->enviados );
     }
 
-    public function test_el_asunto_nombra_al_equipo(): void {
+    public function test_el_asunto_nombra_al_equipo_y_al_jugador_que_SALE(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
         $this->notifier()->notificarCreada( $id );
 
-        // The team is what the reader scans for in a list of subjects.
-        $this->assertSame( 'Cambios: Nueva solicitud de SUIZA', $this->enviados[0]['asunto'] );
+        // The one being taken out (777), NOT the one coming in (888): that
+        // is the plaza the process owner is being asked about, and the name
+        // he already has in his head.
+        //
+        // assertSame on the whole string, not contains: `contains` would
+        // pass on a subject that also happened to carry the team.
+        $this->assertSame(
+            'Cambios: Nueva solicitud de SUIZA por Titular Perez',
+            $this->enviados[0]['asunto']
+        );
+        $this->assertStringNotContainsString( 'Suplente Gomez', $this->enviados[0]['asunto'] );
+    }
+
+    /**
+     * Two requests from one team on one day must not share a subject — the
+     * whole reason the player was added to it.
+     */
+    public function test_dos_pedidos_del_mismo_equipo_no_comparten_asunto(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $this->seedFecha( 1 );
+
+        $plazaA = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $plazaB = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 999, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+
+        foreach ( [ [ $plazaA, 888 ], [ $plazaB, 111 ] ] as [ $plaza, $entrante ] ) {
+            $this->notifier()->notificarCreada(
+                $this->solicitudRepository->crear(
+                    SolicitudDeCambio::sustitucion( self::SEASON_ID, self::TEAM_ID, $plaza, $entrante, 1, time() ),
+                    777,
+                    Dictamen::from( [] ),
+                    '2026-05-27 10:00:00'
+                )
+            );
+        }
+
+        $this->assertCount( 2, $this->enviados );
+        $this->assertNotSame( $this->enviados[0]['asunto'], $this->enviados[1]['asunto'] );
+    }
+
+    /**
+     * A `regreso` has no entrante: the plaza's own titular is who comes
+     * back, and he is what the request is about.
+     */
+    public function test_un_regreso_tiene_su_propio_asunto_y_explica_quien_se_libera(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        foreach ( [ 1, 2, 3, 4 ] as $fechaId ) {
+            $this->seedFecha( $fechaId );
+        }
+
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+        $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
+
+        $id = $this->solicitudRepository->crear(
+            SolicitudDeCambio::regreso( self::SEASON_ID, self::TEAM_ID, $plazaId, 4, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-04-01 10:00:00'
+        );
+
+        $this->notifier()->notificarCreada( $id );
+
+        $this->assertSame(
+            'Cambios: Confirmación de Regreso de Titular Perez',
+            $this->enviados[0]['asunto'],
+            'A regreso is not a request for a new player — it confirms one the team already has.'
+        );
+        $this->assertStringNotContainsString( 'Nueva solicitud', $this->enviados[0]['asunto'] );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringContainsString(
+            'El capitán pide el regreso de Titular Perez a su plaza.',
+            $cuerpo,
+            'The table alone does not say which direction a regreso runs.'
+        );
+        $this->assertStringContainsString( 'Se libera', $cuerpo );
+        $this->assertStringContainsString(
+            'Suplente Gomez',
+            $cuerpo,
+            'The suplente giving the plaza back is who the process owner needs to know frees up.'
+        );
     }
 
     public function test_el_boton_dice_gestionar(): void {
@@ -363,6 +442,17 @@ class SolicitudNotifierTest extends TestCase {
         $this->notifier()->notificarCreada( $id );
 
         $this->assertCount( 1, $this->enviados, 'One request, one email.' );
+
+        // The arco leg moves a player the team ALREADY has; the only one
+        // joining from outside is the field entrante, so he is the ask.
+        // The GOALKEEPER stepping out of the arco (777), which is the whole
+        // subject of the move — not the field titular who replaces him, and
+        // not the external player joining underneath (999).
+        $this->assertSame(
+            'Cambios: Nueva solicitud de SUIZA por Titular Perez',
+            $this->enviados[0]['asunto']
+        );
+        $this->assertStringNotContainsString( 'Otro Lopez', $this->enviados[0]['asunto'] );
 
         $cuerpo = $this->enviados[0]['cuerpo'];
         $this->assertStringContainsString( 'Arco — sale', $cuerpo );
