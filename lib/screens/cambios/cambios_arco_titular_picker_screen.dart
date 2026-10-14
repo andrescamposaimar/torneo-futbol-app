@@ -46,9 +46,28 @@ class CambiosArcoTitularPickerScreen extends StatelessWidget {
     required this.jugadoresById,
   });
 
+  /// Field titulares who may step into goal.
+  ///
+  /// A plaza with a request already standing against it is NOT one of them.
+  /// Picking it builds a grouped request whose vacated field plaza is
+  /// already spoken for, which the backend refuses with a 409
+  /// (`Dictamen\Reglas\PlazaSinSolicitudAbierta`, covered by
+  /// `test_grouped_refused_when_the_vacated_field_plaza_has_an_open_request`).
+  /// Offering it anyway walks the captain through a whole picker to be told
+  /// no at the end.
+  ///
+  /// The field has been on [CambiosPlaza] since the roster screen started
+  /// hiding its own buttons for the same reason — this list simply never
+  /// read it.
+  ///
+  /// *** STILL NOT THE GUARD *** Same contract as everywhere else this
+  /// field is used: it degrades to "no open request" when missing, so the
+  /// worst case is a captain who taps and is refused. The rule that makes a
+  /// double booking impossible lives on the server.
   List<CambiosPlaza> get _elegibles => plazas.where((p) {
         if (p.cerrada) return false;
         if (!p.esTitularElOcupante) return false;
+        if (p.solicitudAbierta != null) return false;
         return !p.esArco;
       }).toList(growable: false);
 
@@ -110,7 +129,8 @@ class _EmptyView extends StatelessWidget {
             const SizedBox(height: 8),
             const Text(
               'No encontramos titulares de campo disponibles para pasar al '
-              'arco en este momento.',
+              'arco en este momento. Los jugadores que ya figuran en un '
+              'pedido de cambio sin resolver no aparecen acá.',
               textAlign: TextAlign.center,
             ),
           ],

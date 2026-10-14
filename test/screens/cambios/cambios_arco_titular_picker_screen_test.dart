@@ -22,6 +22,7 @@ CambiosPlaza _plaza({
   bool cerrada = false,
   bool esArco = false,
   double puntajeTecho = 3.0,
+  CambiosSolicitudAbierta? solicitudAbierta,
 }) {
   return CambiosPlaza(
     plazaId: plazaId,
@@ -33,6 +34,7 @@ CambiosPlaza _plaza({
     cerrada: cerrada,
     esArco: esArco,
     puntajeTecho: puntajeTecho,
+    solicitudAbierta: solicitudAbierta,
   );
 }
 
@@ -210,6 +212,60 @@ void main() {
 
       expect(find.byKey(const Key('arco_titular_card_2')), findsOneWidget);
       expect(find.byKey(const Key('arco_titular_card_5')), findsNothing);
+    });
+
+    /// Reported from a real session: a sustitución was filed on a field
+    /// titular's plaza, and that same titular then showed up here as a
+    /// candidate to step into goal. Picking him builds a grouped request
+    /// whose vacated field plaza is already spoken for, which the backend
+    /// refuses with a 409 — so the captain walked the whole picker to be
+    /// told no at the end.
+    testWidgets('excludes a field plaza that already has an open request',
+        (tester) async {
+      final plazaConPedido = _plaza(
+        plazaId: 6,
+        titularPlayerId: 105,
+        titularNombre: 'Campos, Andres',
+        solicitudAbierta: const CambiosSolicitudAbierta(id: 42, estado: 'pendiente'),
+      );
+
+      await tester.pumpWidget(_wrap(CambiosArcoTitularPickerScreen(
+        seasonId: 7,
+        teamId: 1,
+        plazaArco: plazaArco,
+        plazas: [plazaArco, plazaCampoA, plazaConPedido],
+        jugadoresById: {
+          ...jugadoresById(),
+          105: _jugador(id: 105, posicion: 'Defensor'),
+        },
+      )));
+
+      expect(find.byKey(const Key('arco_titular_card_2')), findsOneWidget);
+      expect(find.byKey(const Key('arco_titular_card_6')), findsNothing);
+      expect(find.text('Campos, Andres'), findsNothing);
+    });
+
+    /// `aprobada` is open too: it still holds its plaza until Friday's lote.
+    testWidgets('excludes one whose request is already aprobada', (tester) async {
+      final plazaAprobada = _plaza(
+        plazaId: 7,
+        titularPlayerId: 106,
+        titularNombre: 'Ya Aprobado',
+        solicitudAbierta: const CambiosSolicitudAbierta(id: 43, estado: 'aprobada'),
+      );
+
+      await tester.pumpWidget(_wrap(CambiosArcoTitularPickerScreen(
+        seasonId: 7,
+        teamId: 1,
+        plazaArco: plazaArco,
+        plazas: [plazaArco, plazaCampoA, plazaAprobada],
+        jugadoresById: {
+          ...jugadoresById(),
+          106: _jugador(id: 106, posicion: 'Defensor'),
+        },
+      )));
+
+      expect(find.byKey(const Key('arco_titular_card_7')), findsNothing);
     });
 
     testWidgets('empty state when no field titular is eligible', (tester) async {
