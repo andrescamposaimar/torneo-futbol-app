@@ -75,6 +75,12 @@ class InitialSchema {
         // ONLY — the bandeja and the histórico keep working, which is the
         // whole point of being able to stop the inbox while still
         // processing what is already in it.
+        // Notify the process owner on every new request (0.1.25). OFF by
+        // default and with NO address, because the address cannot be known
+        // at seed time and mailing nowhere is worse than not mailing:
+        // Admin\ConfiguracionPage refuses to turn it on without one.
+        'notificacion_nueva_activa'  => '0',
+        'notificacion_nueva_destino' => '',
         'cambios_habilitados'        => '1',
         'mensaje_deshabilitado'      => 'Por el momento no es posible gestionar los cambios de forma online. Por favor contactate con la Comisión Directiva.',
         // `0` means "not configured" — NEVER a real `sp_team` post id, see

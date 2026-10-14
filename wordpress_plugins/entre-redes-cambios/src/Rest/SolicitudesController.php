@@ -19,6 +19,7 @@ use EntreRedes\Cambios\Dictamen\Reglas\PlazaSinSolicitudAbierta;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\Exception\CreationLockUnavailableException;
 use EntreRedes\Cambios\Solicitudes\Exception\SolicitudAbiertaException;
+use EntreRedes\Cambios\Notificaciones\NotificaSolicitudes;
 use EntreRedes\Cambios\Solicitudes\Lock\CreationLock;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
@@ -118,6 +119,14 @@ class SolicitudesController {
     private JugadorMetricasReader $jugadorMetricasReader;
     private ?CreationLock $creationLock;
 
+    /**
+     * Emails the process owner after a successful creation, or null to send
+     * nothing. Optional so every existing test that builds this controller
+     * keeps working unchanged — a missing notifier is "no alert", never an
+     * error: the solicitud is what matters and it is already stored.
+     */
+    private ?NotificaSolicitudes $notifier;
+
     /** @var callable(): int */
     private $clockFn;
 
@@ -164,9 +173,11 @@ class SolicitudesController {
         PlazaRepository $plazaRepository,
         JugadorMetricasReader $jugadorMetricasReader,
         ?callable $clockFn = null,
-        ?CreationLock $creationLock = null
+        ?CreationLock $creationLock = null,
+        ?NotificaSolicitudes $notifier = null
     ) {
         $this->creationLock          = $creationLock;
+        $this->notifier              = $notifier;
         $this->authorizer            = $authorizer;
         $this->solicitudRepository   = $solicitudRepository;
         $this->dictamenPipeline      = $dictamenPipeline;
@@ -378,7 +389,7 @@ class SolicitudesController {
             // (SolicitudAbiertaException) and any other exception included;
             // if it cannot be acquired in time the closure never runs and
             // CreationLockUnavailableException is answered below as a 503.
-            return $this->creationLock->run( $seasonId, function () use (
+            $respuesta = $this->creationLock->run( $seasonId, function () use (
                 $tipo, $seasonId, $teamId, $plazaId, $entrantePlayerId, $entranteCampoPlayerId, $fechaId, $ahora, $solicitadaPor, $ahoraDb
             ): \WP_REST_Response {
                 if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
@@ -434,6 +445,20 @@ class SolicitudesController {
                     200
                 );
             } );
+
+            // *** OUTSIDE THE LOCK, ON PURPOSE ***
+            // run() has returned, so the per-season GET_LOCK is already
+            // released. wp_mail() can block for seconds on an SMTP timeout,
+            // and doing that inside the critical section would answer 503
+            // `creacion_ocupada` to every other captain in the league for as
+            // long as it hung. SolicitudNotifierTest pins this as a
+            // property — it is invisible from here.
+            //
+            // notificarCreada() never throws: the solicitud is stored and
+            // the captain's request succeeded whatever happens to the mail.
+            $this->notificarCreada( $respuesta );
+
+            return $respuesta;
         } catch ( CreationLockUnavailableException $e ) {
             // Retryable, unlike the 409 below: another creation held the
             // lock for the whole bounded wait. Nothing was evaluated or
@@ -977,6 +1002,30 @@ class SolicitudesController {
      * "probá de nuevo en unos minutos" register as the generic error and a
      * distinct `code` the client can key a retry on.
      */
+    /**
+     * Fires the new-request alert for a successful creation, and for
+     * nothing else. Reads the id back out of the response rather than
+     * being handed it, so the two creation branches (plain and grouped,
+     * which return from different places inside the locked closure) cannot
+     * drift into one of them forgetting to notify.
+     *
+     * A non-200 never reaches here — the refusals return earlier — but the
+     * status is checked anyway: this method must never be the reason a
+     * rejected request looks accepted in somebody's inbox.
+     */
+    private function notificarCreada( \WP_REST_Response $respuesta ): void {
+        if ( null === $this->notifier || 200 !== $respuesta->get_status() ) {
+            return;
+        }
+
+        $datos = $respuesta->get_data();
+        $id    = is_array( $datos ) ? (int) ( $datos['id'] ?? 0 ) : 0;
+
+        if ( $id > 0 ) {
+            $this->notifier->notificarCreada( $id );
+        }
+    }
+
     private function respuestaCreacionOcupada(): \WP_REST_Response {
         return new \WP_REST_Response(
             [

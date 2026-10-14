@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.24
+Stable tag: 0.1.25
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,12 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.25 =
+* Feature: the process owner can be emailed on every new request (`notificacion_nueva_activa` + `notificacion_nueva_destino`, both on the Configuración screen, OFF by default and with no address — saving refuses to turn it on without a valid one). The NinjaForms process this plugin replaces emailed the comisión on every submission; ours did not, so the whole thing depended on somebody remembering to open a page. The mail carries the team, the movement, the fecha, the suggested action with its motivos, and a link to the bandeja — enough to triage without opening it. A grouped `reasignacion_arquero` is ONE request with two movements, so it sends ONE mail describing both.
+* Reliability: the alert is sent with the creation lock ALREADY RELEASED. `wp_mail()` can block for seconds on an SMTP timeout, and inside `Solicitudes\Lock\CreationLock` that would hold the per-season `GET_LOCK` for its duration and answer 503 `creacion_ocupada` to every other captain in the league. Pinned as a property by `Rest\SolicitudesControllerNotificaTest`, because nothing about the call site makes it visible.
+* Reliability: a mail failure NEVER fails the request. By the time the notifier runs the solicitud is stored and the captain's action succeeded; turning an SMTP timeout into an error would tell them it did not go through — false, and an invitation to file it again straight into the duplicate refusal. Every path is swallowed into a logged event (`notificacion.envio_fallido`, `notificacion.fallida`, `notificacion.sin_destino_fallida`).
+* Internal: `Notificaciones\NotificaSolicitudes` is the seam the controller depends on — same reason `Solicitudes\Lock\CreationLock` is an interface — so the controller's "only a 200 with an id notifies" guard is testable without a mailer or a database.
 
 = 0.1.24 =
 * Fix: the hora fields on the Configuración screen were `small-text` (~55px), which cut "23:59:59" off mid-value. The operator read "23:5" and could not tell a stored `23:59:59` from a stored `23:50:00` — the value was always correct, only unreadable.

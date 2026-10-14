@@ -775,6 +775,32 @@ if ( ! function_exists( 'esc_attr__' ) ) {
     }
 }
 
+if ( ! function_exists( 'is_email' ) ) {
+    /**
+     * Core's is_email() is stricter than FILTER_VALIDATE_EMAIL in places and
+     * looser in others, but both agree on everything a settings form will
+     * realistically see. What matters for fidelity is that it REJECTS —
+     * returning a truthy value unconditionally, the tempting shim, would
+     * make the "invalid address" test pass while validating nothing.
+     */
+    function is_email( string $email ): string|false {
+        return filter_var( $email, FILTER_VALIDATE_EMAIL ) ? $email : false;
+    }
+}
+
+if ( ! function_exists( 'wp_mail' ) ) {
+    /**
+     * Records instead of sending. Production passes an explicit $mailFn, so
+     * this only guards against a path that forgot to — and it records
+     * rather than returning true silently, so such a path is visible.
+     */
+    function wp_mail( string $to, string $subject, string $message, mixed $headers = '', mixed $attachments = [] ): bool {
+        $GLOBALS['_cambios_test_mails'][] = [ 'to' => $to, 'subject' => $subject, 'message' => $message ];
+
+        return true;
+    }
+}
+
 if ( ! function_exists( 'sanitize_textarea_field' ) ) {
     /**
      * Core strips tags and control characters but KEEPS newlines — the one

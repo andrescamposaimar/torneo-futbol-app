@@ -179,6 +179,25 @@ class ConfiguracionPage {
             );
         }
 
+        // Same shape as the kill switch's message: only enforced when the
+        // thing is actually ON. Turning on an alert with nowhere to send it
+        // produces silence that looks exactly like "nobody asked for a
+        // change" — the failure this feature exists to end.
+        if ( $entrada['notificar'] && '' === $entrada['notificar_destino'] ) {
+            $errores[] = __(
+                'Si querés que se avise por mail, escribí la dirección a la que mandarlo.',
+                'entre-redes-cambios'
+            );
+        }
+
+        if ( '' !== $entrada['notificar_destino'] && ! is_email( $entrada['notificar_destino'] ) ) {
+            $errores[] = sprintf(
+                /* translators: %s: the submitted value */
+                __( '"%s" no parece una dirección de mail válida.', 'entre-redes-cambios' ),
+                $entrada['notificar_destino']
+            );
+        }
+
         if ( mb_strlen( $entrada['mensaje'] ) > self::MENSAJE_MAX ) {
             $errores[] = sprintf(
                 /* translators: %d: maximum length */
@@ -209,6 +228,8 @@ class ConfiguracionPage {
 
         $valores['minimo_fechas_cambio']   = (string) (int) $entrada['minimo_fechas'];
         $valores['cambios_habilitados']    = $entrada['habilitados'] ? '1' : '0';
+        $valores['notificacion_nueva_activa']  = $entrada['notificar'] ? '1' : '0';
+        $valores['notificacion_nueva_destino'] = $entrada['notificar_destino'];
         $valores['mensaje_deshabilitado']  = $entrada['mensaje'];
         $valores['exencion_arco_activa'] = $entrada['exencion_arco'] ? '1' : '0';
         $valores['prioridad_padres_activa'] = $entrada['prioridad_padres'] ? '1' : '0';
@@ -269,6 +290,10 @@ class ConfiguracionPage {
             'exencion_arco'    => isset( $_POST['exencion_arco_activa'] ),
             'prioridad_padres' => isset( $_POST['prioridad_padres_activa'] ),
             'habilitados'      => isset( $_POST['cambios_habilitados'] ),
+            'notificar'        => isset( $_POST['notificacion_nueva_activa'] ),
+            'notificar_destino' => isset( $_POST['notificacion_nueva_destino'] ) && is_scalar( $_POST['notificacion_nueva_destino'] )
+                ? trim( sanitize_text_field( wp_unslash( (string) $_POST['notificacion_nueva_destino'] ) ) )
+                : '',
             // sanitize_textarea_field keeps newlines and strips tags — this
             // is the one string this plugin sends to the app to be rendered
             // as written, so it is cleaned here, at the only door it can
@@ -354,6 +379,51 @@ class ConfiguracionPage {
                                     );
                                     ?>
                                 </p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2><?php esc_html_e( 'Avisos', 'entre-redes-cambios' ); ?></h2>
+
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><?php esc_html_e( 'Avisar por mail', 'entre-redes-cambios' ); ?></th>
+                            <td>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        name="notificacion_nueva_activa"
+                                        value="1"
+                                        <?php checked( $this->settings->notificacionNuevaSolicitudActiva() ); ?>>
+                                    <?php esc_html_e( 'Mandar un mail cada vez que un capitán pide un cambio', 'entre-redes-cambios' ); ?>
+                                </label>
+                                <p class="description">
+                                    <?php
+                                    esc_html_e(
+                                        'El mail trae el equipo, el movimiento, la fecha y la acción sugerida, más el link a '
+                                        . 'la bandeja. Un pedido agrupado de arquero manda UN solo mail con los dos '
+                                        . 'movimientos. Si el envío falla, el pedido igual queda guardado: nunca se pierde '
+                                        . 'una solicitud por un problema de mail.',
+                                        'entre-redes-cambios'
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">
+                                <label for="notificacion_nueva_destino"><?php esc_html_e( 'Mandar el aviso a', 'entre-redes-cambios' ); ?></label>
+                            </th>
+                            <td>
+                                <input
+                                    type="email"
+                                    id="notificacion_nueva_destino"
+                                    name="notificacion_nueva_destino"
+                                    value="<?php echo esc_attr( $this->settings->notificacionNuevaSolicitudDestino() ); ?>"
+                                    class="regular-text"
+                                    placeholder="comision@ejemplo.com">
                             </td>
                         </tr>
                     </tbody>
