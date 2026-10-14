@@ -135,20 +135,45 @@ final class SettingsWriter {
     }
 
     /**
-     * The stored string, or null when there is no row. Unlike `Settings`'s
-     * readers this does NOT fall back to a seeded default: the caller is
-     * comparing against what is physically there, and a default standing in
-     * for an absent row would make a first-time write look like a no-op and
-     * skip it.
+     * The stored string, or null when there is genuinely NO ROW. Unlike
+     * `Settings`'s readers this does NOT fall back to a seeded default: the
+     * caller is comparing against what is physically there, and a default
+     * standing in for an absent row would make a first-time write look like
+     * a no-op and skip it.
+     *
+     * *** WHY get_row() AND NOT get_var() ***
+     * `wpdb::get_var()` returns `null` for an EMPTY STRING, not just for a
+     * missing row — straight from core:
+     *
+     *     return ( isset( $values[ $x ] ) && '' !== $values[ $x ] ) ? $values[ $x ] : null;
+     *
+     * so through `get_var()` "stored but empty" and "no such row" are the
+     * same answer. This method's `null` decides UPDATE vs INSERT, and reading
+     * an empty value as "no row" sent an INSERT at a row that existed,
+     * straight into the primary key. It shipped in 0.1.25 and broke exactly
+     * one setting — `notificacion_nueva_destino`, the only one seeded with
+     * an empty value — with "Algunos valores no se pudieron guardar".
+     *
+     * `get_row()` has no such quirk: it hands back the row as it is, so an
+     * empty `setting_value` comes back as `''` and the absence of a row is
+     * the only thing that produces `null`.
+     *
+     * The test shim used to return `''` where core returns `null`, which is
+     * why 1059 tests passed over this. It now mirrors core.
      */
     private function leerCrudo( string $clave ): ?string {
         $p = $this->wpdb->prefix;
 
-        $valor = $this->wpdb->get_var(
-            $this->wpdb->prepare( "SELECT setting_value FROM {$p}cambios_settings WHERE setting_key = %s LIMIT 1", $clave )
+        $fila = $this->wpdb->get_row(
+            $this->wpdb->prepare( "SELECT setting_value FROM {$p}cambios_settings WHERE setting_key = %s LIMIT 1", $clave ),
+            ARRAY_A
         );
 
-        return null === $valor ? null : (string) $valor;
+        if ( ! is_array( $fila ) || ! array_key_exists( 'setting_value', $fila ) ) {
+            return null;
+        }
+
+        return (string) $fila['setting_value'];
     }
 
     /**

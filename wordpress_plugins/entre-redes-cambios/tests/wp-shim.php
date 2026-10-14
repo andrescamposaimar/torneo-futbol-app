@@ -91,11 +91,28 @@ if ( ! class_exists( 'wpdb' ) ) {
         /**
          * Returns first column of first row, or null.
          */
+        /**
+         * *** RETURNS null FOR AN EMPTY STRING, EXACTLY LIKE CORE ***
+         * wp-includes/class-wpdb.php:
+         *     return ( isset( $values[ $x ] ) && '' !== $values[ $x ] ) ? $values[ $x ] : null;
+         *
+         * So "the stored value is empty" and "there is no such row" are
+         * INDISTINGUISHABLE through get_var(). This shim used to return ''
+         * for the first case, which made a real production bug invisible:
+         * Calendario\SettingsWriter decided UPDATE-vs-INSERT from that null,
+         * took the INSERT branch for a row that did exist, and hit the
+         * primary key. Every test passed.
+         */
         public function get_var( string $sql ): ?string {
             try {
                 $stmt = $this->pdo->query( $sql );
                 $row  = $stmt->fetch( \PDO::FETCH_NUM );
-                return $row ? (string) $row[0] : null;
+
+                if ( ! $row || null === $row[0] || '' === (string) $row[0] ) {
+                    return null;
+                }
+
+                return (string) $row[0];
             } catch ( \PDOException $e ) {
                 return null;
             }
