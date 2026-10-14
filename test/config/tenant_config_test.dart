@@ -109,8 +109,12 @@ void main() {
       expect(auth.appleRedirectUri, contains('entreredespadres.com.ar'));
     });
 
-    test('has cambios: false (still in development)', () {
-      expect(marianistaTenant.features.cambios, isFalse);
+    // Guards the launch in the other direction now: Cambios is live, and
+    // flipping this back off would silently remove the feature for every
+    // captain. Pausing it is the plugin's `cambios_habilitados` setting, not
+    // an app release.
+    test('has cambios: true (live)', () {
+      expect(marianistaTenant.features.cambios, isTrue);
     });
 
     test('has solicitudCambioUrl: null (hidden for the launch)', () {

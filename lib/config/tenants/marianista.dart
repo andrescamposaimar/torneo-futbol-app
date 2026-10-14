@@ -16,19 +16,17 @@ const marianistaTenant = TenantConfig(
     waitingLists: true,
     newsTab: true,
     ads: true,
-    // Shipped dark: the Prode UI (incl. the G5 leaderboard) is complete in the
-    // app, but the WordPress plugin in production is still pre-G3/G4 — the
-    // /prode/ranking endpoint 404s. Keep Prode hidden until the updated plugin
-    // is deployed, then flip this back to true. prodeAuth below stays set so
-    // re-enabling is a one-line change.
+    // Live since 1.5.0 — the comment that used to sit here described the
+    // dark-ship period and outlived it.
     prode: true,
     campeones: true,
     // On without the in-app photo upload flow: the comisión loads the
     // player's photo until the upload UX ships (slice 4).
     credencial: true,
-    // Still in development — must stay hidden from Gestión Torneo until the
-    // feature is ready to ship.
-    cambios: false,
+    // Live. The WordPress plugin (entre-redes-cambios 0.1.33) is deployed, and
+    // the comisión can pause the feature from its admin page without shipping
+    // an app release — see `cambios_habilitados` in the plugin's settings.
+    cambios: true,
   ),
   integrations: TenantIntegrations(
     appsScriptUrl:
@@ -56,7 +54,7 @@ const marianistaTenant = TenantConfig(
     modalidadUrl:
         'https://entreredespadres.com.ar/wp-content/uploads/2026/modalidad_torneo_2026.pdf',
     // solicitudCambioUrl is intentionally unset, so that tile stays hidden:
-    // "Cambios de jugadores" (features.cambios, still off) will replace it.
+    // "Cambios de jugadores" (features.cambios) replaces it.
     anuarios: [
       TenantAnuario(
         label: 'Anuario 2022',
