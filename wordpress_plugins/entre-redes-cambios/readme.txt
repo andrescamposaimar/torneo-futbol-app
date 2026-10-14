@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.25
+Stable tag: 0.1.26
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.26 =
+* Fix: saving the Configuración screen failed with "Algunos valores no se pudieron guardar: notificacion_nueva_destino". `wpdb::get_var()` returns `null` for an EMPTY STRING, not only for a missing row (`return ( isset( $values[ $x ] ) && '' !== $values[ $x ] ) ? $values[ $x ] : null;` in core), and `Calendario\SettingsWriter` decided UPDATE-vs-INSERT from that `null`. The only setting seeded with an empty value is `notificacion_nueva_destino`, added in 0.1.25, so the writer sent an INSERT at a row that existed and hit the primary key. It now reads the row with `get_row()`, which has no such quirk, so `null` means only "no such row".
+* Fix (tests): the SQLite shim's `get_var()` returned `''` where core returns `null`, which is why 1059 tests passed over the bug above. It now mirrors core exactly. Restoring the old `get_var()` in `SettingsWriter` breaks 431 tests; before this, it broke none.
 
 = 0.1.25 =
 * Feature: the process owner can be emailed on every new request (`notificacion_nueva_activa` + `notificacion_nueva_destino`, both on the Configuración screen, OFF by default and with no address — saving refuses to turn it on without a valid one). The NinjaForms process this plugin replaces emailed the comisión on every submission; ours did not, so the whole thing depended on somebody remembering to open a page. The mail carries the team, the movement, the fecha, the suggested action with its motivos, and a link to the bandeja — enough to triage without opening it. A grouped `reasignacion_arquero` is ONE request with two movements, so it sends ONE mail describing both.
