@@ -67,6 +67,7 @@ class SolicitudNotifierTest extends TestCase {
             777           => 'Titular Perez',
             888           => 'Suplente Gomez',
             999           => 'Otro Lopez',
+            222           => 'Capitan Suarez',
         ];
 
         $this->eventLog        = new InMemoryEventLog();
@@ -208,6 +209,36 @@ class SolicitudNotifierTest extends TestCase {
         $this->assertStringContainsString( 'Titular Perez', $cuerpo );
         $this->assertStringContainsString( 'Suplente Gomez', $cuerpo );
         $this->assertStringContainsString( 'page=cambios-bandeja', $cuerpo, 'The link is what turns an alert into an action.' );
+    }
+
+    public function test_el_cuerpo_nombra_al_capitan_que_pidio(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+
+        // A captain who is NEITHER of the two players in the movement: with
+        // the default 777 the name would already be on the mail as the
+        // saliente, and the assertion would pass without the new line.
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCreada( $id );
+
+        // The role in parentheses, so the name is not mistaken for another
+        // player in the movement — which is exactly what it looks like when
+        // the captain happens to be one of them.
+        $this->assertStringContainsString( 'Pedido por Capitan Suarez (Capitán)', $this->enviados[0]['cuerpo'] );
+    }
+
+    public function test_sin_capitan_resoluble_la_linea_no_aparece(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+
+        // 0 is what the column holds if the token carried no player id.
+        $id = $this->crearSustitucion( null, 0 );
+
+        $this->notifier()->notificarCreada( $id );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringNotContainsString( 'Pedido por', $cuerpo );
+        $this->assertStringNotContainsString( 'Jugador #0', $cuerpo );
     }
 
     public function test_va_como_html(): void {
@@ -501,13 +532,13 @@ class SolicitudNotifierTest extends TestCase {
         );
     }
 
-    private function crearSustitucion( ?Dictamen $dictamen = null ): int {
+    private function crearSustitucion( ?Dictamen $dictamen = null, int $solicitadaPor = 777 ): int {
         $this->seedFecha( 1 );
         $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
 
         return $this->solicitudRepository->crear(
             SolicitudDeCambio::sustitucion( self::SEASON_ID, self::TEAM_ID, $plazaId, 888, 1, time() ),
-            777,
+            $solicitadaPor,
             $dictamen ?? Dictamen::from( [] ),
             '2026-05-27 10:00:00'
         );

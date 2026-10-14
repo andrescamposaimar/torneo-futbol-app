@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.29
+Stable tag: 0.1.30
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.30 =
+* Feature: the alert names the captain who filed the request ("Pedido por Campos, Andres (Capitán)"). The role goes in parentheses because the captain is often also one of the players in the movement, and without it the line reads as a third name. `cambios_solicitud.solicitada_por` holds the captain's PLAYER id — `$claims['player_id']` from the token, not a WP user id — so it resolves through the same `get_the_title()` path as every other name on the mail; resolving it as a WP user would have printed nothing. The line is dropped rather than printing "Jugador #0" when the column holds 0, which only happens if the token carried no player id.
 
 = 0.1.29 =
 * Change: the alert's subject names the player BEING TAKEN OUT, plus the team — "Cambios: Nueva solicitud de SUIZA por Campos, Andres". Two requests from one team on one day would otherwise share a subject and have to be opened to be told apart, which is what dropping the solicitud id in 0.1.28 cost. The player leaving is what the process owner reads these by: it is the plaza he is being asked about. For a `reasignacion_arquero` the same rule names the goalkeeper stepping out of the arco — the move's whole subject — not the field titular replacing him nor the external player joining underneath. One column serves all of them: `saliente_player_id`, the plaza's vigent occupant frozen at request time.
