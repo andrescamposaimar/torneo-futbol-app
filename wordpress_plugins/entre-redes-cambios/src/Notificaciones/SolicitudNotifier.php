@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Notificaciones;
 
 use EntreRedes\Cambios\Admin\BandejaPage;
+use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\Settings;
-use EntreRedes\Cambios\Dictamen\DictamenSnapshot;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
@@ -57,30 +58,37 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     private Settings $settings;
     private SolicitudRepository $solicitudRepository;
     private PlazaRepository $plazaRepository;
+    private FechaRepository $fechaRepository;
+    private JugadorMetricasReader $metricasReader;
     private EventLog $eventLog;
 
     /** @var callable(string, string, string): bool */
     private $mailFn;
 
     /**
-     * @param callable(string $para, string $asunto, string $cuerpo): bool|null $mailFn
-     *        Defaults to `wp_mail()` with a plain-text body — plain text on
-     *        purpose: this is an operational alert read on a phone, and an
-     *        HTML mail buys nothing while adding a way to render wrong.
+     * @param callable(string $para, string $asunto, string $cuerpo, string[] $headers): bool|null $mailFn
+     *        Defaults to `wp_mail()`. The headers are part of the contract
+     *        because the body is HTML: without `Content-Type: text/html` the
+     *        reader gets the markup as literal text, which is worse than the
+     *        plain text this replaced.
      */
     public function __construct(
         Settings $settings,
         SolicitudRepository $solicitudRepository,
         PlazaRepository $plazaRepository,
+        FechaRepository $fechaRepository,
+        JugadorMetricasReader $metricasReader,
         EventLog $eventLog,
         ?callable $mailFn = null
     ) {
         $this->settings            = $settings;
         $this->solicitudRepository = $solicitudRepository;
         $this->plazaRepository     = $plazaRepository;
+        $this->fechaRepository     = $fechaRepository;
+        $this->metricasReader      = $metricasReader;
         $this->eventLog            = $eventLog;
-        $this->mailFn              = $mailFn ?? static function ( string $para, string $asunto, string $cuerpo ): bool {
-            return (bool) wp_mail( $para, $asunto, $cuerpo );
+        $this->mailFn              = $mailFn ?? static function ( string $para, string $asunto, string $cuerpo, array $headers ): bool {
+            return (bool) wp_mail( $para, $asunto, $cuerpo, $headers );
         };
     }
 
@@ -117,7 +125,12 @@ final class SolicitudNotifier implements NotificaSolicitudes {
                 return;
             }
 
-            $enviado = ( $this->mailFn )( $destino, $this->asunto( $row ), $this->cuerpo( $row ) );
+            $enviado = ( $this->mailFn )(
+                $destino,
+                $this->asunto( $row ),
+                $this->cuerpo( $row ),
+                [ 'Content-Type: text/html; charset=UTF-8' ]
+            );
 
             if ( ! $enviado ) {
                 $this->eventLog->record( 'notificacion.envio_fallido', [
@@ -154,72 +167,197 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     }
 
     /**
-     * Plain text, and deliberately complete enough to TRIAGE from: who, what
-     * movement, for which fecha, and what the dictamen already concluded. An
-     * alert that only says "there is something" makes the reader open the
-     * tray to find out whether it was worth opening.
+     * The alert body, as HTML.
+     *
+     * *** NO "ACCIÓN SUGERIDA" HERE — THE PROCESS OWNER'S OWN CALL ***
+     * 0.1.25 opened with the dictamen's verdict. It was removed on request:
+     * an alert that arrives already recommending an answer frames the
+     * decision before the reader has looked at it, and the decision is his.
+     * The tray still shows it, right next to the buttons that act on it —
+     * which is where a recommendation belongs, not in a notification read on
+     * a phone. The motivos are gone with it: without the verdict they are a
+     * list of objections with nothing to object to.
+     *
+     * *** INLINE STYLES, NO <style> BLOCK ***
+     * Gmail and most webmail strip `<style>` from the document. Anything
+     * that must survive has to ride on the element.
+     *
+     * *** EVERY INTERPOLATED VALUE IS ESCAPED ***
+     * Team and player names come from post titles. They are not hostile
+     * input, but an apostrophe or an ampersand in a surname is ordinary and
+     * would break the markup.
      *
      * @param array<string, mixed> $row
      */
     private function cuerpo( array $row ): string {
-        $tipo     = (string) $row['tipo'];
-        $snapshot = DictamenSnapshot::fromJson( (string) $row['dictamen_original'] );
+        $tipo = (string) $row['tipo'];
 
-        $lineas = [
-            sprintf( __( 'Equipo: %s', 'entre-redes-cambios' ), $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ) ),
-            sprintf( __( 'Tipo: %s', 'entre-redes-cambios' ), $this->etiquetaTipo( $tipo ) ),
-            sprintf( __( 'Fecha: %d', 'entre-redes-cambios' ), (int) $row['fecha_id'] ),
-            '',
-        ];
+        $filas = $this->movimientos( $row );
 
-        $sale = null !== $row['saliente_player_id'] ? (int) $row['saliente_player_id'] : null;
+        // ONE batched read for every player on the mail — the same discipline
+        // Admin\BandejaPage follows, and worth keeping even for two names.
+        $puntajes = $this->puntajesDe( $filas );
 
-        // Both movements of a grouped request, in ONE email — see rule 3.
-        if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
-            $lineas[] = sprintf(
-                __( 'Arco — sale %1$s, entra %2$s', 'entre-redes-cambios' ),
-                $this->nombreJugador( $sale ),
-                $this->nombreJugador( null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null )
-            );
-            $lineas[] = sprintf(
-                __( 'Campo — entra %s', 'entre-redes-cambios' ),
-                $this->nombreJugador( null !== $row['entrante_campo_player_id'] ? (int) $row['entrante_campo_player_id'] : null )
-            );
-        } elseif ( SolicitudDeCambio::TIPO_REGRESO === $tipo ) {
-            $plaza   = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
-            $titular = null !== $plaza ? (int) $plaza['titular_player_id'] : null;
+        $html  = '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;color:#1d2327;line-height:1.5;">';
+        $html .= sprintf(
+            '<p style="margin:0 0 4px;font-size:18px;font-weight:600;">%s</p>',
+            esc_html( $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ) )
+        );
+        $html .= sprintf(
+            '<p style="margin:0 0 16px;color:#646970;">%s</p>',
+            esc_html( $this->contexto( $row, $tipo ) )
+        );
 
-            $lineas[] = sprintf(
-                __( 'Sale %1$s, vuelve el titular %2$s', 'entre-redes-cambios' ),
-                $this->nombreJugador( $sale ),
-                $this->nombreJugador( $titular )
-            );
-        } else {
-            $lineas[] = sprintf(
-                __( 'Sale %1$s, entra %2$s', 'entre-redes-cambios' ),
-                $this->nombreJugador( $sale ),
-                $this->nombreJugador( null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null )
+        $html .= '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px;">';
+
+        foreach ( $filas as $fila ) {
+            $html .= sprintf(
+                '<tr>'
+                . '<td style="padding:6px 12px 6px 0;color:#646970;white-space:nowrap;">%s</td>'
+                . '<td style="padding:6px 12px 6px 0;font-weight:600;">%s</td>'
+                . '<td style="padding:6px 0;color:#646970;white-space:nowrap;">%s</td>'
+                . '</tr>',
+                esc_html( $fila['etiqueta'] ),
+                esc_html( $this->nombreJugador( $fila['player_id'] ) ),
+                esc_html( $this->puntajeLegible( $fila['player_id'], $puntajes ) )
             );
         }
 
-        $lineas[] = '';
-        $lineas[] = $snapshot->procede()
-            ? __( 'Acción sugerida: aprobar.', 'entre-redes-cambios' )
-            : __( 'Acción sugerida: rechazar.', 'entre-redes-cambios' );
+        $html .= '</table>';
 
-        foreach ( $snapshot->motivos() as $motivo ) {
-            $mensaje = (string) ( $motivo['mensaje'] ?? '' );
+        $html .= sprintf(
+            '<p style="margin:0;"><a href="%1$s" style="display:inline-block;background:#2271b1;color:#ffffff;'
+            . 'text-decoration:none;padding:10px 18px;border-radius:4px;font-weight:600;">%2$s</a></p>',
+            esc_url( admin_url( 'admin.php?page=' . BandejaPage::SLUG ) ),
+            esc_html__( 'Resolver en la bandeja', 'entre-redes-cambios' )
+        );
 
-            if ( '' !== $mensaje ) {
-                $lineas[] = '  - ' . $mensaje;
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    /**
+     * "Apertura · fecha 6 · Cambio" — the torneo a human reads, not the
+     * global `fecha_id`, which means nothing to anybody outside the
+     * database. `numero_en_torneo` restarts at 1 on every torneo (see
+     * `Migrations\InitialSchema`), so it only makes sense WITH the label and
+     * is never shown alone.
+     *
+     * Degrades to the plain fecha id when the fecha row cannot be read: an
+     * alert with a slightly poorer heading is better than no alert.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function contexto( array $row, string $tipo ): string {
+        $partes = [];
+        $fecha  = $this->fechaRepository->findById( (int) $row['fecha_id'] );
+
+        $label  = is_array( $fecha ) ? trim( (string) ( $fecha['torneo_label'] ?? '' ) ) : '';
+        $numero = is_array( $fecha ) ? (int) ( $fecha['numero_en_torneo'] ?? 0 ) : 0;
+
+        if ( '' !== $label ) {
+            $partes[] = $numero > 0
+                ? sprintf( __( '%1$s · fecha %2$d', 'entre-redes-cambios' ), $label, $numero )
+                : $label;
+        } else {
+            $partes[] = sprintf( __( 'Fecha %d', 'entre-redes-cambios' ), (int) $row['fecha_id'] );
+        }
+
+        $partes[] = $this->etiquetaTipo( $tipo );
+
+        return implode( ' · ', $partes );
+    }
+
+    /**
+     * Every player this request moves, labelled, in reading order. One list
+     * for every tipo — a grouped reasignación simply contributes four rows
+     * instead of two, which is how it stays ONE mail describing both
+     * movements.
+     *
+     * @param array<string, mixed> $row
+     * @return array<int, array{etiqueta: string, player_id: int|null}>
+     */
+    private function movimientos( array $row ): array {
+        $tipo  = (string) $row['tipo'];
+        $sale  = null !== $row['saliente_player_id'] ? (int) $row['saliente_player_id'] : null;
+        $entra = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
+
+        if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+            return [
+                [ 'etiqueta' => __( 'Arco — sale', 'entre-redes-cambios' ), 'player_id' => $sale ],
+                [ 'etiqueta' => __( 'Arco — entra', 'entre-redes-cambios' ), 'player_id' => $entra ],
+                [
+                    'etiqueta'  => __( 'Campo — entra', 'entre-redes-cambios' ),
+                    'player_id' => null !== $row['entrante_campo_player_id'] ? (int) $row['entrante_campo_player_id'] : null,
+                ],
+            ];
+        }
+
+        if ( SolicitudDeCambio::TIPO_REGRESO === $tipo ) {
+            $plaza = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
+
+            return [
+                [ 'etiqueta' => __( 'Sale', 'entre-redes-cambios' ), 'player_id' => $sale ],
+                [
+                    'etiqueta'  => __( 'Vuelve el titular', 'entre-redes-cambios' ),
+                    'player_id' => null !== $plaza ? (int) $plaza['titular_player_id'] : null,
+                ],
+            ];
+        }
+
+        return [
+            [ 'etiqueta' => __( 'Sale', 'entre-redes-cambios' ), 'player_id' => $sale ],
+            [ 'etiqueta' => __( 'Entra', 'entre-redes-cambios' ), 'player_id' => $entra ],
+        ];
+    }
+
+    /**
+     * @param array<int, array{etiqueta: string, player_id: int|null}> $filas
+     * @return array<int, \EntreRedes\Cambios\Plazas\JugadorMetricas>
+     */
+    private function puntajesDe( array $filas ): array {
+        $ids = [];
+
+        foreach ( $filas as $fila ) {
+            if ( null !== $fila['player_id'] ) {
+                $ids[] = $fila['player_id'];
             }
         }
 
-        $lineas[] = '';
-        $lineas[] = __( 'Resolvela en la bandeja:', 'entre-redes-cambios' );
-        $lineas[] = admin_url( 'admin.php?page=' . BandejaPage::SLUG );
+        if ( empty( $ids ) ) {
+            return [];
+        }
 
-        return implode( "\n", $lineas );
+        return $this->metricasReader->resolveMuchos( array_values( array_unique( $ids ) ) );
+    }
+
+    /**
+     * "4.5 ptos", or an explicit "sin puntaje".
+     *
+     * A player with NO puntaje says so rather than printing nothing: a blank
+     * cell reads as a rendering glitch, while "sin puntaje" is a fact the
+     * process owner can act on — it is exactly the condition that keeps
+     * somebody out of the candidate list in the first place.
+     *
+     * @param array<int, \EntreRedes\Cambios\Plazas\JugadorMetricas> $puntajes
+     */
+    private function puntajeLegible( ?int $playerId, array $puntajes ): string {
+        if ( null === $playerId || ! isset( $puntajes[ $playerId ] ) ) {
+            return __( 'sin puntaje', 'entre-redes-cambios' );
+        }
+
+        $puntaje = $puntajes[ $playerId ]->puntaje();
+
+        if ( null === $puntaje ) {
+            return __( 'sin puntaje', 'entre-redes-cambios' );
+        }
+
+        return sprintf(
+            /* translators: %s: the score, e.g. 4.5 */
+            __( '%s ptos', 'entre-redes-cambios' ),
+            rtrim( rtrim( number_format( $puntaje->toDecimal(), 1, '.', '' ), '0' ), '.' ) ?: '0'
+        );
     }
 
     /**

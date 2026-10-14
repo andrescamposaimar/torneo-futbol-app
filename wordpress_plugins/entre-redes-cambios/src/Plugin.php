@@ -186,6 +186,8 @@ final class Plugin {
                     $settings,
                     $solicitudRepository,
                     $plazaRepository,
+                    $fechaRepository,
+                    $jugadorMetricasReader,
                     $eventLog
                 )
             );
