@@ -14,6 +14,7 @@ use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Notificaciones\SolicitudNotifier;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
+use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
@@ -47,6 +48,20 @@ class SolicitudNotifierTest extends TestCase {
         }
         InitialSchema::up();
 
+        // postmeta is NOT one of this plugin's tables, so InitialSchema does
+        // not touch it and it survives between tests — a puntaje seeded by
+        // one test would silently give a player a score in the next, which
+        // is exactly how the "sin puntaje" case passed for the wrong reason.
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}postmeta (
+                meta_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                meta_key TEXT,
+                meta_value TEXT
+            )"
+        );
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}postmeta" );
+
         $wp_test_post_titles = [
             self::TEAM_ID => 'SUIZA',
             777           => 'Titular Perez',
@@ -78,7 +93,7 @@ class SolicitudNotifierTest extends TestCase {
 
     protected function tearDown(): void {
         global $wpdb;
-        foreach ( [ 'cambios_solicitud', 'cambios_decision', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha', 'cambios_settings' ] as $t ) {
+        foreach ( [ 'cambios_solicitud', 'cambios_decision', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha', 'cambios_settings', 'postmeta' ] as $t ) {
             $wpdb->query( "DELETE FROM {$wpdb->prefix}{$t}" );
         }
         unset( $GLOBALS['wp_test_post_titles'], $GLOBALS['_cambios_test_mails'] );
@@ -145,7 +160,7 @@ class SolicitudNotifierTest extends TestCase {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
-        $notifier = $this->notifier( static function (): bool {
+        $notifier = $this->notifier( static function ( string $para, string $asunto, string $cuerpo, array $headers ): bool {
             throw new \RuntimeException( 'SMTP timeout' );
         } );
 
@@ -161,7 +176,8 @@ class SolicitudNotifierTest extends TestCase {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
-        $this->notifier( static fn (): bool => false )->notificarCreada( $id );
+        $this->notifier( static fn ( string $para, string $asunto, string $cuerpo, array $headers ): bool => false )
+            ->notificarCreada( $id );
 
         $this->assertTrue( $this->eventLog->has( 'notificacion.envio_fallido' ) );
         $this->assertFalse( $this->eventLog->has( 'notificacion.enviada' ) );
@@ -180,7 +196,7 @@ class SolicitudNotifierTest extends TestCase {
     // What the mail says — it must be triageable without opening the tray
     // -------------------------------------------------------------------------
 
-    public function test_el_cuerpo_nombra_equipo_movimiento_fecha_y_accion_sugerida(): void {
+    public function test_el_cuerpo_nombra_equipo_movimiento_y_link(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
@@ -189,23 +205,30 @@ class SolicitudNotifierTest extends TestCase {
         $cuerpo = $this->enviados[0]['cuerpo'];
 
         $this->assertStringContainsString( 'SUIZA', $cuerpo );
-        $this->assertStringContainsString( 'Sale Titular Perez, entra Suplente Gomez', $cuerpo );
-        $this->assertStringContainsString( 'Fecha: 1', $cuerpo );
-        $this->assertStringContainsString( 'Acción sugerida', $cuerpo );
+        $this->assertStringContainsString( 'Titular Perez', $cuerpo );
+        $this->assertStringContainsString( 'Suplente Gomez', $cuerpo );
         $this->assertStringContainsString( 'page=cambios-bandeja', $cuerpo, 'The link is what turns an alert into an action.' );
     }
 
-    public function test_el_asunto_lleva_el_numero_y_el_equipo(): void {
+    public function test_va_como_html(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
         $this->notifier()->notificarCreada( $id );
 
-        $this->assertStringContainsString( '#' . $id, $this->enviados[0]['asunto'] );
-        $this->assertStringContainsString( 'SUIZA', $this->enviados[0]['asunto'] );
+        $this->assertContains(
+            'Content-Type: text/html; charset=UTF-8',
+            $this->enviados[0]['headers'],
+            'Without the header the reader gets the markup as literal text — worse than the plain text this replaced.'
+        );
     }
 
-    public function test_un_dictamen_que_no_procede_lleva_sus_motivos(): void {
+    /**
+     * Removed on the process owner's request: an alert that arrives already
+     * recommending an answer frames the decision before he has looked at it.
+     * The tray still shows it, next to the buttons that act on it.
+     */
+    public function test_el_cuerpo_no_lleva_la_accion_sugerida(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
 
         $id = $this->crearSustitucion( Dictamen::from( [
@@ -216,8 +239,82 @@ class SolicitudNotifierTest extends TestCase {
 
         $cuerpo = $this->enviados[0]['cuerpo'];
 
-        $this->assertStringContainsString( 'Acción sugerida: rechazar.', $cuerpo );
-        $this->assertStringContainsString( 'El puntaje supera el techo de la plaza.', $cuerpo );
+        $this->assertStringNotContainsString( 'Acción sugerida', $cuerpo );
+        $this->assertStringNotContainsString( 'aprobar', $cuerpo );
+        $this->assertStringNotContainsString( 'rechazar', $cuerpo );
+        $this->assertStringNotContainsString(
+            'El puntaje supera el techo de la plaza.',
+            $cuerpo,
+            'Without the verdict the motivos are objections with nothing to object to.'
+        );
+    }
+
+    public function test_el_cuerpo_lleva_el_puntaje_de_cada_jugador(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $this->seedPuntaje( 777, 4.5 );
+        $this->seedPuntaje( 888, 3.0 );
+
+        $id = $this->crearSustitucion();
+
+        $this->notifier()->notificarCreada( $id );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringContainsString( '4.5 ptos', $cuerpo );
+        $this->assertStringContainsString( '3 ptos', $cuerpo, 'A whole number reads as "3 ptos", not "3.0 ptos".' );
+    }
+
+    public function test_un_jugador_sin_puntaje_lo_dice_en_vez_de_dejar_un_hueco(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $this->seedPuntaje( 777, 4.5 );
+        // 888 deliberately has none.
+
+        $id = $this->crearSustitucion();
+
+        $this->notifier()->notificarCreada( $id );
+
+        $this->assertStringContainsString(
+            'sin puntaje',
+            $this->enviados[0]['cuerpo'],
+            'A blank cell reads as a rendering glitch; "sin puntaje" is a fact he can act on.'
+        );
+    }
+
+    public function test_el_cuerpo_nombra_el_torneo_y_la_fecha_de_ese_torneo(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $id = $this->crearSustitucion();
+
+        $this->notifier()->notificarCreada( $id );
+
+        // `numero_en_torneo` restarts at 1 on every torneo, so it is never
+        // shown without the label that gives it meaning.
+        $this->assertStringContainsString( 'Apertura · fecha 1', $this->enviados[0]['cuerpo'] );
+    }
+
+    public function test_si_no_se_puede_leer_la_fecha_cae_al_id_global(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $id = $this->crearSustitucion();
+
+        // The row disappears between creation and the alert.
+        global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->prefix}cambios_fecha" );
+
+        $this->notifier()->notificarCreada( $id );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringContainsString( 'Fecha 1', $cuerpo, 'A poorer heading beats no alert.' );
+        $this->assertCount( 1, $this->enviados );
+    }
+
+    public function test_el_asunto_lleva_el_numero_y_el_equipo(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $id = $this->crearSustitucion();
+
+        $this->notifier()->notificarCreada( $id );
+
+        $this->assertStringContainsString( '#' . $id, $this->enviados[0]['asunto'] );
+        $this->assertStringContainsString( 'SUIZA', $this->enviados[0]['asunto'] );
     }
 
     /**
@@ -256,8 +353,9 @@ class SolicitudNotifierTest extends TestCase {
         $this->assertCount( 1, $this->enviados, 'One request, one email.' );
 
         $cuerpo = $this->enviados[0]['cuerpo'];
-        $this->assertStringContainsString( 'Arco —', $cuerpo );
-        $this->assertStringContainsString( 'Campo —', $cuerpo );
+        $this->assertStringContainsString( 'Arco — sale', $cuerpo );
+        $this->assertStringContainsString( 'Arco — entra', $cuerpo );
+        $this->assertStringContainsString( 'Campo — entra', $cuerpo );
         $this->assertStringContainsString( 'Otro Lopez', $cuerpo, 'The field movement names who comes in.' );
     }
 
@@ -266,13 +364,17 @@ class SolicitudNotifierTest extends TestCase {
     // -------------------------------------------------------------------------
 
     private function notifier( ?callable $mailFn = null ): SolicitudNotifier {
+        global $wpdb;
+
         return new SolicitudNotifier(
             $this->settings,
             $this->solicitudRepository,
             $this->plazaRepository,
+            new FechaRepository( $wpdb, new InMemoryEventLog() ),
+            new JugadorMetricasReader( $wpdb, $this->eventLog ),
             $this->eventLog,
-            $mailFn ?? function ( string $para, string $asunto, string $cuerpo ): bool {
-                $this->enviados[] = [ 'para' => $para, 'asunto' => $asunto, 'cuerpo' => $cuerpo ];
+            $mailFn ?? function ( string $para, string $asunto, string $cuerpo, array $headers ): bool {
+                $this->enviados[] = [ 'para' => $para, 'asunto' => $asunto, 'cuerpo' => $cuerpo, 'headers' => $headers ];
 
                 return true;
             }
@@ -306,6 +408,19 @@ class SolicitudNotifierTest extends TestCase {
             777,
             $dictamen ?? Dictamen::from( [] ),
             '2026-05-27 10:00:00'
+        );
+    }
+
+    private function seedPuntaje( int $playerId, float $puntaje ): void {
+        global $wpdb;
+
+        $wpdb->insert(
+            $wpdb->prefix . 'postmeta',
+            [
+                'post_id'    => $playerId,
+                'meta_key'   => 'sp_metrics',
+                'meta_value' => serialize( [ 'puntaje' => (string) $puntaje ] ),
+            ]
         );
     }
 

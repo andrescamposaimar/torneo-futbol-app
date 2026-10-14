@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.26
+Stable tag: 0.1.27
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,12 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.27 =
+* Change: the new-request alert no longer carries the dictamen's "Acción sugerida", nor its motivos. On the process owner's request: an alert that arrives already recommending an answer frames the decision before he has looked at it, and the decision is his. The tray still shows it, right next to the buttons that act on it — which is where a recommendation belongs. The motivos go with it: without the verdict they are a list of objections with nothing to object to.
+* Feature: the alert names each involved player's puntaje ("4.5 ptos"), read in ONE batched call through `Plazas\JugadorMetricasReader`. A player with no puntaje is shown as "sin puntaje" rather than left blank: an empty cell reads as a rendering glitch, while the absence of a score is a fact worth acting on — it is exactly what keeps somebody out of the candidate list.
+* Feature: the alert names the torneo and the fecha WITHIN it ("Apertura · fecha 6") instead of the global `fecha_id`, which means nothing outside the database. `numero_en_torneo` restarts at 1 on every torneo, so it is never shown without the label that gives it meaning; if the fecha row cannot be read it degrades to the plain id rather than dropping the alert.
+* Change: the alert is HTML, with inline styles only (Gmail strips `<style>`), and is sent with `Content-Type: text/html` — without that header the reader gets the markup as literal text, which is worse than the plain text this replaced. Every interpolated name is escaped: an apostrophe in a surname is ordinary and would break the markup.
 
 = 0.1.26 =
 * Fix: saving the Configuración screen failed with "Algunos valores no se pudieron guardar: notificacion_nueva_destino". `wpdb::get_var()` returns `null` for an EMPTY STRING, not only for a missing row (`return ( isset( $values[ $x ] ) && '' !== $values[ $x ] ) ? $values[ $x ] : null;` in core), and `Calendario\SettingsWriter` decided UPDATE-vs-INSERT from that `null`. The only setting seeded with an empty value is `notificacion_nueva_destino`, added in 0.1.25, so the writer sent an INSERT at a row that existed and hit the primary key. It now reads the row with `get_row()`, which has no such quirk, so `null` means only "no such row".
