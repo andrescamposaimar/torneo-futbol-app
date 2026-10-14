@@ -40,6 +40,11 @@ class CambiosSolicitudesScreen extends ConsumerWidget {
         state: state,
         onRetry: () => notifier.load(seasonId: seasonId, teamId: teamId),
         onRefresh: () => notifier.refresh(seasonId: seasonId, teamId: teamId),
+        onCancelar: (id) => notifier.cancelar(
+          seasonId: seasonId,
+          teamId: teamId,
+          solicitudId: id,
+        ),
       ),
     );
   }
@@ -54,11 +59,20 @@ class CambiosSolicitudesView extends StatelessWidget {
   final VoidCallback onRetry;
   final Future<void> Function() onRefresh;
 
+  /// Withdraws a still-pending request. Answers null on success, or a short
+  /// Spanish sentence to show the captain.
+  ///
+  /// Nullable so this view stays usable without it: every existing test that
+  /// builds it keeps working, and a screen wired without a canceller simply
+  /// shows no button rather than one that does nothing.
+  final Future<String?> Function(int solicitudId)? onCancelar;
+
   const CambiosSolicitudesView({
     super.key,
     required this.state,
     required this.onRetry,
     required this.onRefresh,
+    this.onCancelar,
   });
 
   @override
@@ -71,7 +85,10 @@ class CambiosSolicitudesView extends StatelessWidget {
           ? const _EmptyView()
           : RefreshIndicator(
               onRefresh: onRefresh,
-              child: _GroupedList(grupos: agruparSolicitudes(solicitudes)),
+              child: _GroupedList(
+                grupos: agruparSolicitudes(solicitudes),
+                onCancelar: onCancelar,
+              ),
             ),
     };
   }
@@ -165,7 +182,9 @@ List<CambiosSolicitudGrupo> agruparSolicitudes(List<CambiosSolicitud> solicitude
 
 class _GroupedList extends StatelessWidget {
   final List<CambiosSolicitudGrupo> grupos;
-  const _GroupedList({required this.grupos});
+  final Future<String?> Function(int solicitudId)? onCancelar;
+
+  const _GroupedList({required this.grupos, this.onCancelar});
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +200,10 @@ class _GroupedList extends StatelessWidget {
       itemBuilder: (context, i) {
         final item = items[i];
         if (item is CambiosSolicitudEstado) return _GrupoHeader(estado: item);
-        return _SolicitudCard(solicitud: item as CambiosSolicitud);
+        return _SolicitudCard(
+          solicitud: item as CambiosSolicitud,
+          onCancelar: onCancelar,
+        );
       },
     );
   }
@@ -286,7 +308,9 @@ class _EmptyView extends StatelessWidget {
 
 class _SolicitudCard extends StatelessWidget {
   final CambiosSolicitud solicitud;
-  const _SolicitudCard({required this.solicitud});
+  final Future<String?> Function(int solicitudId)? onCancelar;
+
+  const _SolicitudCard({required this.solicitud, this.onCancelar});
 
   Color _estadoColor(BuildContext context) {
     final theme = Theme.of(context);
@@ -420,10 +444,66 @@ class _SolicitudCard extends StatelessWidget {
                   ),
                 ),
               ],
+            if (_puedeCancelar) ...[
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  key: Key('cancelar_solicitud_${solicitud.id}'),
+                  onPressed: () => _confirmarYCancelar(context),
+                  icon: const Icon(Icons.close, size: 18),
+                  label: const Text('Cancelar pedido'),
+                  style: TextButton.styleFrom(foregroundColor: theme.colorScheme.error),
+                ),
+              ),
+            ],
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Only while nobody has decided. An approved request is the comisión's to
+  /// undo — cancelling it here would also silently change what the next
+  /// publication contains — and anything already resolved is closed.
+  bool get _puedeCancelar =>
+      onCancelar != null && solicitud.estado == CambiosSolicitudEstado.pendiente;
+
+  Future<void> _confirmarYCancelar(BuildContext context) async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Cancelar el pedido?'),
+        content: const Text(
+          'El pedido se da de baja y la plaza queda libre para que pidas otro '
+          'cambio. No se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('No'),
+          ),
+          TextButton(
+            key: const Key('confirmar_cancelar'),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Sí, cancelar'),
+          ),
+        ],
+      ),
+    );
+
+    if (true != confirmado) return;
+
+    final error = await onCancelar!(solicitud.id);
+
+    // The widget can be gone by now: cancelling reloads the list, which
+    // rebuilds these cards.
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error ?? 'Cancelamos tu pedido.')),
     );
   }
 }

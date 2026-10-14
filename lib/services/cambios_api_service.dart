@@ -364,6 +364,41 @@ class CambiosApiService {
   }
 
   // ---------------------------------------------------------------------------
+  // POST /solicitudes/{id}/cancelar
+  // ---------------------------------------------------------------------------
+
+  /// Withdraws a still-undecided request of this captain's own team.
+  ///
+  /// Unlike [crearSolicitud], a refusal here IS an exception: there is no
+  /// dictamen to report, only "done" or "could not". The two the caller must
+  /// handle by name arrive as [CambiosApiException.code]:
+  ///   - `solicitud_ya_resuelta` (409) — the comisión decided while the
+  ///     screen was open. Not an error to apologise for: the right response
+  ///     is to refresh and show what they decided.
+  ///   - `solicitud_no_encontrada` (404) — also the answer for a request
+  ///     that belongs to another team, deliberately, so this endpoint cannot
+  ///     be used to probe for other teams' request ids.
+  Future<void> cancelarSolicitud({
+    required int seasonId,
+    required int teamId,
+    required int solicitudId,
+  }) async {
+    final req = http.Request(
+      'POST',
+      Uri.parse('$_baseUrl/solicitudes/$solicitudId/cancelar'),
+    )
+      ..headers['Content-Type'] = 'application/json'
+      ..headers['Accept'] = 'application/json'
+      ..body = json.encode({'season_id': seasonId, 'team_id': teamId});
+
+    final response = await _prodeApi.request(req).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode != 200) {
+      throw _errorFor(response);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // POST /solicitudes — reasignacion_arquero (grouped)
   // ---------------------------------------------------------------------------
 
