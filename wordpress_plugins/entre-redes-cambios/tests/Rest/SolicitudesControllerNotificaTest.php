@@ -160,6 +160,12 @@ class SolicitudesControllerNotificaTest extends TestCase {
             public function notificarCreada( int $solicitudId ): void {
                 $this->registro[] = $solicitudId;
             }
+
+            public function notificarCreadaAlCapitan( int $solicitudId ): void {
+            }
+
+            public function notificarDecision( int $solicitudId, string $estado ): void {
+            }
         };
     }
 

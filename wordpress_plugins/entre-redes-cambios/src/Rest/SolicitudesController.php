@@ -1022,7 +1022,12 @@ class SolicitudesController {
         $id    = is_array( $datos ) ? (int) ( $datos['id'] ?? 0 ) : 0;
 
         if ( $id > 0 ) {
+            // Two readers, two mails: the comisión gets told there is work,
+            // the captain gets a receipt. Each is gated by its own setting
+            // and neither can throw, so one being off — or failing — never
+            // costs the other.
             $this->notifier->notificarCreada( $id );
+            $this->notifier->notificarCreadaAlCapitan( $id );
         }
     }
 

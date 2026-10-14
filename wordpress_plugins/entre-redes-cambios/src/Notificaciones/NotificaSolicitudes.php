@@ -18,7 +18,21 @@ namespace EntreRedes\Cambios\Notificaciones;
 interface NotificaSolicitudes {
 
     /**
-     * Announce that $solicitudId was just created. MUST NOT throw.
+     * Announce to the PROCESS OWNER that $solicitudId was just created.
+     * MUST NOT throw.
      */
     public function notificarCreada( int $solicitudId ): void;
+
+    /**
+     * Acknowledge to the CAPTAIN that his request was received.
+     * MUST NOT throw.
+     */
+    public function notificarCreadaAlCapitan( int $solicitudId ): void;
+
+    /**
+     * Tell the CAPTAIN what the comisión decided. MUST NOT throw, and must
+     * ignore any $estado it has no copy written for rather than improvising
+     * one.
+     */
+    public function notificarDecision( int $solicitudId, string $estado ): void;
 }

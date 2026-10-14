@@ -81,6 +81,11 @@ class InitialSchema {
         // Admin\ConfiguracionPage refuses to turn it on without one.
         'notificacion_nueva_activa'  => '0',
         'notificacion_nueva_destino' => '',
+        // Tell the CAPTAIN what happened to his own request (0.1.31). A
+        // separate switch from the comisión's: one may want the inbox
+        // without the outbox, or the other way round. No address to
+        // configure — it is resolved per captain from their prode account.
+        'notificacion_capitan_activa' => '0',
         'cambios_habilitados'        => '1',
         'mensaje_deshabilitado'      => 'Por el momento no es posible gestionar los cambios de forma online. Por favor contactate con la Comisión Directiva.',
         // `0` means "not configured" — NEVER a real `sp_team` post id, see

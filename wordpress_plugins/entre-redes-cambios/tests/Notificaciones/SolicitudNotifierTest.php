@@ -12,11 +12,13 @@ use EntreRedes\Cambios\Dictamen\DictamenPipeline;
 use EntreRedes\Cambios\Dictamen\Motivo;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Migrations\InitialSchema;
+use EntreRedes\Cambios\Notificaciones\CapitanEmailResolver;
 use EntreRedes\Cambios\Notificaciones\SolicitudNotifier;
 use EntreRedes\Cambios\Observability\InMemoryEventLog;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Plazas\Puntaje;
+use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 use PHPUnit\Framework\TestCase;
 
@@ -97,6 +99,8 @@ class SolicitudNotifierTest extends TestCase {
         foreach ( [ 'cambios_solicitud', 'cambios_decision', 'cambios_ocupacion', 'cambios_plaza', 'cambios_fecha', 'cambios_settings', 'postmeta' ] as $t ) {
             $wpdb->query( "DELETE FROM {$wpdb->prefix}{$t}" );
         }
+        $this->borrarTablasDeProde();
+
         unset( $GLOBALS['wp_test_post_titles'], $GLOBALS['_cambios_test_mails'] );
         $GLOBALS['wp_test_position_terms'] = [];
     }
@@ -493,6 +497,187 @@ class SolicitudNotifierTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // Los tres mails al capitán
+    // -------------------------------------------------------------------------
+
+    private function configurarCapitan( bool $activa ): void {
+        global $wpdb;
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE {$wpdb->prefix}cambios_settings SET setting_value = %s WHERE setting_key = 'notificacion_capitan_activa'",
+                $activa ? '1' : '0'
+            )
+        );
+    }
+
+    public function test_apagado_el_capitan_no_recibe_nada(): void {
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCreadaAlCapitan( $id );
+
+        $this->assertSame( [], $this->enviados, 'OFF by default.' );
+    }
+
+    public function test_el_acuse_llega_al_mail_del_capitan(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCreadaAlCapitan( $id );
+
+        $this->assertCount( 1, $this->enviados );
+        $this->assertSame( 'capitan@ejemplo.com', $this->enviados[0]['para'] );
+        $this->assertSame( 'Cambios: Recibimos tu pedido por Titular Perez', $this->enviados[0]['asunto'] );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+        $this->assertStringContainsString( 'Recibimos tu pedido.', $cuerpo );
+        $this->assertStringContainsString( 'Te avisamos por mail cuando haya una decisión.', $cuerpo );
+    }
+
+    public function test_el_mail_de_aprobacion_avisa_que_NO_es_definitivo(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->solicitudRepository->aprobar( $id, 1, 'Dale', '2026-05-28 10:00:00', 'La comision' );
+        $this->notifier()->notificarDecision( $id, EstadoSolicitud::APROBADA );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertSame( 'Cambios: Aprobaron tu pedido por Titular Perez', $this->enviados[0]['asunto'] );
+        $this->assertStringContainsString( 'La comisión aprobó tu pedido.', $cuerpo );
+
+        // THE point of this mail: a captain who reads "aprobado" and fields
+        // the player before the lote is published has broken the rule
+        // believing he followed it.
+        $this->assertStringContainsString( 'Todavía no es definitivo.', $cuerpo );
+        $this->assertStringContainsString( 'el jugador no puede jugar', $cuerpo );
+        $this->assertStringContainsString( 'Dale', $cuerpo, "The comisión's note is the only explanation he gets." );
+    }
+
+    public function test_el_mail_de_rechazo_lleva_la_nota_y_nada_mas(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+
+        $id = $this->crearSustitucion(
+            Dictamen::from( [ new Motivo( 'puntaje_fuera_del_techo', 'El puntaje supera el techo de la plaza.', [] ) ] ),
+            222
+        );
+
+        $this->solicitudRepository->rechazar( $id, 1, 'No da el puntaje', '2026-05-28 10:00:00', 'La comision' );
+        $this->notifier()->notificarDecision( $id, EstadoSolicitud::RECHAZADA );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertSame( 'Cambios: Rechazaron tu pedido por Titular Perez', $this->enviados[0]['asunto'] );
+        $this->assertStringContainsString( 'La comisión rechazó tu pedido.', $cuerpo );
+        $this->assertStringContainsString( 'No da el puntaje', $cuerpo );
+
+        // NOT the dictamen's objections: if the comisión rejected for a
+        // reason of their own, printing the ruleset's beside it tells the
+        // captain a reason that was not the real one.
+        $this->assertStringNotContainsString( 'El puntaje supera el techo de la plaza.', $cuerpo );
+    }
+
+    public function test_sin_nota_lo_dice_en_vez_de_inventar_una_razon(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->solicitudRepository->rechazar( $id, 1, null, '2026-05-28 10:00:00', 'La comision' );
+        $this->notifier()->notificarDecision( $id, EstadoSolicitud::RECHAZADA );
+
+        $this->assertStringContainsString( 'La comisión no dejó un comentario.', $this->enviados[0]['cuerpo'] );
+    }
+
+    /** wp-admin is not somewhere a captain can go. */
+    public function test_el_mail_del_capitan_no_lleva_el_link_al_admin(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCreadaAlCapitan( $id );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringNotContainsString( 'cambios-bandeja', $cuerpo );
+        $this->assertStringNotContainsString( 'Gestionar', $cuerpo );
+        $this->assertStringContainsString( 'Mis pedidos', $cuerpo );
+    }
+
+    public function test_un_capitan_sin_mail_no_rompe_y_deja_rastro(): void {
+        $this->configurarCapitan( true );
+        // No prode account linked for 222.
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCreadaAlCapitan( $id );
+
+        $this->assertSame( [], $this->enviados );
+        $this->assertTrue( $this->eventLog->has( 'notificacion.capitan_sin_email_fallida' ) );
+    }
+
+    public function test_una_asociacion_borrada_no_es_una_direccion(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+
+        global $wpdb;
+        $wpdb->query( "UPDATE {$wpdb->prefix}prode_associations SET deleted_at = '2026-09-01 00:00:00'" );
+
+        $id = $this->crearSustitucion( null, 222 );
+        $this->notifier()->notificarCreadaAlCapitan( $id );
+
+        $this->assertSame(
+            [],
+            $this->enviados,
+            'An association the user removed is not a way to reach them any more.'
+        );
+    }
+
+    public function test_con_dos_cuentas_gana_la_del_ultimo_ingreso(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'vieja@ejemplo.com', '2026-01-01 10:00:00' );
+        $this->seedCapitanEmail( 222, 'nueva@ejemplo.com', '2026-10-10 10:00:00' );
+
+        $id = $this->crearSustitucion( null, 222 );
+        $this->notifier()->notificarCreadaAlCapitan( $id );
+
+        $this->assertSame(
+            'nueva@ejemplo.com',
+            $this->enviados[0]['para'],
+            'The account they actually read is the one they last signed in with.'
+        );
+    }
+
+    /**
+     * `publicada` and `anulada` have no copy written for them. Mailing
+     * something improvised is how a captain gets told what nobody meant to
+     * say.
+     */
+    public function test_un_estado_sin_texto_escrito_no_manda_nada(): void {
+        $this->configurarCapitan( true );
+        $this->seedCapitanEmail( 222, 'capitan@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        foreach ( [ EstadoSolicitud::PUBLICADA, EstadoSolicitud::ANULADA, EstadoSolicitud::PENDIENTE, 'inventado' ] as $estado ) {
+            $this->notifier()->notificarDecision( $id, $estado );
+        }
+
+        $this->assertSame( [], $this->enviados );
+
+        // No mail is only half of it: WITHOUT the guard these fall through
+        // to a missing template, blow up, and get swallowed by the catch —
+        // same silence, but every one of them logged as a failure. Over a
+        // Friday lote that is a stream of fake errors in the one durable
+        // slot this host has for real ones.
+        $this->assertFalse(
+            $this->eventLog->has( 'notificacion.capitan_fallida' ),
+            'An estado with no copy written is a SKIP, not a failure.'
+        );
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -510,8 +695,50 @@ class SolicitudNotifierTest extends TestCase {
                 $this->enviados[] = [ 'para' => $para, 'asunto' => $asunto, 'cuerpo' => $cuerpo, 'headers' => $headers ];
 
                 return true;
-            }
+            },
+            new CapitanEmailResolver( $wpdb, $this->eventLog )
         );
+    }
+
+    /**
+     * prode_associations + prode_users belong to entre-redes-prode, not to
+     * this plugin, so InitialSchema does not create them. The shim's SQLite
+     * needs them to exist before the resolver can read anything.
+     */
+    private function seedCapitanEmail( int $playerId, string $email, ?string $lastLogin = '2026-10-01 10:00:00' ): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$p}prode_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT,
+                last_login_at TEXT,
+                deleted_at TEXT
+            )"
+        );
+        $wpdb->query(
+            "CREATE TABLE IF NOT EXISTS {$p}prode_associations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                player_id INTEGER NOT NULL,
+                deleted_at TEXT
+            )"
+        );
+
+        $wpdb->insert( $p . 'prode_users', [ 'email' => $email, 'last_login_at' => $lastLogin, 'deleted_at' => null ] );
+        $userId = (int) $wpdb->insert_id;
+
+        $wpdb->insert( $p . 'prode_associations', [ 'user_id' => $userId, 'player_id' => $playerId, 'deleted_at' => null ] );
+    }
+
+    private function borrarTablasDeProde(): void {
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        foreach ( [ 'prode_associations', 'prode_users' ] as $t ) {
+            $wpdb->query( "DROP TABLE IF EXISTS {$p}{$t}" );
+        }
     }
 
     private function configurar( bool $activa, string $destino ): void {

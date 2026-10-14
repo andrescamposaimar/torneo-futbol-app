@@ -188,7 +188,9 @@ final class Plugin {
                     $plazaRepository,
                     $fechaRepository,
                     $jugadorMetricasReader,
-                    $eventLog
+                    $eventLog,
+                    null,
+                    new Notificaciones\CapitanEmailResolver( $wpdb, $eventLog )
                 )
             );
 
@@ -296,13 +298,26 @@ final class Plugin {
                     $eventLog
                 );
 
+                $metricasReader = new Plazas\JugadorMetricasReader( $wpdb, $eventLog );
+
                 $bandejaPage = new Admin\BandejaPage(
                     $authorizer,
                     $solicitudRepository,
                     $plazaRepository,
                     $settings,
                     $eventLog,
-                    new Plazas\JugadorMetricasReader( $wpdb, $eventLog )
+                    $metricasReader,
+                    null,
+                    new Notificaciones\SolicitudNotifier(
+                        $settings,
+                        $solicitudRepository,
+                        $plazaRepository,
+                        $fechaRepository,
+                        $metricasReader,
+                        $eventLog,
+                        null,
+                        new Notificaciones\CapitanEmailResolver( $wpdb, $eventLog )
+                    )
                 );
 
                 $historicoPage = new Admin\HistoricoPage(

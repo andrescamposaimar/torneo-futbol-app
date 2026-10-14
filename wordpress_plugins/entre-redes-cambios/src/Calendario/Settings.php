@@ -188,6 +188,26 @@ class Settings {
         return trim( $this->readString( 'notificacion_nueva_destino', (string) InitialSchema::SEED_DEFAULTS['notificacion_nueva_destino'] ) );
     }
 
+    /**
+     * Whether the CAPTAIN is emailed about his own request — the receipt
+     * when he files it, and the decision when the comisión takes one
+     * (0.1.31). Default: `false`.
+     *
+     * Deliberately separate from `notificacionNuevaSolicitudActiva()`:
+     * those two answer different questions ("does the comisión want to be
+     * told" vs "do the captains get told"), and one may be wanted without
+     * the other. There is no address setting beside it — a captain's
+     * address is resolved per request from their prode account, never typed
+     * in by hand.
+     *
+     * A failed read collapses to `false` for the same reason as the
+     * comisión's switch: the worst case is a missing notification, while
+     * the request itself is stored and visible in the app either way.
+     */
+    public function notificacionCapitanActiva(): bool {
+        return $this->readBool( 'notificacion_capitan_activa', (string) InitialSchema::SEED_DEFAULTS['notificacion_capitan_activa'] );
+    }
+
     public function cambiosHabilitados(): bool {
         return $this->readBool( 'cambios_habilitados', (string) InitialSchema::SEED_DEFAULTS['cambios_habilitados'] );
     }

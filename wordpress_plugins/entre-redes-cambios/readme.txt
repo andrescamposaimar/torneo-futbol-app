@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.30
+Stable tag: 0.1.31
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,12 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.31 =
+* Feature: the CAPTAIN is emailed about his own request — a receipt when he files it, and the decision when the comisión approves or rejects it. Its own switch on the Configuración screen, separate from the comisión's: one may be wanted without the other. There is no address to configure; it is resolved per captain from the Google or Apple account they sign in with (`Notificaciones\CapitanEmailResolver`: `solicitada_por` -> `prode_associations.player_id` -> `prode_users.email`). Deleted associations and deleted users are excluded — an account somebody removed is not a way to reach them — and when a player holds more than one, the most recently used login wins, because that is the inbox they are actually reading. No address means no mail, logged, never a guess.
+* The approval mail says, in bold, that it is NOT final: the change takes effect when the lote is published, and until then the player cannot play. That is the single most likely harm this feature can cause — a captain who reads "aprobado" on Wednesday and fields the player on Saturday has broken the rule believing he followed it.
+* Neither the dictamen nor its motivos reach the captain. Chances of approval are the comisión's to discuss, and printing the ruleset's automatic objections beside a human rejection tells him a reason that was not the real one. The only explanation he gets is the note a human wrote, and when there is none the mail says so rather than inventing one. The "Gestionar" button is absent too: it points at wp-admin, where a captain cannot go — he is sent to Mis pedidos in the app.
+* `notificarDecision()` ignores any estado it has no copy written for (`publicada`, `anulada`) instead of improvising one. Without that guard they fall through to a missing template and are swallowed by the catch: the same silence, but every one logged as a failure, which over a Friday lote would be a stream of fake errors in the one durable slot this host has for real ones.
 
 = 0.1.30 =
 * Feature: the alert names the captain who filed the request ("Pedido por Campos, Andres (Capitán)"). The role goes in parentheses because the captain is often also one of the players in the movement, and without it the line reads as a third name. `cambios_solicitud.solicitada_por` holds the captain's PLAYER id — `$claims['player_id']` from the token, not a WP user id — so it resolves through the same `get_the_title()` path as every other name on the mail; resolving it as a WP user would have printed nothing. The line is dropped rather than printing "Jugador #0" when the column holds 0, which only happens if the token carried no player id.
