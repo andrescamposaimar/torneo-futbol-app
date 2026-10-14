@@ -307,14 +307,26 @@ class SolicitudNotifierTest extends TestCase {
         $this->assertCount( 1, $this->enviados );
     }
 
-    public function test_el_asunto_lleva_el_numero_y_el_equipo(): void {
+    public function test_el_asunto_nombra_al_equipo(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
         $id = $this->crearSustitucion();
 
         $this->notifier()->notificarCreada( $id );
 
-        $this->assertStringContainsString( '#' . $id, $this->enviados[0]['asunto'] );
-        $this->assertStringContainsString( 'SUIZA', $this->enviados[0]['asunto'] );
+        // The team is what the reader scans for in a list of subjects.
+        $this->assertSame( 'Cambios: Nueva solicitud de SUIZA', $this->enviados[0]['asunto'] );
+    }
+
+    public function test_el_boton_dice_gestionar(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $id = $this->crearSustitucion();
+
+        $this->notifier()->notificarCreada( $id );
+
+        $cuerpo = $this->enviados[0]['cuerpo'];
+
+        $this->assertStringContainsString( '>Gestionar</a>', $cuerpo );
+        $this->assertStringContainsString( 'page=cambios-bandeja', $cuerpo, 'The label changed; where it points did not.' );
     }
 
     /**

@@ -156,12 +156,18 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         }
     }
 
-    /** @param array<string, mixed> $row */
+    /**
+     * The team is what the reader scans for, so it is what the subject
+     * carries. It deliberately does NOT carry the solicitud id: the process
+     * owner asked for this wording, and a row is identified in the tray by
+     * team and players, which the body spells out.
+     *
+     * @param array<string, mixed> $row
+     */
     private function asunto( array $row ): string {
         return sprintf(
-            /* translators: 1: request id, 2: team name */
-            __( 'Cambios: nueva solicitud #%1$d — %2$s', 'entre-redes-cambios' ),
-            (int) $row['id'],
+            /* translators: %s: team name */
+            __( 'Cambios: Nueva solicitud de %s', 'entre-redes-cambios' ),
             $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) )
         );
     }
@@ -229,7 +235,7 @@ final class SolicitudNotifier implements NotificaSolicitudes {
             '<p style="margin:0;"><a href="%1$s" style="display:inline-block;background:#2271b1;color:#ffffff;'
             . 'text-decoration:none;padding:10px 18px;border-radius:4px;font-weight:600;">%2$s</a></p>',
             esc_url( admin_url( 'admin.php?page=' . BandejaPage::SLUG ) ),
-            esc_html__( 'Resolver en la bandeja', 'entre-redes-cambios' )
+            esc_html__( 'Gestionar', 'entre-redes-cambios' )
         );
 
         $html .= '</div>';

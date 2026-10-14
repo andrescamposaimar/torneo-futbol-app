@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.27
+Stable tag: 0.1.28
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,10 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.28 =
+* Change: the alert's subject is now "Cambios: Nueva solicitud de {equipo}" — the team is what the reader scans for in a list of subjects. It no longer carries the solicitud id; a row is identified in the tray by team and players, which the body spells out.
+* Change: the alert's button reads "Gestionar" instead of "Resolver en la bandeja". Where it points did not change.
 
 = 0.1.27 =
 * Change: the new-request alert no longer carries the dictamen's "Acción sugerida", nor its motivos. On the process owner's request: an alert that arrives already recommending an answer frames the decision before he has looked at it, and the decision is his. The tray still shows it, right next to the buttons that act on it — which is where a recommendation belongs. The motivos go with it: without the verdict they are a list of objections with nothing to object to.
