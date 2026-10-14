@@ -125,6 +125,103 @@ class BandejaPageTest extends TestCase {
         $_POST = [];
     }
 
+    // -------------------------------------------------------------------------
+    // The captain's decision mail is actually WIRED here (0.1.31)
+    //
+    // SolicitudNotifierTest proves the mail itself. These prove the cable:
+    // without them, deleting the call from ejecutarAprobar() breaks nothing.
+    // -------------------------------------------------------------------------
+
+    public function test_aprobar_le_avisa_al_capitan(): void {
+        $avisos = [];
+        $this->page = $this->paginaConNotificador( $avisos );
+
+        $id = $this->crearPendiente();
+
+        $this->invoke( 'ejecutarAprobar', [ $id, 'ok' ] );
+
+        $this->assertSame( [ [ $id, EstadoSolicitud::APROBADA ] ], $avisos );
+    }
+
+    public function test_rechazar_le_avisa_al_capitan(): void {
+        $avisos = [];
+        $this->page = $this->paginaConNotificador( $avisos );
+
+        $id = $this->crearPendiente();
+
+        $this->invoke( 'ejecutarRechazar', [ $id, 'no' ] );
+
+        $this->assertSame( [ [ $id, EstadoSolicitud::RECHAZADA ] ], $avisos );
+    }
+
+    /**
+     * A transition that threw never happened, so it must not produce a mail
+     * saying it did. Approving twice is the cheapest way to reach that: the
+     * second call fails the transition check.
+     */
+    public function test_una_transicion_que_falla_no_avisa(): void {
+        $avisos = [];
+        $this->page = $this->paginaConNotificador( $avisos );
+
+        $id = $this->crearPendiente();
+
+        $this->invoke( 'ejecutarRechazar', [ $id, 'no' ] );
+        $avisos = [];
+
+        $resultado = $this->invoke( 'ejecutarAprobar', [ $id, 'ok' ] );
+
+        $this->assertFalse( $resultado['ok'], 'rechazada is terminal.' );
+        $this->assertSame( [], $avisos );
+    }
+
+    /** @param array<int, array{0: int, 1: string}> $avisos */
+    private function paginaConNotificador( array &$avisos ): BandejaPage {
+        global $wpdb;
+
+        $notifier = new class( $avisos ) implements \EntreRedes\Cambios\Notificaciones\NotificaSolicitudes {
+            /** @var array<int, array{0: int, 1: string}> */
+            private array $registro;
+
+            /** @param array<int, array{0: int, 1: string}> $avisos */
+            public function __construct( array &$avisos ) {
+                $this->registro = &$avisos;
+            }
+
+            public function notificarCreada( int $solicitudId ): void {
+            }
+
+            public function notificarCreadaAlCapitan( int $solicitudId ): void {
+            }
+
+            public function notificarDecision( int $solicitudId, string $estado ): void {
+                $this->registro[] = [ $solicitudId, $estado ];
+            }
+        };
+
+        return new BandejaPage(
+            new ProcessOwnerAuthorizer(),
+            $this->solicitudRepository,
+            $this->plazaRepository,
+            $this->settings,
+            $this->eventLog,
+            new JugadorMetricasReader( $wpdb, $this->eventLog ),
+            static fn (): int => strtotime( '2026-05-27 11:00:00' ),
+            $notifier
+        );
+    }
+
+    private function crearPendiente(): int {
+        $this->seedFecha( 1 );
+        $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, 100, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
+
+        return $this->solicitudRepository->crear(
+            SolicitudDeCambio::sustitucion( self::SEASON_ID, 100, $plazaId, 888, 1, time() ),
+            777,
+            Dictamen::from( [] ),
+            '2026-05-27 10:00:00'
+        );
+    }
+
     private function invoke( string $method, array $args = [] ): mixed {
         $ref = new \ReflectionMethod( BandejaPage::class, $method );
 

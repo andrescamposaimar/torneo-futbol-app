@@ -7,10 +7,12 @@ namespace EntreRedes\Cambios\Admin;
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Dictamen\DictamenSnapshot;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
+use EntreRedes\Cambios\Notificaciones\NotificaSolicitudes;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\JugadorMetricas;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
 /**
@@ -96,6 +98,14 @@ class BandejaPage {
     private const NONCE_ANULAR_FIELD    = 'cambios_anular_nonce';
 
     private ProcessOwnerAuthorizer $authorizer;
+
+    /**
+     * Tells the captain what was decided, or null to tell nobody. Optional
+     * so every existing test that builds this page keeps working: a missing
+     * notifier is "no mail", never an error — the decision is what matters
+     * and it is already stored.
+     */
+    private ?NotificaSolicitudes $notifier;
     private SolicitudRepository $solicitudRepository;
     private PlazaRepository $plazaRepository;
     private Settings $settings;
@@ -119,8 +129,10 @@ class BandejaPage {
         Settings $settings,
         EventLog $eventLog,
         JugadorMetricasReader $metricasReader,
-        ?callable $clockFn = null
+        ?callable $clockFn = null,
+        ?NotificaSolicitudes $notifier = null
     ) {
+        $this->notifier            = $notifier;
         $this->authorizer          = $authorizer;
         $this->solicitudRepository = $solicitudRepository;
         $this->plazaRepository     = $plazaRepository;
@@ -538,6 +550,10 @@ class BandejaPage {
         try {
             $this->solicitudRepository->aprobar( $id, get_current_user_id(), $nota, $this->ahoraDb(), $this->nombreDecisor() );
 
+            // AFTER the transition is committed, and it never throws: the
+            // decision is made and stored whatever happens to the mail.
+            $this->notificarDecision( $id, EstadoSolicitud::APROBADA );
+
             return [ 'ok' => true, 'error' => null ];
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'admin.solicitud_decision_fallida', [
@@ -557,6 +573,8 @@ class BandejaPage {
     private function ejecutarRechazar( int $id, ?string $nota ): array {
         try {
             $this->solicitudRepository->rechazar( $id, get_current_user_id(), $nota, $this->ahoraDb(), $this->nombreDecisor() );
+
+            $this->notificarDecision( $id, EstadoSolicitud::RECHAZADA );
 
             return [ 'ok' => true, 'error' => null ];
         } catch ( \Throwable $e ) {
@@ -756,6 +774,18 @@ class BandejaPage {
         $nota = trim( sanitize_text_field( (string) $nota ) );
 
         return '' === $nota ? null : $nota;
+    }
+
+    /**
+     * Fires the captain's decision mail, and only for a decision that
+     * actually landed — callers invoke it inside the `try`, after the
+     * repository returned, so a transition that threw never produces a mail
+     * saying it happened.
+     */
+    private function notificarDecision( int $id, string $estado ): void {
+        if ( null !== $this->notifier ) {
+            $this->notifier->notificarDecision( $id, $estado );
+        }
     }
 
     private function guardarNotice( string $tipo, string $mensaje ): void {

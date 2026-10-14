@@ -11,6 +11,7 @@ use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\JugadorMetricasReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
+use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudRepository;
 
 /**
@@ -59,6 +60,7 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     private SolicitudRepository $solicitudRepository;
     private PlazaRepository $plazaRepository;
     private FechaRepository $fechaRepository;
+    private ?CapitanEmailResolver $capitanEmails;
     private JugadorMetricasReader $metricasReader;
     private EventLog $eventLog;
 
@@ -79,8 +81,10 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         FechaRepository $fechaRepository,
         JugadorMetricasReader $metricasReader,
         EventLog $eventLog,
-        ?callable $mailFn = null
+        ?callable $mailFn = null,
+        ?CapitanEmailResolver $capitanEmails = null
     ) {
+        $this->capitanEmails = $capitanEmails;
         $this->settings            = $settings;
         $this->solicitudRepository = $solicitudRepository;
         $this->plazaRepository     = $plazaRepository;
@@ -150,6 +154,101 @@ final class SolicitudNotifier implements NotificaSolicitudes {
             // captain's request succeeded and must be reported as such.
             $this->eventLog->record( 'notificacion.fallida', [
                 'solicitud_id' => $solicitudId,
+                'excepcion'    => get_class( $e ),
+                'mensaje'      => $e->getMessage(),
+            ] );
+        }
+    }
+
+    /**
+     * Tells the CAPTAIN his request was received. Never throws, for the
+     * same reason `notificarCreada()` does not: by the time this runs the
+     * request is stored and his action succeeded.
+     */
+    public function notificarCreadaAlCapitan( int $solicitudId ): void {
+        $this->notificarAlCapitan( $solicitudId, 'recibida' );
+    }
+
+    /**
+     * Tells the CAPTAIN what the comisión decided.
+     *
+     * @param string $estado `EstadoSolicitud::APROBADA` or `::RECHAZADA`.
+     *        Anything else is ignored rather than mailed: `publicada` and
+     *        `anulada` have no copy written for them yet, and inventing one
+     *        at send time is how a captain gets told something nobody meant
+     *        to say.
+     */
+    public function notificarDecision( int $solicitudId, string $estado ): void {
+        if ( ! in_array( $estado, [ EstadoSolicitud::APROBADA, EstadoSolicitud::RECHAZADA ], true ) ) {
+            return;
+        }
+
+        $this->notificarAlCapitan( $solicitudId, $estado );
+    }
+
+    /**
+     * The shared path for every captain-facing mail. Swallows everything
+     * into a logged event — see the class docblock's rule 1.
+     *
+     * @param string $momento 'recibida' | EstadoSolicitud::APROBADA | ::RECHAZADA
+     */
+    private function notificarAlCapitan( int $solicitudId, string $momento ): void {
+        try {
+            if ( ! $this->settings->notificacionCapitanActiva() ) {
+                return;
+            }
+
+            if ( null === $this->capitanEmails ) {
+                // Wired without a resolver: no address can be found, so
+                // there is nothing to send. Logged, because a deployment
+                // that forgot it would otherwise look like captains simply
+                // never get mail.
+                $this->eventLog->record( 'notificacion.capitan_sin_resolver_fallida', [
+                    'solicitud_id' => $solicitudId,
+                ] );
+
+                return;
+            }
+
+            $row = $this->solicitudRepository->findSolicitud( $solicitudId );
+
+            if ( null === $row ) {
+                $this->eventLog->record( 'notificacion.solicitud_inexistente_fallida', [
+                    'solicitud_id' => $solicitudId,
+                ] );
+
+                return;
+            }
+
+            $destino = $this->capitanEmails->resolve( (int) $row['solicitada_por'] );
+
+            if ( null === $destino ) {
+                // Not a failure of this plugin: the captain has no linked
+                // account with an address. Recorded so "he never got the
+                // mail" has an answer.
+                $this->eventLog->record( 'notificacion.capitan_sin_email_fallida', [
+                    'solicitud_id' => $solicitudId,
+                    'player_id'    => (int) $row['solicitada_por'],
+                ] );
+
+                return;
+            }
+
+            $enviado = ( $this->mailFn )(
+                $destino,
+                $this->asuntoCapitan( $row, $momento ),
+                $this->cuerpoCapitan( $row, $momento ),
+                [ 'Content-Type: text/html; charset=UTF-8' ]
+            );
+
+            $this->eventLog->record(
+                $enviado ? 'notificacion.capitan_enviada' : 'notificacion.capitan_envio_fallido',
+                [ 'solicitud_id' => $solicitudId, 'momento' => $momento ]
+            );
+        } catch ( \Throwable $e ) {
+            $this->eventLog->record( 'notificacion.capitan_fallida', [
+                'solicitud_id' => $solicitudId,
+                'momento'      => $momento,
                 'excepcion'    => get_class( $e ),
                 'mensaje'      => $e->getMessage(),
             ] );
@@ -238,6 +337,185 @@ final class SolicitudNotifier implements NotificaSolicitudes {
         return $playerId > 0
             ? $this->nombrePost( $playerId, __( 'Jugador', 'entre-redes-cambios' ) )
             : null;
+    }
+
+    /**
+     * The captain's subject. Addressed to him, so it says "tu pedido" and
+     * names what he asked about — the same player the comisión's subject
+     * names, for the same reason: it is the plaza he is thinking of.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function asuntoCapitan( array $row, string $momento ): string {
+        $que = $this->quePidio( $row );
+
+        $plantillas = [
+            'recibida'                 => [
+                __( 'Cambios: Recibimos tu pedido por %s', 'entre-redes-cambios' ),
+                __( 'Cambios: Recibimos tu pedido', 'entre-redes-cambios' ),
+            ],
+            EstadoSolicitud::APROBADA  => [
+                __( 'Cambios: Aprobaron tu pedido por %s', 'entre-redes-cambios' ),
+                __( 'Cambios: Aprobaron tu pedido', 'entre-redes-cambios' ),
+            ],
+            EstadoSolicitud::RECHAZADA => [
+                __( 'Cambios: Rechazaron tu pedido por %s', 'entre-redes-cambios' ),
+                __( 'Cambios: Rechazaron tu pedido', 'entre-redes-cambios' ),
+            ],
+        ];
+
+        [ $conJugador, $sinJugador ] = $plantillas[ $momento ];
+
+        return null === $que ? $sinJugador : sprintf( $conJugador, $que );
+    }
+
+    /**
+     * What the captain asked ABOUT: the player leaving, or for a regreso
+     * the titular coming back. Same choice as the comisión's subject —
+     * see `asunto()`.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function quePidio( array $row ): ?string {
+        if ( SolicitudDeCambio::TIPO_REGRESO === (string) $row['tipo'] ) {
+            $titular = $this->titularDeLaPlaza( $row );
+
+            return null === $titular
+                ? null
+                : sprintf( __( 'regreso de %s', 'entre-redes-cambios' ), $titular );
+        }
+
+        $sale = null !== $row['saliente_player_id'] ? (int) $row['saliente_player_id'] : null;
+
+        return null === $sale ? null : $this->nombrePost( $sale, __( 'Jugador', 'entre-redes-cambios' ) );
+    }
+
+    /**
+     * The captain's body.
+     *
+     * *** WHAT IS DELIBERATELY NOT HERE ***
+     * No dictamen and no motivos. Two reasons, and the second is the one
+     * that matters: the chances of approval are the comisión's business to
+     * discuss, not this plugin's to pre-empt; and if the comisión rejects
+     * for a reason of their own, printing the ruleset's automatic
+     * objections beside it tells the captain a reason that WAS NOT THE
+     * REAL ONE. The only explanation he gets is the note a human wrote, and
+     * when there is none the mail says so instead of inventing one.
+     *
+     * No "Gestionar" button either: it points at wp-admin, where a captain
+     * cannot go. He is sent to the app, which is where his requests live.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function cuerpoCapitan( array $row, string $momento ): string {
+        $tipo   = (string) $row['tipo'];
+        $filas  = $this->movimientos( $row );
+        $puntos = $this->puntajesDe( $filas );
+
+        $html  = '<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;color:#1d2327;line-height:1.5;">';
+        $html .= sprintf(
+            '<p style="margin:0 0 4px;font-size:18px;font-weight:600;">%s</p>',
+            esc_html( $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ) )
+        );
+        $html .= sprintf(
+            '<p style="margin:0 0 16px;color:#646970;">%s</p>',
+            esc_html( $this->contexto( $row, $tipo ) )
+        );
+
+        $html .= sprintf( '<p style="margin:0 0 16px;">%s</p>', $this->encabezadoCapitan( $momento ) );
+
+        $html .= '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px;">';
+
+        foreach ( $filas as $fila ) {
+            $html .= sprintf(
+                '<tr>'
+                . '<td style="padding:6px 12px 6px 0;color:#646970;white-space:nowrap;">%s</td>'
+                . '<td style="padding:6px 12px 6px 0;font-weight:600;">%s</td>'
+                . '<td style="padding:6px 0;color:#646970;white-space:nowrap;">%s</td>'
+                . '</tr>',
+                esc_html( $fila['etiqueta'] ),
+                esc_html( $this->nombreJugador( $fila['player_id'] ) ),
+                esc_html( $this->puntajeLegible( $fila['player_id'], $puntos ) )
+            );
+        }
+
+        $html .= '</table>';
+        $html .= $this->cierreCapitan( $row, $momento );
+        $html .= '</div>';
+
+        return $html;
+    }
+
+    /** The one sentence that says what happened. */
+    private function encabezadoCapitan( string $momento ): string {
+        if ( EstadoSolicitud::APROBADA === $momento ) {
+            return esc_html__( 'La comisión aprobó tu pedido.', 'entre-redes-cambios' );
+        }
+
+        if ( EstadoSolicitud::RECHAZADA === $momento ) {
+            return esc_html__( 'La comisión rechazó tu pedido.', 'entre-redes-cambios' );
+        }
+
+        return esc_html__( 'Recibimos tu pedido.', 'entre-redes-cambios' );
+    }
+
+    /**
+     * What comes after the table: what happens next, and the comisión's
+     * note when there is one.
+     *
+     * *** THE WARNING ON AN APPROVAL IS THE POINT OF THAT MAIL ***
+     * Approved is not done. The change takes effect when the lote is
+     * published, and a captain who reads "aprobado" on Wednesday and fields
+     * the player on Saturday has broken the rule believing he followed it.
+     * That is the single most likely harm this whole feature can cause, so
+     * it is said in bold with its consequence spelled out.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function cierreCapitan( array $row, string $momento ): string {
+        $html = '';
+
+        if ( EstadoSolicitud::APROBADA === $momento ) {
+            $html .= sprintf(
+                '<p style="margin:0 0 16px;"><strong>%s</strong> %s</p>',
+                esc_html__( 'Todavía no es definitivo.', 'entre-redes-cambios' ),
+                esc_html__(
+                    'El cambio se hace efectivo cuando la comisión publica los cambios de la fecha. '
+                    . 'Hasta ese momento el jugador no puede jugar.',
+                    'entre-redes-cambios'
+                )
+            );
+        }
+
+        if ( 'recibida' === $momento ) {
+            $html .= sprintf(
+                '<p style="margin:0 0 16px;">%s</p>',
+                esc_html__(
+                    'La comisión lo va a revisar. Te avisamos por mail cuando haya una decisión.',
+                    'entre-redes-cambios'
+                )
+            );
+        }
+
+        if ( EstadoSolicitud::APROBADA === $momento || EstadoSolicitud::RECHAZADA === $momento ) {
+            $nota = trim( (string) ( $row['nota'] ?? '' ) );
+
+            $html .= '' !== $nota
+                ? sprintf(
+                    '<p style="margin:0 0 16px;">%s<br><em>%s</em></p>',
+                    esc_html__( 'Comentario de la comisión:', 'entre-redes-cambios' ),
+                    esc_html( $nota )
+                )
+                : sprintf(
+                    '<p style="margin:0 0 16px;color:#646970;">%s</p>',
+                    esc_html__( 'La comisión no dejó un comentario.', 'entre-redes-cambios' )
+                );
+        }
+
+        return $html . sprintf(
+            '<p style="margin:0;color:#646970;">%s</p>',
+            esc_html__( 'Podés seguir tus pedidos en la app, en Mis pedidos.', 'entre-redes-cambios' )
+        );
     }
 
     /** @param array<string, mixed> $row */

@@ -230,6 +230,7 @@ class ConfiguracionPage {
         $valores['cambios_habilitados']    = $entrada['habilitados'] ? '1' : '0';
         $valores['notificacion_nueva_activa']  = $entrada['notificar'] ? '1' : '0';
         $valores['notificacion_nueva_destino'] = $entrada['notificar_destino'];
+        $valores['notificacion_capitan_activa'] = $entrada['notificar_capitan'] ? '1' : '0';
         $valores['mensaje_deshabilitado']  = $entrada['mensaje'];
         $valores['exencion_arco_activa'] = $entrada['exencion_arco'] ? '1' : '0';
         $valores['prioridad_padres_activa'] = $entrada['prioridad_padres'] ? '1' : '0';
@@ -291,6 +292,7 @@ class ConfiguracionPage {
             'prioridad_padres' => isset( $_POST['prioridad_padres_activa'] ),
             'habilitados'      => isset( $_POST['cambios_habilitados'] ),
             'notificar'        => isset( $_POST['notificacion_nueva_activa'] ),
+            'notificar_capitan' => isset( $_POST['notificacion_capitan_activa'] ),
             'notificar_destino' => isset( $_POST['notificacion_nueva_destino'] ) && is_scalar( $_POST['notificacion_nueva_destino'] )
                 ? trim( sanitize_text_field( wp_unslash( (string) $_POST['notificacion_nueva_destino'] ) ) )
                 : '',
@@ -406,6 +408,30 @@ class ConfiguracionPage {
                                         . 'la bandeja. Un pedido agrupado de arquero manda UN solo mail con los dos '
                                         . 'movimientos. Si el envío falla, el pedido igual queda guardado: nunca se pierde '
                                         . 'una solicitud por un problema de mail.',
+                                        'entre-redes-cambios'
+                                    );
+                                    ?>
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><?php esc_html_e( 'Avisar al capitán', 'entre-redes-cambios' ); ?></th>
+                            <td>
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        name="notificacion_capitan_activa"
+                                        value="1"
+                                        <?php checked( $this->settings->notificacionCapitanActiva() ); ?>>
+                                    <?php esc_html_e( 'Avisarle al capitán cuando recibimos su pedido y cuando se decide', 'entre-redes-cambios' ); ?>
+                                </label>
+                                <p class="description">
+                                    <?php
+                                    esc_html_e(
+                                        'Tres mails: uno al recibir el pedido, otro al aprobarlo y otro al rechazarlo. El de '
+                                        . 'aprobación le aclara que el cambio NO es definitivo hasta que se publica la fecha. '
+                                        . 'La dirección no se configura acá: sale de la cuenta con la que el capitán entra a '
+                                        . 'la app, y si no tiene una, ese capitán no recibe nada.',
                                         'entre-redes-cambios'
                                     );
                                     ?>
