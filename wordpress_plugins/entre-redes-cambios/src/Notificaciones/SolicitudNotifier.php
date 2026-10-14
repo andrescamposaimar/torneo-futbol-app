@@ -157,19 +157,75 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     }
 
     /**
-     * The team is what the reader scans for, so it is what the subject
-     * carries. It deliberately does NOT carry the solicitud id: the process
-     * owner asked for this wording, and a row is identified in the tray by
-     * team and players, which the body spells out.
+     * "Cambios: Nueva solicitud de SUIZA por Grigorjew, Gerardo".
+     *
+     * Team AND player, because two requests from one team on one day would
+     * otherwise share a subject and have to be opened to be told apart —
+     * the reason the solicitud id was missed once it left the subject.
+     *
+     * The player falls off rather than printing a placeholder when the
+     * request names nobody resolvable: "Nueva solicitud de SUIZA" is a
+     * worse subject than the full one, but "por sin registrar" is a worse
+     * subject than both.
      *
      * @param array<string, mixed> $row
      */
     private function asunto( array $row ): string {
+        $equipo   = $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) );
+        $jugador  = $this->jugadorSolicitado( $row );
+
+        if ( null === $jugador ) {
+            return sprintf(
+                /* translators: %s: team name */
+                __( 'Cambios: Nueva solicitud de %s', 'entre-redes-cambios' ),
+                $equipo
+            );
+        }
+
         return sprintf(
-            /* translators: %s: team name */
-            __( 'Cambios: Nueva solicitud de %s', 'entre-redes-cambios' ),
-            $this->nombrePost( (int) $row['team_id'], __( 'Equipo', 'entre-redes-cambios' ) )
+            /* translators: 1: team name, 2: the incoming player */
+            __( 'Cambios: Nueva solicitud de %1$s por %2$s', 'entre-redes-cambios' ),
+            $equipo,
+            $jugador
         );
+    }
+
+    /**
+     * WHO THE TEAM IS ASKING TO BRING IN — a different column per tipo, and
+     * spelled out branch by branch rather than taken from the last row of
+     * `movimientos()`, which happens to be the same player today and would
+     * silently change the subject the day somebody reorders that list.
+     *
+     *   - `sustitucion`: the entrante, plainly.
+     *   - `regreso`: there is no entrante — the plaza's own titular is the
+     *     one coming back, and he is what the request is about.
+     *   - `reasignacion_arquero`: `entrante_player_id` is the FIELD TITULAR
+     *     moving into goal, an internal move. The only player actually
+     *     joining from outside is `entrante_campo_player_id`, and that is
+     *     the one the subject must name; the arco leg is the mechanism, not
+     *     the ask.
+     *
+     * Returns null when the request names nobody this method can resolve —
+     * an unknown tipo included, which must not keep the alert from going
+     * out.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function jugadorSolicitado( array $row ): ?string {
+        $tipo = (string) $row['tipo'];
+
+        if ( SolicitudDeCambio::TIPO_SUSTITUCION === $tipo ) {
+            $playerId = null !== $row['entrante_player_id'] ? (int) $row['entrante_player_id'] : null;
+        } elseif ( SolicitudDeCambio::TIPO_REGRESO === $tipo ) {
+            $plaza    = $this->plazaRepository->findPlaza( (int) $row['plaza_id'] );
+            $playerId = null !== $plaza ? (int) $plaza['titular_player_id'] : null;
+        } elseif ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
+            $playerId = null !== $row['entrante_campo_player_id'] ? (int) $row['entrante_campo_player_id'] : null;
+        } else {
+            return null;
+        }
+
+        return null === $playerId ? null : $this->nombrePost( $playerId, __( 'Jugador', 'entre-redes-cambios' ) );
     }
 
     /**

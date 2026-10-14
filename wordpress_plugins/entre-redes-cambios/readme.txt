@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.28
+Stable tag: 0.1.29
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.29 =
+* Change: the alert's subject names the player too — "Cambios: Nueva solicitud de SUIZA por Grigorjew, Gerardo". Two requests from one team on one day would otherwise share a subject and have to be opened to be told apart, which is what dropping the solicitud id in 0.1.28 cost. WHICH player is a different column per tipo and is spelled out branch by branch: the entrante for a `sustitucion`; the plaza's own titular for a `regreso`, which has no entrante; and `entrante_campo_player_id` for a `reasignacion_arquero`, because `entrante_player_id` there is the field titular moving into goal — an internal move — while the only player joining from outside is the field one. The player falls off the subject rather than printing a placeholder when the request names nobody resolvable.
 
 = 0.1.28 =
 * Change: the alert's subject is now "Cambios: Nueva solicitud de {equipo}" — the team is what the reader scans for in a list of subjects. It no longer carries the solicitud id; a row is identified in the tray by team and players, which the body spells out.
