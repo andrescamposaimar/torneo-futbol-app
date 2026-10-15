@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Rest;
 
+use EntreRedes\Cambios\Calendario\FechaAbierta;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\PlazosCalculator;
 use EntreRedes\Cambios\Calendario\Settings;
@@ -201,13 +202,7 @@ class FechaController {
      * @return array<string, mixed>|null
      */
     private function fechaAbiertaDe( int $seasonId ): ?array {
-        foreach ( $this->fechaRepository->listBySeason( $seasonId ) as $fecha ) {
-            if ( ! FechaRepository::esResuelta( (string) ( $fecha['estado'] ?? '' ) ) ) {
-                return $fecha;
-            }
-        }
-
-        return null;
+        return FechaAbierta::de( $this->fechaRepository, $seasonId );
     }
 
     /**
