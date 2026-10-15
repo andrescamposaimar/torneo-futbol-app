@@ -300,6 +300,19 @@ final class Plugin {
 
                 $metricasReader = new Plazas\JugadorMetricasReader( $wpdb, $eventLog );
 
+                // ONE notifier shared by the tray (decision mails) and the
+                // "Nueva solicitud" use case (creation mails).
+                $notifier = new Notificaciones\SolicitudNotifier(
+                    $settings,
+                    $solicitudRepository,
+                    $plazaRepository,
+                    $fechaRepository,
+                    $metricasReader,
+                    $eventLog,
+                    null,
+                    new Notificaciones\CapitanEmailResolver( $wpdb, $eventLog )
+                );
+
                 $bandejaPage = new Admin\BandejaPage(
                     $authorizer,
                     $solicitudRepository,
@@ -308,16 +321,38 @@ final class Plugin {
                     $eventLog,
                     $metricasReader,
                     null,
-                    new Notificaciones\SolicitudNotifier(
-                        $settings,
-                        $solicitudRepository,
+                    $notifier
+                );
+
+                // The commission loads a request on a captain's behalf
+                // through the SAME creation use case the REST route calls,
+                // wired with the same lock and the same candidate resolver
+                // (see Rest\PlazasController::listarCandidatos()).
+                $nuevaSolicitudPage = new Admin\NuevaSolicitudPage(
+                    $authorizer,
+                    new Solicitudes\CrearSolicitud(
                         $plazaRepository,
-                        $fechaRepository,
-                        $metricasReader,
+                        $solicitudRepository,
+                        $dictamenPipeline,
+                        new Solicitudes\Lock\MysqlCreationLock( $wpdb, $eventLog ),
+                        $notifier
+                    ),
+                    new Capitania\CapitanRepository( $wpdb, $eventLog ),
+                    $plazaRepository,
+                    $fechaRepository,
+                    $settings,
+                    new Plazas\CandidatosResolver(
+                        $wpdb,
+                        $plazaRepository,
                         $eventLog,
                         null,
-                        new Notificaciones\CapitanEmailResolver( $wpdb, $eventLog )
-                    )
+                        null,
+                        null,
+                        new Solicitudes\SolicitudesAbiertasReader( $wpdb, $eventLog )
+                    ),
+                    $bloqueoReemplazoPolicy,
+                    $metricasReader,
+                    $eventLog
                 );
 
                 $historicoPage = new Admin\HistoricoPage(
@@ -337,7 +372,7 @@ final class Plugin {
                     $eventLog
                 );
 
-                ( new Admin\AdminMenu( $bandejaPage, $historicoPage, $configuracionPage ) )->register();
+                ( new Admin\AdminMenu( $bandejaPage, $historicoPage, $configuracionPage, $nuevaSolicitudPage ) )->register();
             } );
         }
 

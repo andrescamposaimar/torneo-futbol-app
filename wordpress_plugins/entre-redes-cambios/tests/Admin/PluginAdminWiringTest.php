@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Tests\Admin;
 
 use EntreRedes\Cambios\Admin\BandejaPage;
+use EntreRedes\Cambios\Admin\NuevaSolicitudPage;
 use EntreRedes\Cambios\Admin\ProcessOwnerAuthorizer;
 use EntreRedes\Cambios\Migrations\InitialSchema;
 use EntreRedes\Cambios\Plugin;
@@ -62,6 +63,60 @@ class PluginAdminWiringTest extends TestCase {
         $this->assertNotEmpty( $found, 'Expected the bandeja menu (slug: ' . BandejaPage::SLUG . ') to be registered.' );
         $this->assertSame( ProcessOwnerAuthorizer::CAPABILITY, $found[0]['capability'], 'The menu must be gated by gestionar_cambios, not manage_options.' );
         $this->assertIsCallable( $found[0]['function'] );
+    }
+
+    public function test_boot_registers_nueva_solicitud_as_a_submenu_of_the_bandeja_gated_by_the_capability(): void {
+        $GLOBALS['wp_test_is_admin'] = true;
+
+        Plugin::boot();
+        do_action( 'admin_menu' );
+
+        $found = array_values( array_filter(
+            $GLOBALS['_prode_test_registered_admin_menus'] ?? [],
+            static fn ( array $m ) => ( $m['menu_slug'] ?? null ) === NuevaSolicitudPage::SLUG
+        ) );
+
+        $this->assertCount( 1, $found, 'Expected exactly one Nueva solicitud submenu.' );
+        $this->assertSame( BandejaPage::SLUG, $found[0]['parent_slug'], 'It must live under the Cambios menu.' );
+        $this->assertSame( ProcessOwnerAuthorizer::CAPABILITY, $found[0]['capability'] );
+        $this->assertIsCallable( $found[0]['function'] );
+    }
+
+    /**
+     * The REAL production-wired handler for the new page, with no capability:
+     * it must die before anything is created.
+     */
+    public function test_boot_wired_nueva_solicitud_handler_rejects_an_unauthorized_post_without_creating_anything(): void {
+        $GLOBALS['wp_test_is_admin'] = true;
+
+        Plugin::boot();
+        do_action( 'admin_menu' );
+
+        global $wpdb;
+        $this->assertSame( 0, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_solicitud" ) );
+
+        $GLOBALS['wp_test_current_user_can'] = false;
+        $_POST = [ 'cambios_action' => 'crear_solicitud', 'team_id' => '100', 'tipo' => 'regreso', 'plaza_id' => '1' ];
+
+        $callbacks = [];
+        foreach ( $GLOBALS['_prode_test_action_registrations']['admin_init'] ?? [] as $registered ) {
+            $callback = $registered['callback'];
+
+            if ( is_array( $callback ) && ( $callback[1] ?? null ) === 'handlePost' && $callback[0] instanceof NuevaSolicitudPage ) {
+                $callbacks[] = $callback;
+            }
+        }
+
+        $this->assertCount( 1, $callbacks, 'Expected the Nueva solicitud admin_init handler to be wired.' );
+
+        try {
+            $callbacks[0]();
+            $this->fail( 'Expected the wired handler to reject an unauthorized request.' );
+        } catch ( \RuntimeException $e ) {
+            // Expected — wp_die() throws in this shim.
+        }
+
+        $this->assertSame( 0, (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}cambios_solicitud" ) );
     }
 
     public function test_boot_does_not_register_the_bandeja_menu_outside_wp_admin(): void {

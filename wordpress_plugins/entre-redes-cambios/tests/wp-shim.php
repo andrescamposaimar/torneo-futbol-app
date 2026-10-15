@@ -956,8 +956,18 @@ if ( ! function_exists( 'check_admin_referer' ) ) {
 }
 
 if ( ! function_exists( 'wp_nonce_field' ) ) {
+    /**
+     * Like the real one it ECHOES the hidden input (when $echo) and returns
+     * it, so a render test can prove a form carries its nonce field.
+     */
     function wp_nonce_field( string $action, string $name, bool $referer = true, bool $echo = true ): string {
-        return '';
+        $field = '<input type="hidden" name="' . $name . '" value="test-nonce-' . $action . '">';
+
+        if ( $echo ) {
+            echo $field;
+        }
+
+        return $field;
     }
 }
 
