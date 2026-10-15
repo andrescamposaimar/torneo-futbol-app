@@ -207,6 +207,22 @@ class CrearSolicitudTest extends TestCase {
         );
     }
 
+    /** Guards the guard: the double must actually throw for an inside-the-lock call, for both mails. */
+    public function test_the_lock_watching_double_detects_a_call_made_inside_the_lock(): void {
+        $notifier = $this->notifierQueVigilaElCandado();
+
+        foreach ( [ 'notificarCreada', 'notificarCreadaAlCapitan' ] as $metodo ) {
+            try {
+                $this->lock->run( $this->seasonId, static fn () => $notifier->{$metodo}( 1 ) );
+                $this->fail( "{$metodo} was not detected inside the lock." );
+            } catch ( \LogicException $e ) {
+                $this->assertStringContainsString( 'lock was still held', $e->getMessage() );
+            }
+        }
+
+        $this->assertSame( [], $this->avisos );
+    }
+
     public function test_without_a_notifier_creation_still_succeeds(): void {
         $caso = new CrearSolicitud( $this->plazaRepository, $this->solicitudRepository, $this->pipeline, $this->lock );
 
@@ -257,9 +273,17 @@ class CrearSolicitudTest extends TestCase {
     }
 
     private function usoCaso(): CrearSolicitud {
+        return new CrearSolicitud( $this->plazaRepository, $this->solicitudRepository, $this->pipeline, $this->lock, $this->notifierQueVigilaElCandado() );
+    }
+
+    /**
+     * The double refuses to be called while the creation lock is held — for
+     * BOTH mails. Proven to bite by the companion test below.
+     */
+    private function notifierQueVigilaElCandado(): NotificaSolicitudes {
         $avisos = &$this->avisos;
 
-        $notifier = new class( $avisos, $this->lock ) implements NotificaSolicitudes {
+        return new class( $avisos, $this->lock ) implements NotificaSolicitudes {
             /** @var array<int, string> */
             private array $registro;
 
@@ -276,6 +300,9 @@ class CrearSolicitudTest extends TestCase {
             }
 
             public function notificarCreadaAlCapitan( int $solicitudId ): void {
+                if ( $this->lock->isHeld() ) {
+                    throw new \LogicException( 'Captain notified while the creation lock was still held.' );
+                }
                 $this->registro[] = 'capitan:' . $solicitudId;
             }
 
@@ -285,7 +312,5 @@ class CrearSolicitudTest extends TestCase {
             public function notificarCancelada( int $solicitudId ): void {
             }
         };
-
-        return new CrearSolicitud( $this->plazaRepository, $this->solicitudRepository, $this->pipeline, $this->lock, $notifier );
     }
 }
