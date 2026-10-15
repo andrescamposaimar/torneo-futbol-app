@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.33
+Stable tag: 0.1.34
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,14 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.34 =
+* Feature: "Nueva solicitud" in the Cambios menu — the comisión loads a request ON BEHALF of a captain who phoned in and cannot use the app. A stepwise form (team -> tipo -> plaza or field titular -> who enters) that offers the same candidates the captain would see, with the ones who cannot enter shown, marked and disabled so the person on the phone can be told why. The request is filed under the team's CURRENT captain (he gets the receipt mail, which is the confirmation it was loaded); a team with no current captain is refused rather than filed under nobody.
+* It goes through the SAME creation use case as the app (`Solicitudes\CrearSolicitud`, extracted from `SolicitudesController::crear()`; the REST route's behavior and response codes are unchanged), so the rules are identical: only the two open-request duplicates refuse, shown as an error; everything else is stored `pendiente` with its dictamen, and the notice says what the dictamen concluded. There is no "force" switch — overriding a negative dictamen is done afterwards by approving in the Bandeja. The plazo is evaluated at the moment of the load.
+* The open fecha is now defined in one place (`Calendario\FechaAbierta`), shared with the `fecha-abierta` endpoint.
+* Schema: `cambios_solicitud.creada_por_wp_user` (nullable) records which WP user loaded a request on a captain's behalf. NULL means the captain filed it himself through the app — true for every existing row, so there is nothing to backfill. `solicitada_por` stays the captain's PLAYER id in both cases: the request is the captain's, the new column only says who typed it in. The column is added by `dbDelta()` on the first request after the upload (the version bump triggers it).
+* The `solicitud.creada` event carries the WP user's id and display name (snapshotted) when a request was loaded from the admin; an app-filed request logs exactly what it always did.
+* The comisión's new-request mail says "Cargada desde el panel por X" for such a request. The captain's receipt is unchanged — it is the confirmation that the request was loaded.
 
 = 0.1.33 =
 * Feature: cancelling a request confirms it to the captain by mail — "Cambios: Cancelamos tu pedido por X" — and says the half that actually matters: the plaza is free again, which is the whole reason he cancelled. Same switch as the other captain mails.

@@ -11,6 +11,11 @@ namespace EntreRedes\Cambios\Admin;
  * `ProcessOwnerAuthorizer::CAPABILITY` (`gestionar_cambios`), never
  * `manage_options` — see that class's own docblock for why.
  *
+ * *** "NUEVA SOLICITUD" SINCE 0.1.34 ***
+ * A fourth entry, between the tray and the record: the commission loads a
+ * request on behalf of a captain who phoned in (`NuevaSolicitudPage`). It
+ * sits next to the Bandeja because that is where the request lands.
+ *
  * *** THREE PAGES SINCE 0.1.23 ***
  * `BandejaPage` is the worklist — what still needs deciding — and stays the
  * landing page, so the default destination never changes for whoever already
@@ -30,10 +35,18 @@ namespace EntreRedes\Cambios\Admin;
  */
 final class AdminMenu {
 
+    /**
+     * @param NuevaSolicitudPage|null $nuevaSolicitudPage The page the
+     *        commission loads a request on a captain's behalf from (0.1.34).
+     *        Optional only so a caller that builds this menu for the other
+     *        three pages — every existing test — keeps working; `Plugin`
+     *        always passes it.
+     */
     public function __construct(
         private BandejaPage $bandejaPage,
         private HistoricoPage $historicoPage,
-        private ConfiguracionPage $configuracionPage
+        private ConfiguracionPage $configuracionPage,
+        private ?NuevaSolicitudPage $nuevaSolicitudPage = null
     ) {
     }
 
@@ -64,6 +77,17 @@ final class AdminMenu {
             [ $this->bandejaPage, 'render' ]
         );
 
+        if ( null !== $this->nuevaSolicitudPage ) {
+            add_submenu_page(
+                BandejaPage::SLUG,
+                __( 'Nueva solicitud', 'entre-redes-cambios' ),
+                __( 'Nueva solicitud', 'entre-redes-cambios' ),
+                ProcessOwnerAuthorizer::CAPABILITY,
+                NuevaSolicitudPage::SLUG,
+                [ $this->nuevaSolicitudPage, 'render' ]
+            );
+        }
+
         add_submenu_page(
             BandejaPage::SLUG,
             __( 'Histórico de cambios', 'entre-redes-cambios' ),
@@ -84,5 +108,9 @@ final class AdminMenu {
 
         add_action( 'admin_init', [ $this->bandejaPage, 'handlePost' ] );
         add_action( 'admin_init', [ $this->configuracionPage, 'handlePost' ] );
+
+        if ( null !== $this->nuevaSolicitudPage ) {
+            add_action( 'admin_init', [ $this->nuevaSolicitudPage, 'handlePost' ] );
+        }
     }
 }

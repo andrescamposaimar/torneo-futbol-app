@@ -33,6 +33,40 @@ class MigrationRunnerTest extends TestCase {
         );
     }
 
+    /**
+     * 0.1.34: `creada_por_wp_user` records who loaded a request on a
+     * captain's behalf. It must be NULLABLE with no default — NULL is the
+     * true answer for every row that predates it — so an upgrade can never
+     * fabricate an author for an existing request, and an INSERT that never
+     * mentions the column (the app's path) still succeeds.
+     */
+    public function test_run_adds_creada_por_wp_user_as_a_nullable_column_that_defaults_to_null(): void {
+        MigrationRunner::run( new InMemoryEventLog() );
+
+        global $wpdb;
+        $p = $wpdb->prefix;
+
+        $columns = $wpdb->getPdo()->query( "PRAGMA table_info({$p}cambios_solicitud)" )->fetchAll( \PDO::FETCH_ASSOC );
+        $column  = array_values( array_filter( $columns, static fn ( array $c ): bool => 'creada_por_wp_user' === $c['name'] ) );
+
+        $this->assertCount( 1, $column, 'cambios_solicitud must have creada_por_wp_user after run().' );
+        $this->assertSame( 0, (int) $column[0]['notnull'], 'The column must be nullable.' );
+        // SQLite reports `DEFAULT NULL` as the literal string 'NULL'; MySQL as null.
+        $this->assertContains( $column[0]['dflt_value'], [ null, 'NULL' ], 'The column must have no non-NULL default.' );
+
+        $wpdb->query( "DELETE FROM {$p}cambios_solicitud" );
+        $wpdb->insert( $p . 'cambios_solicitud', [
+            'season_id' => 359, 'team_id' => 100, 'plaza_id' => 1, 'tipo' => 'regreso', 'fecha_id' => 1,
+            'solicitada_por' => 777, 'solicitada_at' => '2026-03-01 10:00:00', 'solicitud_instante_epoch' => 1772359200,
+            'dictamen_original' => '{}', 'estado' => 'pendiente',
+            'created_at' => '2026-03-01 10:00:00', 'updated_at' => '2026-03-01 10:00:00',
+        ] );
+
+        $this->assertNull( $wpdb->get_var( "SELECT creada_por_wp_user FROM {$p}cambios_solicitud" ) );
+
+        $wpdb->query( "DELETE FROM {$p}cambios_solicitud" );
+    }
+
     public function test_run_updates_the_stored_db_version_option(): void {
         MigrationRunner::run( new InMemoryEventLog() );
 

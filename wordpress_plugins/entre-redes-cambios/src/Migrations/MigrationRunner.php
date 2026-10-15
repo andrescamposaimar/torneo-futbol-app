@@ -93,6 +93,13 @@ use EntreRedes\Cambios\Plazas\PosicionResolver;
  * explains at length for `es_arco` simply does not apply here.
  * `InitialSchema::up()` — already called unconditionally by `run()` above —
  * picks the change up via its own idempotent `dbDelta()`.
+ *
+ * *** 0.1.34 ADDS `cambios_solicitud.creada_por_wp_user`, ALSO WITHOUT A TASK ***
+ * Nullable, NULL being the true answer for every existing row (they were all
+ * filed by a captain through the app), so there is nothing to backfill. The
+ * version bump is what matters here: it makes `runIfOutdated()` fire on the
+ * first request after the zip is uploaded, and `InitialSchema::up()`'s
+ * `dbDelta()` adds the column — see `InitialSchema::sqlCambiosSolicitud()`.
  */
 class MigrationRunner {
 

@@ -592,6 +592,14 @@ class InitialSchema {
      * own docblock. `ocupacion_id` itself is reused for movement 1 — no new
      * column needed there.
      *
+     * `creada_por_wp_user` (0.1.34) is the WP user who loaded the request ON
+     * BEHALF of a captain from the "Nueva solicitud" admin page; NULL for
+     * every request a captain filed himself through the app (and for every
+     * row that predates the column). It is distinct from `solicitada_por`,
+     * which stays the captain's PLAYER id in both cases — the request is the
+     * captain's, the column only records who typed it in. Nullable with no
+     * backfill: NULL is the true answer for every existing row.
+     *
      * None of this needed a versioned backfill: `cambios_solicitud` was
      * still EMPTY in production when these columns were added (same
      * precondition the `saliente_player_id` addition already relied on), and
@@ -613,6 +621,7 @@ class InitialSchema {
   entrante_campo_player_id BIGINT UNSIGNED NULL DEFAULT NULL,
   fecha_id BIGINT UNSIGNED NOT NULL,
   solicitada_por BIGINT UNSIGNED NOT NULL,
+  creada_por_wp_user BIGINT UNSIGNED NULL DEFAULT NULL,
   solicitada_at DATETIME NOT NULL,
   solicitud_instante_epoch BIGINT UNSIGNED NOT NULL,
   dictamen_original TEXT NOT NULL,

@@ -360,6 +360,30 @@ final class SolicitudNotifier implements NotificaSolicitudes {
     }
 
     /**
+     * Who typed the request in, when the commission loaded it from the admin
+     * on a captain's behalf (`creada_por_wp_user` is a WP USER id, unlike
+     * `solicitada_por`, which is always the captain's player id). Null for a
+     * request the captain filed himself, so that mail is unchanged.
+     *
+     * The comisión's mail only: the captain's receipt is the confirmation
+     * that the request was loaded, and needs no extra line.
+     *
+     * @param array<string, mixed> $row
+     */
+    private function cargadaDesdeElAdmin( array $row ): ?string {
+        $wpUserId = (int) ( $row['creada_por_wp_user'] ?? 0 );
+
+        if ( $wpUserId <= 0 ) {
+            return null;
+        }
+
+        $usuario = function_exists( 'get_userdata' ) ? get_userdata( $wpUserId ) : false;
+        $nombre  = is_object( $usuario ) ? trim( (string) ( $usuario->display_name ?? '' ) ) : '';
+
+        return '' !== $nombre ? $nombre : sprintf( 'usuario #%d', $wpUserId );
+    }
+
+    /**
      * The captain's subject. Addressed to him, so it says "tu pedido" and
      * names what he asked about — the same player the comisión's subject
      * names, for the same reason: it is the plaza he is thinking of.
@@ -619,6 +643,19 @@ final class SolicitudNotifier implements NotificaSolicitudes {
                     /* translators: %s: the captain who filed the request */
                     __( 'Pedido por %s (Capitán)', 'entre-redes-cambios' ),
                     $capitan
+                ) )
+            );
+        }
+
+        $cargadaPor = $this->cargadaDesdeElAdmin( $row );
+
+        if ( null !== $cargadaPor ) {
+            $html .= sprintf(
+                '<p style="margin:0 0 16px;color:#646970;">%s</p>',
+                esc_html( sprintf(
+                    /* translators: %s: the commission member who loaded the request */
+                    __( 'Cargada desde el panel por %s', 'entre-redes-cambios' ),
+                    $cargadaPor
                 ) )
             );
         }

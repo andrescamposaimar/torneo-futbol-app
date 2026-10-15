@@ -245,6 +245,31 @@ class CapitanRepositoryTest extends TestCase {
     }
 
     // -------------------------------------------------------------------------
+    // listCapitanesVigentes
+    // -------------------------------------------------------------------------
+
+    public function test_list_capitanes_vigentes_maps_each_team_of_the_season_to_its_current_captain(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $this->repo->designateCapitan( 359, 200, 888, 7, '2026-09-26 10:00:00' );
+        $this->repo->designateCapitan( 360, 300, 999, 7, '2026-09-26 10:00:00' );
+
+        $this->assertSame( [ 100 => 777, 200 => 888 ], $this->repo->listCapitanesVigentes( 359 ), 'Another season\'s captain must not leak in.' );
+    }
+
+    public function test_list_capitanes_vigentes_excludes_a_revoked_captain_and_reflects_a_replacement(): void {
+        $this->repo->designateCapitan( 359, 100, 777, 7, '2026-09-26 10:00:00' );
+        $this->repo->designateCapitan( 359, 200, 888, 7, '2026-09-26 10:00:00' );
+        $this->repo->revokeCapitan( 359, 200, '2026-09-27 10:00:00' );
+        $this->repo->designateCapitan( 359, 100, 778, 7, '2026-09-28 10:00:00' );
+
+        $this->assertSame( [ 100 => 778 ], $this->repo->listCapitanesVigentes( 359 ) );
+    }
+
+    public function test_list_capitanes_vigentes_is_empty_when_nobody_captains(): void {
+        $this->assertSame( [], $this->repo->listCapitanesVigentes( 359 ) );
+    }
+
+    // -------------------------------------------------------------------------
     // listEquiposByCapitan
     // -------------------------------------------------------------------------
 

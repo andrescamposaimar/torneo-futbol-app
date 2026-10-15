@@ -272,6 +272,42 @@ class CapitanRepository {
     }
 
     /**
+     * Every team of $seasonId that currently has a captain, as
+     * `team_id => player_id`. Feeds the commission's "Nueva solicitud" page,
+     * whose first step is "which team phoned in".
+     *
+     * *** MUST THROW, NEVER SILENTLY RETURN [] ON A QUERY FAILURE *** Same
+     * reasoning as listEquiposByCapitan(): a failed read misread as "no team
+     * has a captain" would render an empty picker with no error anywhere.
+     *
+     * @return array<int, int>
+     * @throws \RuntimeException When the query fails at the wpdb level.
+     */
+    public function listCapitanesVigentes( int $seasonId ): array {
+        $wpdb = $this->wpdb;
+        $p    = $wpdb->prefix;
+
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT team_id, player_id FROM {$p}cambios_capitan
+                  WHERE season_id = %d AND revocado_at IS NULL
+                  ORDER BY team_id ASC",
+                $seasonId
+            ),
+            ARRAY_A
+        );
+
+        $this->assertReadSucceeded( $rows, 'listCapitanesVigentes', [ 'season_id' => $seasonId ] );
+
+        $capitanes = [];
+        foreach ( $rows as $row ) {
+            $capitanes[ (int) $row['team_id'] ] = (int) $row['player_id'];
+        }
+
+        return $capitanes;
+    }
+
+    /**
      * @throws CapitanPersistenceException When $wpdb->update() returns
      *         `false` (see wpdb's own contract — it never throws on
      *         failure) instead of the number of affected rows.
