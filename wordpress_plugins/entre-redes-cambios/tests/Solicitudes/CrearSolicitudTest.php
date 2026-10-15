@@ -75,6 +75,50 @@ class CrearSolicitudTest extends TestCase {
         $this->assertSame( $this->arqueroPlayerId, (int) $row['saliente_player_id'] );
     }
 
+    public function test_a_captain_filed_request_leaves_creada_por_wp_user_null(): void {
+        $resultado = $this->crear( 'sustitucion', $this->plazaCampoId, $this->entrantePlayerId );
+
+        $row = $this->solicitudRepository->findSolicitud( $resultado['id'] );
+        $this->assertNotNull( $row );
+        $this->assertNull( $row['creada_por_wp_user'] );
+
+        $payload = $this->eventLog->last()['contexto'] ?? [];
+        $this->assertArrayNotHasKey( 'creada_por_wp_user', $payload, 'An app-filed request keeps the payload it always had.' );
+    }
+
+    public function test_a_loaded_for_captain_request_records_the_wp_user_in_the_row_and_the_event(): void {
+        global $wp_test_users;
+        $wp_test_users = [ 42 => 'Fernando Comision' ];
+
+        $resultado = $this->usoCaso()->ejecutar(
+            $this->seasonId, $this->teamId, $this->plazaCampoId, $this->fechaId, 'sustitucion', $this->entrantePlayerId, null, 777, $this->fixedNow, 42
+        );
+
+        $row = $this->solicitudRepository->findSolicitud( $resultado['id'] );
+        $this->assertNotNull( $row );
+        $this->assertSame( 42, (int) $row['creada_por_wp_user'] );
+        $this->assertSame( 777, (int) $row['solicitada_por'], 'solicitada_por stays the captain\'s player id.' );
+
+        $creada = array_values( array_filter(
+            $this->eventLog->all(),
+            static fn ( array $e ): bool => 'solicitud.creada' === $e['evento']
+        ) );
+        $this->assertSame( 42, $creada[0]['contexto']['creada_por_wp_user'] );
+        $this->assertSame( 'Fernando Comision', $creada[0]['contexto']['creada_por_wp_user_nombre'] );
+
+        $wp_test_users = [];
+    }
+
+    public function test_a_grouped_request_loaded_for_a_captain_records_the_wp_user_too(): void {
+        $resultado = $this->usoCaso()->ejecutar(
+            $this->seasonId, $this->teamId, $this->plazaArcoId, $this->fechaId, 'reasignacion_arquero', $this->titularPlayerId, $this->entrantePlayerId, 777, $this->fixedNow, 42
+        );
+
+        $row = $this->solicitudRepository->findSolicitud( $resultado['id'] );
+        $this->assertNotNull( $row );
+        $this->assertSame( 42, (int) $row['creada_por_wp_user'] );
+    }
+
     public function test_an_open_request_on_the_plaza_is_refused_and_nothing_is_stored(): void {
         $this->crear( 'sustitucion', $this->plazaCampoId, $this->entrantePlayerId );
         $this->avisos = [];

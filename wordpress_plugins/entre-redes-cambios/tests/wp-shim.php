@@ -908,8 +908,25 @@ if ( ! function_exists( 'sanitize_text_field' ) ) {
 }
 
 if ( ! function_exists( 'get_current_user_id' ) ) {
+    /** Controllable via $GLOBALS['wp_test_current_user_id']; defaults to 1. */
     function get_current_user_id(): int {
-        return 1;
+        global $wp_test_current_user_id;
+
+        return (int) ( $wp_test_current_user_id ?? 1 );
+    }
+}
+
+if ( ! function_exists( 'get_userdata' ) ) {
+    /**
+     * Data-driven via $GLOBALS['wp_test_users'] (WP user id => display name).
+     * An unknown id is `false`, exactly like the real function.
+     */
+    function get_userdata( int $user_id ): object|false {
+        global $wp_test_users;
+
+        $nombre = $wp_test_users[ $user_id ] ?? null;
+
+        return null === $nombre ? false : (object) [ 'ID' => $user_id, 'display_name' => $nombre ];
     }
 }
 

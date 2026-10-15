@@ -231,6 +231,29 @@ class SolicitudNotifierTest extends TestCase {
         $this->assertStringContainsString( 'Pedido por Capitan Suarez (Capitán)', $this->enviados[0]['cuerpo'] );
     }
 
+    public function test_una_solicitud_cargada_desde_el_admin_lo_dice_en_el_mail_de_la_comision(): void {
+        global $wp_test_users;
+        $wp_test_users = [ 42 => 'Fernando Comision' ];
+
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222, 42 );
+
+        $this->notifier()->notificarCreada( $id );
+
+        $this->assertStringContainsString( 'Cargada desde el panel por Fernando Comision', $this->enviados[0]['cuerpo'] );
+
+        $wp_test_users = [];
+    }
+
+    public function test_una_solicitud_del_capitan_no_lleva_la_linea_de_carga_desde_el_admin(): void {
+        $this->configurar( true, 'fernando@ejemplo.com' );
+        $id = $this->crearSustitucion( null, 222 );
+
+        $this->notifier()->notificarCreada( $id );
+
+        $this->assertStringNotContainsString( 'Cargada desde el panel', $this->enviados[0]['cuerpo'] );
+    }
+
     public function test_sin_capitan_resoluble_la_linea_no_aparece(): void {
         $this->configurar( true, 'fernando@ejemplo.com' );
 
@@ -806,7 +829,7 @@ class SolicitudNotifierTest extends TestCase {
         );
     }
 
-    private function crearSustitucion( ?Dictamen $dictamen = null, int $solicitadaPor = 777 ): int {
+    private function crearSustitucion( ?Dictamen $dictamen = null, int $solicitadaPor = 777, ?int $creadaPorWpUser = null ): int {
         $this->seedFecha( 1 );
         $plazaId = $this->plazaRepository->openPlaza( self::SEASON_ID, self::TEAM_ID, 777, Puntaje::fromDecimal( 3.0 ), 1, '2026-03-01 00:00:00' );
 
@@ -814,7 +837,8 @@ class SolicitudNotifierTest extends TestCase {
             SolicitudDeCambio::sustitucion( self::SEASON_ID, self::TEAM_ID, $plazaId, 888, 1, time() ),
             $solicitadaPor,
             $dictamen ?? Dictamen::from( [] ),
-            '2026-05-27 10:00:00'
+            '2026-05-27 10:00:00',
+            $creadaPorWpUser
         );
     }
 

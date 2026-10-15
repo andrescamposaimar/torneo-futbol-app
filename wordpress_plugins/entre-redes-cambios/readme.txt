@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.33
+Stable tag: 0.1.34
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,11 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.34 =
+* Schema: `cambios_solicitud.creada_por_wp_user` (nullable) records which WP user loaded a request on a captain's behalf. NULL means the captain filed it himself through the app — true for every existing row, so there is nothing to backfill. `solicitada_por` stays the captain's PLAYER id in both cases: the request is the captain's, the new column only says who typed it in. The column is added by `dbDelta()` on the first request after the upload (the version bump triggers it).
+* The `solicitud.creada` event carries the WP user's id and display name (snapshotted) when a request was loaded from the admin; an app-filed request logs exactly what it always did.
+* The comisión's new-request mail says "Cargada desde el panel por X" for such a request. The captain's receipt is unchanged — it is the confirmation that the request was loaded.
 
 = 0.1.33 =
 * Feature: cancelling a request confirms it to the captain by mail — "Cambios: Cancelamos tu pedido por X" — and says the half that actually matters: the plaza is free again, which is the whole reason he cancelled. Same switch as the other captain mails.

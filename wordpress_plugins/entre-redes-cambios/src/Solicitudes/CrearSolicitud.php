@@ -84,6 +84,10 @@ class CrearSolicitud {
      * @param int|null $entranteCampoPlayerId Required for
      *        `reasignacion_arquero` alone (the outside player filling the
      *        field plaza the titular vacates); ignored otherwise.
+     * @param int|null $creadaPorWpUser The WP user typing the request in on a
+     *        captain's behalf (admin page), or null when the captain himself
+     *        asked (REST). `$solicitadaPor` is the captain's player id in
+     *        both cases.
      * @return array{id: int, dictamen: array{procede: bool, motivos: array<int, array<string, mixed>>, fechas_faltantes_liberacion: int|null}}
      * @throws SolicitudInvalidaException On any input the request cannot be
      *         built from. Nothing was evaluated or stored.
@@ -100,7 +104,8 @@ class CrearSolicitud {
         ?int $entrantePlayerId,
         ?int $entranteCampoPlayerId,
         int $solicitadaPor,
-        int $ahora
+        int $ahora,
+        ?int $creadaPorWpUser = null
     ): array {
         $this->validarCampos( $plazaId, $fechaId, $tipo, $entrantePlayerId, $entranteCampoPlayerId );
 
@@ -145,7 +150,7 @@ class CrearSolicitud {
         // closure; if it cannot be acquired in time the closure never runs
         // and CreationLockUnavailableException propagates.
         $resultado = $this->creationLock->run( $seasonId, function () use (
-            $tipo, $seasonId, $teamId, $plazaId, $entrantePlayerId, $entranteCampoPlayerId, $fechaId, $ahora, $solicitadaPor, $ahoraDb
+            $tipo, $seasonId, $teamId, $plazaId, $entrantePlayerId, $entranteCampoPlayerId, $fechaId, $ahora, $solicitadaPor, $ahoraDb, $creadaPorWpUser
         ): array {
             if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
                 $titularPlayerId = (int) $entrantePlayerId;
@@ -162,7 +167,8 @@ class CrearSolicitud {
                     $fechaId,
                     $ahora,
                     $solicitadaPor,
-                    $ahoraDb
+                    $ahoraDb,
+                    $creadaPorWpUser
                 );
 
                 $row = $this->solicitudRepository->findSolicitud( $id );
@@ -186,7 +192,7 @@ class CrearSolicitud {
 
             $dictamen = $this->dictamenPipeline->evaluate( $solicitud );
 
-            $id = $this->solicitudRepository->crear( $solicitud, $solicitadaPor, $dictamen, $ahoraDb );
+            $id = $this->solicitudRepository->crear( $solicitud, $solicitadaPor, $dictamen, $ahoraDb, $creadaPorWpUser );
 
             return [ 'id' => $id, 'dictamen' => $this->shapeDictamen( $dictamen ) ];
         } );

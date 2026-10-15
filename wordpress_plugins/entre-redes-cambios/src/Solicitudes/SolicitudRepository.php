@@ -188,12 +188,16 @@ class SolicitudRepository {
      * REFUSED before any write — see `SolicitudAbiertaException` for why
      * those two, and only those, are not the process owner's to overrule.
      *
+     * @param int|null $creadaPorWpUser The WP user who loaded this request on
+     *        a captain's behalf from the admin, or null (the default) when
+     *        the captain filed it himself. `$solicitadaPor` stays the
+     *        captain's player id either way.
      * @throws SolicitudAbiertaException When $dictamen carries either
      *         open-request motivo; nothing was written.
      * @throws SolicitudPersistenceException When the insert fails at the
      *         wpdb level.
      */
-    public function crear( SolicitudDeCambio $solicitud, int $solicitadaPor, Dictamen $dictamen, string $now ): int {
+    public function crear( SolicitudDeCambio $solicitud, int $solicitadaPor, Dictamen $dictamen, string $now, ?int $creadaPorWpUser = null ): int {
         $this->refuseIfDuplicate( $dictamen, [
             'season_id'      => $solicitud->seasonId(),
             'team_id'        => $solicitud->teamId(),
@@ -210,9 +214,7 @@ class SolicitudRepository {
         $vigente           = $this->plazaRepository->findOcupacionVigente( $solicitud->plazaId() );
         $salientePlayerId  = null !== $vigente ? (int) $vigente['player_id'] : null;
 
-        $result = $wpdb->insert(
-            $p . 'cambios_solicitud',
-            [
+        $fila = [
                 'season_id'                => $solicitud->seasonId(),
                 'team_id'                  => $solicitud->teamId(),
                 'plaza_id'                 => $solicitud->plazaId(),
@@ -231,8 +233,15 @@ class SolicitudRepository {
                 'nota'                     => null,
                 'created_at'               => $now,
                 'updated_at'               => $now,
-            ]
-        );
+        ];
+
+        // Only when somebody typed it in for the captain: an app-filed row
+        // leaves the column out entirely, so it stays NULL.
+        if ( null !== $creadaPorWpUser ) {
+            $fila['creada_por_wp_user'] = $creadaPorWpUser;
+        }
+
+        $result = $wpdb->insert( $p . 'cambios_solicitud', $fila );
 
         if ( false === $result ) {
             $this->eventLog->record( 'escritura.fallida', [
@@ -274,7 +283,7 @@ class SolicitudRepository {
             'solicitada_por'     => $solicitadaPor,
             'dictamen_procede'   => $dictamen->procede(),
             'dictamen_motivos'   => $snapshot->motivoCodigos(),
-        ] );
+        ] + $this->payloadCargadaPor( $creadaPorWpUser ) );
 
         return $id;
     }
@@ -324,7 +333,8 @@ class SolicitudRepository {
         int $fechaId,
         int $instanteEpoch,
         int $solicitadaPor,
-        string $now
+        string $now,
+        ?int $creadaPorWpUser = null
     ): int {
         $this->assertPlazasDeReasignacionArquero( $plazaArcoId, $plazaCampoId, $teamId, $seasonId );
 
@@ -354,9 +364,7 @@ class SolicitudRepository {
         $wpdb = $this->wpdb;
         $p    = $wpdb->prefix;
 
-        $result = $wpdb->insert(
-            $p . 'cambios_solicitud',
-            [
+        $fila = [
                 'season_id'                => $seasonId,
                 'team_id'                  => $teamId,
                 'plaza_id'                 => $plazaArcoId,
@@ -377,8 +385,13 @@ class SolicitudRepository {
                 'nota'                     => null,
                 'created_at'               => $now,
                 'updated_at'               => $now,
-            ]
-        );
+        ];
+
+        if ( null !== $creadaPorWpUser ) {
+            $fila['creada_por_wp_user'] = $creadaPorWpUser;
+        }
+
+        $result = $wpdb->insert( $p . 'cambios_solicitud', $fila );
 
         if ( false === $result ) {
             $this->eventLog->record( 'escritura.fallida', [
@@ -422,9 +435,31 @@ class SolicitudRepository {
             'solicitada_por'           => $solicitadaPor,
             'dictamen_procede'         => $dictamen->procede(),
             'dictamen_motivos'         => $snapshot->motivoCodigos(),
-        ] );
+        ] + $this->payloadCargadaPor( $creadaPorWpUser ) );
 
         return $id;
+    }
+
+    /**
+     * Extra `solicitud.creada` payload for a request loaded from the admin:
+     * the WP user's id and display name, the latter snapshotted NOW (a user
+     * can be renamed or deleted; the log must keep who it was). Empty for an
+     * app-filed request, so its payload is exactly what it always was.
+     *
+     * @return array<string, mixed>
+     */
+    private function payloadCargadaPor( ?int $creadaPorWpUser ): array {
+        if ( null === $creadaPorWpUser ) {
+            return [];
+        }
+
+        $usuario = function_exists( 'get_userdata' ) ? get_userdata( $creadaPorWpUser ) : false;
+        $nombre  = is_object( $usuario ) ? trim( (string) ( $usuario->display_name ?? '' ) ) : '';
+
+        return [
+            'creada_por_wp_user'        => $creadaPorWpUser,
+            'creada_por_wp_user_nombre' => '' !== $nombre ? $nombre : null,
+        ];
     }
 
     /**
