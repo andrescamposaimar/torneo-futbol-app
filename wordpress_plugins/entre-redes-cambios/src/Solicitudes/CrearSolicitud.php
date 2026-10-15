@@ -12,6 +12,7 @@ use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Notificaciones\NotificaSolicitudes;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Solicitudes\Exception\SolicitudInvalidaException;
+use EntreRedes\Cambios\Solicitudes\Exception\TitularSinPlazaDeCampoException;
 use EntreRedes\Cambios\Solicitudes\Lock\CreationLock;
 
 /**
@@ -203,7 +204,7 @@ class CrearSolicitud {
         // property — it is invisible from here. Two readers, two mails: the
         // comisión gets told there is work, the captain gets a receipt. Each
         // is gated by its own setting and neither can throw.
-        if ( null !== $this->notifier && $resultado['id'] > 0 ) {
+        if ( null !== $this->notifier ) {
             $this->notifier->notificarCreada( $resultado['id'] );
             $this->notifier->notificarCreadaAlCapitan( $resultado['id'] );
         }
@@ -345,8 +346,9 @@ class CrearSolicitud {
         $plazasDeCampoDelEquipo = array_values( array_unique( $plazasDeCampoDelEquipo ) );
 
         if ( 1 !== count( $plazasDeCampoDelEquipo ) ) {
-            throw new \RuntimeException(
-                "CrearSolicitud::derivarPlazaCampoId(): titular_player_id {$titularPlayerId} does not hold exactly one vigent field plaza in team_id {$teamId}/season_id {$seasonId} (found " . count( $plazasDeCampoDelEquipo ) . ').'
+            throw new TitularSinPlazaDeCampoException(
+                "CrearSolicitud::derivarPlazaCampoId(): titular_player_id {$titularPlayerId} does not hold exactly one vigent field plaza in team_id {$teamId}/season_id {$seasonId} (found " . count( $plazasDeCampoDelEquipo ) . ').',
+                $titularPlayerId
             );
         }
 

@@ -24,6 +24,7 @@ use EntreRedes\Cambios\Solicitudes\CrearSolicitud;
 use EntreRedes\Cambios\Solicitudes\Exception\CreationLockUnavailableException;
 use EntreRedes\Cambios\Solicitudes\Exception\SolicitudAbiertaException;
 use EntreRedes\Cambios\Solicitudes\Exception\SolicitudInvalidaException;
+use EntreRedes\Cambios\Solicitudes\Exception\TitularSinPlazaDeCampoException;
 
 /**
  * "Nueva solicitud" — the commission loads a change request ON BEHALF of a
@@ -161,27 +162,13 @@ class NuevaSolicitudPage {
     private function handleCrear(): void {
         $this->verificarNonceOMorir( self::NONCE_ACTION, self::NONCE_FIELD );
 
-        $teamId   = absint( $_POST['team_id'] ?? 0 );
-        $tipo     = sanitize_text_field( (string) ( $_POST['tipo'] ?? '' ) );
-        $plazaId  = absint( $_POST['plaza_id'] ?? 0 );
-        $titular  = absint( $_POST['titular_player_id'] ?? 0 );
-        $entrante = absint( $_POST['entrante_player_id'] ?? 0 );
-
-        $esArquero = SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo;
-
-        $resultado = $this->ejecutarCrear(
-            $teamId,
-            $tipo,
-            $plazaId,
-            $esArquero ? $titular : $entrante,
-            $esArquero ? $entrante : 0,
-            get_current_user_id()
-        );
+        $resultado = $this->ejecutarDesdePost( $_POST, get_current_user_id() );
 
         $this->guardarNotice( $resultado['ok'] ? 'success' : 'error', $resultado['mensaje'] );
 
         // Success starts over (the next phone call is a different team); a
         // refusal returns to the same team so the operator can correct it.
+        $teamId  = absint( $_POST['team_id'] ?? 0 );
         $destino = admin_url( 'admin.php?page=' . self::SLUG );
         if ( ! $resultado['ok'] && $teamId > 0 ) {
             $destino = admin_url( 'admin.php?page=' . self::SLUG . '&team_id=' . $teamId );
@@ -189,6 +176,38 @@ class NuevaSolicitudPage {
 
         wp_safe_redirect( $destino );
         exit;
+    }
+
+    /**
+     * Maps the form's fields onto `ejecutarCrear()`'s arguments. Public and
+     * separate from `handleCrear()` (which exits) precisely so the mapping —
+     * the one place a field swap could hide — is testable.
+     *
+     * The form's `entrante_player_id` is the entrante for a `sustitucion`,
+     * but for `reasignacion_arquero` it is the OUTSIDE player filling the
+     * field plaza, while the field titular moving into goal travels as
+     * `titular_player_id`.
+     *
+     * @param array<string, mixed> $post
+     * @return array{ok: bool, mensaje: string, solicitud_id: int|null}
+     */
+    public function ejecutarDesdePost( array $post, int $wpUserId ): array {
+        $teamId   = absint( $post['team_id'] ?? 0 );
+        $tipo     = sanitize_text_field( (string) ( $post['tipo'] ?? '' ) );
+        $plazaId  = absint( $post['plaza_id'] ?? 0 );
+        $titular  = absint( $post['titular_player_id'] ?? 0 );
+        $entrante = absint( $post['entrante_player_id'] ?? 0 );
+
+        $esArquero = SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo;
+
+        return $this->ejecutarCrear(
+            $teamId,
+            $tipo,
+            $plazaId,
+            $esArquero ? $titular : $entrante,
+            $esArquero ? $entrante : 0,
+            $wpUserId
+        );
     }
 
     /**
@@ -220,7 +239,7 @@ class NuevaSolicitudPage {
 
         if ( null === $capitan ) {
             return $this->fallo( sprintf(
-                'El equipo %s no tiene un capitán vigente esta temporada, así que no se creó la solicitud. Designe un capitán primero: sin él no habría nadie que reciba la confirmación por mail.',
+                'El equipo %s no tiene un capitán vigente esta temporada, así que no se creó la solicitud. Designá un capitán primero: sin él no habría nadie que reciba la confirmación por mail.',
                 $this->nombrePost( $teamId, 'Equipo' )
             ) );
         }
@@ -234,7 +253,20 @@ class NuevaSolicitudPage {
         if ( SolicitudDeCambio::TIPO_REASIGNACION_ARQUERO === $tipo ) {
             // The goal plaza is never a form field: it is the team's `es_arco`
             // plaza, so a stale or tampered form cannot name another one.
-            $plazaId = $this->plazaDelArco( $seasonId, $teamId ) ?? 0;
+            $plazaArcoId = $this->plazaDelArco( $seasonId, $teamId );
+
+            if ( null === $plazaArcoId ) {
+                // A data problem, not an input one: every team must have
+                // exactly one goal plaza (see MigrationRunner::checkEsArcoInvariant()).
+                // Saying "la solicitud no es válida" would send the operator
+                // to look for a mistake of their own.
+                return $this->fallo( sprintf(
+                    'El equipo %s no tiene cargada una plaza de arquero esta temporada, así que no se puede pedir una reasignación al arco. Es un problema de datos de los planteles: avisá a quien los administra.',
+                    $this->nombrePost( $teamId, 'Equipo' )
+                ) );
+            }
+
+            $plazaId = $plazaArcoId;
         }
 
         $capitanPlayerId = (int) $capitan['player_id'];
@@ -255,7 +287,7 @@ class NuevaSolicitudPage {
         } catch ( SolicitudInvalidaException $e ) {
             return $this->fallo( 'La solicitud no es válida: ' . $e->getMessage() );
         } catch ( CreationLockUnavailableException $e ) {
-            return $this->fallo( 'El sistema está procesando otra solicitud. No se creó la solicitud: vuelva a intentarlo en unos minutos.' );
+            return $this->fallo( 'El sistema está procesando otra solicitud. No se creó la solicitud: volvé a intentarlo en unos minutos.' );
         } catch ( SolicitudAbiertaException $e ) {
             // A refusal, not a system failure: nothing was stored, and
             // retrying cannot help until the other request is resolved.
@@ -264,6 +296,14 @@ class NuevaSolicitudPage {
                 EntranteSinSolicitudAbierta::CODE => 'El jugador elegido ya figura como entrante en una solicitud abierta de esta temporada, así que no se creó la solicitud. Hay que resolver primero la otra.',
                 default                           => 'La solicitud fue rechazada por una solicitud abierta existente. No se creó nada.',
             } );
+        } catch ( TitularSinPlazaDeCampoException $e ) {
+            // A structural precondition of the grouped tipo, not a system
+            // failure: the REST route answers its generic 500 for it, but an
+            // operator on the phone needs to know WHICH player is the problem.
+            return $this->fallo( sprintf(
+                '%s no ocupa exactamente una plaza de campo vigente en este equipo, así que no se puede pasar al arco. No se creó la solicitud. Revisá el plantel: puede que ya se haya movido o que figure en más de una plaza.',
+                $this->nombrePost( $e->titularPlayerId(), 'El jugador elegido' )
+            ) );
         } catch ( \Throwable $e ) {
             $this->eventLog->record( 'admin.nueva_solicitud_fallida', [
                 'season_id' => $seasonId,
@@ -367,7 +407,7 @@ class NuevaSolicitudPage {
             <?php endif; ?>
 
             <p>
-                <?php esc_html_e( 'Cargue una solicitud en nombre de un capitán que avisó por teléfono. Se rige por las mismas reglas que si la hiciera él desde la app, y queda a su nombre.', 'entre-redes-cambios' ); ?>
+                <?php esc_html_e( 'Cargá una solicitud en nombre de un capitán que avisó por teléfono. Se rige por las mismas reglas que si la hiciera él desde la app, y queda a su nombre.', 'entre-redes-cambios' ); ?>
             </p>
 
             <?php if ( null === $fecha ) : ?>

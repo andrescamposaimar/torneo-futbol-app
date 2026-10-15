@@ -302,6 +302,92 @@ class NuevaSolicitudPageTest extends TestCase {
         $this->assertSame( self::WP_USER_ID, (int) $row['creada_por_wp_user'] );
     }
 
+    /** The form carries no captain id: the captain is re-read when the POST lands. */
+    public function test_a_captain_changed_between_steps_files_the_request_under_the_current_one(): void {
+        $this->designarCapitan();
+        $this->capitanRepository->revokeCapitan( $this->seasonId, $this->teamId, '2026-05-10 00:00:00' );
+        $this->capitanRepository->designateCapitan( $this->seasonId, $this->teamId, 556, null, '2026-05-10 00:00:01' );
+
+        $resultado = $this->page->ejecutarDesdePost( $this->postValido(), self::WP_USER_ID );
+
+        $this->assertTrue( $resultado['ok'], $resultado['mensaje'] );
+        $row = $this->solicitudRepository->findSolicitud( (int) $resultado['solicitud_id'] );
+        $this->assertNotNull( $row );
+        $this->assertSame( 556, (int) $row['solicitada_por'] );
+    }
+
+    public function test_a_reasignacion_arquero_post_maps_titular_and_outside_player_to_the_right_slots(): void {
+        $this->designarCapitan();
+
+        $resultado = $this->page->ejecutarDesdePost( [
+            'team_id'            => (string) $this->teamId,
+            'tipo'               => 'reasignacion_arquero',
+            'plaza_id'           => '0',
+            'titular_player_id'  => (string) $this->titularPlayerId,
+            'entrante_player_id' => (string) $this->entrantePlayerId,
+        ], self::WP_USER_ID );
+
+        $this->assertTrue( $resultado['ok'], $resultado['mensaje'] );
+        $row = $this->solicitudRepository->findSolicitud( (int) $resultado['solicitud_id'] );
+        $this->assertNotNull( $row );
+        $this->assertSame( $this->titularPlayerId, (int) $row['entrante_player_id'], 'The field titular moving into goal.' );
+        $this->assertSame( $this->entrantePlayerId, (int) $row['entrante_campo_player_id'], 'The outside player filling the field plaza.' );
+    }
+
+    public function test_a_reasignacion_arquero_post_without_a_titular_reports_titular_requerido(): void {
+        $this->designarCapitan();
+
+        $resultado = $this->page->ejecutarDesdePost( [
+            'team_id'            => (string) $this->teamId,
+            'tipo'               => 'reasignacion_arquero',
+            'entrante_player_id' => (string) $this->entrantePlayerId,
+        ], self::WP_USER_ID );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertStringContainsString( 'titular de campo', $resultado['mensaje'] );
+        $this->assertSame( 0, $this->countSolicitudes() );
+    }
+
+    public function test_a_reasignacion_arquero_post_without_the_outside_player_reports_entrante_campo_requerido(): void {
+        $this->designarCapitan();
+
+        $resultado = $this->page->ejecutarDesdePost( [
+            'team_id'           => (string) $this->teamId,
+            'tipo'              => 'reasignacion_arquero',
+            'titular_player_id' => (string) $this->titularPlayerId,
+        ], self::WP_USER_ID );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertStringContainsString( 'entrante_campo_player_id es obligatorio', $resultado['mensaje'] );
+        $this->assertSame( 0, $this->countSolicitudes() );
+    }
+
+    public function test_a_team_without_a_goal_plaza_gets_a_specific_notice_and_never_reaches_the_use_case(): void {
+        global $wpdb;
+        $this->designarCapitan();
+        $wpdb->query( "UPDATE {$wpdb->prefix}cambios_plaza SET es_arco = 0" );
+
+        $resultado = $this->page->ejecutarCrear( $this->teamId, 'reasignacion_arquero', 0, $this->titularPlayerId, $this->entrantePlayerId, self::WP_USER_ID );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertStringContainsString( 'no tiene cargada una plaza de arquero', $resultado['mensaje'] );
+        $this->assertStringNotContainsString( 'no es válida', $resultado['mensaje'] );
+        $this->assertSame( 0, $this->countSolicitudes() );
+        $this->assertSame( [], $this->avisos );
+    }
+
+    public function test_a_titular_without_exactly_one_field_plaza_names_the_player(): void {
+        $this->designarCapitan();
+
+        // 333 holds no plaza at all, so the vacated field plaza cannot be derived.
+        $resultado = $this->page->ejecutarCrear( $this->teamId, 'reasignacion_arquero', 0, $this->entrantePlayerId, $this->otroEntrantePlayerId, self::WP_USER_ID );
+
+        $this->assertFalse( $resultado['ok'] );
+        $this->assertStringContainsString( 'Entrante Lopez no ocupa exactamente una plaza de campo', $resultado['mensaje'] );
+        $this->assertFalse( $this->eventLog->has( 'admin.nueva_solicitud_fallida' ), 'It is a named precondition, not an internal failure.' );
+        $this->assertSame( 0, $this->countSolicitudes() );
+    }
+
     public function test_a_missing_entrante_is_reported_not_stored(): void {
         $this->designarCapitan();
 
