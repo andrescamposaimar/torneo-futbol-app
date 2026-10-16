@@ -9,6 +9,20 @@ import '../../widgets/entre_redes_app_bar.dart';
 import '../prode/prode_auth_view.dart';
 import 'cambios_context_screen.dart';
 
+/// Cambios wording for the sign-in, revoked and error states of the shared
+/// [ProdeAuthView] (its default copy names the Prode).
+const _cambiosAuthCopy = AuthViewCopy(
+  signInTitle: 'Ingresá a Cambios',
+  signInMessage:
+      'Iniciá sesión para ver y pedir los cambios de tu equipo. Es la misma '
+      'cuenta que usás en el Prode.',
+  revokedMessage:
+      'Cerramos tu sesión por seguridad. Ingresá de nuevo para seguir.',
+  errorMessage:
+      'No pudimos cargar Cambios. Revisá tu conexión y reintentá en unos '
+      'minutos.',
+);
+
 /// Entry point for the captain-facing "Cambios" (player substitution)
 /// feature — reachable from the "More" tab.
 ///
@@ -74,6 +88,7 @@ class _CambiosAuthGateState extends ConsumerState<CambiosAuthGate> {
         onGoogleSignIn: controller.signInWithGoogle,
         onAppleSignIn: Platform.isIOS ? controller.signInWithApple : null,
         onConfirmDni: controller.confirmDni,
+        copy: _cambiosAuthCopy,
         // `onLogout` is intentionally unused here: unlike ProdeFixturesScreen,
         // CambiosContextScreen (and everything under it) has no room for its
         // own persistent logout action, so the affordance lives on THIS

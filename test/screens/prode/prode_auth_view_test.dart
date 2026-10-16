@@ -285,6 +285,42 @@ void main() {
       expect(find.text('Continuar con Apple'), findsNothing);
     });
 
+    testWidgets('a custom copy replaces the sign-in, revoked and error strings',
+        (tester) async {
+      const copy = AuthViewCopy(
+        signInTitle: 'T',
+        signInMessage: 'sign-in message',
+        revokedMessage: 'revoked message',
+        errorMessage: 'error message',
+      );
+      Future<void> pump(ProdeAuthState state) => tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: ProdeAuthView(
+                  state: state,
+                  onLogout: () {},
+                  onRetry: () {},
+                  onGoogleSignIn: () {},
+                  onAppleSignIn: null,
+                  onConfirmDni: (_) async => null,
+                  copy: copy,
+                ),
+              ),
+            ),
+          );
+
+      await pump(const ProdeAuthUnauthenticated());
+      expect(find.text('T'), findsOneWidget);
+      expect(find.text('sign-in message'), findsOneWidget);
+      expect(find.text('Sumate al Prode'), findsNothing);
+
+      await pump(const ProdeAuthRevoked(reason: 'session_revoked'));
+      expect(find.text('revoked message'), findsOneWidget);
+
+      await pump(const ProdeAuthError(code: 'bootstrap_error', message: 'boom'));
+      expect(find.text('error message'), findsOneWidget);
+    });
+
     testWidgets('Apple button shows and triggers onAppleSignIn when available',
         (tester) async {
       var apple = 0;
