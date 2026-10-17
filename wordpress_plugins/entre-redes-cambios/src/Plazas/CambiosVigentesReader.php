@@ -26,7 +26,7 @@ use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
  * Two levels:
  *  - `listar()` — the raw rows the admin renders, byte-for-byte what
  *    `HistoricoPage::construirVigentes()` used to build.
- *  - `listarParaCapitanes()` — the same rows shaped for the API: titular as
+ *  - `listarPublico()` — the same rows shaped for the API: titular as
  *    `baja`, current occupant as `alta`, puntaje per player, the fecha as a
  *    label, and the situación as plain text.
  *
@@ -140,25 +140,27 @@ class CambiosVigentesReader {
      *
      * @return array<int, array<string, mixed>>
      */
-    public function listarParaCapitanes( int $seasonId ): array {
+    public function listarPublico( int $seasonId ): array {
         $filas = $this->listar( $seasonId );
 
         if ( empty( $filas ) ) {
             return [];
         }
 
-        $metricas = [];
-
-        if ( null !== $this->metricasReader ) {
-            $playerIds = [];
-
-            foreach ( $filas as $fila ) {
-                $playerIds[ (int) $fila['titular_id'] ] = true;
-                $playerIds[ (int) $fila['ocupante_id'] ] = true;
-            }
-
-            $metricas = $this->metricasReader->resolveMuchos( array_keys( $playerIds ) );
+        // Without the metrics reader every player would read "sin
+        // calificar" — a fabricated value on a public list. Fail instead.
+        if ( null === $this->metricasReader ) {
+            throw new \LogicException( 'CambiosVigentesReader::listarPublico() needs a JugadorMetricasReader.' );
         }
+
+        $playerIds = [];
+
+        foreach ( $filas as $fila ) {
+            $playerIds[ (int) $fila['titular_id'] ] = true;
+            $playerIds[ (int) $fila['ocupante_id'] ] = true;
+        }
+
+        $metricas = $this->metricasReader->resolveMuchos( array_keys( $playerIds ) );
 
         $etiquetasFecha = [];
         $salida         = [];
@@ -170,7 +172,7 @@ class CambiosVigentesReader {
                 $etiquetasFecha[ $fechaId ] = $this->etiquetaFecha( $fechaId );
             }
 
-            $situacion = self::situacion( $fila );
+            $situacion = self::situacionPublica( $fila );
 
             $salida[] = [
                 'team_id'          => (int) $fila['team_id'],
@@ -253,6 +255,29 @@ class CambiosVigentesReader {
             'tipo'  => self::SITUACION_PUEDE_VOLVER,
             'texto' => __( 'El titular ya puede volver — nadie pidió el regreso.', 'entre-redes-cambios' ),
         ];
+    }
+
+    /**
+     * The situación for the PUBLIC list. Same precedence as situacion() minus
+     * its first branch: an open solicitud (pendiente/aprobada, not yet
+     * published) is internal, in-flight state of the comisión's workflow —
+     * the public list only shows what is already official, so it never says
+     * whether a request exists, its id or its estado.
+     *
+     * @param array<string, mixed> $fila A row from `listar()`.
+     * @return array{tipo: string, texto: string}
+     */
+    public static function situacionPublica( array $fila ): array {
+        $sinSolicitud = self::situacion( array_merge( $fila, [ 'solicitud_abierta' => null ] ) );
+
+        if ( self::SITUACION_PUEDE_VOLVER === $sinSolicitud['tipo'] ) {
+            return [
+                'tipo'  => self::SITUACION_PUEDE_VOLVER,
+                'texto' => __( 'El titular ya puede volver.', 'entre-redes-cambios' ),
+            ];
+        }
+
+        return $sinSolicitud;
     }
 
     /**

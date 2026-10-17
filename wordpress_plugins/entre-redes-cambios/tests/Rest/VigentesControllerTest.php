@@ -46,7 +46,7 @@ class VigentesControllerTest extends TestCase {
         $rows = [ [ 'team_id' => 100, 'plaza_id' => 1 ], [ 'team_id' => 200, 'plaza_id' => 2 ] ];
 
         $reader = $this->createMock( CambiosVigentesReader::class );
-        $reader->expects( $this->once() )->method( 'listarParaCapitanes' )->with( 359 )->willReturn( $rows );
+        $reader->expects( $this->once() )->method( 'listarPublico' )->with( 359 )->willReturn( $rows );
 
         $response = ( new VigentesController( $this->settings( 359 ), $reader, $this->eventLog ) )->listar( $this->request() );
 
@@ -56,7 +56,7 @@ class VigentesControllerTest extends TestCase {
 
     public function test_listar_ignores_a_season_id_sent_by_the_client(): void {
         $reader = $this->createMock( CambiosVigentesReader::class );
-        $reader->expects( $this->once() )->method( 'listarParaCapitanes' )->with( 359 )->willReturn( [] );
+        $reader->expects( $this->once() )->method( 'listarPublico' )->with( 359 )->willReturn( [] );
 
         $response = ( new VigentesController( $this->settings( 359 ), $reader, $this->eventLog ) )
             ->listar( $this->request( [ 'season_id' => '120' ] ) );
@@ -67,7 +67,7 @@ class VigentesControllerTest extends TestCase {
 
     public function test_listar_returns_500_without_reading_when_the_configured_season_is_invalid(): void {
         $reader = $this->createMock( CambiosVigentesReader::class );
-        $reader->expects( $this->never() )->method( 'listarParaCapitanes' );
+        $reader->expects( $this->never() )->method( 'listarPublico' );
 
         $response = ( new VigentesController( $this->settings( 0 ), $reader, $this->eventLog ) )->listar( $this->request() );
 
@@ -78,7 +78,7 @@ class VigentesControllerTest extends TestCase {
 
     public function test_listar_returns_500_when_the_read_fails_instead_of_an_empty_list(): void {
         $reader = $this->createMock( CambiosVigentesReader::class );
-        $reader->method( 'listarParaCapitanes' )->willThrowException( new \RuntimeException( 'simulated read failure' ) );
+        $reader->method( 'listarPublico' )->willThrowException( new \RuntimeException( 'simulated read failure' ) );
 
         $response = ( new VigentesController( $this->settings( 359 ), $reader, $this->eventLog ) )->listar( $this->request() );
 

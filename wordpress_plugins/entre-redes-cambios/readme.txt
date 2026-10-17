@@ -29,7 +29,7 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 
 = 0.1.35 =
 * Feature: `GET /cambios/vigentes` — every live substitution of every team of the CURRENT season (always the configured `season_id`; a client-sent one is ignored), for the app's new public "Cambios activos" screen: who left the plaza (`baja`), who is on it now (`alta`, each with puntaje, `null` + `sin_calificar` when unrated), since which fecha (label, e.g. "Apertura Fecha 7") and the situación text with the fechas still missing.
-* The list is PUBLIC and read-only, by product decision: no JWT and no captain check (500 on a failed read or an invalid configured season).
+* The list is PUBLIC and read-only, by product decision: no JWT and no captain check (500 on a failed read or an invalid configured season). Its situación never mentions an open (not yet published) solicitud, and a successful answer is cacheable for 60s (`public, max-age=60`); every other `/cambios/` route stays no-store.
 * The data comes from the new `Plazas\CambiosVigentesReader`, extracted from the admin "Cambios vigentes" table, which now reads from it: the comisión and the captains see the same situación by construction. Admin output is unchanged.
 
 = 0.1.34 =

@@ -96,7 +96,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $this->putPuntaje( 777, '3.5' );
         $this->putPuntaje( 888, '2' );
 
-        $rows = $this->reader->listarParaCapitanes( self::SEASON_ID );
+        $rows = $this->reader->listarPublico( self::SEASON_ID );
 
         $this->assertCount( 1, $rows );
         $row = $rows[0];
@@ -120,7 +120,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
         $this->plazaRepository->succeedOcupacion( $plazaId, 999, 3, 'reemplazada', '2026-03-17 00:00:00' );
 
-        $rows = $this->reader->listarParaCapitanes( self::SEASON_ID );
+        $rows = $this->reader->listarPublico( self::SEASON_ID );
 
         $this->assertCount( 1, $rows, 'A chain is ONE live substitution, not one row per link.' );
         $this->assertSame( 777, $rows[0]['baja']['player_id'] );
@@ -136,7 +136,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $wpdb->update( $wpdb->prefix . 'cambios_plaza', [ 'es_arco' => 1 ], [ 'id' => $plazaId ] );
         $this->plazaRepository->succeedOcupacion( $plazaId, 555, 2, 'reemplazada', '2026-03-10 00:00:00' );
 
-        $rows = $this->reader->listarParaCapitanes( self::SEASON_ID );
+        $rows = $this->reader->listarPublico( self::SEASON_ID );
 
         $this->assertCount( 1, $rows );
         $this->assertTrue( $rows[0]['es_arco'] );
@@ -151,7 +151,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $this->putPuntaje( 777, '0' );
         // 888 has no metrics at all.
 
-        $row = $this->reader->listarParaCapitanes( self::SEASON_ID )[0];
+        $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
         $this->assertNull( $row['baja']['puntaje'] );
         $this->assertTrue( $row['baja']['sin_calificar'] );
@@ -164,7 +164,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $plazaId = $this->abrirPlaza( 100, 777 );
         $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
 
-        $row = $this->reader->listarParaCapitanes( self::SEASON_ID )[0];
+        $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
         $this->assertSame( [ 'fecha_id' => 2, 'label' => 'Apertura Fecha 2' ], $row['desde'] );
     }
@@ -174,7 +174,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $plazaId = $this->abrirPlaza( 100, 777 );
         $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
 
-        $row = $this->reader->listarParaCapitanes( self::SEASON_ID )[0];
+        $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
         $this->assertSame( 'Faltan 2 fechas para poder volver.', $row['situacion'] );
         $this->assertSame( CambiosVigentesReader::SITUACION_FALTAN_FECHAS, $row['situacion_tipo'] );
@@ -186,14 +186,14 @@ class CambiosVigentesReaderTest extends TestCase {
         $plazaId = $this->abrirPlaza( 100, 777 );
         $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
 
-        $row = $this->reader->listarParaCapitanes( self::SEASON_ID )[0];
+        $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
-        $this->assertSame( 'El titular ya puede volver — nadie pidió el regreso.', $row['situacion'] );
+        $this->assertSame( 'El titular ya puede volver.', $row['situacion'] );
         $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
         $this->assertNull( $row['fechas_restantes'] );
     }
 
-    public function test_situacion_reports_an_open_solicitud_instead_of_nagging(): void {
+    public function test_the_public_list_never_reveals_an_open_solicitud_but_the_admin_still_sees_it(): void {
         $this->seedFechas( 4, 4 );
         $plazaId = $this->abrirPlaza( 100, 777 );
         $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
@@ -212,10 +212,33 @@ class CambiosVigentesReaderTest extends TestCase {
             '2026-04-01 10:00:00'
         );
 
-        $row = $this->reader->listarParaCapitanes( self::SEASON_ID )[0];
+        $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
-        $this->assertSame( 'Solicitud #' . $solicitudId . ' abierta (Pendiente)', $row['situacion'] );
-        $this->assertSame( CambiosVigentesReader::SITUACION_SOLICITUD_ABIERTA, $row['situacion_tipo'] );
+        $this->assertSame( 'El titular ya puede volver.', $row['situacion'] );
+        $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
+        $this->assertStringNotContainsStringIgnoringCase( 'solicitud', json_encode( $row ) );
+        $this->assertStringNotContainsStringIgnoringCase( 'pendiente', json_encode( $row ) );
+
+        $admin = CambiosVigentesReader::situacion( $this->reader->listar( self::SEASON_ID )[0] );
+        $this->assertSame( 'Solicitud #' . $solicitudId . ' abierta (Pendiente)', $admin['texto'] );
+    }
+
+    public function test_the_public_list_fails_instead_of_inventing_sin_calificar_without_metrics(): void {
+        $this->seedFechas( 4, 1 );
+        $plazaId = $this->abrirPlaza( 100, 777 );
+        $this->plazaRepository->succeedOcupacion( $plazaId, 888, 2, 'reemplazada', '2026-03-10 00:00:00' );
+
+        global $wpdb;
+        $sinMetricas = new CambiosVigentesReader(
+            $this->plazaRepository,
+            new SolicitudesAbiertasReader( $wpdb, $this->eventLog ),
+            new FechaRepository( $wpdb, new InMemoryEventLog() ),
+            new Settings( $wpdb, $this->eventLog ),
+            $this->eventLog
+        );
+
+        $this->expectException( \LogicException::class );
+        $sinMetricas->listarPublico( self::SEASON_ID );
     }
 
     public function test_rows_are_sorted_by_team_name_then_plaza_and_a_titular_in_place_is_excluded(): void {
@@ -229,7 +252,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $this->plazaRepository->succeedOcupacion( $suiza1, 555, 2, 'reemplazada', '2026-03-10 00:00:00' );
         $this->plazaRepository->succeedOcupacion( $arg, 777, 2, 'reemplazada', '2026-03-10 00:00:00' );
 
-        $rows = $this->reader->listarParaCapitanes( self::SEASON_ID );
+        $rows = $this->reader->listarPublico( self::SEASON_ID );
 
         $this->assertSame(
             [ [ 'ARGENTINA', $arg ], [ 'SUIZA', $suiza1 ], [ 'SUIZA', $suiza2 ] ],
@@ -241,7 +264,7 @@ class CambiosVigentesReaderTest extends TestCase {
         $this->seedFechas( 2, 1 );
         $this->abrirPlaza( 100, 777 );
 
-        $this->assertSame( [], $this->reader->listarParaCapitanes( self::SEASON_ID ) );
+        $this->assertSame( [], $this->reader->listarPublico( self::SEASON_ID ) );
     }
 
     private function abrirPlaza( int $teamId, int $titularId ): int {

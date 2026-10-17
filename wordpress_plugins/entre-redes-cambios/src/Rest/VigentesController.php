@@ -34,9 +34,10 @@ use EntreRedes\Cambios\Plazas\CambiosVigentesReader;
  * `GET /cambios/mis-equipos` hands the captain's app). A `season_id` sent by
  * a client is ignored.
  *
- * Caching: the route lives under `/cambios/`, so `Plugin::denyCambiosResponse
- * Caching()` marks it `no-store` like the rest. Not needed for a public read,
- * but harmless, and it keeps the list fresh right after a lote is published.
+ * Caching: `Plugin::denyCambiosResponseCaching()` exempts this ONE route from
+ * the `/cambios/` no-store rule — a successful answer is the same for every
+ * caller, so it is served with `public, max-age=60` and the host nginx can
+ * absorb repeated hits. Errors stay no-store.
  */
 final class VigentesController {
 
@@ -77,7 +78,7 @@ final class VigentesController {
             return new \WP_REST_Response(
                 [
                     'season_id' => $seasonId,
-                    'vigentes'  => $this->reader->listarParaCapitanes( $seasonId ),
+                    'vigentes'  => $this->reader->listarPublico( $seasonId ),
                 ],
                 200
             );
