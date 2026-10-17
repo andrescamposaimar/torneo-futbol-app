@@ -188,7 +188,7 @@ class CambiosVigentesReaderTest extends TestCase {
 
         $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
-        $this->assertSame( 'El titular ya puede volver.', $row['situacion'] );
+        $this->assertSame( 'Renovado 1 fecha más.', $row['situacion'] );
         $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
         $this->assertNull( $row['fechas_restantes'] );
     }
@@ -214,7 +214,7 @@ class CambiosVigentesReaderTest extends TestCase {
 
         $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
-        $this->assertSame( 'El titular ya puede volver.', $row['situacion'] );
+        $this->assertSame( 'Renovado 1 fecha más.', $row['situacion'] );
         $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
         $this->assertStringNotContainsStringIgnoringCase( 'solicitud', json_encode( $row ) );
         $this->assertStringNotContainsStringIgnoringCase( 'pendiente', json_encode( $row ) );

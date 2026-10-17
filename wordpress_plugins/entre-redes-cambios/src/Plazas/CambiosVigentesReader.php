@@ -264,6 +264,11 @@ class CambiosVigentesReader {
      * the public list only shows what is already official, so it never says
      * whether a request exists, its id or its estado.
      *
+     * Once the minimum is met, the reglamento renews the change one fecha at
+     * a time for as long as the captain does not report the titular's
+     * return — so the public wording for that state is "Renovado 1 fecha
+     * más", not an invitation to come back.
+     *
      * @param array<string, mixed> $fila A row from `listar()`.
      * @return array{tipo: string, texto: string}
      */
@@ -273,7 +278,7 @@ class CambiosVigentesReader {
         if ( self::SITUACION_PUEDE_VOLVER === $sinSolicitud['tipo'] ) {
             return [
                 'tipo'  => self::SITUACION_PUEDE_VOLVER,
-                'texto' => __( 'El titular ya puede volver.', 'entre-redes-cambios' ),
+                'texto' => __( 'Renovado 1 fecha más.', 'entre-redes-cambios' ),
             ];
         }
 
