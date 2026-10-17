@@ -116,6 +116,9 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Cambios'), findsOneWidget); // app bar title
     expect(find.text('Continuar con Google'), findsOneWidget); // shared sign-in view
+    expect(find.text('Ingresá a Cambios'), findsOneWidget);
+    expect(find.text('Sumate al Prode'), findsNothing);
+    expect(find.textContaining('pronosticar'), findsNothing);
   });
 
   group('Authenticated arm (FIX 4 — logout affordance)', () {

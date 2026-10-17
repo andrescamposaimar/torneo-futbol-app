@@ -4,6 +4,37 @@ import '../../services/prode_auth_state.dart';
 import '../../widgets/prode_sign_in_buttons.dart';
 import 'prode_fixtures_screen.dart';
 
+/// The feature-specific strings of [ProdeAuthView]. The view is shared by every
+/// feature gated behind the Prode session (Prode, Cambios), so the copy that
+/// names the feature is injected instead of hardcoded. Everything else
+/// (session-closed title, retry labels, DNI form, terms) is feature-neutral
+/// and stays in the view.
+class AuthViewCopy {
+  final String signInTitle;
+  final String signInMessage;
+  final String revokedMessage;
+  final String errorMessage;
+
+  const AuthViewCopy({
+    required this.signInTitle,
+    required this.signInMessage,
+    required this.revokedMessage,
+    required this.errorMessage,
+  });
+
+  /// Today's Prode strings; [ProdeAuthView] uses this unless told otherwise.
+  static const prode = AuthViewCopy(
+    signInTitle: 'Sumate al Prode',
+    signInMessage: 'Iniciá sesión para pronosticar los partidos del torneo.',
+    revokedMessage:
+        'Cerramos tu sesión por seguridad. Ingresá de nuevo para seguir '
+        'jugando.',
+    errorMessage:
+        'No pudimos cargar el Prode. Revisá tu conexión y reintentá en '
+        'unos minutos.',
+  );
+}
+
 /// Presentational view for the Prode auth feature.
 ///
 /// Pure and Riverpod-free: it renders the right UI for a given
@@ -43,6 +74,10 @@ class ProdeAuthView extends StatelessWidget {
   /// without duplicating that UI, and supply their own destination here.
   final Widget Function(bool stale, VoidCallback onLogout)? authenticatedBuilder;
 
+  /// Feature-specific copy for the sign-in, revoked and error states.
+  /// Defaults to the Prode wording.
+  final AuthViewCopy copy;
+
   const ProdeAuthView({
     super.key,
     required this.state,
@@ -52,6 +87,7 @@ class ProdeAuthView extends StatelessWidget {
     required this.onAppleSignIn,
     required this.onConfirmDni,
     this.authenticatedBuilder,
+    this.copy = AuthViewCopy.prode,
   });
 
   @override
@@ -64,6 +100,7 @@ class ProdeAuthView extends StatelessWidget {
           ? authenticatedBuilder!(stale, onLogout)
           : ProdeChamiScreen(stale: stale, onLogout: onLogout),
       ProdeAuthUnauthenticated() => _SignInView(
+          copy: copy,
           onGoogleSignIn: onGoogleSignIn,
           onAppleSignIn: onAppleSignIn,
         ),
@@ -74,9 +111,7 @@ class ProdeAuthView extends StatelessWidget {
       ProdeAuthRevoked() => _MessageAction(
           icon: Icons.lock_outline,
           title: 'Tu sesión se cerró',
-          message:
-              'Cerramos tu sesión por seguridad. Ingresá de nuevo para seguir '
-              'jugando.',
+          message: copy.revokedMessage,
           actionLabel: 'Volver a ingresar',
           onAction: onLogout,
         ),
@@ -86,9 +121,7 @@ class ProdeAuthView extends StatelessWidget {
       ProdeAuthError() => _MessageAction(
           icon: Icons.error_outline,
           title: 'Algo salió mal',
-          message:
-              'No pudimos cargar el Prode. Revisá tu conexión y reintentá en '
-              'unos minutos.',
+          message: copy.errorMessage,
           actionLabel: 'Reintentar',
           onAction: onRetry,
         ),
@@ -111,10 +144,15 @@ class _Centered extends StatelessWidget {
 /// Sign-in view for the Unauthenticated state. Google is always shown; the
 /// Apple button appears only when [onAppleSignIn] is non-null (iOS).
 class _SignInView extends StatelessWidget {
+  final AuthViewCopy copy;
   final VoidCallback onGoogleSignIn;
   final VoidCallback? onAppleSignIn;
 
-  const _SignInView({required this.onGoogleSignIn, this.onAppleSignIn});
+  const _SignInView({
+    required this.copy,
+    required this.onGoogleSignIn,
+    this.onAppleSignIn,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -127,12 +165,9 @@ class _SignInView extends StatelessWidget {
           children: [
             Icon(Icons.sports_soccer, size: 64, color: theme.colorScheme.primary),
             const SizedBox(height: 16),
-            Text('Sumate al Prode', style: theme.textTheme.headlineSmall),
+            Text(copy.signInTitle, style: theme.textTheme.headlineSmall),
             const SizedBox(height: 8),
-            const Text(
-              'Iniciá sesión para pronosticar los partidos del torneo.',
-              textAlign: TextAlign.center,
-            ),
+            Text(copy.signInMessage, textAlign: TextAlign.center),
             const SizedBox(height: 24),
             ProdeSignInButtons(
               onGoogleSignIn: onGoogleSignIn,
