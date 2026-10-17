@@ -78,14 +78,15 @@ class CambiosVigentesReaderTest extends TestCase {
         unset( $GLOBALS['wp_test_post_titles'] );
     }
 
-    private function construirReader( \wpdb $wpdb, ?FechaRepository $fechaRepository = null ): CambiosVigentesReader {
+    private function construirReader( \wpdb $wpdb, ?FechaRepository $fechaRepository = null, ?callable $clock = null ): CambiosVigentesReader {
         return new CambiosVigentesReader(
             $this->plazaRepository,
             new SolicitudesAbiertasReader( $wpdb, $this->eventLog ),
             $fechaRepository ?? new FechaRepository( $wpdb, new InMemoryEventLog() ),
             new Settings( $wpdb, $this->eventLog ),
             $this->eventLog,
-            new JugadorMetricasReader( $wpdb, $this->eventLog )
+            new JugadorMetricasReader( $wpdb, $this->eventLog ),
+            $clock
         );
     }
 
@@ -188,9 +189,53 @@ class CambiosVigentesReaderTest extends TestCase {
 
         $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
-        $this->assertSame( 'Renovado 1 fecha más.', $row['situacion'] );
+        $this->assertSame( 'El titular ya puede volver.', $row['situacion'], 'No fecha left to renew into.' );
         $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
         $this->assertNull( $row['fechas_restantes'] );
+    }
+
+    /**
+     * Fecha 5 (2026-03-05) is the open one; with the default offsets its
+     * cierre_regresos is 2026-03-01 23:59:59 in Buenos Aires = 2026-03-02
+     * 02:59:59 UTC.
+     */
+    public function test_before_the_regreso_deadline_the_titular_can_still_come_back(): void {
+        $this->seedFechas( 5, 4 );
+        $plazaId = $this->abrirPlaza( 100, 777 );
+        $this->plazaRepository->succeedOcupacion( $plazaId, 888, 1, 'reemplazada', '2026-03-01 00:00:00' );
+
+        global $wpdb;
+        $reader = $this->construirReader( $wpdb, null, static fn (): int => strtotime( '2026-03-02 02:59:59 UTC' ) );
+        $row    = $reader->listarPublico( self::SEASON_ID )[0];
+
+        $this->assertSame( 'El titular ya puede volver.', $row['situacion'] );
+        $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
+    }
+
+    public function test_after_the_regreso_deadline_without_a_report_the_change_is_renewed(): void {
+        $this->seedFechas( 5, 4 );
+        $plazaId = $this->abrirPlaza( 100, 777 );
+        $this->plazaRepository->succeedOcupacion( $plazaId, 888, 1, 'reemplazada', '2026-03-01 00:00:00' );
+
+        global $wpdb;
+        $reader = $this->construirReader( $wpdb, null, static fn (): int => strtotime( '2026-03-02 03:00:00 UTC' ) );
+        $row    = $reader->listarPublico( self::SEASON_ID )[0];
+
+        $this->assertSame( 'Renovado 1 fecha más.', $row['situacion'] );
+        $this->assertSame( CambiosVigentesReader::SITUACION_RENOVADO, $row['situacion_tipo'] );
+        $this->assertNull( $row['fechas_restantes'] );
+    }
+
+    public function test_a_change_still_short_of_the_minimum_is_never_renovado(): void {
+        $this->seedFechas( 5, 4 );
+        $plazaId = $this->abrirPlaza( 100, 777 );
+        $this->plazaRepository->succeedOcupacion( $plazaId, 888, 4, 'reemplazada', '2026-03-01 00:00:00' );
+
+        global $wpdb;
+        $reader = $this->construirReader( $wpdb, null, static fn (): int => strtotime( '2026-03-03 12:00:00 UTC' ) );
+        $row    = $reader->listarPublico( self::SEASON_ID )[0];
+
+        $this->assertSame( CambiosVigentesReader::SITUACION_FALTAN_FECHAS, $row['situacion_tipo'] );
     }
 
     public function test_the_public_list_never_reveals_an_open_solicitud_but_the_admin_still_sees_it(): void {
@@ -214,7 +259,7 @@ class CambiosVigentesReaderTest extends TestCase {
 
         $row = $this->reader->listarPublico( self::SEASON_ID )[0];
 
-        $this->assertSame( 'Renovado 1 fecha más.', $row['situacion'] );
+        $this->assertSame( 'El titular ya puede volver.', $row['situacion'] );
         $this->assertSame( CambiosVigentesReader::SITUACION_PUEDE_VOLVER, $row['situacion_tipo'] );
         $this->assertStringNotContainsStringIgnoringCase( 'solicitud', json_encode( $row ) );
         $this->assertStringNotContainsStringIgnoringCase( 'pendiente', json_encode( $row ) );

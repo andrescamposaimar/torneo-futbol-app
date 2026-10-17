@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.36
+Stable tag: 0.1.37
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,9 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.37 =
+* The public situación for a change that met the minimum now follows the week's clock: until the next fecha's `cierre_regresos` (default Tuesday 23:59) it reads "El titular ya puede volver."; after it, with no return reported, "Renovado 1 fecha más." (`situacion_tipo` `renovado`). With no open fecha left it stays "El titular ya puede volver.".
 
 = 0.1.36 =
 * The public `GET /cambios/vigentes` says "Renovado 1 fecha más." once the minimum is met and no return was reported (the reglamento renews the change one fecha at a time). The admin wording is unchanged.
