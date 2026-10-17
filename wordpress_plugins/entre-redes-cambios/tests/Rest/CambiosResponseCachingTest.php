@@ -141,4 +141,35 @@ class CambiosResponseCachingTest extends TestCase {
             'Plugin::boot() must hook denyCambiosResponseCaching onto rest_post_dispatch.'
         );
     }
+
+    public function test_the_public_vigentes_list_gets_a_short_shared_cache_only_when_it_succeeds(): void {
+        $ok = Plugin::denyCambiosResponseCaching(
+            new \WP_REST_Response( [ 'vigentes' => [] ], 200 ),
+            new \WP_REST_Server(),
+            $this->request( '/entre-redes/v1/cambios/vigentes' )
+        );
+        $this->assertSame( 'public, max-age=60', $ok->get_headers()['Cache-Control'] ?? null );
+
+        $error = Plugin::denyCambiosResponseCaching(
+            new \WP_REST_Response( [ 'code' => 'error_interno' ], 500 ),
+            new \WP_REST_Server(),
+            $this->request( '/entre-redes/v1/cambios/vigentes' )
+        );
+        $this->assertSame(
+            'no-store, no-cache, must-revalidate, max-age=0, private',
+            $error->get_headers()['Cache-Control'] ?? null,
+            'An error must never be cached and served to the next caller.'
+        );
+
+        $parecida = Plugin::denyCambiosResponseCaching(
+            new \WP_REST_Response( [], 200 ),
+            new \WP_REST_Server(),
+            $this->request( '/entre-redes/v1/cambios/vigentes/otra' )
+        );
+        $this->assertSame(
+            'no-store, no-cache, must-revalidate, max-age=0, private',
+            $parecida->get_headers()['Cache-Control'] ?? null,
+            'Only the exact public route is exempt.'
+        );
+    }
 }

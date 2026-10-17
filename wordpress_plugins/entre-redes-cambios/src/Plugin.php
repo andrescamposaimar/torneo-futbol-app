@@ -241,7 +241,20 @@ final class Plugin {
                 $eventLog
             );
 
-            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController, $fechaController ) )->register_routes();
+            $vigentesController = new Rest\VigentesController(
+                $settings,
+                new Plazas\CambiosVigentesReader(
+                    $plazaRepository,
+                    $solicitudesAbiertasReader,
+                    $fechaRepository,
+                    $settings,
+                    $eventLog,
+                    $jugadorMetricasReader
+                ),
+                $eventLog
+            );
+
+            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController, $fechaController, $vigentesController ) )->register_routes();
         } );
 
         // Process owner's admin bandeja — only in wp-admin context, same
@@ -457,7 +470,23 @@ final class Plugin {
             return $response;
         }
 
-        if ( ! str_starts_with( (string) $request->get_route(), '/' . Rest\RestController::API_NAMESPACE . '/' . Rest\RestController::BASE . '/' ) ) {
+        $prefijo = '/' . Rest\RestController::API_NAMESPACE . '/' . Rest\RestController::BASE . '/';
+        $ruta    = (string) $request->get_route();
+
+        if ( ! str_starts_with( $ruta, $prefijo ) ) {
+            return $response;
+        }
+
+        // The ONE public, credential-free route (Rest\VigentesController):
+        // the same answer for every caller, so a short shared cache is safe
+        // and keeps an unauthenticated endpoint from hitting the database on
+        // every request. Only a successful answer is cached — an error must
+        // never be served to the next caller for a minute.
+        if ( $prefijo . 'vigentes' === $ruta
+            && method_exists( $response, 'get_status' )
+            && 200 === (int) $response->get_status() ) {
+            $response->header( 'Cache-Control', 'public, max-age=60' );
+
             return $response;
         }
 

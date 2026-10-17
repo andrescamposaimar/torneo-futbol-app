@@ -372,7 +372,8 @@ void main() {
       expect(find.text('Jugadores'), findsOneWidget);
       expect(find.text('Lista de Espera'), findsNothing);
       expect(find.text('Solicitud de cambio de jugador'), findsNothing);
-      expect(find.text('Cambios de jugadores'), findsNothing);
+      expect(find.text('Solicitar cambios'), findsNothing);
+      expect(find.text('Cambios activos'), findsNothing);
     });
 
     testWidgets('Gestión Torneo: tapping Jugadores pushes PlayersScreen',
@@ -386,38 +387,40 @@ void main() {
       expect(find.byType(PlayersScreen), findsOneWidget);
     });
 
-    // cambios=false → "Cambios de jugadores" stays hidden even with prode on
+    // cambios=false → "Solicitar cambios" stays hidden even with prode on
     // (the feature is still in development).
     testWidgets(
-        'Gestión Torneo: cambios=false → "Cambios de jugadores" absent even with prode on',
+        'Gestión Torneo: cambios=false → "Solicitar cambios" absent even with prode on',
         (tester) async {
       await _pump(tester, prode: true, cambios: false);
 
       expect(find.text('Jugadores'), findsOneWidget);
-      expect(find.text('Cambios de jugadores'), findsNothing);
+      expect(find.text('Solicitar cambios'), findsNothing);
+      expect(find.text('Cambios activos'), findsNothing);
     });
 
     // cambios=true but prode=false → still hidden (shared auth dependency).
     testWidgets(
-        'Gestión Torneo: cambios=true, prode=false → "Cambios de jugadores" absent',
+        'Gestión Torneo: cambios=true, prode=false → "Solicitar cambios" absent',
         (tester) async {
       await _pump(tester, prode: false, cambios: true);
 
-      expect(find.text('Cambios de jugadores'), findsNothing);
+      expect(find.text('Solicitar cambios'), findsNothing);
     });
 
-    // cambios=true AND prode=true → Jugadores then Cambios de jugadores, in order.
+    // cambios=true AND prode=true → Jugadores then Solicitar cambios, in order.
     testWidgets(
-        'Gestión Torneo: cambios=true, prode=true → Jugadores then Cambios de jugadores',
+        'Gestión Torneo: cambios=true, prode=true → Jugadores then Solicitar cambios',
         (tester) async {
       await _pump(tester, prode: true, cambios: true);
 
       expect(find.text('Jugadores'), findsOneWidget);
-      expect(find.text('Cambios de jugadores'), findsOneWidget);
+      expect(find.text('Solicitar cambios'), findsOneWidget);
+      expect(find.text('Cambios activos'), findsOneWidget);
 
       final jugadoresPos = tester.getTopLeft(find.text('Jugadores')).dy;
       final cambiosPos =
-          tester.getTopLeft(find.text('Cambios de jugadores')).dy;
+          tester.getTopLeft(find.text('Solicitar cambios')).dy;
       expect(cambiosPos, greaterThan(jugadoresPos));
     });
 

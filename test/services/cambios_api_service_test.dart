@@ -603,4 +603,43 @@ void main() {
       }
     });
   });
+
+  group('CambiosApiService — fetchVigentes (public)', () {
+    CambiosApiService publicService(http.Client client) => CambiosApiService(
+          baseUrl: _cambiosBaseUrl,
+          prodeApi: ProdeApiService(
+            config: _testProdeConfig,
+            authRepo: ProdeAuthRepository(),
+          ),
+          httpClient: client,
+        );
+
+    test('sends no Authorization header and parses the envelope', () async {
+      final service = publicService(MockClient((request) async {
+        expect(request.url.path, endsWith('/cambios/vigentes'));
+        expect(request.headers.containsKey('Authorization'), isFalse);
+        return _jsonResponse({'season_id': 7, 'vigentes': []}, 200);
+      }));
+
+      final result = await service.fetchVigentes();
+
+      expect(result.seasonId, 7);
+      expect(result.vigentes, isEmpty);
+    });
+
+    test('non-200 throws CambiosApiException', () async {
+      final service = publicService(MockClient((_) async => _jsonResponse({'code': 'boom'}, 500)));
+
+      expect(
+        service.fetchVigentes(),
+        throwsA(isA<CambiosApiException>().having((e) => e.statusCode, 'statusCode', 500)),
+      );
+    });
+
+    test('malformed 200 throws CambiosMalformedResponseException', () async {
+      final service = publicService(MockClient((_) async => _jsonResponse({'nope': 1}, 200)));
+
+      expect(service.fetchVigentes(), throwsA(isA<CambiosMalformedResponseException>()));
+    });
+  });
 }
