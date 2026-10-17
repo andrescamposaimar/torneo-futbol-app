@@ -9,6 +9,7 @@ import '../services/cambios_candidatos_controller.dart';
 import '../services/cambios_context_controller.dart';
 import '../services/cambios_plantel_controller.dart';
 import '../services/cambios_solicitudes_controller.dart';
+import '../services/cambios_vigentes_controller.dart';
 import 'prode_providers.dart';
 import 'service_providers.dart';
 
@@ -185,4 +186,13 @@ final cambiosJugadorPorIdProvider =
   } catch (_) {
     return null;
   }
+});
+
+/// Provides the public "Cambios activos" list controller. autoDispose: the
+/// list is cheap to re-fetch on every visit and goes stale quickly.
+final cambiosVigentesControllerProvider =
+    StateNotifierProvider.autoDispose<CambiosVigentesController, CambiosVigentesState>((ref) {
+  final controller = CambiosVigentesController(ref.watch(cambiosApiServiceProvider));
+  controller.load();
+  return controller;
 });

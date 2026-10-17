@@ -7,6 +7,7 @@ import '../models/cambios_fecha_abierta.dart';
 import '../models/cambios_mis_equipos.dart';
 import '../models/cambios_plaza.dart';
 import '../models/cambios_solicitud.dart';
+import '../models/cambios_vigente.dart';
 import 'prode_api_service.dart';
 
 /// Thrown by any [CambiosApiService] method on a non-200 response the
@@ -103,9 +104,40 @@ class CambiosApiService {
 
   /// [baseUrl] has no trailing slash, e.g.
   /// `'https://entreredespadres.com.ar/wp-json/entre-redes/v1/cambios'`.
-  CambiosApiService({required String baseUrl, required ProdeApiService prodeApi})
-      : _baseUrl = baseUrl,
-        _prodeApi = prodeApi;
+  CambiosApiService({
+    required String baseUrl,
+    required ProdeApiService prodeApi,
+    http.Client? httpClient,
+  })  : _baseUrl = baseUrl,
+        _prodeApi = prodeApi,
+        _publicClient = httpClient ?? http.Client();
+
+  /// Plain client for the PUBLIC endpoints (no Authorization header, no
+  /// refresh logic): `GET /vigentes`.
+  final http.Client _publicClient;
+
+  // ---------------------------------------------------------------------------
+  // GET /vigentes (public, no auth)
+  // ---------------------------------------------------------------------------
+
+  /// Every live substitution of the current season. The server picks the
+  /// season; this call sends NO Authorization header on purpose, so it works
+  /// without a session.
+  Future<CambiosVigentes> fetchVigentes() async {
+    final response = await _publicClient
+        .get(Uri.parse('$_baseUrl/vigentes'), headers: const {'Accept': 'application/json'})
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode != 200) {
+      throw _errorFor(response);
+    }
+
+    try {
+      return CambiosVigentes.fromJson(_decodeBody(response));
+    } catch (_) {
+      throw const CambiosMalformedResponseException();
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // GET /mis-equipos

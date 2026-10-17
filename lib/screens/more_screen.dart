@@ -11,6 +11,7 @@ import '../utils/url_launcher_helper.dart';
 import '../widgets/entre_redes_app_bar.dart';
 import '../widgets/prode_identity_card.dart';
 import 'anuarios_screen.dart';
+import 'cambios/cambios_activos_screen.dart';
 import 'cambios/cambios_auth_gate.dart';
 import 'campeones_screen.dart';
 import 'players_screen.dart';
@@ -227,7 +228,19 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
               if (features.prode && features.cambios)
                 _tile(
                   context,
-                  'Cambios de jugadores',
+                  'Cambios activos',
+                  Icons.published_with_changes,
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => const CambiosActivosScreen(),
+                    ),
+                  ),
+                ),
+              if (features.prode && features.cambios)
+                _tile(
+                  context,
+                  'Solicitar cambios',
                   Icons.swap_horizontal_circle,
                   () => Navigator.push(
                     context,
