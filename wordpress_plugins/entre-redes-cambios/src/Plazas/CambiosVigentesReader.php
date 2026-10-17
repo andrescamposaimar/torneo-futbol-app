@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace EntreRedes\Cambios\Plazas;
 
 use EntreRedes\Cambios\Calendario\BoundedFechaCounter;
+use EntreRedes\Cambios\Calendario\FechaAbierta;
 use EntreRedes\Cambios\Calendario\FechaRepository;
+use EntreRedes\Cambios\Calendario\PlazosCalculator;
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Observability\EventLog;
 use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
@@ -44,6 +46,7 @@ class CambiosVigentesReader {
     public const SITUACION_INDETERMINADO     = 'indeterminado';
     public const SITUACION_FALTAN_FECHAS     = 'faltan_fechas';
     public const SITUACION_PUEDE_VOLVER      = 'puede_volver';
+    public const SITUACION_RENOVADO          = 'renovado';
 
     private PlazaRepository $plazaRepository;
     private SolicitudesAbiertasReader $solicitudesAbiertas;
@@ -52,13 +55,17 @@ class CambiosVigentesReader {
     private EventLog $eventLog;
     private ?JugadorMetricasReader $metricasReader;
 
+    /** @var callable(): int */
+    private $clockFn;
+
     public function __construct(
         PlazaRepository $plazaRepository,
         SolicitudesAbiertasReader $solicitudesAbiertas,
         FechaRepository $fechaRepository,
         Settings $settings,
         EventLog $eventLog,
-        ?JugadorMetricasReader $metricasReader = null
+        ?JugadorMetricasReader $metricasReader = null,
+        ?callable $clockFn = null
     ) {
         $this->plazaRepository     = $plazaRepository;
         $this->solicitudesAbiertas = $solicitudesAbiertas;
@@ -66,6 +73,7 @@ class CambiosVigentesReader {
         $this->settings            = $settings;
         $this->eventLog            = $eventLog;
         $this->metricasReader      = $metricasReader;
+        $this->clockFn             = $clockFn ?? static fn (): int => time();
     }
 
     /**
@@ -160,7 +168,8 @@ class CambiosVigentesReader {
             $playerIds[ (int) $fila['ocupante_id'] ] = true;
         }
 
-        $metricas = $this->metricasReader->resolveMuchos( array_keys( $playerIds ) );
+        $metricas       = $this->metricasReader->resolveMuchos( array_keys( $playerIds ) );
+        $regresoAbierto = $this->regresoTodaviaInformable( $seasonId );
 
         $etiquetasFecha = [];
         $salida         = [];
@@ -172,7 +181,7 @@ class CambiosVigentesReader {
                 $etiquetasFecha[ $fechaId ] = $this->etiquetaFecha( $fechaId );
             }
 
-            $situacion = self::situacionPublica( $fila );
+            $situacion = self::situacionPublica( $fila, $regresoAbierto );
 
             $salida[] = [
                 'team_id'          => (int) $fila['team_id'],
@@ -266,23 +275,54 @@ class CambiosVigentesReader {
      *
      * Once the minimum is met, the reglamento renews the change one fecha at
      * a time for as long as the captain does not report the titular's
-     * return — so the public wording for that state is "Renovado 1 fecha
-     * más", not an invitation to come back.
+     * return. So the minimum-met state reads two ways, by the week's clock:
+     * while the return can still be reported for the next fecha
+     * ($regresoAbierto, until `cierre_regresos`), "El titular ya puede
+     * volver."; once that deadline passed without a report, "Renovado 1
+     * fecha más.".
      *
      * @param array<string, mixed> $fila A row from `listar()`.
      * @return array{tipo: string, texto: string}
      */
-    public static function situacionPublica( array $fila ): array {
+    public static function situacionPublica( array $fila, bool $regresoAbierto ): array {
         $sinSolicitud = self::situacion( array_merge( $fila, [ 'solicitud_abierta' => null ] ) );
 
-        if ( self::SITUACION_PUEDE_VOLVER === $sinSolicitud['tipo'] ) {
-            return [
-                'tipo'  => self::SITUACION_PUEDE_VOLVER,
-                'texto' => __( 'Renovado 1 fecha más.', 'entre-redes-cambios' ),
-            ];
+        if ( self::SITUACION_PUEDE_VOLVER !== $sinSolicitud['tipo'] ) {
+            return $sinSolicitud;
         }
 
-        return $sinSolicitud;
+        return $regresoAbierto
+            ? [
+                'tipo'  => self::SITUACION_PUEDE_VOLVER,
+                'texto' => __( 'El titular ya puede volver.', 'entre-redes-cambios' ),
+            ]
+            : [
+                'tipo'  => self::SITUACION_RENOVADO,
+                'texto' => __( 'Renovado 1 fecha más.', 'entre-redes-cambios' ),
+            ];
+    }
+
+    /**
+     * Whether, right now, a titular's return can still be reported for the
+     * next fecha: the season's open fecha (`Calendario\FechaAbierta`) and its
+     * `cierre_regresos` plazo from the configured offsets, compared in UTC.
+     * With no open fecha left there is nothing to renew into, so the return
+     * is reported as still possible.
+     */
+    private function regresoTodaviaInformable( int $seasonId ): bool {
+        $fecha = FechaAbierta::de( $this->fechaRepository, $seasonId );
+
+        if ( null === $fecha ) {
+            return true;
+        }
+
+        $plazosUtc = PlazosCalculator::computeUtc(
+            (string) $fecha['play_date'],
+            $this->settings->plazosOffsets(),
+            $this->settings->timezone()
+        );
+
+        return gmdate( 'Y-m-d H:i:s', ( $this->clockFn )() ) <= $plazosUtc['cierre_regresos'];
     }
 
     /**
