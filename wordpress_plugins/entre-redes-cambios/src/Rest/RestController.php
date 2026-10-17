@@ -35,17 +35,20 @@ final class RestController {
     private PlazasController $plazasController;
     private CapitanController $capitanController;
     private FechaController $fechaController;
+    private ?VigentesController $vigentesController;
 
     public function __construct(
         SolicitudesController $solicitudesController,
         PlazasController $plazasController,
         CapitanController $capitanController,
-        FechaController $fechaController
+        FechaController $fechaController,
+        ?VigentesController $vigentesController = null
     ) {
         $this->solicitudesController = $solicitudesController;
         $this->plazasController      = $plazasController;
         $this->capitanController     = $capitanController;
         $this->fechaController       = $fechaController;
+        $this->vigentesController    = $vigentesController;
     }
 
     public function register_routes(): void {
@@ -53,5 +56,9 @@ final class RestController {
         $this->plazasController->register_routes();
         $this->capitanController->register_routes();
         $this->fechaController->register_routes();
+
+        if ( null !== $this->vigentesController ) {
+            $this->vigentesController->register_routes();
+        }
     }
 }

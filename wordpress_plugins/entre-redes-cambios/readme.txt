@@ -3,7 +3,7 @@ Contributors: entreredes
 Tags: football, roster, player-changes, calendar, tournament
 Requires at least: 6.2
 Tested up to: 6.7
-Stable tag: 0.1.34
+Stable tag: 0.1.35
 Requires PHP: 8.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -26,6 +26,11 @@ The Cambios plugin models the calendar of jornadas (matchdays) for a season — 
 6. To build a deployable zip instead of a local checkout, use `wordpress_plugins/build-plugin.sh entre-redes-cambios` from the repo — see the plugin's README.md.
 
 == Changelog ==
+
+= 0.1.35 =
+* Feature: `GET /cambios/vigentes` — every live substitution of every team of the CURRENT season (always the configured `season_id`; a client-sent one is ignored), for the app's new public "Cambios activos" screen: who left the plaza (`baja`), who is on it now (`alta`, each with puntaje, `null` + `sin_calificar` when unrated), since which fecha (label, e.g. "Apertura Fecha 7") and the situación text with the fechas still missing.
+* The list is PUBLIC and read-only, by product decision: no JWT and no captain check (500 on a failed read or an invalid configured season).
+* The data comes from the new `Plazas\CambiosVigentesReader`, extracted from the admin "Cambios vigentes" table, which now reads from it: the comisión and the captains see the same situación by construction. Admin output is unchanged.
 
 = 0.1.34 =
 * Feature: "Nueva solicitud" in the Cambios menu — the comisión loads a request ON BEHALF of a captain who phoned in and cannot use the app. A stepwise form (team -> tipo -> plaza or field titular -> who enters) that offers the same candidates the captain would see, with the ones who cannot enter shown, marked and disabled so the person on the phone can be told why. The request is filed under the team's CURRENT captain (he gets the receipt mail, which is the confirmation it was loaded); a team with no current captain is refused rather than filed under nobody.

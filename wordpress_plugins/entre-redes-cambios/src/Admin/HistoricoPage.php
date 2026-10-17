@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace EntreRedes\Cambios\Admin;
 
-use EntreRedes\Cambios\Calendario\BoundedFechaCounter;
 use EntreRedes\Cambios\Calendario\FechaRepository;
 use EntreRedes\Cambios\Calendario\Settings;
 use EntreRedes\Cambios\Dictamen\SolicitudDeCambio;
 use EntreRedes\Cambios\Observability\EventLog;
-use EntreRedes\Cambios\Plazas\CadenaResolver;
-use EntreRedes\Cambios\Plazas\Exception\FechaCountUnavailableException;
+use EntreRedes\Cambios\Plazas\CambiosVigentesReader;
 use EntreRedes\Cambios\Plazas\PlazaRepository;
 use EntreRedes\Cambios\Solicitudes\EstadoSolicitud;
 use EntreRedes\Cambios\Solicitudes\SolicitudesAbiertasReader;
@@ -245,106 +243,19 @@ class HistoricoPage {
      * @return array<int, array<string, mixed>>
      */
     private function construirVigentes( int $seasonId ): array {
-        $ocupaciones = $this->plazaRepository->listOcupacionesVigentesNoTitulares( $seasonId );
+        return $this->vigentesReader()->listar( $seasonId );
+    }
 
-        if ( empty( $ocupaciones ) ) {
-            return [];
-        }
-
-        $plazaIds = array_map( static fn ( array $o ): int => (int) $o['plaza_id'], $ocupaciones );
-
-        // Two batched reads for the whole table, never one per row — the same
-        // discipline BandejaPage::anotarMetricas() follows.
-        $cadenas  = $this->plazaRepository->listOcupacionesDePlazas( $plazaIds );
-        $abiertas = $this->solicitudesAbiertas->abiertaPorPlazaDeTemporada( $seasonId );
-
-        $cadenaResolver = new CadenaResolver(
-            ( new BoundedFechaCounter( $this->fechaRepository, $this->eventLog ) )
-                ->boundedCountResolvedFechasSinceFn( $seasonId ),
-            $this->settings->minimoFechasCambio()
+    private function vigentesReader(): CambiosVigentesReader {
+        return new CambiosVigentesReader(
+            $this->plazaRepository,
+            $this->solicitudesAbiertas,
+            $this->fechaRepository,
+            $this->settings,
+            $this->eventLog
         );
-
-        $filas          = [];
-        $noCalculables  = [];
-
-        foreach ( $ocupaciones as $ocupacion ) {
-            $plazaId = (int) $ocupacion['plaza_id'];
-            $cadena  = $cadenas[ $plazaId ] ?? [];
-
-            [ $faltantes, $indeterminado ] = $this->resolveFaltantes( $cadena, $cadenaResolver );
-
-            if ( $indeterminado ) {
-                $noCalculables[] = $plazaId;
-            }
-
-            $filas[] = [
-                'plaza_id'        => $plazaId,
-                'team_id'         => (int) $ocupacion['team_id'],
-                'team_nombre'     => $this->nombrePost( (int) $ocupacion['team_id'], __( 'Equipo', 'entre-redes-cambios' ) ),
-                'es_arco'         => ! empty( $ocupacion['es_arco'] ),
-                'ocupante_id'     => (int) $ocupacion['player_id'],
-                'ocupante_nombre' => $this->nombrePost( (int) $ocupacion['player_id'], __( 'Jugador', 'entre-redes-cambios' ) ),
-                'titular_id'      => (int) $ocupacion['titular_player_id'],
-                'titular_nombre'  => $this->nombrePost( (int) $ocupacion['titular_player_id'], __( 'Jugador', 'entre-redes-cambios' ) ),
-                'desde_fecha_id'  => (int) $ocupacion['fecha_desde_id'],
-                'faltantes'       => $faltantes,
-                'indeterminado'   => $indeterminado,
-                // ANY open solicitud, not just a regreso — see class
-                // docblock. `abiertaPorPlazaDeTemporada()` does not filter by
-                // tipo, and a pending sustitución speaks for the plaza just
-                // as much as a regreso does.
-                'solicitud_abierta' => $abiertas[ $plazaId ] ?? null,
-            ];
-        }
-
-        // ONCE per render, never once per row — see class docblock. The name
-        // deliberately does NOT contain `fallid`: this event must not take
-        // over the single persisted `wp_options` slot, because the real
-        // record of a broken counter belongs to `BoundedFechaCounter`, and
-        // this one would overwrite a `lectura.fallida` N times on one load.
-        if ( ! empty( $noCalculables ) ) {
-            $this->eventLog->record( 'admin.historico_conteo_no_confiable', [
-                'plazas' => $noCalculables,
-                'total'  => count( $noCalculables ),
-            ] );
-        }
-
-        return $filas;
     }
 
-    /**
-     * Degrades a single unreliable count to "indeterminado" instead of
-     * failing the page — see `Rest\PlazasController::resolveFechasFaltantes()`,
-     * which makes the identical trade for the captain's screen. The caller
-     * logs the aggregate once; this method only decides.
-     *
-     * *** WHY AN EMPTY CHAIN DEGRADES HERE RATHER THAN THROWING ***
-     * `CadenaResolver::countFechasUntilLiberacion()` throws
-     * `\InvalidArgumentException` on an empty chain, documented as a CALLER
-     * bug — and for its usual callers it is. Not for this one. Every plaza
-     * id this page passes came out of an ocupación row read moments earlier,
-     * so the only way the chain comes back empty is a RACE: the row was
-     * deleted between `listOcupacionesVigentesNoTitulares()` and
-     * `listOcupacionesDePlazas()`. Letting that propagate would take a
-     * read-only page down over a row that no longer exists, and the
-     * exception message would blame the wrong thing ("this screen assembled
-     * its own data wrong"). "We could not work it out" is both true and
-     * survivable.
-     *
-     * @param array<int, array<string, mixed>> $cadena
-     * @return array{0: int|null, 1: bool} [faltantes, indeterminado]
-     */
-    private function resolveFaltantes( array $cadena, CadenaResolver $cadenaResolver ): array {
-        if ( empty( $cadena ) ) {
-            return [ null, true ];
-        }
-
-        try {
-            return [ $cadenaResolver->countFechasUntilLiberacion( $cadena ), false ];
-        } catch ( FechaCountUnavailableException $e ) {
-            return [ null, true ];
-        }
-    }
 
     /** @param array<int, array<string, mixed>> $vigentes */
     private function renderTablaVigentes( array $vigentes ): void {
@@ -388,65 +299,29 @@ class HistoricoPage {
     }
 
     /**
-     * The one cell this table exists for. Order matters: an already-filed
-     * solicitud is reported as such EVEN IF the minimum is not met yet,
-     * because "there is a request on this plaza" is the more actionable fact
-     * and the tray is where it is resolved.
+     * The one cell this table exists for. The text and its precedence live in
+     * `Plazas\CambiosVigentesReader::situacion()`, shared with the captains'
+     * API; only the colour is decided here.
      *
      * @param array<string, mixed> $fila
      */
     private function renderSituacion( array $fila ): void {
-        $abierta = $fila['solicitud_abierta'];
+        $situacion = CambiosVigentesReader::situacion( $fila );
+        $texto     = esc_html( $situacion['texto'] );
 
-        if ( is_array( $abierta ) ) {
-            printf(
-                '<span style="color:#2271b1;">%s</span>',
-                esc_html(
-                    sprintf(
-                        /* translators: 1: solicitud id, 2: estado */
-                        __( 'Solicitud #%1$d abierta (%2$s)', 'entre-redes-cambios' ),
-                        (int) $abierta['id'],
-                        // Through etiquetaEstado(), never the raw column: the
-                        // operator reads "pendiente"/"aprobada" as words, and
-                        // this is the one place on this page where a
-                        // NON-terminal estado is printed — which is why that
-                        // method is total over every estado, not just the
-                        // terminal ones.
-                        $this->etiquetaEstado( (string) $abierta['estado'] )
-                    )
-                )
-            );
-
-            return;
+        switch ( $situacion['tipo'] ) {
+            case CambiosVigentesReader::SITUACION_SOLICITUD_ABIERTA:
+                printf( '<span style="color:#2271b1;">%s</span>', $texto );
+                break;
+            case CambiosVigentesReader::SITUACION_INDETERMINADO:
+                printf( '<span style="color:#b32d2e;">%s</span>', $texto );
+                break;
+            case CambiosVigentesReader::SITUACION_PUEDE_VOLVER:
+                printf( '<strong style="color:#996800;">%s</strong>', $texto );
+                break;
+            default:
+                echo $texto;
         }
-
-        if ( true === $fila['indeterminado'] ) {
-            printf(
-                '<span style="color:#b32d2e;">%s</span>',
-                esc_html__( 'No se pudo calcular cuánto falta.', 'entre-redes-cambios' )
-            );
-
-            return;
-        }
-
-        $faltantes = (int) $fila['faltantes'];
-
-        if ( $faltantes > 0 ) {
-            echo esc_html(
-                sprintf(
-                    /* translators: %d: fechas still missing */
-                    _n( 'Falta %d fecha para poder volver.', 'Faltan %d fechas para poder volver.', $faltantes, 'entre-redes-cambios' ),
-                    $faltantes
-                )
-            );
-
-            return;
-        }
-
-        printf(
-            '<strong style="color:#996800;">%s</strong>',
-            esc_html__( 'El titular ya puede volver — nadie pidió el regreso.', 'entre-redes-cambios' )
-        );
     }
 
     // -------------------------------------------------------------------------
@@ -749,14 +624,7 @@ class HistoricoPage {
      * survivable.
      */
     private function etiquetaEstado( string $estado ): string {
-        return match ( $estado ) {
-            EstadoSolicitud::PUBLICADA => __( 'Publicada', 'entre-redes-cambios' ),
-            EstadoSolicitud::RECHAZADA => __( 'Rechazada', 'entre-redes-cambios' ),
-            EstadoSolicitud::ANULADA   => __( 'Anulada', 'entre-redes-cambios' ),
-            EstadoSolicitud::PENDIENTE => __( 'Pendiente', 'entre-redes-cambios' ),
-            EstadoSolicitud::APROBADA  => __( 'Aprobada', 'entre-redes-cambios' ),
-            default                    => __( 'Estado desconocido', 'entre-redes-cambios' ),
-        };
+        return CambiosVigentesReader::etiquetaEstado( $estado );
     }
 
     /**

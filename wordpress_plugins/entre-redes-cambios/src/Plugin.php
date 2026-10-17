@@ -241,7 +241,20 @@ final class Plugin {
                 $eventLog
             );
 
-            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController, $fechaController ) )->register_routes();
+            $vigentesController = new Rest\VigentesController(
+                $settings,
+                new Plazas\CambiosVigentesReader(
+                    $plazaRepository,
+                    $solicitudesAbiertasReader,
+                    $fechaRepository,
+                    $settings,
+                    $eventLog,
+                    $jugadorMetricasReader
+                ),
+                $eventLog
+            );
+
+            ( new Rest\RestController( $solicitudesController, $plazasController, $capitanController, $fechaController, $vigentesController ) )->register_routes();
         } );
 
         // Process owner's admin bandeja — only in wp-admin context, same
