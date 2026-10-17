@@ -36,18 +36,24 @@ class CambiosVigentesController extends StateNotifier<CambiosVigentesState> {
     await _fetch();
   }
 
-  /// Pull-to-refresh: keeps the list on screen while re-fetching.
-  Future<void> refresh() => _fetch();
+  /// Pull-to-refresh: keeps the list on screen while re-fetching, and also
+  /// when the re-fetch fails — a transient network error must not replace a
+  /// list the user is reading with an error screen. Returns false in that
+  /// case so the screen can say the list could not be updated.
+  Future<bool> refresh() => _fetch(keepLoadedOnError: true);
 
-  Future<void> _fetch() async {
+  Future<bool> _fetch({bool keepLoadedOnError = false}) async {
     try {
       final result = await _service.fetchVigentes();
-      if (!mounted) return;
+      if (!mounted) return false;
       state = CambiosVigentesLoaded(vigentes: result.vigentes);
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
+      if (keepLoadedOnError && state is CambiosVigentesLoaded) return false;
       final failure = describeCambiosLoadFailure('vigentes', e);
       state = CambiosVigentesError(code: failure.code, message: failure.message);
+      return false;
     }
   }
 }

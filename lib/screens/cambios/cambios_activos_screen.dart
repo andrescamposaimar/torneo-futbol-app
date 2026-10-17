@@ -22,7 +22,16 @@ class CambiosActivosScreen extends ConsumerWidget {
       body: CambiosActivosView(
         state: state,
         onRetry: notifier.load,
-        onRefresh: notifier.refresh,
+        onRefresh: () async {
+          final actualizado = await notifier.refresh();
+          if (!actualizado && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('No se pudo actualizar. Revisá tu conexión.'),
+              ),
+            );
+          }
+        },
       ),
     );
   }

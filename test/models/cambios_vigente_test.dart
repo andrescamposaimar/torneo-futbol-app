@@ -63,6 +63,15 @@ void main() {
       expect(v.fechasRestantes, 2);
     });
 
+    test('a corrupt row is skipped and the other rows survive', () {
+      final roto = _row()..remove('plaza_id');
+      final r = CambiosVigentes.fromJson({
+        'season_id': 7,
+        'vigentes': [roto, 'no es un mapa', _row()..['team_nombre'] = 'Sigue'],
+      });
+      expect(r.vigentes.map((v) => v.teamNombre), ['Sigue']);
+    });
+
     test('missing list throws FormatException', () {
       expect(() => CambiosVigentes.fromJson({'season_id': 1}), throwsFormatException);
     });

@@ -137,10 +137,21 @@ class CambiosVigentes {
     }
     return CambiosVigentes(
       seasonId: _asInt(json['season_id']),
-      vigentes: [
-        for (final row in raw) CambiosVigente.fromJson((row as Map).cast<String, dynamic>()),
-      ],
+      vigentes: raw.map(_parseRow).whereType<CambiosVigente>().toList(),
     );
+  }
+
+  /// This is a read-only list: one corrupt row is skipped instead of turning
+  /// the whole screen into an error and hiding every other team's changes.
+  static CambiosVigente? _parseRow(Object? row) {
+    if (row is! Map) return null;
+    try {
+      return CambiosVigente.fromJson(row.cast<String, dynamic>());
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
   }
 }
 
